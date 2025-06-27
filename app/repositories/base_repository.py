@@ -11,6 +11,8 @@ from typing import TypeVar, Generic, Type, List, Optional, Dict, Any, Union
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import or_, and_
+from sqlalchemy.sql import ColumnElement
+from loguru import logger
 
 from app.models.base import DBModel
 
@@ -42,8 +44,7 @@ class BaseRepository(Generic[T]):
         """
         entity = self.model_class(**data)
         self.db.add(entity)
-        await self.db.commit()
-        await self.db.refresh(entity)
+        # 移除 await self.db.commit() - 由调用者负责提交
         return entity
     
     async def create_entity(self, entity: T) -> T:
@@ -57,21 +58,19 @@ class BaseRepository(Generic[T]):
             T: 创建的记录
         """
         self.db.add(entity)
-        await self.db.commit()
-        await self.db.refresh(entity)
         return entity
     
-    async def get_by_id(self, id: Union[int, str]) -> Optional[T]:
+    async def get_by_id(self, entity_id: Union[int, str]) -> Optional[T]:
         """
         通过 ID 获取记录
         
         Args:
-            id: 记录 ID
-            
+            entity_id: 记录 ID
+        
         Returns:
             Optional[T]: 找到的记录，未找到则返回 None
         """
-        query = select(self.model_class).where(self.model_class.id == id)
+        query = select(self.model_class).where(self.model_class.id == entity_id)
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
     
@@ -88,72 +87,100 @@ class BaseRepository(Generic[T]):
         """
         query = select(self.model_class).offset(skip).limit(limit)
         result = await self.db.execute(query)
-        return result.scalars().all()
-    
-    async def update(self, id: Union[int, str], data: Dict[str, Any]) -> Optional[T]:
+        # 使用 list() 将 Sequence 转换为 List
+        return list(result.scalars().all())
+
+    async def update(self, entity_id: Union[int, str], data: Dict[str, Any]) -> Optional[T]:
         """
         更新记录
-        
+
         Args:
-            id: 记录 ID
+            entity_id: 记录 ID
             data: 要更新的数据字典
-            
+
         Returns:
             Optional[T]: 更新后的记录，未找到则返回 None
         """
-        stmt = update(self.model_class).where(self.model_class.id == id).values(**data)
+        stmt = update(self.model_class).where(self.model_class.id == entity_id).values(**data)
         result = await self.db.execute(stmt)
-        await self.db.commit()
-        
+
         if result.rowcount == 0:
             return None
-        
-        return await self.get_by_id(id)
-    
-    async def delete(self, id: Union[int, str]) -> bool:
+
+        return await self.get_by_id(entity_id)
+
+    async def delete(self, entity_id: Union[int, str]) -> bool:
         """
         删除记录
         
         Args:
-            id: 记录 ID
-            
+            entity_id: 记录 ID
+        
         Returns:
             bool: 删除成功返回 True，未找到记录返回 False
         """
-        entity = await self.get_by_id(id)
-        if not entity:
+        # 首先查询实体是否存在
+        entity = await self.get_by_id(entity_id)
+        if entity is None:  # 使用 is None 而不是 not entity
             return False
-            
+        
+        # 使用 SQLAlchemy 的 delete 方法
         await self.db.delete(entity)
-        await self.db.commit()
+
         return True
-    
+
+    def _build_condition(self, field_name: str, value: Any):
+        """
+        构建查询条件
+
+        Args:
+            field_name: 字段名
+            value: 字段值
+
+        Returns:
+            ColumnElement: SQLAlchemy 条件表达式
+        """
+        # 处理不同类型的值
+        if isinstance(value, bool):
+            return getattr(self.model_class, field_name).is_(value)
+        elif value is None:
+            return getattr(self.model_class, field_name).is_(None)
+        else:
+            return getattr(self.model_class, field_name) == value
+
+
+
     async def find_by_field(self, field_name: str, value: Any) -> List[T]:
         """
         通过字段值查找记录
-        
+
         Args:
             field_name: 字段名
             value: 字段值
-            
+
         Returns:
             List[T]: 匹配的记录列表
         """
+
         query = select(self.model_class).where(getattr(self.model_class, field_name) == value)
+
         result = await self.db.execute(query)
-        return result.scalars().all()
-    
+        return list(result.scalars().all())
+
+
     async def find_one_by_field(self, field_name: str, value: Any) -> Optional[T]:
         """
         通过字段值查找单个记录
-        
+
         Args:
             field_name: 字段名
             value: 字段值
-            
+
         Returns:
             Optional[T]: 匹配的记录，未找到则返回 None
         """
-        query = select(self.model_class).where(getattr(self.model_class, field_name) == value)
+        condition = self._build_condition(field_name, value)
+        query = select(self.model_class).where(condition)
+
         result = await self.db.execute(query)
         return result.scalar_one_or_none()

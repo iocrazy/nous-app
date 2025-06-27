@@ -7,17 +7,24 @@
 使用异步 SQLAlchemy 实现高效的数据库操作。
 """
 
-from typing import List, Optional, Dict, Any
+import json
+from datetime import datetime
+from typing import Dict,  Optional, Any, Union
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import or_, and_
+from loguru import logger
 
-from app.models.duyin import Douyin
+from app.core.utils import Utils
+from app.models.douyin import Douyin
+from app.repositories.base_repository import BaseRepository
+from app.core.enums import DownloadStatus
+
+from app.models.base import DBModel
 
 
-class DouyinRepository:
+class DouyinRepository(BaseRepository[Douyin]):
     """抖音视频数据仓储类"""
-    
+
     def __init__(self, db: AsyncSession):
         """
         初始化仓储
@@ -25,126 +32,206 @@ class DouyinRepository:
         Args:
             db: 异步数据库会话
         """
-        self.db = db
-    
-    async def create(self, data: Dict[str, Any]) -> Douyin:
+        super().__init__(db, Douyin)
+
+    async def check_video_existence(self, aweme_id: str) -> bool:
         """
-        创建新的抖音视频记录
-        
-        Args:
-            data: 视频数据字典
-            
-        Returns:
-            Douyin: 创建的视频记录
-        """
-        douyin = Douyin(**data)
-        self.db.add(douyin)
-        await self.db.commit()
-        await self.db.refresh(douyin)
-        return douyin
-    
-    async def get_by_id(self, aweme_id: str) -> Optional[Douyin]:
-        """
-        通过 aweme_id 获取视频记录
-        
+        检查视频是否存在
+
         Args:
             aweme_id: 视频唯一标识
-            
+
         Returns:
-            Optional[Douyin]: 找到的视频记录，未找到则返回 None
+            bool: 视频是否存在
         """
-        query = select(Douyin).where(Douyin.aweme_id == aweme_id)
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none()
-    
-    async def get_all(self, skip: int = 0, limit: int = 100) -> List[Douyin]:
+
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        if result.scalar_one_or_none():
+            return True
+        else:
+            return False
+
+    async def check_video_downloaded(self, aweme_id: str) -> bool:
         """
-        获取所有视频记录，支持分页
-        
-        Args:
-            skip: 跳过的记录数
-            limit: 返回的最大记录数
-            
-        Returns:
-            List[Douyin]: 视频记录列表
-        """
-        query = select(Douyin).offset(skip).limit(limit)
-        result = await self.db.execute(query)
-        return result.scalars().all()
-    
-    async def update(self, aweme_id: str, data: Dict[str, Any]) -> Optional[Douyin]:
-        """
-        更新视频记录
-        
+        检查视频是否已下载
+
         Args:
             aweme_id: 视频唯一标识
-            data: 要更新的数据字典
-            
+
         Returns:
-            Optional[Douyin]: 更新后的视频记录，未找到则返回 None
+            bool: 视频是否已下载
         """
-        douyin = await self.get_by_id(aweme_id)
-        if not douyin:
-            return None
-            
-        for key, value in data.items():
-            if hasattr(douyin, key):
-                setattr(douyin, key, value)
-                
-        await self.db.commit()
-        await self.db.refresh(douyin)
-        return douyin
-    
-    async def delete(self, aweme_id: str) -> bool:
-        """
-        删除视频记录
-        
-        Args:
-            aweme_id: 视频唯一标识
-            
-        Returns:
-            bool: 删除成功返回 True，未找到记录返回 False
-        """
-        douyin = await self.get_by_id(aweme_id)
+
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        douyin = result.scalar_one_or_none()
         if not douyin:
             return False
-            
-        await self.db.delete(douyin)
-        await self.db.commit()
-        return True
-    
-    async def search(self, keyword: str) -> List[Douyin]:
+        return douyin.video_download_status is DownloadStatus.COMPLETED and (douyin.video_download_urls or douyin.image_download_urls)
+
+
+    async def check_music_downloaded(self, aweme_id: str) -> bool:
         """
-        搜索视频记录
-        
+        检查音乐是否已下载
+
         Args:
-            keyword: 搜索关键词
-            
+            aweme_id: 视频唯一标识
+
         Returns:
-            List[Douyin]: 匹配的视频记录列表
+            bool: 音乐是否已下载
         """
-        query = select(Douyin).where(
-            or_(
-                Douyin.title.contains(keyword),
-                Douyin.author.contains(keyword)
-            )
-        )
-        result = await self.db.execute(query)
-        return result.scalars().all()
-    
-    async def mark_as_downloaded(self, aweme_id: str) -> Optional[Douyin]:
+
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        douyin = result.scalar_one_or_none()
+        if not douyin:
+            return False
+
+        return douyin.music_download_status is DownloadStatus.COMPLETED and douyin.music_download_urls
+
+
+
+
+    async def mark_as_downloaded(self, aweme_id: str, download_path: str, download_duration: float) -> Optional[Douyin]:
         """
         标记视频为已下载状态
         
         Args:
             aweme_id: 视频唯一标识
-            
+            download_path: 视频文件的保存路径
+            download_duration: 下载耗时（秒）
+
         Returns:
             Optional[Douyin]: 更新后的视频记录，未找到则返回 None
         """
-        from datetime import datetime
-        
         return await self.update(aweme_id, {
-            "is_downloaded": True,
-            "download_time": datetime.now()
+            "download_status": DownloadStatus.COMPLETED,
+            "download_path": download_path,
+            "download_duration": download_duration
         })
+
+    async def update(self, aweme_id: str, data: Dict[str, Any]) -> Optional[Douyin]:
+        """
+        更新抖音视频记录
+
+        Args:
+            aweme_id: 视频唯一标识
+            data: 要更新的数据字典
+
+        Returns:
+            Optional[Douyin]: 更新后的视频记录，未找到则返回 None
+        """
+        logger.info(f"更新抖音视频: {aweme_id}")
+
+        # 首先获取实体
+        stmt = select(self.model_class).where(self.model_class.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        entity = result.scalar_one_or_none()
+
+        if entity is None:
+            logger.warning(f"未找到aweme_id为 {aweme_id} 的视频记录，无法更新")
+            return None
+
+        # 记录更新前的值
+        logger.debug(f"更新前的实体: {Utils.shorten_item(entity,50)}")
+        
+        # 跟踪更新的字段
+        updated_fields = {}
+        
+        # 使用对象属性方式更新，这样可以触发SQLAlchemy的事件和属性设置逻辑
+        for key, value in data.items():
+            if hasattr(entity, key):
+                old_value = getattr(entity, key)
+                if old_value != value:  # 只记录实际变化的字段
+                    updated_fields[key] = {"old": Utils.shorten_item(old_value,30), "new": Utils.shorten_item(value,30)}
+                    setattr(entity, key, value)
+        
+        # 只记录实际更新的字段
+        if updated_fields:
+            logger.debug(f"更新的字段: {updated_fields}")
+        else:
+            logger.debug("没有字段发生实际更新")
+
+        return entity
+
+    async def get_by_aweme_id(self, aweme_id: str) -> Optional[Douyin]:
+        """
+        通过 aweme_id 获取视频记录
+
+        Args:
+            aweme_id: 视频唯一标识
+
+        Returns:
+            Optional[Douyin]: 视频记录，未找到则返回 None
+        """
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_music_data(self, aweme_id: str) -> dict:
+        """
+        获取音乐下载信息
+
+        Args:
+            aweme_id: 视频ID
+
+        Returns:
+            dict: 包含 music_download_urls 和 music_name 的字典
+        """
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        douyin = result.scalar_one_or_none()
+
+        if douyin:
+            return {
+                "music_download_urls": douyin.music_download_urls,
+                "music_name": douyin.music_name
+            }
+        else:
+            return {"music_download_urls": [], "music_name": None}
+
+    async def has_video_download_urls(self, aweme_id: str) -> bool:
+        """
+        检查视频是否有可用的下载URL
+
+        Args:
+            aweme_id: 视频唯一标识
+
+        Returns:
+            bool: 是否有可用的视频下载URL
+        """
+        douyin = await self._get_douyin_by_aweme_id(aweme_id)
+        if not douyin:
+            return False
+        return bool(douyin.video_download_urls)
+
+    async def has_music_download_urls(self, aweme_id: str) -> bool:
+        """
+        检查视频是否有可用的音乐下载URL
+
+        Args:
+            aweme_id: 视频唯一标识
+
+        Returns:
+            bool: 是否有可用的音乐下载URL
+        """
+        douyin = await self._get_douyin_by_aweme_id(aweme_id)
+        if not douyin:
+            return False
+        return bool(douyin.music_download_urls)
+
+    async def _get_douyin_by_aweme_id(self, aweme_id: str) -> Optional[Douyin]:
+        """
+        通过 aweme_id 获取视频记录
+
+        Args:
+            aweme_id: 视频唯一标识
+
+        Returns:
+            Optional[Douyin]: 视频记录，未找到则返回 None
+        """
+        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
