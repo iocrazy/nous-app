@@ -1,0 +1,129 @@
+import re
+import json
+import random
+import threading
+from typing import Optional
+import asyncio
+
+import uvicorn
+from loguru import logger
+from DrissionPage import ChromiumPage, ChromiumOptions
+from app.core.config import settings
+
+from app.core.utils import SingletonMeta
+
+class DouyinService(metaclass=SingletonMeta):
+    """抖音服务 - 单例模式实现"""
+
+    _lock = threading.Lock()
+    _page: Optional[ChromiumPage] = None
+
+    def __init__(self):
+        """初始化时不立即创建浏览器实例，而是在需要时创建（懒加载）"""
+        self._initialized = False
+
+    def _initialize(self):
+        """初始化浏览器"""
+        if self._initialized:
+            return
+
+        with self._lock:
+            if self._initialized:  # 再次检查，避免竞态条件
+                return
+
+            # 配置浏览器选项
+            options = ChromiumOptions()
+            # 设置用户代理
+            options.set_argument(f'--user-agent={random.choice(settings.USER_AGENTS)}')
+            # 启用无头模式
+            # options.headless()
+            # 禁用GPU加速
+            options.set_argument('--disable-gpu')
+            # 禁用沙盒模式
+            options.set_argument('--no-sandbox')
+
+            # 创建浏览器页面
+            self._page = ChromiumPage(options)
+            self._initialized = True
+            logger.info("抖音服务浏览器初始化成功")
+
+    @property
+    def page(self) -> ChromiumPage:
+        """获取浏览器页面，如果未初始化则先初始化"""
+        if not self._initialized:
+            self._initialize()
+        return self._page
+    
+    @classmethod
+    async def fetch_one_video(cls, url: str):
+        """获取单个抖音视频信息（真正的异步版本）"""
+        # 定义在线程中执行的同步函数
+        def _fetch_in_thread():
+            try:
+                # 获取单例实例
+                instance = cls()
+
+                # 确保浏览器已初始化
+                if not instance._initialized:
+                    instance._initialize()
+
+                    # 开始监听API请求
+                instance.page.listen.start("aweme/detail/")
+                instance.page.listen.start("aweme/post/")
+
+                # 访问抖音链接 - 这是同步方法
+                instance.page.get(url)
+
+
+                response = instance.page.listen.wait( timeout=10)
+
+                if not response:
+                    logger.error("等待API响应超时")
+                    return None
+
+
+
+                # 获取响应数据
+                json_data = response.response.body
+
+
+                aweme_response = json_data.get('aweme_detail', {}) if "aweme_detail" in json_data else json_data.get('aweme_list', {})[0]
+                #转换为json
+                # aweme_response = json.dumps(aweme_response)
+                return aweme_response
+
+
+
+            except Exception as e:
+                logger.error(f"获取抖音视频数据失败: {e}")
+                return None
+
+        # 在单独的线程中执行同步操作
+        return await asyncio.to_thread(_fetch_in_thread)
+
+
+    @classmethod
+    def fetch_multi_video(cls,url):
+        """
+        获取多视频
+        """
+        pass
+
+
+
+
+    def fetch_video_comments(url):
+        """
+        获取视频评论
+        """
+        pass
+
+
+
+async def main():
+    print(await DouyinService.fetch_one_video("https://v.douyin.com/pH5vzARvTSY"))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
