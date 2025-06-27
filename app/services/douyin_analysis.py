@@ -73,7 +73,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 # todo: 同时开始监听API请求
 
                 instance.page.listen.start("aweme/post/")
-                # instance.page.listen.start("aweme/detail/")
+                instance.page.listen.start("aweme/detail/")
 
                 # 访问抖音链接 - 这是同步方法
                 instance.page.get(url)
