@@ -98,11 +98,15 @@ celerybeat.pid
 
 # Environments
 .venv
+.env
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# uv
+.uv_cache/
 
 # Spyder project settings
 .spyderproject
