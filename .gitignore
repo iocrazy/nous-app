@@ -124,7 +124,28 @@ dmypy.json
 
 # IDEs
 .vscode/
-.idea/
+# JetBrains IDEs - 选择性忽略
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries
+.idea/shelf/
+.idea/dataSources.local.xml
+.idea/AugmentWebviewStateStore.xml
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf/
+
+# 保留这些有用的IDE配置文件：
+# .idea/douyin_analysis.iml
+# .idea/misc.xml
+# .idea/modules.xml
+# .idea/vcs.xml
+# .idea/inspectionProfiles/
+# .idea/dataSources.xml
+
 *.swp
 *.swo
 *~
