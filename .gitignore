@@ -54,15 +54,12 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
-*.log
+# stuff:
+
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
-# Flask stuff:
-instance/
-.webassets-cache
 
 # Scrapy stuff:
 .scrapy
@@ -98,7 +95,7 @@ celerybeat.pid
 
 # Environments
 .venv
-.env
+
 env/
 venv/
 ENV/
@@ -207,7 +204,6 @@ node_modules/
 .yarn-integrity
 
 # parcel-bundler cache (https://parceljs.org/)
-.cache
 .parcel-cache
 
 # Next.js build output
@@ -241,7 +237,7 @@ temp/
 # Local data files
 data/db.sqlite3
 videos/
-downloads/
+
 
 # Backup files
 *.bak
