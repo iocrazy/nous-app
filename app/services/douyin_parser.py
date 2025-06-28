@@ -148,7 +148,8 @@ class DouyinParser:
         music_title = aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("title")
         
         music_name = f"{aweme_id}_{music_author}-{music_title}" if music_author and music_title else f"{aweme_id}:{music_from}"
-        
+        resolution = f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
+
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
@@ -164,7 +165,7 @@ class DouyinParser:
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
             "video_datasize": Utils.format_file_size(aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0)),
             "video_duration": Utils.format_duration(aweme_detail.get("video", {}).get("duration")),
-            "Resolution": f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
+            "video_resolution": f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
             "video_download_urls": aweme_detail.get("video", {}).get("play_addr", {}).get("url_list", None),
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
             "music_name": music_name,

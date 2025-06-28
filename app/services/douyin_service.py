@@ -43,13 +43,9 @@ class DouyinService:
             db_result = await DouyinService._store_to_database(parsed_data)
 
 
-
-
-
-            
             # todo:处理下载任务
 
-            #
+
             #
             #
             # download_tasks = []
@@ -76,6 +72,9 @@ class DouyinService:
             # if download_music and db_result.get("download_music"):
             #     message += "; 音乐下载已加入队列"
             #
+
+            #todo: push info to notion
+
             return {
                 "success": True,
                 "message": db_result.get("message"),

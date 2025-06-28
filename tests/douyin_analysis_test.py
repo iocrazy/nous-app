@@ -9,7 +9,7 @@ import uvicorn
 from loguru import logger
 from DrissionPage import ChromiumPage, ChromiumOptions
 from app.core.config import settings
-
+from app.core.utils import Utils
 from app.core.utils import SingletonMeta
 
 class DouyinService(metaclass=SingletonMeta):
@@ -67,9 +67,10 @@ class DouyinService(metaclass=SingletonMeta):
                 if not instance._initialized:
                     instance._initialize()
 
-                    # 开始监听API请求
-                instance.page.listen.start("aweme/detail/")
+                # 开始监听API请求
                 instance.page.listen.start("aweme/post/")
+                instance.page.listen.start("aweme/detail/")
+
 
                 # 访问抖音链接 - 这是同步方法
                 instance.page.get(url)
@@ -81,18 +82,32 @@ class DouyinService(metaclass=SingletonMeta):
                     logger.error("等待API响应超时")
                     return None
 
+                # 获取url中aweme_id
+                redirected_url = instance.page.url
 
+                target_aweme_id = Utils.match_aweme_id(redirected_url)
 
                 # 获取响应数据
                 json_data = response.response.body
 
+                # 如果有aweme_detail直接使用
+                if "aweme_detail" in json_data:
+                    aweme_response = json_data.get('aweme_detail', {})
+                else:
+                    # 获取aweme_list
+                    aweme_list = json_data.get('aweme_list', [])
 
-                aweme_response = json_data.get('aweme_detail', {}) if "aweme_detail" in json_data else json_data.get('aweme_list', {})[0]
-                #转换为json
+                    # 查找匹配的item
+                    for item in aweme_list:
+                        if item.get('aweme_id') == target_aweme_id:
+                            aweme_response = item
+                            break
+                    else:  # 如果没找到匹配的，使用第一个
+                        raise Exception("没有找到匹配的aweme_id")
+
+                # 转换为json
                 # aweme_response = json.dumps(aweme_response)
                 return aweme_response
-
-
 
             except Exception as e:
                 logger.error(f"获取抖音视频数据失败: {e}")
@@ -112,7 +127,7 @@ class DouyinService(metaclass=SingletonMeta):
 
 
 
-    def fetch_video_comments(url):
+    def fetch_video_comments(self , url):
         """
         获取视频评论
         """

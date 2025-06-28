@@ -77,7 +77,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
 
                 # 访问抖音链接 - 这是同步方法
                 instance.page.get(url)
-                # 获取url中aweme_id
+
 
                 response = instance.page.listen.wait(timeout=5)
 
@@ -85,11 +85,12 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                     logger.error("等待API响应超时")
                     return None
 
+                # 获取url中aweme_id
                 redirected_url = instance.page.url
 
                 target_aweme_id = Utils.match_aweme_id(redirected_url)
 
-                # 通过aweme_id获取数据
+
 
                 # 获取响应数据
                 json_data = response.response.body

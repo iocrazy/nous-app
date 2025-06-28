@@ -25,7 +25,7 @@ class Douyin(DBModel):
     # 视频元数据
     video_original_url: Mapped[str] = mapped_column(String(255), nullable=False, comment="视频链接")
     video_duration: Mapped[str] = mapped_column(String(255), nullable=True, comment="视频时长(秒)")
-    resolution: Mapped[str] = mapped_column(String(255), nullable=True, comment="视频分辨率")
+    video_resolution: Mapped[str] = mapped_column(String(255), nullable=True, comment="视频分辨率")
     video_datasize: Mapped[str] = mapped_column(Integer, nullable=True, comment="视频文件大小(字节)")
     video_hashtag_name: Mapped[str] = mapped_column(Text, nullable=True, comment="视频标签名称")
     video_created_time: Mapped[datetime] = mapped_column(DateTime, nullable=True, comment="视频创建时间")
