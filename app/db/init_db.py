@@ -20,7 +20,7 @@ from app.models.user import Role, Permission, RoleType
 
 async def init_roles():
     """初始化基本角色"""
-    logger.info("开始初始化基本角色、权限...")
+    logger.debug("开始初始化基本角色、权限...")
     # todo 放到repo中
     async with AsyncSessionLocal() as db:
         try:
@@ -39,14 +39,14 @@ async def init_roles():
 
                     }.get(role_type.value, f"{role_type.value} 角色")
                     
-                    logger.info(f"创建角色: {role_type.value} ({description})")
+                    logger.debug(f"创建角色: {role_type.value} ({description})")
                     role = Role(name=role_type.value, description=description)
                     db.add(role)
                     # 提交事务
                     await db.commit()
                 else:
                     # 角色已存在，输出角色信息
-                    logger.info(f"角色已存在: {role_type.value} (ID: {role.id}, 描述: {role.description})")
+                    logger.debug(f"角色已存在: {role_type.value} (ID: {role.id}, 描述: {role.description})")
             
 
             logger.success("基本角色初始化成功")

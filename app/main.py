@@ -11,8 +11,12 @@ from app.db.init_db import init_db
 from app.db.database import async_engine
 from app.core.config import settings
 from app.core.auth import check_user_permission
+from app.services.douyin_analysis import DouyinAnalysis
+from app.core.utils import Utils
 
 
+# 在应用启动前设置日志
+Utils.setup_logging()
 
 
 @asynccontextmanager
@@ -21,19 +25,27 @@ async def lifespan(app: FastAPI):
     await init_db() # 在启动时初始化数据库
     # app.state.redis = await init_redis() # 在启动时初始化redis
 
-    yield logger.info(f"{settings.APP_NAME}启动成功")
+    yield logger.success(f"{settings.APP_NAME}启动成功")
 
-    # 关闭 db 数据库引擎
-    logger.info("正在关闭数据库引擎...")
-    await async_engine.dispose()
-    logger.info("数据库引擎已关闭")
+    try:
+        # 关闭 db 数据库引擎
+        logger.info("正在关闭数据库引擎...")
+        await async_engine.dispose()
+        logger.info("数据库引擎已关闭")
 
-    # # 关闭 redis 连接
-    # if hasattr(app.state, "redis") and app.state.redis:
-    #     logger.info("正在关闭Redis连接...")
-    #     await app.state.redis.close()
-    #     logger.info("Redis连接已关闭")
+        # # 关闭 redis 连接
+        # if hasattr(app.state, "redis") and app.state.redis:
+        #     logger.info("正在关闭Redis连接...")
+        #     await app.state.redis.close()
+        #     logger.info("Redis连接已关闭")
 
+        # 关闭 DouyinAnalysis 浏览器资源
+
+        logger.info("正在关闭抖音分析浏览器...")
+        DouyinAnalysis().close()
+        logger.info("抖音分析浏览器已关闭")
+    except Exception as e:
+        logger.error(f"关闭抖音解析下载服务时出错: {str(e)}")
 
     logger.info(f"{settings.APP_NAME}关闭成功")
 

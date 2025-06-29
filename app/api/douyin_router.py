@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Security, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Security, BackgroundTasks , Body
 from fastapi.security import OAuth2PasswordRequestForm
 from typing import Annotated
 from loguru import logger
 import datetime
+from typing import Optional
+
 
 from app.core.deps import AsyncSessionDep
 from app.repositories.douyin_repository import DouyinRepository
@@ -15,30 +17,55 @@ from app.core.config import settings
 from app.services.notion_service import NotionService
 from app.services.douyin_parser import DouyinParser
 from app.services.douyin_service import DouyinService
+from app.schemas.douyin import VideoFetchRequest
 
 router = APIRouter(
     responses={401: {"description": "Unauthorized"}},
 )
 
 
+
+
 @router.post("/fetch_one_video")
-async def fetch_one_video(*, url: str, video_bool:bool = True, music_bool: bool = False, db: AsyncSessionDep, background_tasks: BackgroundTasks):
+async def fetch_one_video(*,
+    request_body: VideoFetchRequest = Body(None),
+    url: Optional[str] = None,
+    video_bool: Optional[bool] = True,
+    music_bool: Optional[bool] = False,
+    video_categories: Optional[str] = None,
+    background_tasks: BackgroundTasks):
     """
     获取单个视频
     
     Args:
+        request_body: 请求体，包含视频URL和下载选项
         url: 抖音视频URL
         video_bool: 是否下载视频，默认为True
         music_bool: 是否下载音乐，默认为False
-        db: 数据库会话依赖
+        video_categories: 视频分类
         background_tasks: 后台任务
     """
     try:
         # 记录开始时间
         start_time = datetime.datetime.now()
-        
+        if request_body:
+            video_url = request_body.url
+            video_bool = request_body.video_bool
+            music_bool = request_body.music_bool
+            categories = request_body.video_categories
+
+            logger.debug(f"请求体参数值: video_bool={video_bool}, music_bool={music_bool}, categories={categories}")
+        elif url:
+            video_url = url
+            download_video = video_bool
+            download_music = music_bool
+            categories = video_categories
+        else:
+            raise HTTPException(status_code=422, detail="Missing required parameter: url")
+
+
         # 提取有效URL
-        valid_url = Utils.extract_valid_url(url)[0]
+        valid_url = Utils.extract_valid_url(video_url)[0]
 
         # 获取原始数据
         raw_data = await DouyinAnalysis.fetch_one_video(valid_url)

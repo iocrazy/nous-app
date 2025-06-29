@@ -43,14 +43,15 @@ class DouyinParser:
         aweme_type = aweme_detail.get("aweme_type")
         aweme_id = aweme_detail.get("aweme_id")
 
-        logger.info(f"解析视频数据: aweme_id={aweme_id}, media_type={aweme_type}")
-        
         # 根据不同的媒体类型进行不同的处理
         if aweme_type == 68:  # 图文类型
+            logger.info(f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
             return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music)
         elif aweme_type == 0:  # 视频类型
+            logger.info(f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
             return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music)
         elif aweme_type == 2:  # 图片合集
+            logger.info(f"解析图片合集类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
             return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music)
         else:
             logger.warning(f"不支持的媒体类型: {aweme_type}")
@@ -88,13 +89,13 @@ class DouyinParser:
                 if not item.get("video", {}):
                     image_urls = item.get("download_url_list", [])
                     image_download_urls.append(image_urls)
-                    logger.info(f"image_url_list: {image_download_urls}")
+                    logger.debug(f"image_url_list: {image_download_urls}")
                 if item.get("video", {}):
                     video_urls = item.get("video", {}).get("play_addr", {}).get("url_list", [])
                     video_download_urls.append(video_urls)
-                    logger.info(f"video_url_list: {video_download_urls}")
+                    logger.debug(f"video_url_list: {video_download_urls}")
 
-        logger.info(f"image_download_urls: {image_download_urls}")
+        logger.debug(f"image_download_urls: {image_download_urls}")
         # 构建音乐名称
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
         music_title = aweme_detail.get("music", {}).get("title", "undefined")

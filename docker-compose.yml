@@ -9,13 +9,7 @@ services:
     ports:
       - "8080:8080"  # 宿主机端口:容器端口（容器内部固定8080）
     environment:
-      - APP_NAME=抖音推送下载app
-      - HOST=0.0.0.0
-      # PORT=8080 固定在代码中
-      - RELOAD=true
-      - DATABASE_URL=sqlite+aiosqlite:///data/db.sqlite3
-      - HTTP_TIMEOUT=30.0
-      - DOWNLOAD_TIMEOUT=60.0
+
       # 在生产环境中，建议通过环境变量或secrets传递敏感信息
 
     volumes:

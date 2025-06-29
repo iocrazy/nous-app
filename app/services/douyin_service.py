@@ -8,18 +8,16 @@
 import asyncio
 from typing import Dict, Any
 from loguru import logger
-import json
+
 
 
 from app.core.enums import DownloadStatus
 from app.db.session import get_async_transaction_session
 from app.repositories.douyin_repository import DouyinRepository
 from app.schemas.douyin import DouyinCreate, DownloadVideoResult
-from app.services.douyin_parser import DouyinParser
-from app.services.douyin_analysis import DouyinAnalysis
+
 from app.services.downloader import DownloaderService
-from app.core.utils import Utils
-from app.models.douyin import Douyin
+
 
 
 class DouyinService:
@@ -115,7 +113,7 @@ class DouyinService:
         # 使用 Pydantic 模型验证数据
         try:
             douyin_data_to_post = DouyinCreate(**parsed_data)
-            logger.info(f"数据验证通过: {douyin_data_to_post}")
+            logger.success(f"数据验证通过: {douyin_data_to_post}")
         except Exception as e:
             logger.error(f"数据验证失败: {str(e)}")
             return {"success": False, "message": f"存储失败: {str(e)}"}
@@ -152,6 +150,8 @@ class DouyinService:
 
                             if parsed_data.get("need_download_music"):
                                 douyin_data_to_update["music_download_status"] = DownloadStatus.PENDING
+                            else:
+                                douyin_data_to_update["music_download_status"] = DownloadStatus.SKIPPED
                             await douyin_repo.update(aweme_id, douyin_data_to_update)
 
                             message = f"Media {aweme_id}_{short_video_name}  video downloaded,music pending download,updating data."
@@ -160,6 +160,8 @@ class DouyinService:
                             # 视频未下载，音频下载
                             if parsed_data.get("need_download_video"):
                                 douyin_data_to_update["video_download_status"] = DownloadStatus.PENDING
+                            else:
+                                douyin_data_to_update["video_download_status"] = DownloadStatus.SKIPPED
                             await douyin_repo.update(aweme_id, douyin_data_to_update)
 
                             message = f"Media {aweme_id}_{short_video_name} music downloaded,video pending download,updating data."
@@ -167,46 +169,48 @@ class DouyinService:
                         case (False, False):
                             # 视频未下载，音频未下载
 
-                            if need_download_video:
-                                douyin_data_to_update["video_download_status"] = DownloadStatus.PENDING
-
-                            if need_download_music:
-                                douyin_data_to_update["music_download_status"] = DownloadStatus.PENDING
-                            await douyin_repo.update(aweme_id, douyin_data_to_update)
-
-                            # 构建消息
                             if need_download_video and need_download_music:
+                                douyin_data_to_update["video_download_status"] = DownloadStatus.PENDING
+                                douyin_data_to_update["music_download_status"] = DownloadStatus.PENDING
                                 message = f"Message: Media {aweme_id}_{short_video_name} updated data, video and music queued for download"
                             elif need_download_video:
+                                douyin_data_to_update["video_download_status"] = DownloadStatus.PENDING
+                                douyin_data_to_update["music_download_status"] = DownloadStatus.SKIPPED
                                 message = f"Message: Media {aweme_id}_{short_video_name} updated data, video queued for download"
                             elif need_download_music:
+                                douyin_data_to_update["music_download_status"] = DownloadStatus.PENDING
+                                douyin_data_to_update["video_download_status"] = DownloadStatus.SKIPPED
                                 message = f"Message: Media {aweme_id}_{short_video_name} updated data, music queued for download"
                             else:
+                                douyin_data_to_update["video_download_status"] = DownloadStatus.SKIPPED
+                                douyin_data_to_update["music_download_status"] = DownloadStatus.SKIPPED
                                 message = f"Message: Media {aweme_id}_{short_video_name} updated data only, no download requested"
+                            await douyin_repo.update(aweme_id, douyin_data_to_update)
 
                 else:
                     # 视频数据不存在，创建新记录
                     douyin_data_to_create = douyin_data_to_post.model_dump()
 
-                    # 设置下载状态
-                    if need_download_video:
+                    # 根据需求设置下载状态
+                    if need_download_video and need_download_music:
                         douyin_data_to_create["video_download_status"] = DownloadStatus.PENDING
-
-                    if need_download_music:
                         douyin_data_to_create["music_download_status"] = DownloadStatus.PENDING
+                        message = f"Message: Media {aweme_id}_{short_video_name} data created with video and music queued for download"
+                    elif need_download_video:
+                        douyin_data_to_create["video_download_status"] = DownloadStatus.PENDING
+                        douyin_data_to_create["music_download_status"] = DownloadStatus.SKIPPED
+                        message = f"Message: Media {aweme_id}_{short_video_name} data created with video queued for download"
+                    elif need_download_music:
+                        douyin_data_to_create["music_download_status"] = DownloadStatus.PENDING
+                        douyin_data_to_create["video_download_status"] = DownloadStatus.SKIPPED
+                        message = f"Message: Media {aweme_id}_{short_video_name} data created with music queued for download"
+                    else:
+                        douyin_data_to_create["video_download_status"] = DownloadStatus.SKIPPED
+                        douyin_data_to_create["music_download_status"] = DownloadStatus.SKIPPED
+                        message = f"Message: Media {aweme_id}_{short_video_name} data created without download requested"
 
                     # 创建新记录
                     await douyin_repo.create(douyin_data_to_create)
-
-                    # 构建消息
-                    if need_download_video and need_download_music:
-                        message = f"Message: Media {aweme_id}_{short_video_name} data created with video and music queued for download"
-                    elif need_download_video:
-                        message = f"Message: Media {aweme_id}_{short_video_name} data created with video queued for download"
-                    elif need_download_music:
-                        message = f"Message: Media {aweme_id}_{short_video_name} data created with music queued for download"
-                    else:
-                        message = f"Message: Media {aweme_id}_{short_video_name} data created without download requested"
 
 
                 await db.commit()

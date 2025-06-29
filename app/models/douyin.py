@@ -45,12 +45,13 @@ class Douyin(DBModel):
 
 
     # 下载状态跟踪
-    video_download_status: Mapped[DownloadStatus] = mapped_column(Enum(DownloadStatus), nullable=True, default=DownloadStatus.PENDING, comment="下载状态")
-    music_download_status: Mapped[DownloadStatus] = mapped_column(Enum(DownloadStatus), nullable=True, default=DownloadStatus.PENDING, comment="下载状态")
+    video_download_status: Mapped[DownloadStatus] = mapped_column(Enum(DownloadStatus), nullable=False, default=DownloadStatus.PENDING, comment="下载状态")
+    music_download_status: Mapped[DownloadStatus] = mapped_column(Enum(DownloadStatus), nullable=False, default=DownloadStatus.PENDING, comment="下载状态")
     download_duration: Mapped[float] = mapped_column(Float, nullable=True, comment="下载耗时(秒)")
     download_path: Mapped[str] = mapped_column(Text, nullable=True, comment="下载路径")
     error_message: Mapped[str] = mapped_column(Text, nullable=True, comment="错误信息")
     download_time: Mapped[datetime] = mapped_column(DateTime, nullable=True, comment="下载时间")
+    video_categories:Mapped[str] = mapped_column(String(255), nullable=True, comment="视频分类")
 
     def __repr__(self):
         return f"<Douyin {self.aweme_id}: {self.video_title}>"

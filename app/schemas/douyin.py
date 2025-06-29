@@ -54,6 +54,7 @@ class DouyinBase(BaseModel):
     download_path: Optional[str] = Field(None, description="下载路径")
     error_message: Optional[str] = Field(None, description="错误信息")
     download_time: Optional[datetime] = Field(None, description="下载时间")
+    video_categories: Optional[str] = Field(None, description="视频分类")
 
 
 
@@ -169,3 +170,33 @@ class DownloadImagesResult(BaseModel):
     image_urls_list: list[str] = Field([], description="图片文件路径列表")
     error: Optional[str] = Field(None, description="错误信息")
     warning: Optional[str] = Field(None, description="警告信息")
+
+
+class VideoFetchRequest(BaseModel):
+    """抖音视频获取请求模型"""
+    url: str = Field(..., description="包含抖音视频URL的文本")
+    video_bool: bool = Field(default=True, description="是否下载视频")
+    music_bool: bool = Field(default=False, description="是否下载音频")
+    video_categories: Optional[str] = Field(None, description="视频分类")
+
+    @model_validator(mode='after')
+    def validate_url(self):
+        """验证URL格式 - 检查文本中是否包含有效URL"""
+        if not self.url:
+            raise ValueError("url field cannot be empty")
+
+        # 不在这里验证URL格式，而是依赖Utils.extract_valid_url方法
+        return self
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "url": "视频描述 https://v.douyin.com/example/ 复制此链接...",
+                    "video_bool": True,
+                    "music_bool": True,
+                    "video_categories": "c1"
+                }
+            ]
+        }
+    }
