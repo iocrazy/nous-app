@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Security, BackgroundTasks , Body
+from fastapi import APIRouter, Depends, HTTPException, status, Security, BackgroundTasks, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from typing import Annotated
 from loguru import logger
 import datetime
 from typing import Optional
-
 
 from app.core.deps import AsyncSessionDep
 from app.repositories.douyin_repository import DouyinRepository
@@ -24,16 +23,14 @@ router = APIRouter(
 )
 
 
-
-
 @router.post("/fetch_one_video")
 async def fetch_one_video(*,
-    request_body: VideoFetchRequest = Body(None),
-    url: Optional[str] = None,
-    video_bool: Optional[bool] = True,
-    music_bool: Optional[bool] = False,
-    video_categories: Optional[str] = None,
-    background_tasks: BackgroundTasks):
+                          request_body: VideoFetchRequest = Body(None),
+                          url: Optional[str] = None,
+                          video_bool: Optional[bool] = True,
+                          music_bool: Optional[bool] = False,
+                          video_categories: Optional[str] = None,
+                          background_tasks: BackgroundTasks):
     """
     获取单个视频
     
@@ -57,12 +54,11 @@ async def fetch_one_video(*,
             logger.debug(f"请求体参数值: video_bool={video_bool}, music_bool={music_bool}, categories={categories}")
         elif url:
             video_url = url
-            download_video = video_bool
-            download_music = music_bool
+            video_bool = video_bool
+            music_bool = music_bool
             categories = video_categories
         else:
             raise HTTPException(status_code=422, detail="Missing required parameter: url")
-
 
         # 提取有效URL
         valid_url = Utils.extract_valid_url(video_url)[0]
@@ -77,15 +73,16 @@ async def fetch_one_video(*,
 
         # 获取aweme_id
         aweme_id = raw_data.get("aweme_id")
-        
+
         # 解析数据 - 不包含下载状态检查
         parsed_data = await DouyinParser.parse_aweme_detail(
-            raw_data, 
+            raw_data,
             valid_url,
             download_video=video_bool,
-            download_music=music_bool
+            download_music=music_bool,
+            categories=categories
         )
-        
+
         if not parsed_data:
             logger.error("解析抖音数据失败")
             return {"success": False, "message": "解析抖音数据失败"}
@@ -93,7 +90,7 @@ async def fetch_one_video(*,
         # 生成短视频名称用于日志和消息
         video_title = parsed_data.get("video_title", "")
         short_video_name = video_title[:10] + "…" if len(video_title) > 10 else video_title
-        
+
         # 记录处理时间
         process_time = (datetime.datetime.now() - start_time).total_seconds()
         logger.info(f"处理视频 {aweme_id} 数据耗时: {process_time:.2f}秒")
