@@ -20,7 +20,8 @@ services:
       - D:/Docker/douyin_analysis/download:/app/videos
       # 应用日志持久化
       - douyin_logs:/app/logs
-      # 配置文件挂载（开发环境可选）
+      # 配置文件挂载（开发环境）
+      - ./.env:/app/.env:ro
       - ./config.yml:/app/config.yml:ro
     restart: unless-stopped
     healthcheck:

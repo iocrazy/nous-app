@@ -91,7 +91,7 @@ class DownloaderService:
                 repo = DouyinRepository(session)
 
                 # 获取视频数据 - 这是 Douyin 模型实例
-                video_data = await repo.get_by_aweme_id(aweme_id)
+                video_data = await repo.get_douyin_by_aweme_id(aweme_id)
                 if not video_data:
                     logger.error(f"找不到视频数据: {aweme_id}")
                     result.video_download_status = DownloadStatus.FAILED
@@ -104,6 +104,7 @@ class DownloaderService:
 
                 # create file path
                 download_path = Utils.create_download_folder()
+                logger.info(f"创建下载文件夹，NAS_BASE_PATH: {settings.NAS_BASE_PATH}")
 
                 # generate file name
                 video_title = video_data.video_title
@@ -131,9 +132,8 @@ class DownloaderService:
                 # download video while one of the urls is successful
                 for url in video_urls:
                     if await DownloaderService.download_file(url, video_path, headers):
-                        logger.info(f"视频 {aweme_id} 下载成功下载到 {video_path}")
                         try:
-                            await repo.mark_as_downloaded(
+                            await repo.mark_video_as_downloaded(
                                 aweme_id=aweme_id,
                                 download_path=video_path,
                                 download_duration=download_duration
@@ -170,7 +170,8 @@ class DownloaderService:
             result.error = str(e)
             return result
 
-    async def download_images_by_aweme_id(self, *, aweme_id) -> DownloadImagesResult:
+    @staticmethod
+    async def download_images_by_aweme_id(aweme_id) :
         """
         只下载图片文件
 
@@ -183,6 +184,9 @@ class DownloaderService:
         # 初始化结果对象
         result = DownloadImagesResult.model_construct()
         headers = Utils.get_headers()
+
+        # todo: 创建独立文件夹
+
         try:
             # 建立数据库链接 - 注意这里的缩进，会话应该包含所有数据库操作
             async with get_async_transaction_session() as session:

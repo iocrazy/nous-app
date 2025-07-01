@@ -26,7 +26,8 @@ services:
       - /var/douyin/videos:/app/videos
       # 应用日志挂载
       - /var/douyin/logs:/app/logs
-      # 配置文件挂载（可选）
+      # 配置文件挂载（生产环境可选，推荐使用环境变量）
+      - ./.env.prod:/app/.env:ro
       - ./config.yml:/app/config.yml:ro
     restart: always
     healthcheck:

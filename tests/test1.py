@@ -67,7 +67,7 @@ async def test_store_nested_json():
             
             # 读取记录验证
             print("读取记录进行验证...")
-            result = await repo.get_by_aweme_id(test_douyin_data["aweme_id"])
+            result = await repo.get_douyin_by_aweme_id(test_douyin_data["aweme_id"])
             
             if result:
                 print("成功读取记录!")

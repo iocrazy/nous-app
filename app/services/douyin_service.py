@@ -14,7 +14,7 @@ from loguru import logger
 from app.core.enums import DownloadStatus
 from app.db.session import get_async_transaction_session
 from app.repositories.douyin_repository import DouyinRepository
-from app.schemas.douyin import DouyinCreate, DownloadVideoResult
+from app.schemas.douyin import DouyinCreate
 
 from app.services.downloader import DownloaderService
 
@@ -37,45 +37,57 @@ class DouyinService:
         """
         try:
 
-            # todo:存储到数据库
+            # 存储到数据库
+            logger.info("Start storing to the database…")
             db_result = await DouyinService._store_to_database(parsed_data)
 
 
+
+
+
             # todo:处理下载任务
+            logger.info("Start processing the download task…")
 
 
-            #
-            #
-            # download_tasks = []
-            # if download_video and db_result.get("download_video"):
-            #     # 创建视频下载任务
-            #     download_tasks.append(
-            #         DouyinService._download_video(aweme_id)
-            #     )
-            #
-            # if download_music and db_result.get("download_music"):
-            #     # 创建音乐下载任务
-            #     download_tasks.append(
-            #         DouyinService._download_music(aweme_id)
-            #     )
-            #
-            # # 并行执行下载任务
-            # if download_tasks:
-            #     asyncio.create_task(DouyinService._execute_download_tasks(download_tasks))
-            #
-            # # 构建返回消息
-            # message = "下载任务已创建"
-            # if download_video and db_result.get("download_video"):
-            #     message += "; 视频下载已加入队列"
-            # if download_music and db_result.get("download_music"):
-            #     message += "; 音乐下载已加入队列"
-            #
+            if db_result.get("success"):
+                # 获取下载选项和状态
+                to_download_video = db_result.get("download_video", False)
+                to_download_music = db_result.get("download_music", False)
+                message = db_result.get("message", "")
+                aweme_type =db_result.get("aweme_type", 0)
 
-            #todo: push info to notion
+                logger.info(f"Douyin {aweme_id} download request status:download_video {to_download_video}, download_music {to_download_music}.")
+
+
+                if to_download_video or to_download_music:
+
+                    asyncio.create_task(DouyinService._execute_downloads(
+                        aweme_id,
+                        to_download_video,
+                        to_download_music,
+                        aweme_type
+                    ))
+
+                # 使用列表推导式和join构建消息
+                download_msgs = []
+                if to_download_video:
+                    download_msgs.append("Video download has been queued.")
+                if to_download_music:
+                    download_msgs.append("Music download has been queued.")
+
+                if download_msgs:
+                    message += f"; {'; '.join(download_msgs)}"
+
+
+            # todo: push info to notion
+
+            logger.success(f" {message}")
+
+
 
             return {
                 "success": True,
-                "message": db_result.get("message"),
+                "message": message,
                 "aweme_id": aweme_id,
             }
             
@@ -93,12 +105,8 @@ class DouyinService:
 
             
         Returns:
-            Dict[str, Any]: 存储结果
+            Dict[str, Any]: 存储结果，包含下载状态信息
         """
-        result={
-            "success": True,
-            "message": ""
-        }
 
         aweme_id = parsed_data.get("aweme_id")
         aweme_type = parsed_data.get('aweme_type')
@@ -122,6 +130,8 @@ class DouyinService:
         async with get_async_transaction_session() as db:
             try:
                 douyin_repo = DouyinRepository(db)
+
+                logger.debug("检查视频是否已存在")
                 
                 # 检查视频是否已存在
                 data_exists = await douyin_repo.check_video_existence(aweme_id)
@@ -129,7 +139,7 @@ class DouyinService:
                 music_downloaded = await douyin_repo.check_music_downloaded(aweme_id)
 
 
-                logger.info(f"Media status:{aweme_id}:{short_video_name} aweme_type={aweme_type}, exists={data_exists}, video_dl={video_downloaded}, music_dl={music_downloaded}, need_video={need_download_video}, need_music={need_download_music}")
+                logger.debug(f"Media status:{aweme_id}:{short_video_name} aweme_type={aweme_type}, exists={data_exists}, video_dl={video_downloaded}, music_dl={music_downloaded}, need_video={need_download_video}, need_music={need_download_music}")
 
                 # 使用match-case语句处理不同的视频存在状态
                 if data_exists:
@@ -143,28 +153,34 @@ class DouyinService:
                         case (True, True):
                             # 视频、音频已下载
                             await douyin_repo.update(aweme_id, douyin_data_to_update)
-                            message = f"Media {aweme_id}_{short_video_name} downloaded, only updating data."
+                            message = f"Message: Media {aweme_id}_{short_video_name} downloaded, only updating data."
 
                         case (True, False):
-                            # 视频下载，音频未下载
+                            # 视频已下载，音乐未下载
 
+                            # 检查是否需要下载音乐
                             if parsed_data.get("need_download_music"):
                                 douyin_data_to_update["music_download_status"] = DownloadStatus.PENDING
+                                message = f"Message: Media {aweme_id}_{short_video_name} video downloaded, music pending download, updating data."
                             else:
+                                # 不需要下载音乐，设置为跳过状态
                                 douyin_data_to_update["music_download_status"] = DownloadStatus.SKIPPED
+                                message = f"Message: Media {aweme_id}_{short_video_name} video downloaded, music download skipped, updating data."
+
                             await douyin_repo.update(aweme_id, douyin_data_to_update)
 
-                            message = f"Media {aweme_id}_{short_video_name}  video downloaded,music pending download,updating data."
 
                         case (False, True):
                             # 视频未下载，音频下载
                             if parsed_data.get("need_download_video"):
                                 douyin_data_to_update["video_download_status"] = DownloadStatus.PENDING
+                                message = f"Message: Media {aweme_id}_{short_video_name} music downloaded,video pending download,updating data."
+
                             else:
                                 douyin_data_to_update["video_download_status"] = DownloadStatus.SKIPPED
+                                message = f"Message: Media {aweme_id}_{short_video_name} music downloaded,video download skipped,updating data."
                             await douyin_repo.update(aweme_id, douyin_data_to_update)
 
-                            message = f"Media {aweme_id}_{short_video_name} music downloaded,video pending download,updating data."
 
                         case (False, False):
                             # 视频未下载，音频未下载
@@ -214,66 +230,83 @@ class DouyinService:
 
 
                 await db.commit()
-                logger.info(f"{message}")
 
-                return {"success": True, "message": message}
-                
+
+                # 提交后重新获取最新下载状态
+                video_downloaded = await douyin_repo.check_video_downloaded(aweme_id)
+                music_downloaded = await douyin_repo.check_music_downloaded(aweme_id)
+
+
+                message += f"video_dl_status={video_downloaded}, music_dl_status={music_downloaded}"
+                logger.debug(f"{message}")
+
+                return {
+                    "success": True,
+                    "message": message,
+                    "download_video": need_download_video and not video_downloaded,
+                    "download_music": need_download_music and not music_downloaded,
+                    "aweme_id": aweme_id,
+                    "aweme_type": aweme_type
+                }
+
             except Exception as e:
                 await db.rollback()
                 logger.error(f"存储视频数据失败: {str(e)}")
                 return {"success": False, "message": f"存储失败: {str(e)}"}
-    
+
     @staticmethod
-    async def _download_video(aweme_id: str) -> DownloadVideoResult:
+    async def _execute_downloads(
+        aweme_id: str,
+        download_video: bool,
+        download_music: bool,
+        aweme_type: int,
+    ):
         """
-        下载视频
+        使用 TaskGroup 执行下载任务
         
         Args:
             aweme_id: 视频ID
-            
-        Returns:
-            DownloadVideoResult: 下载结果
+            download_video: 是否下载视频
+            download_music: 是否下载音乐
+            aweme_type: 媒体类型
+
         """
         try:
-            return await DownloaderService.download_video_by_aweme_id(aweme_id)
-        except Exception as e:
-            logger.error(f"下载视频 {aweme_id} 失败: {str(e)}")
-            result = DownloadVideoResult.model_construct()
-            result.video_download_status = DownloadStatus.FAILED
-            result.error = str(e)
-            return result
-    
-    @staticmethod
-    async def _download_music(aweme_id: str) -> Dict[str, Any]:
-        """
-        下载音乐
-        
-        Args:
-            aweme_id: 视频ID
-            
-        Returns:
-            Dict[str, Any]: 下载结果
-        """
-        try:
-            return await DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id)
-        except Exception as e:
-            logger.error(f"下载音乐 {aweme_id} 失败: {str(e)}")
-            return {"success": False, "error": str(e)}
-    
-    @staticmethod
-    async def _execute_download_tasks(tasks):
-        """
-        执行下载任务
-        
-        Args:
-            tasks: 下载任务列表
-        """
-        try:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"下载任务 {i+1} 失败: {str(result)}")
-                else:
-                    logger.info(f"下载任务 {i+1} 完成")
-        except Exception as e:
-            logger.error(f"执行下载任务失败: {str(e)}")
+            # 添加日志，帮助诊断问题
+            logger.info(f"开始执行下载任务: aweme_id={aweme_id}, download_video={download_video}, download_music={download_music}, aweme_type={aweme_type}")
+
+            # 将 aweme_type 转换为字符串进行比较
+            aweme_type_str = str(aweme_type)
+
+            async with asyncio.TaskGroup() as tg:
+                if aweme_type_str == "0":  # 视频类型
+                    logger.debug(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
+                    if download_video:
+                        logger.info(f"Create a download task for video: {aweme_id}")
+                        tg.create_task(DownloaderService.download_video_by_aweme_id(aweme_id))
+                    if download_music:
+                        logger.info(f"Create a download task for music: {aweme_id}")
+                        # 修复这里的错误：应该调用 download_music_by_aweme_id 而不是 download_video_by_aweme_id
+                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id))
+
+                elif aweme_type_str == "68":  # 图文类型
+                    logger.debug(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
+                    # 处理图文下载逻辑
+                    if download_video:
+                        logger.info(f"Create a download task for images: {aweme_id}")
+                        tg.create_task(DownloaderService.download_images_by_aweme_id(aweme_id))
+
+                    if download_music:
+                        logger.info(f"Create a download task for music:  {aweme_id}")
+                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id))
+
+                else:  # 其他类型
+                    logger.error(f"暂不提供{aweme_type_str}类型的下载， {aweme_id} 下载失败")
+                    # 处理其他类型媒体的下载逻辑
+                    raise Exception(f"暂不提供{aweme_type_str}类型的下载， {aweme_id} 下载失败")
+
+            logger.info(f"所有下载任务完成: {aweme_id}")
+        except* Exception as exc_group:
+            # 处理所有任务中的异常
+            for exc in exc_group.exceptions:
+                logger.error(f"下载任务异常: {exc}")

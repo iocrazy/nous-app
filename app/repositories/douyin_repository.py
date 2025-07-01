@@ -68,7 +68,8 @@ class DouyinRepository(BaseRepository[Douyin]):
         douyin = result.scalar_one_or_none()
         if not douyin:
             return False
-        return douyin.video_download_status is DownloadStatus.COMPLETED and (douyin.video_download_urls or douyin.image_download_urls)
+
+        return douyin.video_download_status is DownloadStatus.COMPLETED and (bool(douyin.video_download_urls) or bool(douyin.image_download_urls))
 
 
     async def check_music_downloaded(self, aweme_id: str) -> bool:
@@ -88,12 +89,12 @@ class DouyinRepository(BaseRepository[Douyin]):
         if not douyin:
             return False
 
-        return douyin.music_download_status is DownloadStatus.COMPLETED and douyin.music_download_urls
+        return (douyin.music_download_status is DownloadStatus.COMPLETED) and bool(douyin.music_download_urls)
 
 
 
 
-    async def mark_as_downloaded(self, aweme_id: str, download_path: str, download_duration: float) -> Optional[Douyin]:
+    async def mark_video_as_downloaded(self, aweme_id: str, download_path: str, download_duration: float) -> Optional[Douyin]:
         """
         标记视频为已下载状态
         
@@ -106,9 +107,25 @@ class DouyinRepository(BaseRepository[Douyin]):
             Optional[Douyin]: 更新后的视频记录，未找到则返回 None
         """
         return await self.update(aweme_id, {
-            "download_status": DownloadStatus.COMPLETED,
+            "video_download_status": DownloadStatus.COMPLETED,
             "download_path": download_path,
             "download_duration": download_duration
+        })
+
+    async def mark_music_as_downloaded(self, aweme_id: str, ) -> Optional[
+        Douyin]:
+        """
+        标记视频为已下载状态
+
+        Args:
+            aweme_id: 视频唯一标识
+
+
+        Returns:
+            Optional[Douyin]: 更新后的视频记录，未找到则返回 None
+        """
+        return await self.update(aweme_id, {
+            "music_download_status": DownloadStatus.COMPLETED,
         })
 
     async def update(self, aweme_id: str, data: Dict[str, Any]) -> Optional[Douyin]:
@@ -122,7 +139,7 @@ class DouyinRepository(BaseRepository[Douyin]):
         Returns:
             Optional[Douyin]: 更新后的视频记录，未找到则返回 None
         """
-        logger.info(f"更新抖音视频: {aweme_id}")
+        logger.debug(f"更新抖音视频: {aweme_id}")
 
         # 首先获取实体
         stmt = select(self.model_class).where(self.model_class.aweme_id == aweme_id)
@@ -149,25 +166,12 @@ class DouyinRepository(BaseRepository[Douyin]):
         
         # 只记录实际更新的字段
         if updated_fields:
-            logger.debug(f"更新的字段: {updated_fields}")
+            logger.success(f"更新的字段: {updated_fields}")
         else:
-            logger.debug("没有字段发生实际更新")
+            logger.info("没有字段发生实际更新")
 
         return entity
 
-    async def get_by_aweme_id(self, aweme_id: str) -> Optional[Douyin]:
-        """
-        通过 aweme_id 获取视频记录
-
-        Args:
-            aweme_id: 视频唯一标识
-
-        Returns:
-            Optional[Douyin]: 视频记录，未找到则返回 None
-        """
-        stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
 
     async def get_music_data(self, aweme_id: str) -> dict:
         """
@@ -201,7 +205,7 @@ class DouyinRepository(BaseRepository[Douyin]):
         Returns:
             bool: 是否有可用的视频下载URL
         """
-        douyin = await self._get_douyin_by_aweme_id(aweme_id)
+        douyin = await self.get_douyin_by_aweme_id(aweme_id)
         if not douyin:
             return False
         return bool(douyin.video_download_urls)
@@ -216,12 +220,12 @@ class DouyinRepository(BaseRepository[Douyin]):
         Returns:
             bool: 是否有可用的音乐下载URL
         """
-        douyin = await self._get_douyin_by_aweme_id(aweme_id)
+        douyin = await self.get_douyin_by_aweme_id(aweme_id)
         if not douyin:
             return False
         return bool(douyin.music_download_urls)
 
-    async def _get_douyin_by_aweme_id(self, aweme_id: str) -> Optional[Douyin]:
+    async def get_douyin_by_aweme_id(self, aweme_id: str) -> Optional[Douyin]:
         """
         通过 aweme_id 获取视频记录
 

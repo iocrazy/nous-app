@@ -104,8 +104,8 @@ async def fetch_one_video(*,
 
         return {
             "success": True,
-            "message": f"视频{aweme_id} {short_video_name} 处理请求已接受，正在后台处理",
-            "process_time": f"{process_time:.2f}秒"
+            "process_time": f"{process_time:.2f}秒",
+            "message": f"视频{aweme_id} {short_video_name} 处理请求已接受，正在后台处理"
         }
 
     except Exception as e:

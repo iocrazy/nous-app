@@ -6,7 +6,7 @@ authors = [
     {name = "heygo", email = "8512939@qq.com"}
 ]
 license = {text = "MIT"}
-requires-python = ">=3.13.5"
+requires-python = ">=3.12"
 keywords = ["douyin", "tiktok", "video", "download", "analysis", "fastapi"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,6 +31,7 @@ dependencies = [
     "pydantic-settings>=2.9.1",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
     "redis>=6.2.0",
     "requests>=2.32.3",
     "rich>=14.0.0",

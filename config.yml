@@ -1,19 +1,27 @@
-# 应用程序基本设置
-APP_NAME: "抖音推送下载app"
+# ===========================================
+# YAML 配置文件 (config.yml)
+# 用于存储结构化配置和业务逻辑参数
+# ===========================================
 
+# HTTP 客户端配置
+HTTP_TIMEOUT: 60.0
+DOWNLOAD_TIMEOUT: 60.0
 
-# 服务器设置
-HOST: "0.0.0.0"
-RELOAD: true
+# 用户代理列表（复杂数组配置）
+USER_AGENTS:
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15"
+  - "Mozilla/5.0 (Linux; Android 13; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.198 Mobile Safari/537.36"
+  - "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+  - "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0"
 
-# 数据库设置
-DATABASE_URL: "sqlite+aiosqlite:///data/db.sqlite3"
+# CORS 配置（结构化对象）
+CORS_ORIGINS:
+  - "*"
+CORS_CREDENTIALS: true
 
-# HTTP设置
-HTTP_TIMEOUT: 30.0
-DOWNLOAD_TIMEOUT: 60.0  # 添加下载超时设置
-
-# Notion API设置
-NOTION_API_KEY: ""
-NOTION_DATABASE_ID: ""
-PUSH_TO_NOTION: true
+# 应用程序固定配置
+APP_PORT: 8080  # Docker 容器内部固定端口
