@@ -226,7 +226,9 @@ class DouyinService:
                         message = f"Message: Media {aweme_id}_{short_video_name} data created without download requested"
 
                     # 创建新记录
+                    # todo 检查问题，未存储信息
                     await douyin_repo.create(douyin_data_to_create)
+                    logger.debug("写入成功")
 
 
                 await db.commit()

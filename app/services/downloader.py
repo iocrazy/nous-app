@@ -218,7 +218,7 @@ class DownloaderService:
         headers = Utils.get_headers()
 
         try:
-
+            #todo 数据库分析
             # 建立数据库链接 - 注意这里的缩进，会话应该包含所有数据库操作
             async with get_async_transaction_session() as session:
                 repo = DouyinRepository(session)
