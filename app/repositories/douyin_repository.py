@@ -112,13 +112,14 @@ class DouyinRepository(BaseRepository[Douyin]):
             "download_duration": download_duration
         })
 
-    async def mark_music_as_downloaded(self, aweme_id: str, ) -> Optional[
+    async def mark_music_as_downloaded(self, aweme_id: str,music_path: str ) -> Optional[
         Douyin]:
         """
         标记视频为已下载状态
 
         Args:
             aweme_id: 视频唯一标识
+            music_path: 视频文件的保存路径
 
 
         Returns:
@@ -126,6 +127,7 @@ class DouyinRepository(BaseRepository[Douyin]):
         """
         return await self.update(aweme_id, {
             "music_download_status": DownloadStatus.COMPLETED,
+            "music_path": music_path
         })
 
     async def update(self, aweme_id: str, data: Dict[str, Any]) -> Optional[Douyin]:
@@ -182,18 +184,21 @@ class DouyinRepository(BaseRepository[Douyin]):
 
         Returns:
             dict: 包含 music_download_urls 和 music_name 的字典
+
+        Raises:
+            ValueError: 当找不到指定的视频记录时
         """
         stmt = select(Douyin).where(Douyin.aweme_id == aweme_id)
         result = await self.db.execute(stmt)
         douyin = result.scalar_one_or_none()
 
-        if douyin:
+        if douyin.music_download_urls:
             return {
                 "music_download_urls": douyin.music_download_urls,
                 "music_name": douyin.music_name
             }
         else:
-            return {"music_download_urls": [], "music_name": None}
+            raise ValueError(f"No music record found for aweme_id: {aweme_id}.")
 
     async def has_video_download_urls(self, aweme_id: str) -> bool:
         """

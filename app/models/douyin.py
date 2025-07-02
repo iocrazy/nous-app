@@ -32,6 +32,7 @@ class Douyin(DBModel):
     author: Mapped[str] = mapped_column(String(255), nullable=True, comment="作者名称")
     video_title: Mapped[str] = mapped_column(Text, nullable=True, comment="视频标题")
     aweme_type: Mapped[str] = mapped_column(String(255), nullable=True, comment="媒体类型")
+    video_desc: Mapped[str] = mapped_column(Text, nullable=True, comment="视频描述")
 
     # 视频下载信息 - 使用自定义类型自动处理 JSON 转换
     need_download_video: Mapped[bool] = mapped_column(Boolean, nullable=True, default=True, comment="是否需要下载视频")

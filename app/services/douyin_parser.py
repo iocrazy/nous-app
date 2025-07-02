@@ -86,7 +86,7 @@ class DouyinParser:
         images = aweme_detail.get("images", [])
         image_download_urls = []
         video_download_urls = []
-        #todo if title is too long
+
         
         if images:
             for item in images:
@@ -104,13 +104,16 @@ class DouyinParser:
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
         music_title = aweme_detail.get("music", {}).get("title", "undefined")
         music_name = f"{aweme_id}_{music_author}-{music_title}"
+        video_desc = aweme_detail.get("desc", "undefined")
+        short_video_desc = video_desc[:14] + "..." if len(video_desc) > 15 else video_desc
         
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
             "video_original_url": valid_url,
-            "video_title": aweme_detail.get("desc", "undefined"),
+            "video_title": short_video_desc,
+            "video_desc": video_desc,
             "video_digg_count": aweme_detail.get("statistics", {}).get("digg_count"),
             "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
@@ -156,14 +159,16 @@ class DouyinParser:
         music_title = aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("title")
         
         music_name = f"{aweme_id}_{music_author}-{music_title}" if music_author and music_title else f"{aweme_id}:{music_from}"
-        resolution = f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
+        video_desc = aweme_detail.get("desc", "undefined")
+        short_video_desc = video_desc[:14] + "..." if len(video_desc) > 15 else video_desc
 
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
             "video_original_url": original_url,
-            "video_title": aweme_detail.get("desc", "undefined"),
+            "video_title": aweme_detail.get("item_title", short_video_desc),
+            "video_desc": aweme_detail.get("desc", "undefined"),
             "video_digg_count": aweme_detail.get("statistics", {}).get("digg_count"),
             "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),

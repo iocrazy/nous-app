@@ -85,26 +85,26 @@ class Settings(BaseSettings):
         extra='ignore'
     )
 
-    # @classmethod
-    # def settings_customise_sources(
-    #     cls,
-    #     settings_cls,
-    #     init_settings,
-    #     env_settings,
-    #     dotenv_settings,
-    #     file_secret_settings,
-    # ):
-    #     """
-    #     自定义配置源加载顺序
-    #     优先级：环境变量 > .env 文件 > config.yml 文件 > 默认值
-    #     """
-    #     return (
-    #         init_settings,
-    #         env_settings,
-    #         dotenv_settings,
-    #         YamlConfigSettingsSource(settings_cls),
-    #         file_secret_settings,
-    #     )
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,  # Settings 类本身
+        init_settings,  # 初始化时传入的参数
+        env_settings,  # 环境变量设置源
+        dotenv_settings,  # .env 文件设置源
+        file_secret_settings,  # 文件密钥设置源（如 Docker secrets）
+    ):
+        """
+        自定义配置源加载顺序
+        优先级：环境变量 > .env 文件 > config.yml 文件 > 默认值
+        """
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
 
 
 
@@ -114,4 +114,4 @@ class Settings(BaseSettings):
 # 创建全局设置实例
 settings = Settings()
 
-print(settings.HTTP_TIMEOUT)
+

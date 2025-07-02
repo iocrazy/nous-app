@@ -77,14 +77,14 @@ class Utils:
 
     """文件处理工具类"""
     @classmethod
-    def safe_filename(cls, video_title, aweme_id) -> str:
+    def safe_filename(cls, video_title:str, aweme_id:str ,lenth:int) -> str:
         """生成文件名"""
 
         # 视频标题过滤特殊字符
 
 
         safe_title = "".join(c for c in video_title if c.isalnum() or c in " ._-/").strip()
-        short_safe_title = safe_title[:29] + "…" if len(safe_title) > 30 else safe_title
+        short_safe_title = safe_title[:lenth] + "…" if len(safe_title) > (lenth + 1) else safe_title
 
         safe_filename = f"{aweme_id}_{short_safe_title}"
 
@@ -252,3 +252,26 @@ class Utils:
         except Exception as e:
             logger.error(f"提取aweme_id失败: {e}")
             raise ValueError("提取aweme_id失败") from e
+
+
+    @classmethod
+    def is_nested_list(cls, obj):
+        """
+        判断对象是否为嵌套列表（列表的列表）
+
+        Args:
+            obj: 要检查的对象
+
+        Returns:
+            bool: 如果是嵌套列表则返回True，否则返回False
+        """
+        # 首先检查对象本身是否为列表
+        if not isinstance(obj, list):
+            return False
+
+        # 如果是空列表，不算嵌套列表
+        if len(obj) == 0:
+            return False
+
+        # 检查列表中的每个元素是否都是列表
+        return all(isinstance(item, list) for item in obj)

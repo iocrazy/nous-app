@@ -36,6 +36,7 @@ class DouyinBase(BaseModel):
     author: Optional[str] = Field(None, description="作者名称")
     video_title: Optional[str] = Field(None, description="视频标题")
     aweme_type: Optional[str] = Field(None, description="媒体类型")
+    video_desc: Optional[str] = Field(None, description="视频描述")
 
     # 视频下载信息
     need_download_video: Optional[bool] = Field(None, description="是否需要下载视频")
@@ -168,6 +169,7 @@ class DownloadMusicResult(BaseModel):
 class DownloadImagesResult(BaseModel):
     """下载结果数据模型"""
     image_urls_list: list[str] = Field([], description="图片文件路径列表")
+    video_download_status: DownloadStatus = Field(default=DownloadStatus.PENDING, description="视频下载状态")
     error: Optional[str] = Field(None, description="错误信息")
     warning: Optional[str] = Field(None, description="警告信息")
 

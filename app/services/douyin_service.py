@@ -81,6 +81,8 @@ class DouyinService:
 
             # todo: push info to notion
 
+
+            #todo 还是要添加await 获取下载信息
             logger.success(f" {message}")
 
 
@@ -274,15 +276,16 @@ class DouyinService:
 
         """
         try:
+            #todo 传入title，是否要添加任务数量
             # 添加日志，帮助诊断问题
-            logger.info(f"开始执行下载任务: aweme_id={aweme_id}, download_video={download_video}, download_music={download_music}, aweme_type={aweme_type}")
+            logger.debug(f"开始执行下载任务: aweme_id={aweme_id}, download_video={download_video}, download_music={download_music}, aweme_type={aweme_type}")
 
             # 将 aweme_type 转换为字符串进行比较
             aweme_type_str = str(aweme_type)
 
             async with asyncio.TaskGroup() as tg:
                 if aweme_type_str == "0":  # 视频类型
-                    logger.debug(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
+                    logger.info(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
                     if download_video:
                         logger.info(f"Create a download task for video: {aweme_id}")
                         tg.create_task(DownloaderService.download_video_by_aweme_id(aweme_id))
@@ -292,7 +295,7 @@ class DouyinService:
                         tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id))
 
                 elif aweme_type_str == "68":  # 图文类型
-                    logger.debug(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
+                    logger.info(f"Start downloading Douyin: {aweme_id}, aweme_type: {aweme_type_str}")
                     # 处理图文下载逻辑
                     if download_video:
                         logger.info(f"Create a download task for images: {aweme_id}")
