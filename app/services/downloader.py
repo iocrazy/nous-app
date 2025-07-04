@@ -109,7 +109,7 @@ class DownloaderService:
 
                 # generate file name
                 video_title = video_data.video_title
-                file_name = Utils.safe_filename(video_title, aweme_id)
+                file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
                 video_path = os.path.join(download_path, file_name + ".mp4")
                 logger.debug(f"视频文件名: {file_name}")
                 
@@ -184,7 +184,7 @@ class DownloaderService:
             DownloadImagesResult: 下载结果信息
         """
         #todo:获取并叠加error_message
-        # 初始化结果对象
+
         result = DownloadImagesResult.model_construct()
         headers = Utils.get_headers()
 
@@ -209,32 +209,31 @@ class DownloaderService:
 
                 # generate file name
                 video_title = video_data.video_title
-                file_name = Utils.safe_filename(video_title, aweme_id,20)
+                file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
+
                 sub_download_path = os.path.join(parent_download_path, file_name)
                 os.makedirs(sub_download_path, exist_ok=True)
-                logger.debug(f"成功创建下载文件路径: {sub_download_path}")
+                logger.success(f"Successfully created download file path: {sub_download_path}")
 
                 video_urls = video_data.video_download_urls
                 image_urls = video_data.image_download_urls
 
                 # 打印调试信息
-                logger.debug(f"视频URL类型: {type(video_urls)}")
-                logger.debug(f"图片URL类型: {type(image_urls)}")
-
+                # logger.debug(f"视频URL类型: {type(video_urls)}")
+                # logger.debug(f"图片URL类型: {type(image_urls)}")
 
                 video_downloaded_count = 0
                 image_downloaded_count = 0
-                download_results = []
 
-                # # 下载视频
+                # 下载视频
 
                 if  Utils.is_nested_list(video_urls):
-                    logger.debug(f"准备下载  {len(video_urls)} 个视频")
+                    logger.info(f"准备下载  {len(video_urls)} 个视频")
                     video_tasks = []
                     async with asyncio.TaskGroup() as tg:
                         for i, url_list in enumerate(video_urls):
                             task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_path,file_name, headers))
-                            logger.debug(f"添加视频第{i}下载任务: {task}")
+                            logger.debug(f"添加视频第{i+1}下载任务: {task}")
                             video_tasks.append(task)
 
                     for task in video_tasks:
@@ -245,9 +244,9 @@ class DownloaderService:
                         except Exception as e:
                             logger.error(f"获取视频下载任务结果失败: {e}")
 
-                    logger.debug(f"Douyin {file_name} 视频下载完成，共下载了 {video_downloaded_count}/{len(video_urls)} 个视频文件。")
+                    logger.info(f"Douyin{file_name} 视频下载完成，共下载了 {video_downloaded_count}/{len(video_urls)} 个视频文件。")
                 else:
-                    logger.debug(f"没有视频下载")
+                    logger.info(f"No videos require downloading.")
 
 
                 # todo 检查错误，这里没有
@@ -272,7 +271,7 @@ class DownloaderService:
                         except Exception as e:
                             logger.error(f"获取图片下载任务结果失败: {e}")
 
-                    logger.debug(f"Douyin {file_name} 图片下载完成，共下载了 {image_downloaded_count}/{len(image_urls)} 个图片文件。")
+                    logger.info(f"Douyin {file_name} 图片下载完成，共下载了 {image_downloaded_count}/{len(image_urls)} 个图片文件。")
 
                 # 计算总下载数量
                 total_expected = 0
@@ -395,6 +394,9 @@ class DownloaderService:
             logger.error(f"Music download processing error: {str(e)}")
             result.error = str(e)
             return result
+
+
+    #todo 名称修改,所有文件名规范统一。
 
     @staticmethod
     async def download_single_list_item(i, url_list, sub_download_path, file_name, headers):

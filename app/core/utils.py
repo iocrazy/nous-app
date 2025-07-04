@@ -77,18 +77,23 @@ class Utils:
 
     """文件处理工具类"""
     @classmethod
-    def safe_filename(cls, video_title:str, aweme_id:str ,lenth:int) -> str:
+    def safe_filename(cls, video_title:str, lenth:int) -> str:
         """生成文件名"""
 
         # 视频标题过滤特殊字符
 
-
         safe_title = "".join(c for c in video_title if c.isalnum() or c in " ._-/").strip()
         short_safe_title = safe_title[:lenth] + "…" if len(safe_title) > (lenth + 1) else safe_title
 
-        safe_filename = f"{aweme_id}_{short_safe_title}"
+        return short_safe_title
 
-        return safe_filename
+    @classmethod
+    def concat_filename_safe_title(cls, video_title: str, aweme_id: str) -> str:
+        """生成文件名"""
+
+        output_filename = f"{aweme_id}_{video_title}"
+
+        return output_filename
 
 
     @classmethod

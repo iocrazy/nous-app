@@ -49,7 +49,7 @@ class DouyinParser:
         if aweme_type == 68:  # 图文类型
             logger.info(f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
             return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
-        elif aweme_type == 0:  # 视频类型
+        elif aweme_type in (0, 4, 61):  # 视频类型
             logger.info(f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
             return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
         elif aweme_type == 2:  # 图片合集
@@ -57,7 +57,7 @@ class DouyinParser:
             return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
         else:
             logger.warning(f"不支持的媒体类型: {aweme_type}")
-            return {"aweme_id": aweme_id, "media_type": str(aweme_type)}
+            raise ValueError(f"不支持的媒体类型: {aweme_type}")
     
     @staticmethod
     async def _parse_image_text(
@@ -105,22 +105,24 @@ class DouyinParser:
         music_title = aweme_detail.get("music", {}).get("title", "undefined")
         music_name = f"{aweme_id}_{music_author}-{music_title}"
         video_desc = aweme_detail.get("desc", "undefined")
-        short_video_desc = video_desc[:14] + "..." if len(video_desc) > 15 else video_desc
+
+
         
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
             "video_original_url": valid_url,
-            "video_title": short_video_desc,
+            "video_title": Utils.safe_filename(video_desc, 15),
             "video_desc": video_desc,
             "video_digg_count": aweme_detail.get("statistics", {}).get("digg_count"),
             "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "video_collect_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "aweme_type": str(aweme_detail.get("aweme_type")),
-            "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
+            # "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
+            "video_hashtag_name":  Utils.concat_hashtag_name(aweme_detail),
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
@@ -160,20 +162,24 @@ class DouyinParser:
         
         music_name = f"{aweme_id}_{music_author}-{music_title}" if music_author and music_title else f"{aweme_id}:{music_from}"
         video_desc = aweme_detail.get("desc", "undefined")
-        short_video_desc = video_desc[:14] + "..." if len(video_desc) > 15 else video_desc
+
+
+        # logger.debug(f"video_title: {video_title}")
+        # logger.debug(f"video_hashtag_name: {video_hashtag_name}")
 
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
             "video_original_url": original_url,
-            "video_title": aweme_detail.get("item_title", short_video_desc),
+            "video_title": Utils.safe_filename(video_desc, 15),
             "video_desc": aweme_detail.get("desc", "undefined"),
             "video_digg_count": aweme_detail.get("statistics", {}).get("digg_count"),
             "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "video_collect_count": aweme_detail.get("statistics", {}).get("collect_count"),
-            "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
+            # "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
+            "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
             "video_datasize": Utils.format_file_size(aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0)),

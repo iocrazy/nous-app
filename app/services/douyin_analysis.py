@@ -1,6 +1,7 @@
 
 import threading
 from typing import Optional
+import json
 
 import asyncio
 
@@ -9,6 +10,7 @@ from DrissionPage import ChromiumPage, ChromiumOptions
 
 from app.core.utils import SingletonMeta
 from app.core.utils import Utils
+from app.core.config import settings
 
 
 class DouyinAnalysis(metaclass=SingletonMeta):
@@ -107,7 +109,6 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
                 instance.page.listen.start(["aweme/post/","aweme/detail/"])
-                # instance.page.listen.start("aweme/detail/")
                 logger.debug("API请求监听已启动")
 
                 # 访问抖音链接
@@ -115,7 +116,6 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 try:
                     # 添加超时设置和错误处理
                     instance.page.get(url, timeout=5)
-
                     logger.success(f"抖音链接访问成功，当前URL: {instance.page.url}")
                 except Exception as e:
                     logger.error(f"访问抖音链接失败: {e}")
@@ -133,15 +133,8 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         instance.page.get(url, timeout=5)
                         logger.debug("浏览器重新初始化并访问URL成功")
 
-                # 等待API响应
-                # logger.info("等待API响应...")
-                response = instance.page.listen.wait(timeout=5)
-
-                if not response:
-                    logger.error("等待API响应超时")
-                    return None
-
-                logger.success("成功接收到API响应")
+                # 获取所有网络请求
+                aweme_response = None
 
                 # 获取url中aweme_id
                 redirected_url = instance.page.url
@@ -150,35 +143,70 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 target_aweme_id = Utils.match_aweme_id(redirected_url)
                 logger.debug(f"提取的aweme_id: {target_aweme_id}")
 
-                # 获取响应数据
-                json_data = response.response.body
-                logger.debug(f"响应数据类型: {type(json_data)}")
+                # 等待API响应
 
-                # 如果有aweme_detail直接使用
-                if "aweme_detail" in json_data:
-                    logger.debug("从响应中提取aweme_detail")
-                    aweme_response = json_data.get('aweme_detail', {})
-                else:
-                    # 获取aweme_list
-                    logger.debug("从响应中提取aweme_list")
-                    aweme_list = json_data.get('aweme_list', [])
+                try:
+                    while True:
+
+                        response = instance.page.listen.wait(timeout=2)
+
+                        if not response:
+                            logger.error("等待API响应超时")
+                            return None
+
+                        logger.success(f"成功接收到API {response.url}响应")
+                        response_name = response.url[-15:] if len(response.url) >= 15 else response.url
+
+                        # 检查响应体
+                        if hasattr(response, 'response') and response.response.body:
+
+                            # 获取响应数据
+                            json_data = response.response.body
+                            logger.debug(f"响应数据类型: {type(json_data)}")
+                            # with open(fr"{settings.ROOT_DIR}\data\response{response_name}.json", "w", encoding="utf-8") as f:
+                            #     f.write(json.dumps(json_data, ensure_ascii=False, indent=2))
 
 
-                    # 查找匹配的item
-                    for item in aweme_list:
-                        if item.get('aweme_id') == target_aweme_id:
-                            logger.debug(f"找到匹配的aweme_id: {target_aweme_id}")
-                            aweme_response = item
-                            break
-                    else:  # 如果没找到匹配的，使用第一个
-                        raise Exception("没有找到匹配的aweme_id")
+                            if "aweme_detail" in json_data:
+                                logger.debug("从响应中提取aweme_detail")
+                                aweme_response = json_data.get('aweme_detail', {})
+                            else:
+                                # 获取aweme_list
+                                logger.debug("从响应中提取aweme_list")
+                                aweme_list = json_data.get('aweme_list', [])
 
-                logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
-                return aweme_response
+                                # 查找匹配的item
+                                for item in aweme_list:
+                                    if item.get('aweme_id') == target_aweme_id:
+                                        logger.debug(f"找到匹配的aweme_id: {target_aweme_id}")
+                                        aweme_response = item
+                                        break
+                                else:
+                                    # 没有找到匹配的aweme_id，记录日志并继续等待下一个响应
+                                    logger.warning(f"在当前响应中没有找到匹配的aweme_id: {target_aweme_id}，继续等待下一个响应")
+                                    continue  # 继续while循环，等待下一个响应
+
+                            logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
+                            return aweme_response
+
+                        else:
+                            logger.error("响应没有有效的响应体，继续等待下一个响应")
+                            continue  # 继续等待下一个响应，而不是break
+
+                except Exception as e:
+                    logger.error(f"等待API响应失败: {e}")
+                    # 如果等待API响应失败，应该返回None表示获取失败
+                    return None
+
+                # 如果没有找到匹配的aweme_id，返回None
+                if not aweme_response:
+                    logger.error("未能获取到有效的抖音视频数据")
+                    return None
 
             except Exception as e:
                 logger.error(f"获取抖音视频数据失败: {e}")
                 return None
+
 
         # 在单独的线程中执行同步操作
         logger.debug("开始在单独线程中执行同步操作")
