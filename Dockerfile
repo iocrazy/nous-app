@@ -61,7 +61,7 @@ FROM dependencies AS final
 COPY . .
 
 # 创建必要的目录
-RUN mkdir -p /app/data /app/videos /app/logs
+RUN mkdir -p /app/data /app/videos /app/logs /app/cache/chromium
 
 # 设置权限
 RUN chmod +x /app

@@ -20,6 +20,8 @@ services:
       - /Volumes/program/Docker/douyin_analysis/videos:/app/videos
       # 应用日志持久化
       - /Volumes/program/Docker/douyin_analysis/logs:/app/logs
+      # Chromium缓存持久化
+      - /Volumes/program/Docker/douyin_analysis/cache:/app/cache
       # 配置文件挂载（开发环境）
       - /Volumes/program/Docker/douyin_analysis/.env:/app/.env:ro
       - /Volumes/program/Docker/douyin_analysis/config.yml:/app/config.yml:ro

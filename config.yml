@@ -27,4 +27,4 @@ CORS_ORIGINS:
 CORS_CREDENTIALS: true
 
 # 应用程序固定配置
-APP_PORT: 8080  # Docker 容器内部固定端口
+APP_PORT: 9999  # Docker 容器内部固定端口
