@@ -11,8 +11,7 @@ ENV APP_VERSION=${VERSION}
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    UV_CACHE_DIR=/tmp/uv-cache
 
 # 替换为国内镜像源
 RUN echo "deb https://mirrors.aliyun.com/debian/ bookworm main non-free\n\
@@ -32,8 +31,8 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-## 配置pip使用国内镜像源
-#RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 安装 uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # 安装Chromium浏览器（DrissionPage需要）
 RUN apt-get update && apt-get install -y \
@@ -49,11 +48,11 @@ ENV CHROME_BIN=/usr/bin/chromium \
 # 创建依赖阶段
 FROM base AS dependencies
 
-# 复制requirements文件
-COPY requirements.txt .
+# 复制项目配置文件
+COPY pyproject.toml uv.lock ./
 
 # 安装Python依赖
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv sync --frozen --no-dev
 
 # 创建最终阶段
 FROM dependencies AS final
@@ -75,4 +74,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # 启动命令
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

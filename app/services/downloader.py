@@ -105,7 +105,7 @@ class DownloaderService:
 
                 # create file path
                 download_path = Utils.create_download_folder()
-                logger.debug(f"创建下载文件夹，NAS_BASE_PATH: {settings.NAS_BASE_PATH}")
+                logger.debug(f"NAS_BASE_PATH: {settings.NAS_BASE_PATH}")
 
                 # generate file name
                 video_title = video_data.video_title
@@ -293,7 +293,7 @@ class DownloaderService:
                     result.video_download_status = DownloadStatus.COMPLETED
 
                 else:
-                    error_msg = f"Douyin {file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。"
+                    error_msg = f"Douyin {file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。Download Path: {sub_download_path}"
                     logger.error(error_msg)
                     await repo.update(aweme_id, {
                         "video_download_status": DownloadStatus.FAILED,
@@ -394,9 +394,6 @@ class DownloaderService:
             logger.error(f"Music download processing error: {str(e)}")
             result.error = str(e)
             return result
-
-
-    #todo 名称修改,所有文件名规范统一。
 
     @staticmethod
     async def download_single_list_item(i, url_list, sub_download_path, file_name, headers):
