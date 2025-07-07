@@ -28,3 +28,7 @@ CORS_CREDENTIALS: true
 
 # 应用程序固定配置
 APP_PORT: 9999  # Docker 容器内部固定端口
+
+
+## 文件存储路径（环境特定）
+NAS_BASE_PATH: /Volumes/program/Download/Douyin
