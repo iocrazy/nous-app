@@ -243,3 +243,6 @@ cache/
 # Backup files
 *.bak
 *.backup
+
+# Git worktrees
+.worktrees/

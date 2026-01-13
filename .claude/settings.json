@@ -1,0 +1,15 @@
+{
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before stopping, check if this conversation contains any information that should be persisted to progress.md:\n\n1. **Decisions** (决定/确定/选择/敲定) - technical choices, architecture decisions\n2. **Constraints** (必须/不能/要求/强制) - requirements, limitations\n3. **Tasks** (需要/应该/计划/TODO) - new work items\n4. **Completions** (完成了/实现了/修复了) - finished tasks\n5. **Important notes** - key information worth remembering\n\nIf ANY of these exist and should be recorded, invoke the progress_recorder skill to update progress.md before stopping.\n\nIf nothing needs recording, proceed to stop normally."
+          }
+        ]
+      }
+    ]
+  }
+}

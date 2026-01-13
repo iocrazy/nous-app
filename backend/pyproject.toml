@@ -1,0 +1,97 @@
+[project]
+name = "douyin-analysis-backend"
+version = "0.2.0"
+description = "抖音视频分析和下载工具后端 - 基于 FastAPI + Supabase"
+authors = [
+    {name = "heygo", email = "8512939@qq.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.12"
+keywords = ["douyin", "tiktok", "video", "download", "analysis", "fastapi", "supabase"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "aiofiles>=24.1.0",
+    "aiosqlite>=0.21.0",
+    "alembic>=1.16.2",
+    "drissionpage>=4.1.0.18",
+    "fastapi>=0.115.12",
+    "greenlet>=3.2.3",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "notion-client>=2.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "pydantic[email]>=2.11.3",
+    "pydantic-settings[yaml]>=2.9.1",
+    "python-jose[cryptography]>=3.5.0",
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
+    "redis>=6.2.0",
+    "requests>=2.32.3",
+    "rich>=14.0.0",
+    "sqlalchemy>=2.0.41",
+    "supabase>=2.18.1",
+    "tqdm>=4.67.1",
+    "uvicorn>=0.34.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.1",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+]
+
+[project.scripts]
+douyin-analysis = "app.main:main"
+
+[project.urls]
+Homepage = "https://github.com/iocrazy/douyin_analysis"
+Repository = "https://github.com/iocrazy/douyin_analysis"
+Issues = "https://github.com/iocrazy/douyin_analysis/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
