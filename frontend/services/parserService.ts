@@ -67,6 +67,24 @@ export interface FetchResponse {
   video_title?: string;
   author?: string;
   aweme_type?: string;
+  // 视频/封面 URL
+  video_download_urls?: string[];
+  cover_urls?: string[];
+  image_download_urls?: string[][];
+  // 统计数据
+  video_digg_count?: number;
+  video_comment_count?: number;
+  video_share_count?: number;
+  video_collect_count?: number;
+  // 视频信息
+  video_duration?: string;
+  video_created_time?: string;
+  video_desc?: string;
+  video_categories?: string;
+  video_original_url?: string;
+  video_resolution?: string;
+  // 下载状态
+  video_download_status?: string;
 }
 
 /**

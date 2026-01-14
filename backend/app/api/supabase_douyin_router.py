@@ -139,13 +139,37 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             aweme_id=aweme_id
         )
 
+        # 处理 datetime 对象转字符串
+        video_created_time = parsed_data.get("video_created_time")
+        if video_created_time and hasattr(video_created_time, 'isoformat'):
+            video_created_time = video_created_time.isoformat()
+
+        # 返回完整的解析数据供前端显示
         return {
             "success": True,
             "message": "视频处理任务已提交",
             "aweme_id": aweme_id,
             "video_title": parsed_data.get("video_title"),
             "author": parsed_data.get("author"),
-            "aweme_type": parsed_data.get("aweme_type")
+            "aweme_type": parsed_data.get("aweme_type"),
+            # 视频/封面 URL
+            "video_download_urls": parsed_data.get("video_download_urls", []),
+            "cover_urls": parsed_data.get("cover_urls", []),
+            "image_download_urls": parsed_data.get("image_download_urls", []),
+            # 统计数据 (使用 video_ 前缀以匹配前端类型)
+            "video_digg_count": parsed_data.get("video_digg_count", 0),
+            "video_comment_count": parsed_data.get("video_comment_count", 0),
+            "video_share_count": parsed_data.get("video_share_count", 0),
+            "video_collect_count": parsed_data.get("video_collect_count", 0),
+            # 视频信息
+            "video_duration": parsed_data.get("video_duration", "0"),
+            "video_created_time": video_created_time,
+            "video_desc": parsed_data.get("video_desc"),
+            "video_categories": parsed_data.get("video_categories"),
+            "video_original_url": parsed_data.get("video_original_url"),
+            "video_resolution": parsed_data.get("video_resolution"),
+            # 下载状态
+            "video_download_status": parsed_data.get("video_download_status", "PENDING"),
         }
 
     except HTTPException:

@@ -69,8 +69,8 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   };
 
   return (
-    <div 
-      className="group relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all active:scale-[0.98] shadow-sm mb-3 break-inside-avoid"
+    <div
+      className="group relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all active:scale-[0.98] shadow-sm"
     >
       {/* Thumbnail Container - Handles Hover Playback & Sliding */}
       <div 

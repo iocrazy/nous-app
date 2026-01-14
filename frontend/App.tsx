@@ -251,6 +251,72 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  // Supabase Realtime 订阅 - 自动同步数据库变化
+  useEffect(() => {
+    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
+      return;
+    }
+
+    const channel = supabase
+      .channel('douyin_videos_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'douyin_videos',
+        },
+        async (payload) => {
+          console.log('Realtime update:', payload.eventType, payload);
+
+          // 获取当前用户 ID
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          const newRecord = payload.new as DouyinBase;
+          const oldRecord = payload.old as DouyinBase;
+
+          // 只处理当前用户的数据
+          if (payload.eventType === 'INSERT' && newRecord.user_id === user.id) {
+            setLibrary(prev => {
+              // 避免重复添加
+              if (prev.find(item => item.aweme_id === newRecord.aweme_id)) {
+                return prev;
+              }
+              return [newRecord, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === user.id) {
+            setLibrary(prev =>
+              prev.map(item =>
+                item.aweme_id === newRecord.aweme_id ? newRecord : item
+              )
+            );
+            // 如果当前选中的项被更新，也更新它
+            setSelectedLibraryItem(prev =>
+              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
+            );
+            // 如果当前解析结果被更新，也更新它
+            setCurrentResult(prev =>
+              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
+            );
+          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === user.id) {
+            setLibrary(prev =>
+              prev.filter(item => item.aweme_id !== oldRecord.aweme_id)
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
+
+    // 清理订阅
+    return () => {
+      console.log('Unsubscribing from realtime channel');
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated]);
+
   const handleLogin = (user: { email: string; id: string }) => {
     setUserProfile(prev => ({
       ...prev,
@@ -418,13 +484,29 @@ export default function App() {
         if (newItem) {
           setCurrentResult(newItem);
         } else {
-          // Create a minimal result for display
+          // Create result from response data (now includes full parsed data)
           setCurrentResult({
             aweme_id: response.aweme_id,
             video_title: response.video_title,
             author: response.author,
             aweme_type: response.aweme_type,
-            video_original_url: urlInput,
+            video_original_url: response.video_original_url || urlInput,
+            // URLs
+            video_download_urls: response.video_download_urls || [],
+            cover_urls: response.cover_urls || [],
+            image_download_urls: response.image_download_urls || [],
+            // Stats
+            video_digg_count: response.video_digg_count || 0,
+            video_comment_count: response.video_comment_count || 0,
+            video_share_count: response.video_share_count || 0,
+            video_collect_count: response.video_collect_count || 0,
+            // Video info
+            video_duration: response.video_duration || "0",
+            video_created_time: response.video_created_time,
+            video_desc: response.video_desc,
+            video_categories: response.video_categories,
+            video_resolution: response.video_resolution,
+            video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
           } as DouyinBase);
         }
       } else {
@@ -1217,15 +1299,15 @@ export default function App() {
                       )}
 
                       {libraryViewMode === 'grid' ? (
-                        <div className="p-2 md:p-0">
+                        <div className="p-2 md:p-0 w-full">
                           {filteredLibrary.length > 0 ? (
-                             // UPDATED: Use CSS Columns for Masonry (Waterfall) layout
-                             // Columns: 2 (mobile), 3 (md), 4 (lg), 5 (xl) - Increased density = smaller images
-                             <div className="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3 mx-auto space-y-3 pb-20">
+                             // UPDATED: Use CSS Grid for responsive layout
+                             // Auto-fill columns with minimum 200px width
+                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 w-full pb-20">
                                 {filteredLibrary.map((item, idx) => (
-                                  <CompactMediaCard 
-                                    key={`${item.aweme_id}-${idx}`} 
-                                    data={item} 
+                                  <CompactMediaCard
+                                    key={`${item.aweme_id}-${idx}`}
+                                    data={item}
                                     onClick={() => setSelectedLibraryItem(item)}
                                   />
                                 ))}
