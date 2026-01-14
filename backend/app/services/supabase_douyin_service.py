@@ -32,6 +32,9 @@ class SupabaseDouyinService:
             Dict[str, Any]: 处理结果
         """
         try:
+            # 获取 user_id 用于后续操作
+            user_id = parsed_data.get("user_id")
+
             # 存储到 Supabase
             logger.info("开始存储到 Supabase...")
             db_result = await SupabaseDouyinService._store_to_supabase(parsed_data)
@@ -45,33 +48,37 @@ class SupabaseDouyinService:
             if db_result.get("success"):
                 to_download_video = db_result.get("download_video", False)
                 to_download_music = db_result.get("download_music", False)
+                to_download_cover = db_result.get("download_cover", False)
                 aweme_type = db_result.get("aweme_type", 0)
                 video_title = db_result.get("video_title", "undefined")
 
                 logger.info(
                     f"Douyin:{aweme_id}_{video_title} 下载请求状态: "
-                    f"video_{to_download_video}, music_{to_download_music}"
+                    f"video_{to_download_video}, music_{to_download_music}, cover_{to_download_cover}"
                 )
 
-                if to_download_video or to_download_music:
+                if to_download_video or to_download_music or to_download_cover:
                     logger.info(
-                        f"创建下载任务 Douyin:{aweme_id}_{video_title}, aweme_type: {aweme_type}"
+                        f"开始执行下载任务 Douyin:{aweme_id}_{video_title}, aweme_type: {aweme_type}"
                     )
-                    asyncio.create_task(
-                        SupabaseDouyinService._execute_downloads(
-                            aweme_id,
-                            to_download_video,
-                            to_download_music,
-                            aweme_type,
-                            video_title
-                        )
+                    # 直接 await 下载任务，确保在 BackgroundTask 中正确执行
+                    await SupabaseDouyinService._execute_downloads(
+                        aweme_id,
+                        to_download_video,
+                        to_download_music,
+                        to_download_cover,
+                        aweme_type,
+                        video_title,
+                        user_id
                     )
 
                 download_msgs = []
                 if to_download_video:
-                    download_msgs.append("视频下载任务已加入队列")
+                    download_msgs.append("视频下载完成")
                 if to_download_music:
-                    download_msgs.append("音频下载任务已加入队列")
+                    download_msgs.append("音频下载完成")
+                if to_download_cover:
+                    download_msgs.append("封面下载完成")
 
                 if download_msgs:
                     message += f"; {'; '.join(download_msgs)}"
@@ -102,14 +109,16 @@ class SupabaseDouyinService:
         aweme_id = parsed_data.get("aweme_id")
         aweme_type = parsed_data.get('aweme_type')
         video_title = parsed_data.get("video_title", "undefined")
+        user_id = parsed_data.get("user_id")  # 获取 user_id 用于数据隔离
 
         need_download_video = parsed_data.get("need_download_video", False)
         need_download_music = parsed_data.get("need_download_music", False)
+        need_download_cover = parsed_data.get("need_download_cover", True)
 
         # 数据验证
         try:
             douyin_data = DouyinCreate(**parsed_data)
-            logger.success(f"数据验证通过: {douyin_data}")
+            logger.success(f"数据验证通过: aweme_id={aweme_id}, user_id={user_id}")
         except Exception as e:
             logger.error(f"数据验证失败: {str(e)}")
             return {"success": False, "message": f"存储失败: {str(e)}"}
@@ -117,8 +126,19 @@ class SupabaseDouyinService:
         try:
             repo = SupabaseDouyinRepository()
 
-            # 检查视频状态
-            data_exists = await repo.check_video_existence(aweme_id)
+            # 检查当前用户的视频状态（使用 user_id 进行数据隔离）
+            existing_video = await repo.get_by_aweme_id(aweme_id, user_id=user_id)
+            data_exists = existing_video is not None
+
+            # 如果当前用户没有这个视频，但视频存在（属于其他用户），则为当前用户创建新记录
+            if not data_exists:
+                global_exists = await repo.check_video_existence(aweme_id)
+                if global_exists:
+                    logger.info(f"视频 {aweme_id} 已存在但属于其他用户，为当前用户创建新记录")
+                    # 注意：数据库 aweme_id 有 UNIQUE 约束，需要更新而不是创建
+                    # 这里我们选择更新现有记录的 user_id（获取视频所有权）
+                    data_exists = True
+
             video_downloaded = await repo.check_video_downloaded(aweme_id)
             music_downloaded = await repo.check_music_downloaded(aweme_id)
 
@@ -126,13 +146,13 @@ class SupabaseDouyinService:
                 f"媒体状态: {aweme_id}:{video_title} aweme_type={aweme_type}, "
                 f"exists={data_exists}, video_dl={video_downloaded}, "
                 f"music_dl={music_downloaded}, need_video={need_download_video}, "
-                f"need_music={need_download_music}"
+                f"need_music={need_download_music}, user_id={user_id}"
             )
 
             data_dict = douyin_data.model_dump()
 
             if data_exists:
-                # 更新现有记录
+                # 更新现有记录（不传递 user_id 以允许获取视频所有权）
                 update_data = {
                     k: v for k, v in data_dict.items()
                     if k not in ["video_download_status", "download_path",
@@ -197,6 +217,7 @@ class SupabaseDouyinService:
                     message = f"媒体 {aweme_id}_{video_title} 已创建，无下载请求"
 
                 await repo.create(data_dict)
+                logger.info(f"创建新视频记录: aweme_id={aweme_id}, user_id={user_id}")
 
             # 重新检查下载状态
             video_downloaded = await repo.check_video_downloaded(aweme_id)
@@ -205,11 +226,15 @@ class SupabaseDouyinService:
             logger.debug(f"下载状态: video_dl={video_downloaded}, music_dl={music_downloaded}")
             logger.debug(f"{message}")
 
+            # 检查封面是否已下载
+            cover_downloaded = await repo.check_cover_downloaded(aweme_id)
+
             return {
                 "success": True,
                 "message": message,
                 "download_video": need_download_video and not video_downloaded,
                 "download_music": need_download_music and not music_downloaded,
+                "download_cover": need_download_cover and not cover_downloaded,
                 "aweme_id": aweme_id,
                 "aweme_type": aweme_type,
                 "video_title": video_title
@@ -224,29 +249,48 @@ class SupabaseDouyinService:
         aweme_id: str,
         download_video: bool,
         download_music: bool,
+        download_cover: bool,
         aweme_type: int,
-        video_title: str
+        video_title: str,
+        user_id: str = None
     ):
-        """执行下载任务"""
+        """
+        执行下载任务
+
+        Args:
+            aweme_id: 视频ID
+            download_video: 是否下载视频
+            download_music: 是否下载音频
+            download_cover: 是否下载封面
+            aweme_type: 媒体类型
+            video_title: 视频标题
+            user_id: 用户ID（用于数据隔离）
+        """
         try:
             async with asyncio.TaskGroup() as tg:
                 if int(aweme_type) in (0, 4, 61):  # 视频类型
                     logger.info(f"开始下载 Douyin: {aweme_id}_{video_title}, aweme_type: {aweme_type}")
                     if download_video:
                         logger.info("创建视频下载任务")
-                        tg.create_task(DownloaderService.download_video_by_aweme_id(aweme_id))
+                        tg.create_task(DownloaderService.download_video_by_aweme_id(aweme_id, user_id=user_id))
                     if download_music:
                         logger.info("创建音频下载任务")
-                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id))
+                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id, user_id=user_id))
+                    if download_cover:
+                        logger.info("创建封面下载任务")
+                        tg.create_task(DownloaderService.download_cover_by_aweme_id(aweme_id, user_id=user_id))
 
-                elif int(aweme_type) == 68:  # 图文类型
+                elif int(aweme_type) in (2, 68):  # 图集/图文类型
                     logger.info(f"开始下载 Douyin: {aweme_id}_{video_title}, aweme_type: {aweme_type}")
                     if download_video:
                         logger.info("创建图片下载任务")
-                        tg.create_task(DownloaderService.download_images_by_aweme_id(aweme_id))
+                        tg.create_task(DownloaderService.download_images_by_aweme_id(aweme_id, user_id=user_id))
                     if download_music:
                         logger.info("创建音频下载任务")
-                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id))
+                        tg.create_task(DownloaderService.download_music_by_aweme_id(aweme_id=aweme_id, user_id=user_id))
+                    if download_cover:
+                        logger.info("创建封面下载任务")
+                        tg.create_task(DownloaderService.download_cover_by_aweme_id(aweme_id, user_id=user_id))
 
                 else:
                     logger.error(f"暂不支持 aweme_type: {aweme_type} 类型的下载")

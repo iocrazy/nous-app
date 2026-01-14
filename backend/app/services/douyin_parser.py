@@ -22,6 +22,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool = True,
         download_music: bool = False,
+        download_cover: bool = True,
         categories: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -48,17 +49,51 @@ class DouyinParser:
         # 根据不同的媒体类型进行不同的处理
         if aweme_type == 68:  # 图文类型
             logger.info(f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
+            return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
         elif aweme_type in (0, 4, 61):  # 视频类型
             logger.info(f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
+            return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
         elif aweme_type == 2:  # 图片合集
             logger.info(f"解析图片合集类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music,categories)
+            return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
         else:
             logger.warning(f"不支持的媒体类型: {aweme_type}")
             raise ValueError(f"不支持的媒体类型: {aweme_type}")
     
+    @staticmethod
+    def _extract_cover_urls(aweme_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        提取封面相关 URL
+
+        Returns:
+            Dict 包含 cover_urls 和 dynamic_cover_url
+        """
+        video_data = aweme_detail.get("video", {})
+
+        # 收集所有封面 URL
+        cover_urls = []
+
+        # 原始封面（高清）
+        origin_cover = video_data.get("origin_cover", {})
+        if origin_cover and origin_cover.get("url_list"):
+            cover_urls.extend(origin_cover.get("url_list", []))
+
+        # 普通封面
+        cover = video_data.get("cover", {})
+        if cover and cover.get("url_list"):
+            cover_urls.extend(cover.get("url_list", []))
+
+        # 动态封面（GIF）
+        dynamic_cover = video_data.get("dynamic_cover", {})
+        dynamic_cover_url = None
+        if dynamic_cover and dynamic_cover.get("url_list"):
+            dynamic_cover_url = dynamic_cover.get("url_list", [])[0] if dynamic_cover.get("url_list") else None
+
+        return {
+            "cover_urls": cover_urls,
+            "dynamic_cover_url": dynamic_cover_url
+        }
+
     @staticmethod
     async def _parse_image_text(
         aweme_detail: Dict[str, Any],
@@ -66,6 +101,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
+        download_cover: bool,
         categories: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -106,8 +142,9 @@ class DouyinParser:
         music_name = f"{aweme_id}_{music_author}-{music_title}"
         video_desc = aweme_detail.get("desc", "undefined")
 
+        # 提取封面 URL
+        cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
-        
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
@@ -120,15 +157,17 @@ class DouyinParser:
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "video_collect_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "aweme_type": str(aweme_detail.get("aweme_type")),
-            # "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
-            "video_hashtag_name":  Utils.concat_hashtag_name(aweme_detail),
+            "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
             "need_download_music": download_music,
+            "need_download_cover": download_cover,
+            "cover_urls": cover_data["cover_urls"],
+            "dynamic_cover_url": cover_data["dynamic_cover_url"],
             "video_categories": categories,
         }
     
@@ -139,6 +178,7 @@ class DouyinParser:
         original_url: str,
         download_video: bool,
         download_music: bool,
+        download_cover: bool,
         categories: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -163,9 +203,8 @@ class DouyinParser:
         music_name = f"{aweme_id}_{music_author}-{music_title}" if music_author and music_title else f"{aweme_id}:{music_from}"
         video_desc = aweme_detail.get("desc", "undefined")
 
-
-        # logger.debug(f"video_title: {video_title}")
-        # logger.debug(f"video_hashtag_name: {video_hashtag_name}")
+        # 提取封面 URL
+        cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
         # 构建返回数据
         return {
@@ -178,7 +217,6 @@ class DouyinParser:
             "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
             "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "video_collect_count": aweme_detail.get("statistics", {}).get("collect_count"),
-            # "video_hashtag_name": aweme_detail.get("caption", Utils.concat_hashtag_name(aweme_detail)),
             "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
@@ -190,6 +228,9 @@ class DouyinParser:
             "music_name": music_name,
             "need_download_video": download_video,
             "need_download_music": download_music,
+            "need_download_cover": download_cover,
+            "cover_urls": cover_data["cover_urls"],
+            "dynamic_cover_url": cover_data["dynamic_cover_url"],
             "video_categories": categories,
         }
     
@@ -200,6 +241,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
+        download_cover: bool,
         categories: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -209,18 +251,53 @@ class DouyinParser:
             aweme_detail: 抖音API返回的原始数据
             aweme_id: 抖音视频ID
             valid_url: 有效的抖音视频URL
-            download_video: 是否需要下载视频
+            download_video: 是否需要下载视频（图片）
             download_music: 是否需要下载音乐
+            download_cover: 是否需要下载封面
             categories: 视频分类
 
         Returns:
             Dict[str, Any]: 结构化后的图片合集数据
         """
-        # 目前只返回基本信息，可以根据需要扩展
+        # 提取图片 URL（图片合集）
+        images = aweme_detail.get("images", [])
+        image_download_urls = []
+
+        if images:
+            for item in images:
+                image_urls = item.get("download_url_list", [])
+                if image_urls:
+                    image_download_urls.append(image_urls)
+
+        # 构建音乐名称
+        music_author = aweme_detail.get("music", {}).get("author", "undefined")
+        music_title = aweme_detail.get("music", {}).get("title", "undefined")
+        music_name = f"{aweme_id}_{music_author}-{music_title}"
+        video_desc = aweme_detail.get("desc", "undefined")
+
+        # 提取封面 URL
+        cover_data = DouyinParser._extract_cover_urls(aweme_detail)
+
         return {
             "aweme_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
             "video_original_url": valid_url,
-            "video_title": aweme_detail.get("desc", "undefined"),
+            "video_title": Utils.safe_filename(video_desc, 15),
+            "video_desc": video_desc,
+            "video_digg_count": aweme_detail.get("statistics", {}).get("digg_count"),
+            "video_comment_count": aweme_detail.get("statistics", {}).get("comment_count"),
+            "video_share_count": aweme_detail.get("statistics", {}).get("share_count"),
+            "video_collect_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "aweme_type": str(aweme_detail.get("aweme_type")),
+            "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
+            "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
+            "image_download_urls": image_download_urls,
+            "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
+            "music_name": music_name,
+            "need_download_video": download_video,
+            "need_download_music": download_music,
+            "need_download_cover": download_cover,
+            "cover_urls": cover_data["cover_urls"],
+            "dynamic_cover_url": cover_data["dynamic_cover_url"],
+            "video_categories": categories,
         }

@@ -20,7 +20,8 @@ from loguru import logger
 from app.core.utils import Utils
 from app.core.enums import DownloadStatus
 from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
-from app.schemas.douyin import DownloadVideoResult, DownloadMusicResult, DownloadImagesResult
+from app.repositories.user_logs_repository import log_user_action
+from app.schemas.douyin import DownloadVideoResult, DownloadMusicResult, DownloadImagesResult, DownloadCoverResult
 # from app.db.session import get_async_transaction_session
 from app.core.config import settings
 
@@ -71,12 +72,13 @@ class DownloaderService:
             return False
 
     @staticmethod
-    async def download_video_by_aweme_id(aweme_id) -> DownloadVideoResult:
+    async def download_video_by_aweme_id(aweme_id, user_id: str = None) -> DownloadVideoResult:
         """
         下载视频和可选的音乐文件
-        
+
         Args:
             aweme_id: 视频id
+            user_id: 用户ID（用于数据隔离）
 
         Returns:
             DownloadResult: 下载结果信息
@@ -84,14 +86,14 @@ class DownloaderService:
         # 初始化结果对象,pydantic2.0方法
         result = DownloadVideoResult.model_construct()
         headers = Utils.get_headers()
-        
+
         try:
 
             # 建立数据库链接
             repo = SupabaseDouyinRepository()
 
             # 获取视频数据 - 这是 Douyin 模型实例
-            video_data = await repo.get_by_aweme_id(aweme_id)
+            video_data = await repo.get_by_aweme_id(aweme_id, user_id=user_id)
             if not video_data:
                 logger.error(f"找不到视频数据: {aweme_id}")
                 result.video_download_status = DownloadStatus.FAILED
@@ -121,9 +123,9 @@ class DownloaderService:
                 await repo.update(aweme_id, {
                     "download_status": DownloadStatus.FAILED,
                     "error_message": result.error
-                })
+                }, user_id=user_id)
                 return result
-            
+
             # todo calculate download time
             download_duration = 10
 
@@ -145,8 +147,18 @@ class DownloaderService:
                     result.video_path = video_path
                     result.download_duration = download_duration
                     logger.success(f"Video {aweme_id} downloaded successfully and saved to {video_path}.")
+
+                    # 记录成功日志
+                    if user_id:
+                        await log_user_action(
+                            user_id=user_id,
+                            action="download",
+                            message=f"视频下载成功: {video_title[:30]}...",
+                            status="success",
+                            aweme_id=aweme_id
+                        )
                     break
-                
+
             if result.video_download_status != DownloadStatus.COMPLETED:
                 logger.error(f"All download URLs for the video {aweme_id} failed.")
                 result.video_download_status = DownloadStatus.FAILED
@@ -156,10 +168,21 @@ class DownloaderService:
                 await repo.update(aweme_id, {
                     "video_download_status": DownloadStatus.FAILED,
                     "error_message": result.error
-                })
+                }, user_id=user_id)
+
+                # 记录失败日志
+                if user_id:
+                    await log_user_action(
+                        user_id=user_id,
+                        action="download",
+                        message=f"视频下载失败: {video_title[:30]}...",
+                        status="error",
+                        aweme_id=aweme_id,
+                        details={"error": result.error}
+                    )
 
             return result
-        
+
         except Exception as e:
             logger.error(f"Download processing error:: {str(e)}")
             result.video_download_status = DownloadStatus.FAILED
@@ -167,12 +190,13 @@ class DownloaderService:
             return result
 
     @staticmethod
-    async def download_images_by_aweme_id(aweme_id) :
+    async def download_images_by_aweme_id(aweme_id, user_id: str = None):
         """
         只下载图片文件
 
         Args:
             aweme_id: 视频ID aweme_id
+            user_id: 用户ID（用于数据隔离）
 
         Returns:
             DownloadImagesResult: 下载结果信息
@@ -187,7 +211,7 @@ class DownloaderService:
             repo = SupabaseDouyinRepository()
 
             # 获取视频数据
-            video_data = await repo.get_by_aweme_id(aweme_id)
+            video_data = await repo.get_by_aweme_id(aweme_id, user_id=user_id)
             if not video_data:
                 logger.error(f"找不到视频数据: {aweme_id}")
                 result.video_download_status = DownloadStatus.FAILED
@@ -281,8 +305,18 @@ class DownloaderService:
                 await repo.update(aweme_id, {
                     "video_download_status": DownloadStatus.COMPLETED,
                     "download_path": sub_download_path
-                })
+                }, user_id=user_id)
                 result.video_download_status = DownloadStatus.COMPLETED
+
+                # 记录成功日志
+                if user_id:
+                    await log_user_action(
+                        user_id=user_id,
+                        action="download",
+                        message=f"图集下载成功: {video_title[:30]}... ({total_downloaded}个文件)",
+                        status="success",
+                        aweme_id=aweme_id
+                    )
 
             else:
                 error_msg = f"Douyin {file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。Download Path: {sub_download_path}"
@@ -290,9 +324,20 @@ class DownloaderService:
                 await repo.update(aweme_id, {
                     "video_download_status": DownloadStatus.FAILED,
                     "error_message": error_msg
-                })
+                }, user_id=user_id)
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = error_msg
+
+                # 记录失败日志
+                if user_id:
+                    await log_user_action(
+                        user_id=user_id,
+                        action="download",
+                        message=f"图集下载失败: {video_title[:30]}...",
+                        status="error",
+                        aweme_id=aweme_id,
+                        details={"error": error_msg[:200]}
+                    )
 
         except Exception as e:
             logger.error(f"douyin {aweme_id} 下载处理出错: {str(e)}")
@@ -302,12 +347,13 @@ class DownloaderService:
         return result
 
     @staticmethod
-    async def download_music_by_aweme_id(*, aweme_id) -> DownloadMusicResult:
+    async def download_music_by_aweme_id(*, aweme_id, user_id: str = None) -> DownloadMusicResult:
         """
         只下载音乐文件
-        
+
         Args:
             aweme_id: 视频ID aweme_id
+            user_id: 用户ID（用于数据隔离）
 
         Returns:
             DownloadMusicResult: 下载结果信息
@@ -335,18 +381,18 @@ class DownloaderService:
 
             # 从字典中获取音乐URL列表
             music_urls = music_data.get("music_download_urls", [])
-            
+
             # 创建下载路径
             download_path = Utils.create_download_folder()
-        
+
             # 从字典中获取音乐名称
             music_name = music_data.get("music_name")
             if not music_name:
                 music_name = f"{aweme_id}_music"
-            
+
             # 生成音乐文件路径
             music_path = os.path.join(download_path, f"{music_name}.mp3")
-        
+
             # 尝试下载音乐
             for url in music_urls:
                 if await DownloaderService.download_file(url, music_path, headers):
@@ -371,10 +417,10 @@ class DownloaderService:
                 await repo.update(aweme_id, {
                     "music_download_status": DownloadStatus.FAILED,
                     "error_message": result.error
-                })
+                }, user_id=user_id)
 
             return result
-        
+
         except Exception as e:
             logger.error(f"Music download processing error: {str(e)}")
             result.error = str(e)
@@ -406,3 +452,102 @@ class DownloaderService:
 
         # 所有URL都失败了
         return {"success": False, "path": None, "message": f"所有URL都失败了，共尝试了{len(url_list)}个URL"}
+
+    @staticmethod
+    async def download_cover_by_aweme_id(aweme_id: str, user_id: str = None) -> DownloadCoverResult:
+        """
+        下载视频封面图片
+
+        Args:
+            aweme_id: 视频ID
+            user_id: 用户ID（用于数据隔离）
+
+        Returns:
+            DownloadCoverResult: 下载结果信息
+        """
+        result = DownloadCoverResult.model_construct()
+        headers = Utils.get_headers()
+
+        try:
+            repo = SupabaseDouyinRepository()
+
+            # 获取视频数据
+            video_data = await repo.get_by_aweme_id(aweme_id, user_id=user_id)
+            if not video_data:
+                logger.error(f"找不到视频数据: {aweme_id}")
+                result.cover_download_status = DownloadStatus.FAILED
+                result.error = f"找不到视频数据: {aweme_id}"
+                return result
+
+            logger.info(f"准备下载视频 {aweme_id} 的封面")
+
+            # 获取封面 URL 列表
+            cover_urls = video_data.get("cover_urls", [])
+            if not cover_urls:
+                logger.warning(f"视频 {aweme_id} 没有封面 URL")
+                result.cover_download_status = DownloadStatus.SKIPPED
+                result.error = "没有封面 URL"
+                return result
+
+            # 创建下载路径
+            download_path = Utils.create_download_folder()
+
+            # 生成文件名
+            video_title = video_data.get("video_title", "undefined")
+            file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
+            cover_path = os.path.join(download_path, f"{file_name}_cover.jpg")
+
+            # 尝试下载封面（尝试多个 URL）
+            for url in cover_urls:
+                if await DownloaderService.download_file(url, cover_path, headers):
+                    # 更新数据库
+                    try:
+                        await repo.update(aweme_id, {
+                            "cover_download_status": DownloadStatus.COMPLETED.value,
+                            "cover_download_path": cover_path
+                        }, user_id=user_id)
+                    except Exception as e:
+                        logger.error(f"更新封面下载状态失败: {e}")
+
+                    result.cover_download_status = DownloadStatus.COMPLETED
+                    result.cover_path = cover_path
+                    logger.success(f"封面 {aweme_id} 下载成功: {cover_path}")
+
+                    # 记录成功日志
+                    if user_id:
+                        await log_user_action(
+                            user_id=user_id,
+                            action="download",
+                            message=f"封面下载成功: {video_title[:30]}...",
+                            status="success",
+                            aweme_id=aweme_id
+                        )
+                    return result
+
+            # 所有 URL 都失败
+            logger.error(f"视频 {aweme_id} 的所有封面 URL 都下载失败")
+            result.cover_download_status = DownloadStatus.FAILED
+            result.error = "所有封面 URL 下载失败"
+
+            await repo.update(aweme_id, {
+                "cover_download_status": DownloadStatus.FAILED.value,
+                "error_message": result.error
+            }, user_id=user_id)
+
+            # 记录失败日志
+            if user_id:
+                await log_user_action(
+                    user_id=user_id,
+                    action="download",
+                    message=f"封面下载失败: {video_title[:30]}...",
+                    status="error",
+                    aweme_id=aweme_id
+                )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"下载封面出错: {str(e)}")
+            result.cover_download_status = DownloadStatus.FAILED
+            result.error = str(e)
+            return result

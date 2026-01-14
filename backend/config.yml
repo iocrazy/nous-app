@@ -31,4 +31,6 @@ APP_PORT: 9999  # Docker 容器内部固定端口
 
 
 ## 文件存储路径（环境特定）
-NAS_BASE_PATH: /Volumes/program/Download/Douyin
+# 静态文件服务的根目录，所有下载的文件都在此目录下
+# 注意：.env 中的值会覆盖此配置
+NAS_BASE_PATH: /Volumes/program/Download/Test

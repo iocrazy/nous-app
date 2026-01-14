@@ -242,14 +242,20 @@ class DouyinAnalysis(metaclass=SingletonMeta):
 
                 try:
                     response_count = 0
+                    timeout_count = 0
+                    max_timeout_retries = 5  # 最多允许 5 次超时重试
                     while True:
                         response_count += 1
 
-                        response = instance.page.listen.wait(timeout=2)
+                        response = instance.page.listen.wait(timeout=3)
 
                         if not response:
-                            logger.warning(f"第 {response_count} 次等待API响应超时")
-                            return None
+                            timeout_count += 1
+                            logger.warning(f"第 {timeout_count} 次等待API响应超时")
+                            if timeout_count >= max_timeout_retries:
+                                logger.error(f"已达到最大超时重试次数 {max_timeout_retries}，放弃获取")
+                                return None
+                            continue  # 继续重试
 
                         logger.success(f"成功接收到API {response.url}响应")
                         response_name = response.url[-15:] if len(response.url) >= 15 else response.url

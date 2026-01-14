@@ -16,14 +16,14 @@ douyin_analysis/
 │   │   └── services/         # 业务逻辑层
 │   ├── config.yml            # 业务配置
 │   └── pyproject.toml        # 后端依赖
-├── frontend/                   # 前端应用（React + Vite）
-│   ├── src/
-│   │   ├── components/       # React 组件
-│   │   ├── pages/            # 页面组件
-│   │   ├── hooks/            # 自定义 Hooks
-│   │   ├── lib/              # 工具库
-│   │   ├── stores/           # Zustand 状态
-│   │   └── types/            # TypeScript 类型
+├── frontend/                   # 前端应用（React 19 + Vite）
+│   ├── components/            # React 组件
+│   ├── services/              # API 服务层
+│   │   ├── dataService.ts    # Supabase 数据操作
+│   │   └── parserService.ts  # 后端 API 调用
+│   ├── App.tsx               # 主应用组件
+│   ├── types.ts              # TypeScript 类型
+│   ├── supabaseClient.ts     # Supabase 客户端配置
 │   └── package.json          # 前端依赖
 └── supabase/                   # Supabase 配置
     └── migrations/            # SQL 迁移脚本
@@ -100,12 +100,34 @@ supabase db push
 
 ### 前端技术栈
 
-- **React 18** + **TypeScript**
+- **React 19** + **TypeScript**
 - **Vite** 构建工具
-- **TailwindCSS** 样式
-- **React Query** 数据获取
-- **Zustand** 状态管理
+- **TailwindCSS** 样式（CDN 版本）
+- **Recharts** 数据可视化
+- **Lucide React** 图标库
 - **Supabase JS** 客户端
+
+### 前后端对接
+
+前端通过 `services/parserService.ts` 调用后端 API：
+
+```typescript
+// 解析单个链接
+const response = await parseShareLink(url, {
+  video_bool: true,
+  music_bool: false,
+  cover_bool: true,
+});
+
+// 批量解析
+const response = await parseBatchLinks(urls, options);
+```
+
+**认证方式**：
+- API Key：存储在 `localStorage.douyin_api_key`
+- JWT Token：从 Supabase session 获取
+
+**数据库表名**：`douyin_videos`（前后端统一）
 
 ## Supabase 配置
 
@@ -182,8 +204,9 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 2. 在 `backend/app/repositories/` 添加数据访问方法
 3. 在 `backend/app/services/` 添加业务逻辑
 4. 在 `backend/app/api/` 添加 API 路由
-5. 在 `frontend/src/lib/api.ts` 添加 API 调用
-6. 在 `frontend/src/pages/` 添加页面组件
+5. 在 `frontend/services/parserService.ts` 添加 API 调用
+6. 在 `frontend/components/` 添加 React 组件
+7. 在 `frontend/App.tsx` 集成新组件
 
 ### 数据库变更
 

@@ -8,15 +8,19 @@ Supabase 抖音视频路由
 """
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Header, Query, BackgroundTasks
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from loguru import logger
 
 from app.core.enums import DownloadStatus
 from app.core.deps import AuthDep
+from app.core.utils import Utils
 from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
+from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.supabase_douyin_service import SupabaseDouyinService
@@ -29,6 +33,7 @@ TAGS_FETCH = ["抖音采集"]      # 从抖音获取并解析视频
 TAGS_VIDEOS = ["视频管理"]     # 已存储数据的 CRUD
 TAGS_STATS = ["统计分析"]      # 统计和分析
 TAGS_DOWNLOAD = ["下载管理"]   # 下载相关操作
+TAGS_LOGS = ["日志"]           # 用户操作日志
 
 
 # ============================================
@@ -40,6 +45,7 @@ class VideoFetchRequest(BaseModel):
     url: str
     video_bool: bool = True
     music_bool: bool = False
+    cover_bool: bool = True
     video_categories: Optional[str] = None
 
 
@@ -59,6 +65,7 @@ class BatchFetchRequest(BaseModel):
     urls: list[str]
     video_bool: bool = True
     music_bool: bool = False
+    cover_bool: bool = True
     video_categories: Optional[str] = None
 
 
@@ -81,10 +88,17 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
     需要认证：Bearer Token 或 API Key（需要 `douyin:fetch` 权限）
     """
     try:
-        logger.info(f"用户 {auth.user_id} 开始获取视频: {request.url}")
+        # 从分享文本中提取有效 URL
+        try:
+            valid_urls = Utils.extract_valid_url(request.url)
+            url = valid_urls[0]  # 取第一个有效 URL
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无法从输入中提取有效的抖音链接")
+
+        logger.info(f"用户 {auth.user_id} 开始获取视频: {url}")
 
         # 获取视频数据
-        aweme_detail = await DouyinAnalysis.fetch_one_video(request.url)
+        aweme_detail = await DouyinAnalysis.fetch_one_video(url)
 
         if not aweme_detail:
             raise HTTPException(status_code=404, detail="无法获取视频信息")
@@ -92,9 +106,10 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         # 解析视频数据
         parsed_data = await DouyinParser.parse_aweme_detail(
             aweme_detail=aweme_detail,
-            valid_url=request.url,
+            valid_url=url,
             download_video=request.video_bool,
             download_music=request.music_bool,
+            download_cover=request.cover_bool,
             categories=request.video_categories
         )
 
@@ -113,6 +128,17 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             parsed_data
         )
 
+        # 记录日志
+        video_title = parsed_data.get("video_title", "")[:30]
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="fetch",
+            message=f"获取视频: {video_title}...",
+            status="pending",
+            aweme_id=aweme_id
+        )
+
         return {
             "success": True,
             "message": "视频处理任务已提交",
@@ -123,9 +149,25 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         }
 
     except HTTPException:
+        # 记录失败日志
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="fetch",
+            message=f"获取视频失败: {request.url[:30]}...",
+            status="error"
+        )
         raise
     except Exception as e:
         logger.error(f"获取视频失败: {e}")
+        # 记录失败日志
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="fetch",
+            message=f"获取视频失败: {str(e)[:50]}",
+            status="error"
+        )
         raise HTTPException(status_code=500, detail=f"获取视频失败: {str(e)}")
 
 
@@ -146,8 +188,16 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
     results = []
     errors = []
 
-    for url in request.urls:
+    for raw_url in request.urls:
         try:
+            # 从分享文本中提取有效 URL
+            try:
+                valid_urls = Utils.extract_valid_url(raw_url)
+                url = valid_urls[0]
+            except ValueError:
+                errors.append({"url": raw_url, "error": "无法提取有效链接"})
+                continue
+
             aweme_detail = await DouyinAnalysis.fetch_one_video(url)
 
             if aweme_detail:
@@ -156,6 +206,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                     valid_url=url,
                     download_video=request.video_bool,
                     download_music=request.music_bool,
+                    download_cover=request.cover_bool,
                     categories=request.video_categories
                 )
 
@@ -253,7 +304,7 @@ async def get_video(aweme_id: str, auth: AuthDep):
 
 
 @router.delete("/videos/{aweme_id}", tags=TAGS_VIDEOS)
-async def delete_video(aweme_id: str, auth: AuthDep):
+async def delete_video(aweme_id: str, background_tasks: BackgroundTasks, auth: AuthDep):
     """
     删除视频记录
 
@@ -265,10 +316,25 @@ async def delete_video(aweme_id: str, auth: AuthDep):
     """
     try:
         repo = SupabaseDouyinRepository()
+
+        # 先获取视频信息用于日志
+        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+        video_title = video.get("video_title", aweme_id)[:30] if video else aweme_id
+
         result = await repo.delete(aweme_id, user_id=auth.user_id)
 
         if not result:
             raise HTTPException(status_code=404, detail="视频不存在或删除失败")
+
+        # 记录删除日志
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="delete",
+            message=f"删除视频: {video_title}...",
+            status="success",
+            aweme_id=aweme_id
+        )
 
         return {"success": True, "message": "视频已删除"}
     except HTTPException:
@@ -388,17 +454,30 @@ async def retry_download(aweme_id: str, background_tasks: BackgroundTasks, auth:
         if not video:
             raise HTTPException(status_code=404, detail="视频不存在")
 
+        video_title = video.get("video_title", aweme_id)[:30]
+
         # 重置下载状态
         await repo.update(aweme_id, {
             "video_download_status": DownloadStatus.PENDING.value,
             "error_message": None
         }, user_id=auth.user_id)
 
-        # 添加后台下载任务
+        # 添加后台下载任务（传递 user_id 以实现数据隔离）
         from app.services.downloader import DownloaderService
         background_tasks.add_task(
             DownloaderService.download_video_by_aweme_id,
-            aweme_id
+            aweme_id,
+            user_id=auth.user_id
+        )
+
+        # 记录重试日志
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="retry",
+            message=f"重试下载: {video_title}...",
+            status="pending",
+            aweme_id=aweme_id
         )
 
         return {"success": True, "message": "下载任务已重新提交"}
@@ -407,3 +486,129 @@ async def retry_download(aweme_id: str, background_tasks: BackgroundTasks, auth:
     except Exception as e:
         logger.error(f"重试下载失败: {e}")
         raise HTTPException(status_code=500, detail="重试下载失败")
+
+
+@router.get("/download/{aweme_id}", tags=TAGS_DOWNLOAD)
+async def download_video_file(aweme_id: str, auth: AuthDep):
+    """
+    下载视频文件
+
+    返回视频文件供浏览器下载（设置 Content-Disposition: attachment）。
+
+    - **aweme_id**: 视频唯一标识
+
+    需要认证：Bearer Token 或 API Key（需要 `douyin:videos:read` 权限）
+    """
+    try:
+        repo = SupabaseDouyinRepository()
+        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="视频不存在")
+
+        download_path = video.get("download_path")
+        if not download_path:
+            raise HTTPException(status_code=404, detail="视频文件路径不存在")
+
+        file_path = Path(download_path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="视频文件不存在")
+
+        # 生成下载文件名
+        video_title = video.get("video_title", aweme_id)
+        # 清理文件名中的非法字符
+        safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        if not safe_title:
+            safe_title = aweme_id
+        filename = f"{safe_title}.mp4"
+
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载视频文件失败: {e}")
+        raise HTTPException(status_code=500, detail="下载视频文件失败")
+
+
+@router.get("/download/{aweme_id}/cover", tags=TAGS_DOWNLOAD)
+async def download_cover_file(aweme_id: str, auth: AuthDep):
+    """
+    下载封面文件
+
+    返回封面图片供浏览器下载。
+
+    - **aweme_id**: 视频唯一标识
+
+    需要认证：Bearer Token 或 API Key（需要 `douyin:videos:read` 权限）
+    """
+    try:
+        repo = SupabaseDouyinRepository()
+        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="视频不存在")
+
+        cover_path = video.get("cover_download_path")
+        if not cover_path:
+            raise HTTPException(status_code=404, detail="封面文件路径不存在")
+
+        file_path = Path(cover_path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="封面文件不存在")
+
+        # 生成下载文件名
+        video_title = video.get("video_title", aweme_id)
+        safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        if not safe_title:
+            safe_title = aweme_id
+        filename = f"{safe_title}_cover.jpg"
+
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="image/jpeg",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载封面文件失败: {e}")
+        raise HTTPException(status_code=500, detail="下载封面文件失败")
+
+
+@router.get("/logs", tags=TAGS_LOGS)
+async def get_user_logs(
+    auth: AuthDep,
+    limit: int = Query(20, ge=1, le=100),
+    action: Optional[str] = Query(None, description="筛选操作类型")
+):
+    """
+    获取用户操作日志
+
+    返回用户最近的操作日志记录。
+
+    - **limit**: 返回数量（1-100）
+    - **action**: 筛选特定操作类型（fetch, download, delete, retry, update）
+
+    需要认证：Bearer Token 或 API Key
+    """
+    try:
+        repo = UserLogsRepository()
+        logs = await repo.get_recent(
+            user_id=auth.user_id,
+            limit=limit,
+            action=action
+        )
+        return {"success": True, "count": len(logs), "logs": logs}
+    except Exception as e:
+        logger.error(f"获取用户日志失败: {e}")
+        raise HTTPException(status_code=500, detail="获取用户日志失败")

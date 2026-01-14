@@ -20,6 +20,9 @@ class DouyinBase(BaseModel):
     # 视频唯一标识
     aweme_id: str = Field(..., description="视频唯一标识")
 
+    # 用户关联
+    user_id: Optional[str] = Field(None, description="用户ID")
+
     # 视频互动数据
     video_digg_count: Optional[int] = Field(None, description="视频点赞数")
     video_comment_count: Optional[int] = Field(None, description="视频评论数")
@@ -47,6 +50,13 @@ class DouyinBase(BaseModel):
     music_download_urls: Optional[list] = Field(None, description="音频下载URL")
     music_name: Optional[str] = Field(None, description="音频名称")
     need_download_music: Optional[bool] = Field(None, description="是否需要下载音频")
+
+    # 封面信息
+    cover_urls: Optional[list] = Field(None, description="封面URL列表")
+    dynamic_cover_url: Optional[str] = Field(None, description="动态封面URL")
+    need_download_cover: Optional[bool] = Field(None, description="是否需要下载封面")
+    cover_download_status: Optional[DownloadStatus] = Field(None, description="封面下载状态")
+    cover_download_path: Optional[str] = Field(None, description="封面下载路径")
 
     # 下载状态跟踪
     video_download_status: Optional[DownloadStatus] = Field(None, description="视频下载状态")
@@ -172,6 +182,18 @@ class DownloadImagesResult(BaseModel):
     video_download_status: DownloadStatus = Field(default=DownloadStatus.PENDING, description="视频下载状态")
     error: Optional[str] = Field(None, description="错误信息")
     warning: Optional[str] = Field(None, description="警告信息")
+
+
+class DownloadCoverResult(BaseModel):
+    """封面下载结果数据模型"""
+    cover_download_status: DownloadStatus = Field(default=DownloadStatus.PENDING, description="封面下载状态")
+    cover_path: Optional[str] = Field(None, description="封面文件路径")
+    error: Optional[str] = Field(None, description="错误信息")
+
+    @property
+    def is_successful(self) -> bool:
+        """判断下载是否成功"""
+        return self.cover_download_status == DownloadStatus.COMPLETED and self.error is None
 
 
 class VideoFetchRequest(BaseModel):

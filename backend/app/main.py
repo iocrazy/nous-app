@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 from loguru import logger
 
@@ -136,7 +138,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api/v1")
+
+# 挂载静态文件服务 - 用于访问下载的视频和封面
+media_path = Path(settings.NAS_BASE_PATH)
+if media_path.exists():
+    app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
+    logger.info(f"静态文件服务已挂载: /media -> {media_path}")
+else:
+    logger.warning(f"媒体目录不存在: {media_path}，静态文件服务未挂载")
 
 
 @app.get("/")

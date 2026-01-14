@@ -40,6 +40,8 @@ class SupabaseDouyinRepository:
                 data["video_download_status"] = data["video_download_status"].value
             if "music_download_status" in data and isinstance(data["music_download_status"], DownloadStatus):
                 data["music_download_status"] = data["music_download_status"].value
+            if "cover_download_status" in data and isinstance(data["cover_download_status"], DownloadStatus):
+                data["cover_download_status"] = data["cover_download_status"].value
 
             # 处理 datetime
             if "video_created_time" in data and isinstance(data["video_created_time"], datetime):
@@ -102,6 +104,8 @@ class SupabaseDouyinRepository:
                 data["video_download_status"] = data["video_download_status"].value
             if "music_download_status" in data and isinstance(data["music_download_status"], DownloadStatus):
                 data["music_download_status"] = data["music_download_status"].value
+            if "cover_download_status" in data and isinstance(data["cover_download_status"], DownloadStatus):
+                data["cover_download_status"] = data["cover_download_status"].value
 
             # 处理 datetime
             if "video_created_time" in data and isinstance(data["video_created_time"], datetime):
@@ -161,6 +165,13 @@ class SupabaseDouyinRepository:
         result = await self.get_by_aweme_id(aweme_id)
         if result:
             return result.get("music_download_status") == DownloadStatus.COMPLETED.value
+        return False
+
+    async def check_cover_downloaded(self, aweme_id: str) -> bool:
+        """检查封面是否已下载"""
+        result = await self.get_by_aweme_id(aweme_id)
+        if result:
+            return result.get("cover_download_status") == DownloadStatus.COMPLETED.value
         return False
 
     async def mark_video_as_downloaded(
