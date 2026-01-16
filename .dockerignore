@@ -1,93 +1,45 @@
+# Git
+.git
+.gitignore
+
 # Python
-__pycache__/
+__pycache__
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.venv/
+.venv
+venv
+ENV
+.pytest_cache
 
 # IDE
-.vscode/
-.idea/
+.idea
+.vscode
 *.swp
 *.swo
-*~
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Git
-.git/
-.gitignore
-
-# Docker
-Dockerfile*
-docker-compose*
-.dockerignore
-
-# Logs
-*.log
-logs/
-
-# Database (开发环境的数据库文件)
-*.db
-*.sqlite
-*.sqlite3
-
-# 测试文件
-tests/
-test_*.py
-*_test.py
-
-# 文档
-README.md
+# Frontend (单独部署)
+frontend/
 docs/
 
-# 配置文件（可能包含敏感信息）
-.env.local
-.env.development
-.env.test
-
-# 下载的视频文件
-videos/
-downloads/
+# 测试文件
+test/
+tests/
+*.test.py
 
 # 临时文件
-tmp/
-temp/
+*.log
 *.tmp
+.DS_Store
+Thumbs.db
 
-# Node.js (如果有前端)
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# 本地配置（使用 volume 挂载）
+backend/.env.local
+*.local
+
+# 下载目录
+downloads/
+
+# Worktrees
+.worktrees/
