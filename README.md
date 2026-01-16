@@ -1,138 +1,159 @@
-# 抖音视频分析系统
+# MediaHub - 抖音媒体分析系统
+
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://react.dev)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E.svg)](https://supabase.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A modern Douyin (TikTok China) video analysis and download system built with FastAPI, React, and Supabase.
 
 基于 FastAPI + React + Supabase 的抖音视频分析和下载系统。
 
-## 功能特性
+## Features / 功能特性
 
-- 解析抖音分享链接，获取视频/图集/图文信息
-- 支持视频、图片、音频自动下载
-- 多种媒体类型支持（视频、图集、图文）
-8
-- 用户认证与权限管理（Supabase Auth）
-- **API 密钥管理**（支持多密钥、权限范围控制）
-- 云端数据库存储（Supabase PostgreSQL）
-- 视频收藏夹功能
-- 作者信息管理
-- 实时统计数据
-- 现代化 React 前端界面
+### Core Features
+- **Link Parser** - Parse Douyin share links to extract video/image metadata
+- **Media Download** - Auto-download videos, images, covers, and audio
+- **Multi-format Support** - Videos, image carousels, and image-text posts
+- **Batch Processing** - Process multiple links simultaneously
+- **Real-time Sync** - Supabase Realtime for instant data updates
 
-## 技术栈
+### User Management
+- **User Authentication** - Supabase Auth with email/password login
+- **Per-user Data Isolation** - Each user can only access their own data
+- **User Settings** - Customizable download paths per user
+- **API Key Management** - Create API keys with scoped permissions
 
-| 层级 | 技术 |
-|------|------|
-| **后端** | FastAPI + Python 3.11+ |
-| **数据库** | Supabase (PostgreSQL) |
-| **认证** | Supabase Auth + API Key |
-| **前端** | React 18 + TypeScript + Vite |
-| **样式** | TailwindCSS |
-| **状态管理** | Zustand |
-| **浏览器自动化** | DrissionPage |
+### UI Features
+- **Multiple View Modes** - Grid, List, and Feed views for library
+- **Media Preview** - Full-screen video/image preview with ESC to close
+- **Dark Theme** - Modern dark UI with TailwindCSS
+- **Responsive Design** - Works on desktop and mobile devices
+- **Dashboard Analytics** - Visual statistics and activity charts
 
-## 项目结构
+## Tech Stack / 技术栈
+
+| Layer | Technology |
+|-------|------------|
+| **Backend** | FastAPI + Python 3.11+ |
+| **Database** | Supabase (PostgreSQL) |
+| **Authentication** | Supabase Auth + API Key |
+| **Frontend** | React 18 + TypeScript + Vite |
+| **Styling** | TailwindCSS |
+| **State Management** | Zustand + React Query |
+| **Browser Automation** | DrissionPage |
+| **Package Manager** | uv (Python) + npm (Node.js) |
+
+## Project Structure / 项目结构
 
 ```
-douyin_analysis/
-├── backend/                    # 后端服务
+mediahub/
+├── backend/                        # Backend Service
 │   ├── app/
-│   │   ├── api/               # API 路由
-│   │   │   ├── supabase_auth_router.py    # 认证路由
-│   │   │   ├── supabase_douyin_router.py  # 视频路由
-│   │   │   └── api_key_router.py          # API 密钥路由
-│   │   ├── core/              # 核心配置
-│   │   │   ├── config.py      # 配置管理
-│   │   │   ├── deps.py        # 依赖注入（双重认证）
-│   │   │   ├── enums.py       # 枚举定义
-│   │   │   └── api_key_scopes.py  # 权限范围定义
-│   │   ├── db/                # 数据库
-│   │   │   └── supabase_client.py  # Supabase 客户端
-│   │   ├── repositories/      # 数据访问层
+│   │   ├── api/                   # API Routes
+│   │   │   ├── supabase_auth_router.py     # Auth endpoints
+│   │   │   ├── supabase_douyin_router.py   # Video endpoints
+│   │   │   ├── api_key_router.py           # API key management
+│   │   │   ├── user_settings_router.py     # User settings
+│   │   │   └── frontend_config_router.py   # Frontend config (YAML)
+│   │   ├── core/                  # Core Configuration
+│   │   │   ├── config.py          # Config management
+│   │   │   ├── deps.py            # Dependency injection
+│   │   │   ├── enums.py           # Enum definitions
+│   │   │   └── api_key_scopes.py  # Permission scopes
+│   │   ├── db/                    # Database
+│   │   │   └── supabase_client.py # Supabase client
+│   │   ├── repositories/          # Data Access Layer
 │   │   │   ├── supabase_douyin_repository.py
-│   │   │   └── api_key_repository.py
-│   │   ├── schemas/           # Pydantic 模型
+│   │   │   ├── api_key_repository.py
+│   │   │   └── user_settings_repository.py
+│   │   ├── schemas/               # Pydantic Models
 │   │   │   ├── douyin.py
 │   │   │   └── api_key.py
-│   │   └── services/          # 业务逻辑
+│   │   └── services/              # Business Logic
 │   │       ├── douyin_analysis.py
 │   │       ├── douyin_parser.py
 │   │       ├── downloader.py
 │   │       ├── supabase_auth_service.py
 │   │       └── supabase_douyin_service.py
-│   ├── config.yml             # 业务配置
-│   └── pyproject.toml         # Python 依赖
-├── frontend/                   # 前端应用
-│   ├── src/
-│   │   ├── components/        # React 组件
-│   │   │   └── Layout.tsx     # 布局组件
-│   │   ├── pages/             # 页面组件
-│   │   │   ├── LoginPage.tsx
-│   │   │   ├── DashboardPage.tsx
-│   │   │   ├── VideosPage.tsx
-│   │   │   ├── FetchPage.tsx
-│   │   │   ├── ApiKeysPage.tsx    # API 密钥管理
-│   │   │   └── SettingsPage.tsx
-│   │   ├── lib/               # 工具库
-│   │   │   ├── api.ts         # 后端 API 调用
-│   │   │   ├── supabase.ts    # Supabase 客户端
-│   │   │   └── supabase-api.ts
-│   │   ├── stores/            # 状态管理
-│   │   │   └── authStore.ts
-│   │   └── types/             # TypeScript 类型
-│   │       ├── database.ts
-│   │       └── api-key.ts     # API 密钥类型
-│   └── package.json           # 前端依赖
-├── supabase/                   # Supabase 配置
-│   └── migrations/            # 数据库迁移
+│   ├── config.yml                 # Business config
+│   ├── frontend_config.yml        # Frontend config (Supabase credentials)
+│   └── pyproject.toml             # Python dependencies
+├── frontend/                       # Frontend Application
+│   ├── App.tsx                    # Main application
+│   ├── supabaseClient.ts          # Supabase client with dynamic init
+│   ├── components/                # React Components
+│   │   ├── MediaCard.tsx          # Media detail card
+│   │   ├── CompactMediaCard.tsx   # Grid view card
+│   │   ├── LibraryTable.tsx       # List view table
+│   │   ├── LibraryFeed.tsx        # Feed view
+│   │   ├── SettingsView.tsx       # Settings page
+│   │   ├── AuthOverlay.tsx        # Login modal
+│   │   └── LandingPage.tsx        # Landing page
+│   ├── services/                  # API Services
+│   │   ├── dataService.ts         # Data operations
+│   │   └── parserService.ts       # Link parsing
+│   ├── types/                     # TypeScript Types
+│   │   └── index.ts
+│   └── package.json               # Frontend dependencies
+├── supabase/                       # Supabase Configuration
+│   └── migrations/                # Database Migrations
 │       ├── 001_initial_schema.sql
 │       ├── 002_optimize_schema.sql
-│       └── 003_api_keys.sql   # API 密钥表
-└── docs/                       # 文档
-    └── API_DESIGN.md
+│       ├── 003_api_keys.sql
+│       └── 008_create_user_settings_table.sql
+└── docs/                           # Documentation
+    └── plans/                     # Design documents
 ```
 
-## 快速开始
+## Quick Start / 快速开始
 
-### 环境要求
+### Prerequisites / 环境要求
 
 - Python 3.11+
 - Node.js 18+
-- Chrome/Chromium 浏览器
-- [uv](https://github.com/astral-sh/uv) 包管理器
+- Chrome/Chromium browser
+- [uv](https://github.com/astral-sh/uv) package manager
 
-### 1. 克隆项目
+### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-repo/douyin_analysis.git
-cd douyin_analysis
+git clone https://github.com/your-repo/mediahub.git
+cd mediahub
 ```
 
-### 2. 配置 Supabase
+### 2. Configure Supabase
 
-1. 在 [Supabase](https://supabase.com) 创建新项目
-2. 获取项目 URL 和 API Keys（在 Settings > API 中）
-3. 在 SQL Editor 中依次执行迁移文件：
-   - `supabase/migrations/001_initial_schema.sql`
-   - `supabase/migrations/002_optimize_schema.sql`
-   - `supabase/migrations/003_api_keys.sql`
+1. Create a new project at [Supabase](https://supabase.com)
+2. Get your project URL and API Keys (Settings > API)
+3. Execute migration files in SQL Editor:
+   ```
+   supabase/migrations/001_initial_schema.sql
+   supabase/migrations/002_optimize_schema.sql
+   supabase/migrations/003_api_keys.sql
+   supabase/migrations/008_create_user_settings_table.sql
+   ```
 
-### 3. 配置环境变量
+### 3. Environment Variables
 
-**后端配置** (`backend/.env`):
+**Backend** (`backend/.env`):
 
 ```bash
-# Supabase 配置（必需）
+# Supabase (Required)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# 下载路径
+# Download Path
 NAS_BASE_PATH=/path/to/download/videos
 
-# 服务器配置（可选）
+# Server Config (Optional)
 HOST=0.0.0.0
 APP_PORT=8080
 ```
 
-**前端配置** (`frontend/.env`):
+**Frontend** (`frontend/.env`):
 
 ```bash
 VITE_SUPABASE_URL=https://your-project.supabase.co
@@ -140,310 +161,112 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 VITE_API_URL=http://localhost:8080
 ```
 
-### 4. 启动后端
+> **Note**: Supabase credentials can also be configured via the Settings page in the UI, which saves to `backend/frontend_config.yml`. Priority: YAML config > .env
+
+### 4. Start Backend
 
 ```bash
 cd backend
-uv sync                                    # 安装依赖
-uv run uvicorn app.main:app --reload       # 启动开发服务器
+uv sync                                    # Install dependencies
+uv run uvicorn app.main:app --reload       # Start dev server
 ```
 
-后端 API 文档: http://localhost:8080/docs
+API Documentation: http://localhost:8080/docs
 
-### 5. 启动前端
+### 5. Start Frontend
 
 ```bash
 cd frontend
-npm install                                # 安装依赖
-npm run dev                                # 启动开发服务器
+npm install                                # Install dependencies
+npm run dev                                # Start dev server
 ```
 
-前端界面: http://localhost:5173
+Frontend UI: http://localhost:5173
 
 ---
 
-## 前后端 API 对接文档
+## API Documentation / API 文档
 
-### 认证方式
+### Authentication Methods
 
-系统支持两种认证方式：
+The system supports two authentication methods:
 
-| 认证方式 | Header | 格式 | 说明 |
-|---------|--------|------|------|
-| **JWT Token** | `Authorization` | `Bearer <token>` | 用户登录后获取，拥有完整权限 |
-| **API Key** | `X-API-Key` | `dk_<secret>` | 用户创建，按权限范围控制访问 |
+| Method | Header | Format | Description |
+|--------|--------|--------|-------------|
+| **JWT Token** | `Authorization` | `Bearer <token>` | Obtained after user login, full permissions |
+| **API Key** | `X-API-Key` | `dk_<secret>` | User-created, scoped permissions |
 
-前端通过 Axios 拦截器自动添加 JWT Token：
+### API Endpoints
 
-```typescript
-// frontend/src/lib/api.ts
-api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().session?.access_token
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-```
+#### Authentication
 
----
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/auth/signup` | POST | User registration | No |
+| `/auth/signin` | POST | User login | No |
+| `/auth/signout` | POST | User logout | Yes |
+| `/auth/me` | GET | Get current user | Yes |
+| `/auth/refresh` | POST | Refresh token | Yes |
 
-### 认证 API
+#### Video Operations
 
-#### 前端调用
+| Endpoint | Method | Description | Scope |
+|----------|--------|-------------|-------|
+| `/douyin/fetch` | POST | Fetch single video | `douyin:fetch` |
+| `/douyin/fetch/batch` | POST | Batch fetch videos | `douyin:fetch:batch` |
+| `/douyin/videos` | GET | List videos | `douyin:videos:read` |
+| `/douyin/videos/{aweme_id}` | GET | Get video details | `douyin:videos:read` |
+| `/douyin/videos/{aweme_id}` | DELETE | Delete video | `douyin:videos:write` |
+| `/douyin/videos/search` | POST | Search videos | `douyin:search` |
+| `/douyin/statistics` | GET | Get statistics | `douyin:statistics` |
+| `/douyin/retry/{aweme_id}` | POST | Retry download | `douyin:retry` |
+| `/douyin/download/{aweme_id}` | GET | Download video file | `douyin:videos:read` |
 
-```typescript
-// 通过 Supabase 客户端直接调用
-import { supabase } from '@/lib/supabase'
+#### User Settings
 
-// 登录
-const { data, error } = await supabase.auth.signInWithPassword({
-  email: 'user@example.com',
-  password: 'password123'
-})
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/settings` | GET | Get user settings | Yes |
+| `/settings` | PUT | Update user settings | Yes |
+| `/settings` | DELETE | Reset user settings | Yes |
 
-// 登出
-await supabase.auth.signOut()
+#### Frontend Config (No Auth Required)
 
-// 获取当前用户
-const { data: { user } } = await supabase.auth.getUser()
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/config` | GET | Get frontend config (Supabase URL, Anon Key) |
+| `/config` | PUT | Update frontend config |
 
-#### 后端端点
+#### API Key Management
 
-| 后端端点 | 方法 | 说明 | 认证 |
-|---------|------|------|------|
-| `/auth/signup` | POST | 用户注册 | 否 |
-| `/auth/signin` | POST | 用户登录 | 否 |
-| `/auth/signout` | POST | 用户登出 | 是 |
-| `/auth/me` | GET | 获取当前用户 | 是 |
-| `/auth/refresh` | POST | 刷新令牌 | 是 |
-| `/auth/reset-password` | POST | 发送重置密码邮件 | 否 |
-| `/auth/me` | PUT | 更新用户信息 | 是 |
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api-keys/scopes` | GET | Get available scopes | No |
+| `/api-keys` | POST | Create API key | JWT |
+| `/api-keys` | GET | List API keys | JWT |
+| `/api-keys/{key_id}` | GET | Get key details | JWT |
+| `/api-keys/{key_id}` | PATCH | Update key | JWT |
+| `/api-keys/{key_id}` | DELETE | Delete key | JWT |
+| `/api-keys/{key_id}/revoke` | POST | Revoke key | JWT |
 
----
+### Permission Scopes
 
-### 视频 API
-
-#### 前端调用
-
-```typescript
-import { douyinApi } from '@/lib/api'
-
-// 获取单个视频
-const result = await douyinApi.fetchVideo(url, { video: true, music: false })
-
-// 批量获取视频
-const result = await douyinApi.fetchBatch(urls, { video: true, music: false })
-
-// 获取视频列表
-const { videos, count } = await douyinApi.getVideos({ skip: 0, limit: 20 })
-
-// 获取单个视频详情
-const { video } = await douyinApi.getVideo(awemeId)
-
-// 删除视频
-await douyinApi.deleteVideo(awemeId)
-
-// 搜索视频
-const result = await douyinApi.searchVideos({ keyword: '搞笑', status: 'completed' })
-
-// 获取统计信息
-const { statistics } = await douyinApi.getStatistics()
-
-// 获取待下载列表
-const { videos } = await douyinApi.getPending(100)
-
-// 重试下载
-await douyinApi.retryDownload(awemeId)
-```
-
-#### 前后端映射表
-
-| 前端方法 | 后端端点 | HTTP 方法 | 权限范围 |
-|---------|---------|----------|---------|
-| `douyinApi.fetchVideo()` | `/douyin/fetch` | POST | `douyin:fetch` |
-| `douyinApi.fetchBatch()` | `/douyin/fetch/batch` | POST | `douyin:fetch:batch` |
-| `douyinApi.getVideos()` | `/douyin/videos` | GET | `douyin:videos:read` |
-| `douyinApi.getVideo()` | `/douyin/videos/{aweme_id}` | GET | `douyin:videos:read` |
-| `douyinApi.deleteVideo()` | `/douyin/videos/{aweme_id}` | DELETE | `douyin:videos:write` |
-| `douyinApi.searchVideos()` | `/douyin/videos/search` | POST | `douyin:search` |
-| `douyinApi.getStatistics()` | `/douyin/statistics` | GET | `douyin:statistics` |
-| `douyinApi.getPending()` | `/douyin/pending` | GET | `douyin:videos:read` |
-| `douyinApi.retryDownload()` | `/douyin/retry/{aweme_id}` | POST | `douyin:retry` |
-
-#### 请求/响应示例
-
-**获取视频**:
-
-```typescript
-// 前端请求
-await douyinApi.fetchVideo('https://v.douyin.com/xxx', {
-  video: true,
-  music: false,
-  categories: '搞笑'
-})
-
-// 后端接收
-// POST /douyin/fetch
-// Body: { url, video_bool, music_bool, video_categories }
-
-// 响应
-{
-  "success": true,
-  "message": "视频处理任务已提交",
-  "aweme_id": "7123456789",
-  "video_title": "视频标题",
-  "author": "作者名",
-  "aweme_type": "0"
-}
-```
-
-**获取视频列表**:
-
-```typescript
-// 前端请求
-await douyinApi.getVideos({ skip: 0, limit: 20, order_by: 'created_at', ascending: false })
-
-// 后端接收
-// GET /douyin/videos?skip=0&limit=20&order_by=created_at&ascending=false
-
-// 响应
-{
-  "success": true,
-  "count": 20,
-  "videos": [
-    {
-      "id": 1,
-      "aweme_id": "7123456789",
-      "video_title": "视频标题",
-      "author": "作者名",
-      "video_download_status": "completed",
-      ...
-    }
-  ]
-}
-```
+| Scope | Name | Description |
+|-------|------|-------------|
+| `douyin:fetch` | Fetch Video | Allow fetching single video via URL |
+| `douyin:fetch:batch` | Batch Fetch | Allow batch fetching multiple videos |
+| `douyin:videos:read` | Read Videos | Allow viewing video list and details |
+| `douyin:videos:write` | Manage Videos | Allow deleting video records |
+| `douyin:search` | Search Videos | Allow searching videos |
+| `douyin:statistics` | View Statistics | Allow viewing statistics |
+| `douyin:retry` | Retry Download | Allow retrying video download |
+| `douyin:*` | All Permissions | All Douyin-related permissions |
 
 ---
 
-### API 密钥管理
+## Database Schema / 数据库架构
 
-#### 前端调用
-
-```typescript
-import { apiKeyApi } from '@/lib/api'
-
-// 获取可用权限范围
-const { scopes } = await apiKeyApi.getScopes()
-
-// 创建 API 密钥
-const result = await apiKeyApi.create({
-  name: '自动化脚本',
-  description: '用于定时任务',
-  scopes: ['douyin:fetch', 'douyin:videos:read'],
-  expires_at: '2026-12-31T23:59:59Z'
-})
-// 注意：result.secret_key 仅此时返回一次！
-
-// 获取密钥列表
-const { keys, count } = await apiKeyApi.list(includeRevoked)
-
-// 获取单个密钥详情
-const key = await apiKeyApi.get(keyId)
-
-// 更新密钥
-await apiKeyApi.update(keyId, { name: '新名称' })
-
-// 撤销密钥
-await apiKeyApi.revoke(keyId)
-
-// 删除密钥
-await apiKeyApi.delete(keyId)
-```
-
-#### 前后端映射表
-
-| 前端方法 | 后端端点 | HTTP 方法 | 认证 |
-|---------|---------|----------|------|
-| `apiKeyApi.getScopes()` | `/api-keys/scopes` | GET | 否 |
-| `apiKeyApi.create()` | `/api-keys` | POST | JWT |
-| `apiKeyApi.list()` | `/api-keys` | GET | JWT |
-| `apiKeyApi.get()` | `/api-keys/{key_id}` | GET | JWT |
-| `apiKeyApi.update()` | `/api-keys/{key_id}` | PATCH | JWT |
-| `apiKeyApi.delete()` | `/api-keys/{key_id}` | DELETE | JWT |
-| `apiKeyApi.revoke()` | `/api-keys/{key_id}/revoke` | POST | JWT |
-
-#### 权限范围（Scopes）
-
-| 权限范围 | 名称 | 说明 |
-|---------|------|------|
-| `douyin:fetch` | 获取视频 | 允许通过 URL 获取单个视频信息 |
-| `douyin:fetch:batch` | 批量获取视频 | 允许批量获取多个视频信息 |
-| `douyin:videos:read` | 读取视频 | 允许查看视频列表和详情 |
-| `douyin:videos:write` | 管理视频 | 允许删除视频记录 |
-| `douyin:search` | 搜索视频 | 允许搜索视频 |
-| `douyin:statistics` | 查看统计 | 允许查看统计信息 |
-| `douyin:retry` | 重试下载 | 允许重新触发视频下载 |
-| `douyin:*` | 全部抖音权限 | 拥有所有抖音相关操作权限 |
-
-#### 请求/响应示例
-
-**创建 API 密钥**:
-
-```typescript
-// 前端请求
-const result = await apiKeyApi.create({
-  name: '自动化脚本',
-  description: '用于定时任务',
-  scopes: ['douyin:fetch', 'douyin:videos:read']
-})
-
-// 后端接收
-// POST /api-keys
-// Headers: { Authorization: Bearer <jwt_token> }
-// Body: { name, description, scopes, expires_at?, rate_limit? }
-
-// 响应
-{
-  "success": true,
-  "message": "API 密钥创建成功，请妥善保存密钥！",
-  "id": 1,
-  "key_id": "abc123def456...",
-  "key_prefix": "dk_abc12345...",
-  "name": "自动化脚本",
-  "scopes": ["douyin:fetch", "douyin:videos:read"],
-  "status": "active",
-  "secret_key": "dk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  // 仅此次返回！
-}
-```
-
-**使用 API 密钥访问**:
-
-```bash
-# 使用 API Key 替代 JWT Token
-curl -X GET http://localhost:8080/douyin/videos \
-  -H "X-API-Key: dk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
----
-
-### 前端页面与 API 对应关系
-
-| 页面 | 路由 | 使用的 API |
-|-----|------|-----------|
-| 登录页 | `/login` | Supabase Auth |
-| 仪表盘 | `/dashboard` | `douyinApi.getStatistics()` |
-| 视频管理 | `/videos` | `douyinApi.getVideos()`, `douyinApi.deleteVideo()`, `douyinApi.searchVideos()` |
-| 获取视频 | `/fetch` | `douyinApi.fetchVideo()`, `douyinApi.fetchBatch()` |
-| API 密钥 | `/api-keys` | `apiKeyApi.*` |
-| 设置 | `/settings` | Supabase Auth |
-
----
-
-## 数据库架构
-
-### 表结构
+### Tables
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -458,210 +281,204 @@ curl -X GET http://localhost:8080/douyin/videos \
 └─────────────────┘     │ video_desc      │     │ created_at      │
                         │ video_*_count   │     └─────────────────┘
                         │ cover_url       │
-                        │ download_status │
-                        │ user_id (FK)    │
-                        │ created_at      │
-                        └────────┬────────┘
-                                 │
-┌─────────────────┐     ┌────────▼────────┐     ┌─────────────────┐
-│   collections   │     │video_collections│     │    api_keys     │
-├─────────────────┤     ├─────────────────┤     ├─────────────────┤
-│ id (BIGSERIAL)  │◀────│ collection_id   │     │ id (BIGSERIAL)  │
-│ name            │     │ video_id        │     │ key_id (UK)     │
-│ description     │     │ added_at        │     │ key_hash        │
-│ user_id (FK)    │     └─────────────────┘     │ key_prefix      │
+┌─────────────────┐     │ download_status │     ┌─────────────────┐
+│  user_settings  │     │ user_id (FK)    │     │    api_keys     │
+├─────────────────┤     │ created_at      │     ├─────────────────┤
+│ id (UUID, PK)   │     └─────────────────┘     │ id (BIGSERIAL)  │
+│ user_id (FK)    │                             │ key_id (UK)     │
+│ download_path   │                             │ key_hash        │
+│ settings_json   │                             │ key_prefix      │
 │ created_at      │                             │ name            │
-└─────────────────┘                             │ scopes (JSONB)  │
-                                                │ status (enum)   │
+│ updated_at      │                             │ scopes (JSONB)  │
+└─────────────────┘                             │ status (enum)   │
                                                 │ user_id (FK)    │
                                                 │ expires_at      │
-                                                │ usage_count     │
                                                 └─────────────────┘
 ```
 
-### 枚举类型
+### Enums
 
-**下载状态 (download_status)**:
+**Download Status (`video_download_status`)**:
 
-| 值 | 说明 | 颜色 |
-|----|------|------|
-| `pending` | 待下载 | 黄色 |
-| `downloading` | 下载中 | 蓝色 |
-| `completed` | 已完成 | 绿色 |
-| `failed` | 失败 | 红色 |
-| `skipped` | 已跳过 | 灰色 |
+| Value | Description | Color |
+|-------|-------------|-------|
+| `PENDING` | Pending download | Yellow |
+| `PROCESSING` | Downloading | Blue |
+| `COMPLETED` | Completed | Green |
+| `FAILED` | Failed | Red |
 
-**视频类型 (aweme_type)**:
+**Video Type (`aweme_type`)**:
 
-| 值 | 说明 |
-|----|------|
-| `0` | 标准视频 |
-| `2` | 图片轮播/图集 |
-| `4` | 特殊视频 |
-| `61` | 特殊视频变体 |
-| `68` | 图文 |
-
-**API 密钥状态 (api_key_status)**:
-
-| 值 | 说明 |
-|----|------|
-| `active` | 活跃 |
-| `revoked` | 已撤销 |
-| `expired` | 已过期 |
+| Value | Description |
+|-------|-------------|
+| `0` | Standard video |
+| `2` | Image carousel |
+| `4` | Special video |
+| `61` | Special video variant |
+| `68` | Image-text post |
 
 ---
 
-## 安全策略
+## Configuration / 配置说明
 
-### 行级安全 (RLS)
+### Backend Configuration
 
-| 表 | SELECT | INSERT | UPDATE | DELETE |
-|----|--------|--------|--------|--------|
-| user_profiles | 仅自己 | 仅自己 | 仅自己 | - |
-| douyin_videos | 仅自己 | 仅自己 | 仅自己 | 仅自己 |
-| authors | 所有认证用户 | 所有认证用户 | - | - |
-| collections | 仅自己 | 仅自己 | 仅自己 | 仅自己 |
-| api_keys | 仅自己 | 仅自己 | 仅自己 | 仅自己 |
+**config.yml** - Business configuration:
+- User agent strings
+- CORS settings
+- Timeout values
+- Download paths
 
-### 认证流程
-
+**frontend_config.yml** - Frontend config (editable via UI):
+```yaml
+supabase:
+  url: "https://your-project.supabase.co"
+  anon_key: "your-anon-key"
+default_download_path: "/home/user/downloads/douyin"
 ```
-用户登录方式：
-1. 用户登录 → Supabase Auth 验证 → 返回 JWT Token
-2. 前端存储 Token (Zustand + localStorage)
-3. API 请求携带 Authorization: Bearer <token>
-4. 后端验证 Token → 检查权限 → 执行操作
 
-API 密钥方式：
-1. 用户创建 API 密钥 → 选择权限范围
-2. 系统返回完整密钥（仅一次）→ 用户保存
-3. API 请求携带 X-API-Key: dk_xxx
-4. 后端验证密钥 → 检查权限范围 → 执行操作
-```
+### Configuration Priority
+
+1. **Supabase Credentials**: `frontend_config.yml` > `.env`
+2. **Download Path**: User settings (Supabase) > `frontend_config.yml` > Default
+3. **Business Config**: `config.yml` > Environment variables > Defaults
 
 ---
 
-## 开发命令
+## Development / 开发指南
 
-### 后端
+### Backend Commands
 
 ```bash
 cd backend
-uv sync                                    # 同步依赖
-uv run uvicorn app.main:app --reload       # 启动开发服务器
-uv run pytest                              # 运行测试
+uv sync                                    # Sync dependencies
+uv run uvicorn app.main:app --reload       # Start dev server
+uv run pytest                              # Run tests
 ```
 
-### 前端
+### Frontend Commands
 
 ```bash
 cd frontend
-npm install                                # 安装依赖
-npm run dev                                # 启动开发服务器
-npm run build                              # 构建生产版本
-npm run lint                               # 代码检查
-npm run preview                            # 预览生产构建
+npm install                                # Install dependencies
+npm run dev                                # Start dev server
+npm run build                              # Build for production
+npm run lint                               # Lint code
+npm run preview                            # Preview production build
 ```
+
+### Adding New Features
+
+1. Add Pydantic models in `backend/app/schemas/`
+2. Add data access methods in `backend/app/repositories/`
+3. Add business logic in `backend/app/services/`
+4. Add API routes in `backend/app/api/`
+5. Add API calls in `frontend/services/`
+6. Add UI components in `frontend/components/`
 
 ---
 
-## 常见问题
+## FAQ / 常见问题
 
-### Q: 视频获取失败怎么办？
+### Q: Video fetch fails?
 
-检查以下几点：
-1. 确保 Chrome/Chromium 浏览器已安装
-2. 检查抖音链接是否有效（尝试在浏览器中打开）
-3. 查看后端日志获取详细错误信息
-4. 确认网络可以访问抖音
+Check the following:
+1. Ensure Chrome/Chromium browser is installed
+2. Verify the Douyin link is valid (try opening in browser)
+3. Check backend logs for detailed errors
+4. Confirm network can access Douyin
 
-### Q: 如何使用 API 密钥？
+### Q: How to use API Keys?
 
-1. 登录前端，进入「API 密钥」页面
-2. 点击「创建密钥」，选择所需权限
-3. **立即复制并保存密钥**（仅显示一次！）
-4. 在 API 请求中使用：
+1. Log in to the frontend, go to "Settings" > "API Management"
+2. Click "Create API Key", select required permissions
+3. **Immediately copy and save the key** (shown only once!)
+4. Use in API requests:
    ```bash
-   curl -X GET http://localhost:8080/douyin/videos \
+   curl -X GET http://localhost:8080/api/v1/douyin/videos \
      -H "X-API-Key: dk_your_secret_key"
    ```
 
-### Q: JWT 和 API Key 有什么区别？
+### Q: Difference between JWT and API Key?
 
-| 特性 | JWT Token | API Key |
-|------|-----------|---------|
-| 获取方式 | 用户登录 | 用户创建 |
-| 有效期 | 短（需刷新） | 可自定义（永久/指定天数） |
-| 权限 | 完整权限 | 按 scopes 限制 |
-| 使用场景 | 前端用户交互 | 后端脚本/第三方集成 |
+| Feature | JWT Token | API Key |
+|---------|-----------|---------|
+| Obtained via | User login | User creation |
+| Validity | Short (needs refresh) | Customizable (permanent/expiry date) |
+| Permissions | Full access | Limited by scopes |
+| Use case | Frontend user interaction | Backend scripts/third-party integration |
 | Header | `Authorization: Bearer <token>` | `X-API-Key: dk_xxx` |
 
-### Q: 如何重置下载失败的视频？
+### Q: How to configure Supabase without .env?
 
-使用重试接口：
-```bash
-curl -X POST http://localhost:8080/douyin/retry/{aweme_id} \
-  -H "Authorization: Bearer <token>"
-```
-
-或使用 API Key：
-```bash
-curl -X POST http://localhost:8080/douyin/retry/{aweme_id} \
-  -H "X-API-Key: dk_xxx"
-```
+Use the Settings page in the UI to configure Supabase URL and Anon Key. These are saved to `backend/frontend_config.yml` and take priority over `.env` values.
 
 ---
 
-## 更新日志
+## Changelog / 更新日志
+
+### v2.2.0 (2026-01)
+
+**New Features**:
+- Frontend config API - Configure Supabase credentials via UI
+- User settings persistence - Download path saved per user in Supabase
+- File deletion - Delete local files when removing videos from library
+- ListView improvements - ESC to close fullscreen, improved close button
+
+**Changes**:
+- `frontend_config.yml` for Supabase credentials (priority over .env)
+- `user_settings` table for per-user settings
+- Dynamic Supabase client reinitialization
 
 ### v2.1.0 (2026-01-13)
 
-**新功能**:
-- 添加 API 密钥管理系统
-- 支持双重认证（JWT + API Key）
-- 添加权限范围（Scopes）控制
-- 添加 API 密钥前端管理页面
-- 用户数据隔离（每个用户只能访问自己的数据）
-
-**后端变更**:
-- 新增 `api_key_router.py` - API 密钥 CRUD 端点
-- 新增 `api_key_repository.py` - API 密钥数据访问
-- 新增 `api_key_scopes.py` - 权限范围定义
-- 新增 `api_key.py` - Pydantic 模型
-- 修改 `deps.py` - 支持双重认证
-- 修改 `supabase_douyin_router.py` - 所有端点添加认证
-
-**前端变更**:
-- 新增 `ApiKeysPage.tsx` - API 密钥管理页面
-- 新增 `api-key.ts` - TypeScript 类型定义
-- 修改 `api.ts` - 添加 `apiKeyApi` 调用
-- 修改 `Layout.tsx` - 添加导航链接
-
-**数据库变更**:
-- 新增 `003_api_keys.sql` 迁移
-- 新增 `api_keys` 表
-- 新增 `api_key_logs` 表（审计日志）
+**New Features**:
+- API key management system
+- Dual authentication (JWT + API Key)
+- Permission scopes control
+- API key management UI
+- Per-user data isolation
 
 ### v2.0.0 (2026-01)
 
-**重大变更**:
-- 完全迁移到 Supabase 数据库
-- 移除本地 SQLite 支持
-- 使用 Supabase Auth 替代自建 JWT 认证
+**Breaking Changes**:
+- Full migration to Supabase database
+- Removed local SQLite support
+- Supabase Auth replaces custom JWT authentication
 
-**新功能**:
-- 添加 `authors` 表管理作者信息
-- 添加 `collections` 收藏夹功能
-- 添加视频封面 `cover_url` 字段
+**New Features**:
+- `authors` table for author information
+- `collections` for favorites functionality
+- Video cover URL field
 
 ### v1.0.0
 
-- 初始版本
-- 支持 SQLite 本地数据库
-- 基础视频获取和下载功能
+- Initial release
+- SQLite local database support
+- Basic video fetch and download
 
 ---
 
-## 许可证
+## License / 许可证
 
 MIT License
+
+Copyright (c) 2026
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

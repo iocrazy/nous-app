@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import {
   X, QrCode, Smartphone, Mail, Eye, EyeOff, AlertCircle
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 interface AuthOverlayProps {
   onLogin: (user: { email: string; id: string }) => void;
@@ -51,6 +51,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
 
   const handleLogin = async () => {
     if (loginMode === 'email' && email && password) {
+      const supabase = getSupabaseClient();
       if (isSupabaseConfigured() && supabase) {
         try {
           const { data, error } = await supabase.auth.signInWithPassword({

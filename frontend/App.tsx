@@ -8,10 +8,10 @@ import {
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
   Layers, Download
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
 import { DouyinBase, ViewState, UserProfile, UserSettings } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
-import { fetchLibrary, saveItem, updateItem, fetchDashboardStats, DashboardStats } from './services/dataService';
+import { fetchLibrary, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { MOCK_LIBRARY } from './constants';
 import { MediaCard } from './components/MediaCard';
 import { CompactMediaCard } from './components/CompactMediaCard';
@@ -210,26 +210,71 @@ export default function App() {
     avatarUrl: '',
     plan: 'Free Plan'
   });
-  
+
   const [userSettings, setUserSettings] = useState<UserSettings>({
-    downloadPath: localStorage.getItem('douyin_download_path') || '/home/user/downloads/douyin',
-    supabaseUrl: localStorage.getItem('douyin_supabase_url') || '',
-    supabaseAnonKey: localStorage.getItem('douyin_supabase_key') || ''
+    downloadPath: '/home/user/downloads/douyin',
+    supabaseUrl: '',
+    supabaseAnonKey: ''
   });
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
-  
+
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   // Controls the visibility of the login modal when on Landing Page
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Check for existing session on mount
+  // Config loading state
+  const [isConfigLoaded, setIsConfigLoaded] = useState(false);
+
+  // Load frontend config from backend YAML on mount
   useEffect(() => {
+    const loadFrontendConfig = async () => {
+      try {
+        const config = await fetchFrontendConfig();
+        if (config) {
+          // 如果后端YAML配置了Supabase凭据，使用它们重新初始化客户端
+          if (config.supabase_url && config.supabase_anon_key) {
+            reinitializeSupabaseClient(config.supabase_url, config.supabase_anon_key);
+            setUserSettings(prev => ({
+              ...prev,
+              supabaseUrl: config.supabase_url || '',
+              supabaseAnonKey: config.supabase_anon_key || '',
+              downloadPath: config.default_download_path || prev.downloadPath,
+            }));
+          } else if (config.default_download_path) {
+            setUserSettings(prev => ({
+              ...prev,
+              downloadPath: config.default_download_path || prev.downloadPath,
+            }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load frontend config:', err);
+      } finally {
+        setIsConfigLoaded(true);
+      }
+    };
+    loadFrontendConfig();
+  }, []);
+
+  // Check for existing session after config is loaded
+  useEffect(() => {
+    if (!isConfigLoaded) return;
+
     const checkSession = async () => {
+      const supabase = getSupabaseClient();
       if (isSupabaseConfigured() && supabase) {
+        // 更新 userSettings 中的 Supabase 凭据（从当前配置获取）
+        const credentials = getSupabaseCredentials();
+        setUserSettings(prev => ({
+          ...prev,
+          supabaseUrl: credentials.url || prev.supabaseUrl,
+          supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
+        }));
+
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           setUserProfile(prev => ({
@@ -238,11 +283,24 @@ export default function App() {
             email: session.user.email || '',
           }));
           setIsAuthenticated(true);
+
+          // Load user settings from Supabase
+          try {
+            const settings = await fetchUserSettings();
+            if (settings) {
+              setUserSettings(prev => ({
+                ...prev,
+                downloadPath: settings.download_path || prev.downloadPath,
+              }));
+            }
+          } catch (err) {
+            console.error('Failed to load user settings:', err);
+          }
         }
       }
     };
     checkSession();
-  }, []);
+  }, [isConfigLoaded]);
 
   // Fetch Library Data on Mount
   useEffect(() => {
@@ -253,6 +311,7 @@ export default function App() {
 
   // Supabase Realtime 订阅 - 自动同步数据库变化
   useEffect(() => {
+    const supabase = getSupabaseClient();
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
       return;
     }
@@ -328,6 +387,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       await supabase.auth.signOut();
     }
@@ -344,35 +404,43 @@ export default function App() {
     setShowAuthModal(false);
   };
 
-  const handleUpdateSettings = (newSettings: UserSettings) => {
+  const handleUpdateSettings = async (newSettings: UserSettings) => {
     // Check if critical DB config changed
-    const dbChanged = 
-      newSettings.supabaseUrl !== userSettings.supabaseUrl || 
+    const dbChanged =
+      newSettings.supabaseUrl !== userSettings.supabaseUrl ||
       newSettings.supabaseAnonKey !== userSettings.supabaseAnonKey;
-    
-    // Persist to LocalStorage
-    localStorage.setItem('douyin_download_path', newSettings.downloadPath);
-    
-    if (newSettings.supabaseUrl) {
-      localStorage.setItem('douyin_supabase_url', newSettings.supabaseUrl);
-    } else {
-      localStorage.removeItem('douyin_supabase_url');
-    }
-    
-    if (newSettings.supabaseAnonKey) {
-      localStorage.setItem('douyin_supabase_key', newSettings.supabaseAnonKey);
-    } else {
-      localStorage.removeItem('douyin_supabase_key');
-    }
-    
-    setUserSettings(newSettings);
-    
-    if (dbChanged) {
-        if (confirm("Database configuration changed. Application must reload to apply changes. Reload now?")) {
-           window.location.reload();
+
+    try {
+      // 保存 Supabase 配置到后端 YAML 文件
+      await saveFrontendConfig({
+        supabase_url: newSettings.supabaseUrl || undefined,
+        supabase_anon_key: newSettings.supabaseAnonKey || undefined,
+        default_download_path: newSettings.downloadPath,
+      });
+
+      // Save download_path to Supabase (for per-user settings)
+      if (isAuthenticated && isSupabaseConfigured()) {
+        try {
+          await saveUserSettings({
+            download_path: newSettings.downloadPath
+          });
+        } catch (err) {
+          console.error('Failed to save settings to Supabase:', err);
         }
-    } else {
-       alert("Settings saved successfully!");
+      }
+
+      setUserSettings(newSettings);
+
+      if (dbChanged) {
+        if (confirm("Database configuration changed. Application must reload to apply changes. Reload now?")) {
+          window.location.reload();
+        }
+      } else {
+        alert("Settings saved successfully!");
+      }
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      alert("Failed to save settings. Please try again.");
     }
   };
 
@@ -563,26 +631,26 @@ export default function App() {
         });
       }
 
-      response.results.forEach((result) => {
+      // 直接从响应中提取完整数据
+      const batchData: DouyinBase[] = [];
+      response.results.forEach((result: any) => {
         addLog(`  ✓ ${result.aweme_id}: ${result.status}`, 'success');
+        if (result.data) {
+          batchData.push(result.data as DouyinBase);
+        }
       });
 
       setTaskProgress(80);
 
-      // Refresh library to get all the new items
-      addLog("Refreshing library data...", 'info');
-      await new Promise(r => setTimeout(r, 1500));
-      await loadLibraryData();
+      // 设置批量结果（直接使用返回的数据）
+      setBatchResults(batchData);
 
-      // Get the newly added items from library
-      const newItems = library.filter(item =>
-        response.results.some(r => r.aweme_id === item.aweme_id)
-      );
-      setBatchResults(newItems);
+      // 后台刷新 library（Realtime 也会自动同步）
+      loadLibraryData();
 
       setTaskProgress(100);
       setTaskStatus('Batch Job Completed');
-      addLog(`Batch processing finished. ${response.submitted}/${response.total} successful.`, 'success');
+      addLog(`Batch processing finished. ${batchData.length}/${response.total} successful.`, 'success');
 
     } catch (err: any) {
       setError(err.message || "Batch processing failed");
@@ -634,7 +702,7 @@ export default function App() {
 
   const handleUpdateLibraryItem = async (id: string, updates: Partial<DouyinBase>) => {
     // Optimistic update
-    setLibrary(prev => prev.map(item => 
+    setLibrary(prev => prev.map(item =>
       item.aweme_id === id ? { ...item, ...updates } : item
     ));
 
@@ -644,6 +712,23 @@ export default function App() {
       }
     } catch (err) {
       console.error("Update failed:", err);
+    }
+  };
+
+  const handleDeleteLibraryItem = async (id: string, deleteFiles: boolean) => {
+    try {
+      if (isSupabaseConfigured()) {
+        await deleteItem(id, deleteFiles);
+        // Remove from library state
+        setLibrary(prev => prev.filter(item => item.aweme_id !== id));
+        // Clear selection if this item was selected
+        if (selectedLibraryItem?.aweme_id === id) {
+          setSelectedLibraryItem(null);
+        }
+      }
+    } catch (err) {
+      console.error("Delete failed:", err);
+      throw err; // Re-throw to let the UI handle the error
     }
   };
 
@@ -666,19 +751,26 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
-  // Filter library based on search query
-  const filteredLibrary = library.filter(item => {
-    if (!searchQuery) return true;
-    const lowerQuery = searchQuery.toLowerCase();
-    return (
-      item.video_title?.toLowerCase().includes(lowerQuery) ||
-      item.author?.toLowerCase().includes(lowerQuery) ||
-      item.notes?.toLowerCase().includes(lowerQuery) ||
-      item.tags?.some(tag => tag.toLowerCase().includes(lowerQuery)) ||
-      item.video_categories?.toLowerCase().includes(lowerQuery) ||
-      item.video_desc?.toLowerCase().includes(lowerQuery)
-    );
-  });
+  // Filter and sort library - 默认按添加时间降序（最新在前）
+  const filteredLibrary = library
+    .filter(item => {
+      if (!searchQuery) return true;
+      const lowerQuery = searchQuery.toLowerCase();
+      return (
+        item.video_title?.toLowerCase().includes(lowerQuery) ||
+        item.author?.toLowerCase().includes(lowerQuery) ||
+        item.notes?.toLowerCase().includes(lowerQuery) ||
+        item.tags?.some(tag => tag.toLowerCase().includes(lowerQuery)) ||
+        item.video_categories?.toLowerCase().includes(lowerQuery) ||
+        item.video_desc?.toLowerCase().includes(lowerQuery)
+      );
+    })
+    .sort((a, b) => {
+      // 按 created_at 降序排序（最新在前）
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return bTime - aTime;
+    });
 
   // Calculate main content classes based on view to handle mobile padding
   const mainContentClass = `flex-1 md:ml-64 w-full ${
@@ -1185,7 +1277,7 @@ export default function App() {
                     <h2 className="text-xl font-bold text-white">Media Details</h2>
                  </div>
                  <div className="flex-1 min-h-0">
-                    <MediaCard data={selectedLibraryItem} onSave={(item) => handleSaveToLibrary(item)} onUpdate={handleUpdateLibraryItem} />
+                    <MediaCard data={selectedLibraryItem} onSave={(item) => handleSaveToLibrary(item)} onUpdate={handleUpdateLibraryItem} onDelete={handleDeleteLibraryItem} />
                  </div>
               </div>
             ) : (

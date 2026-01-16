@@ -127,7 +127,7 @@ export const parseBatchLinks = async (
   total: number;
   submitted: number;
   failed: number;
-  results: Array<{ url: string; aweme_id: string; status: string }>;
+  results: Array<{ url: string; aweme_id: string; status: string; data?: DouyinBase }>;
   errors: Array<{ url: string; error: string }>;
 }> => {
   const apiUrl = getApiUrl();

@@ -23,21 +23,26 @@ const getEnv = (key: string): string | undefined => {
   return undefined;
 };
 
-// Access LocalStorage safely
-const getLocal = (key: string): string | null => {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem(key);
-    }
-  } catch (e) {}
-  return null;
+// 配置存储（优先级: 后端YAML > LocalStorage > .env）
+let configuredSupabaseUrl: string | null = null;
+let configuredSupabaseAnonKey: string | null = null;
+
+// 获取当前 Supabase URL（优先级: 后端配置 > .env）
+const getSupabaseUrl = (): string | undefined => {
+  if (configuredSupabaseUrl) return configuredSupabaseUrl;
+  return getEnv('VITE_SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL');
 };
 
-// Priority: LocalStorage (User Config) > Environment Variables (.env)
-const supabaseUrl = getLocal('douyin_supabase_url') || getEnv('VITE_SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL');
-const supabaseAnonKey = getLocal('douyin_supabase_key') || getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY');
+// 获取当前 Supabase Anon Key（优先级: 后端配置 > .env）
+const getSupabaseAnonKey = (): string | undefined => {
+  if (configuredSupabaseAnonKey) return configuredSupabaseAnonKey;
+  return getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY');
+};
 
 export const isSupabaseConfigured = (): boolean => {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
+
   // Check if variables are set
   const isSet = (
     typeof supabaseUrl === 'string' &&
@@ -47,7 +52,7 @@ export const isSupabaseConfigured = (): boolean => {
   );
 
   if (!isSet) {
-    console.warn('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env file.');
+    console.warn('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env file or configure via backend.');
     return false;
   }
 
@@ -63,23 +68,74 @@ export const isSupabaseConfigured = (): boolean => {
 // Initialize client with error handling
 let client: SupabaseClient | null = null;
 
-if (isSupabaseConfigured()) {
+// 初始化 Supabase 客户端
+const initializeClient = (): SupabaseClient | null => {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseAnonKey = getSupabaseAnonKey();
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
   try {
-    client = createClient(supabaseUrl!, supabaseAnonKey!);
+    const newClient = createClient(supabaseUrl, supabaseAnonKey);
     console.log(`Supabase Client initialized with URL: ${supabaseUrl}`);
+    return newClient;
   } catch (error) {
     console.error("Failed to initialize Supabase client:", error);
-    client = null;
+    return null;
   }
+};
+
+// 初始尝试初始化（使用 .env 配置）
+if (isSupabaseConfigured()) {
+  client = initializeClient();
 }
 
 export const supabase = client;
 
+/**
+ * 使用新的配置重新初始化 Supabase 客户端
+ * @param url Supabase URL
+ * @param anonKey Supabase Anon Key
+ * @returns 新的 Supabase 客户端或 null
+ */
+export const reinitializeSupabaseClient = (url: string, anonKey: string): SupabaseClient | null => {
+  configuredSupabaseUrl = url;
+  configuredSupabaseAnonKey = anonKey;
+
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  client = initializeClient();
+  return client;
+};
+
+/**
+ * 获取当前的 Supabase 客户端
+ * 用于在重新初始化后获取最新的客户端实例
+ */
+export const getSupabaseClient = (): SupabaseClient | null => {
+  return client;
+};
+
+/**
+ * 获取当前配置的 Supabase 凭据
+ */
+export const getSupabaseCredentials = (): { url: string | null; anonKey: string | null } => {
+  return {
+    url: configuredSupabaseUrl || getEnv('VITE_SUPABASE_URL') || getEnv('REACT_APP_SUPABASE_URL') || null,
+    anonKey: configuredSupabaseAnonKey || getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('REACT_APP_SUPABASE_ANON_KEY') || null,
+  };
+};
+
 // Helper to get Supabase session token for API calls
 export const getSupabaseAccessToken = async (): Promise<string | null> => {
-  if (!supabase) return null;
+  const currentClient = getSupabaseClient();
+  if (!currentClient) return null;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await currentClient.auth.getSession();
     return session?.access_token || null;
   } catch (e) {
     console.error('Failed to get Supabase session:', e);

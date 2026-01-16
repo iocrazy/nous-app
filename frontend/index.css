@@ -103,3 +103,154 @@ body {
 .duration-500 {
   animation-duration: 500ms;
 }
+
+/* ===== AI Button Sci-Fi Effects ===== */
+
+/* Shimmer animation - light sweep effect */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* Pulse glow animation */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px currentColor, 0 0 10px currentColor, inset 0 0 5px rgba(255,255,255,0.1);
+  }
+  50% {
+    box-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor, inset 0 0 10px rgba(255,255,255,0.2);
+  }
+}
+
+/* Border glow animation */
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(99, 102, 241, 0.5); }
+  50% { border-color: rgba(139, 92, 246, 0.8); }
+}
+
+/* Gradient shift animation */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* AI Button Base Style */
+.ai-btn {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
+  background-size: 200% 200%;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s infinite linear;
+  pointer-events: none;
+}
+
+.ai-btn:hover {
+  animation: gradient-shift 2s ease infinite, border-glow 1.5s ease infinite;
+  box-shadow:
+    0 0 15px rgba(99, 102, 241, 0.4),
+    0 0 30px rgba(139, 92, 246, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+  border-color: rgba(139, 92, 246, 0.6);
+}
+
+.ai-btn:hover::before {
+  animation: shimmer 1.5s infinite linear;
+}
+
+.ai-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Extract Button - Cyan/Teal theme */
+.ai-btn-extract {
+  background: linear-gradient(135deg, #042f2e 0%, #0d4e4e 50%, #042f2e 100%);
+  border-color: rgba(20, 184, 166, 0.4);
+}
+
+.ai-btn-extract:hover {
+  box-shadow:
+    0 0 15px rgba(20, 184, 166, 0.4),
+    0 0 30px rgba(45, 212, 191, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: rgba(45, 212, 191, 0.6);
+}
+
+/* Rewrite Button - Purple/Violet theme */
+.ai-btn-rewrite {
+  background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #2e1065 100%);
+  border-color: rgba(139, 92, 246, 0.4);
+}
+
+.ai-btn-rewrite:hover {
+  box-shadow:
+    0 0 15px rgba(139, 92, 246, 0.4),
+    0 0 30px rgba(167, 139, 250, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: rgba(167, 139, 250, 0.6);
+}
+
+/* Analyze Button - Blue/Indigo theme */
+.ai-btn-analyze {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.ai-btn-analyze:hover {
+  box-shadow:
+    0 0 15px rgba(99, 102, 241, 0.4),
+    0 0 30px rgba(129, 140, 248, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: rgba(129, 140, 248, 0.6);
+}
+
+/* AI text glow effect */
+.ai-text {
+  background: linear-gradient(90deg, #a5b4fc, #c4b5fd, #a5b4fc);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 3s ease infinite;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.ai-btn:hover .ai-text {
+  animation: gradient-shift 1s ease infinite;
+}
+
+/* Disabled state */
+.ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  animation: none;
+}
+
+.ai-btn:disabled::before {
+  animation: none;
+}
+
+.ai-btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}

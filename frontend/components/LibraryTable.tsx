@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { DouyinBase } from '../types';
 import {
   Video, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
@@ -12,7 +13,7 @@ interface LibraryTableProps {
   onUpdate: (id: string, updates: Partial<DouyinBase>) => void;
 }
 
-type SortKey = keyof DouyinBase | 'video_created_time';
+type SortKey = keyof DouyinBase | 'video_created_time' | 'created_at';
 
 // Helper to generate consistent colors from strings
 const getTagStyle = (tag: string) => {
@@ -46,8 +47,25 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
   
-  // Sorting State
-  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' } | null>(null);
+  // Sorting State - 默认按添加时间降序（最新在前）
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
+
+  // ESC 键关闭全屏预览
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && activeMedia) {
+        setActiveMedia(null);
+      }
+    };
+
+    if (activeMedia) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeMedia]);
 
   const startEditing = (item: DouyinBase) => {
     setEditingId(item.aweme_id);
@@ -112,16 +130,16 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     let items = [...data];
     if (sortConfig !== null) {
       items.sort((a, b) => {
-        let aVal = a[sortConfig.key];
-        let bVal = b[sortConfig.key];
+        let aVal: any = a[sortConfig.key as keyof DouyinBase];
+        let bVal: any = b[sortConfig.key as keyof DouyinBase];
 
         // Handle undefined values
         if (aVal === undefined && bVal === undefined) return 0;
         if (aVal === undefined) return 1;
         if (bVal === undefined) return -1;
 
-        // Date comparison
-        if (sortConfig.key === 'video_created_time') {
+        // Date comparison for both video_created_time and created_at
+        if (sortConfig.key === 'video_created_time' || sortConfig.key === 'created_at') {
            aVal = new Date(aVal as string).getTime();
            bVal = new Date(bVal as string).getTime();
         }
@@ -181,18 +199,22 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
             <tr>
               <th className="px-4 py-4 w-20">Media</th>
               
-              {/* Info / Time Sortable */}
-              <th 
-                className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors w-40"
-                onClick={() => handleSort('video_created_time')}
+              {/* Info Column */}
+              <th className="px-4 py-4 w-36">Info</th>
+
+              {/* Date Added Sortable */}
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors w-28"
+                onClick={() => handleSort('created_at')}
+                title="Sort by date added"
               >
                 <div className="flex items-center gap-2">
-                  Info <span className="text-zinc-500 text-[10px] lowercase font-normal">(Time)</span>
-                  {getSortIcon('video_created_time')}
+                  Date Added
+                  {getSortIcon('created_at')}
                 </div>
               </th>
 
-              {/* Content Column (New) */}
+              {/* Content Column */}
               <th className="px-4 py-4 w-1/4">Content</th>
 
               {/* Split Stats Columns */}
@@ -259,7 +281,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                 <td className="px-4 py-4">
                    <div className="flex flex-col gap-1 max-w-xs">
                       <span className="font-medium text-zinc-200 line-clamp-1" title={item.video_title}>{item.video_title || 'Untitled'}</span>
-                      
+
                       <div className="flex flex-col gap-0.5">
                          <span className="text-xs text-zinc-400">@{item.author}</span>
                          <span className="text-[10px] text-zinc-500 flex items-center gap-1.5">
@@ -275,6 +297,13 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                         </a>
                       </div>
                    </div>
+                </td>
+
+                {/* Date Added */}
+                <td className="px-4 py-4">
+                   <span className="text-xs text-zinc-400 whitespace-nowrap">
+                     {formatDate(item.created_at)}
+                   </span>
                 </td>
 
                 {/* Content Column with Copy Interaction */}
@@ -387,39 +416,90 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
         </table>
       </div>
 
-      {/* Media Preview Modal */}
-      {activeMedia && (
-        <div 
-          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+      {/* Media Preview Modal - Using React Portal to render outside component hierarchy */}
+      {activeMedia && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: 99999,
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
           onClick={() => setActiveMedia(null)}
         >
-           <button 
-             className="absolute top-4 right-4 text-white/50 hover:text-white transition-colors"
-             onClick={() => setActiveMedia(null)}
-           >
-             <X size={32} />
-           </button>
-           
-           <div 
-             className="relative max-w-5xl w-full max-h-[85vh] rounded-xl overflow-hidden shadow-2xl bg-black flex items-center justify-center"
+           {/* Media content with close button */}
+           <div
              onClick={e => e.stopPropagation()}
+             style={{
+               position: 'relative',
+               borderRadius: '12px',
+               overflow: 'visible',
+               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+               backgroundColor: '#000',
+             }}
            >
-              {activeMedia.type === 'video' ? (
-                <video 
-                  src={activeMedia.url} 
-                  controls 
-                  autoPlay 
-                  className="w-full h-full max-h-[85vh] object-contain"
-                />
-              ) : (
-                <img 
-                  src={activeMedia.url} 
-                  alt="Preview" 
-                  className="w-full h-full max-h-[85vh] object-contain"
-                />
-              )}
+             {/* Close button - positioned at video's top-right */}
+             <button
+               style={{
+                 position: 'absolute',
+                 top: '-12px',
+                 right: '-12px',
+                 zIndex: 10,
+                 background: 'rgba(0, 0, 0, 0.8)',
+                 border: '2px solid rgba(255, 255, 255, 0.3)',
+                 borderRadius: '50%',
+                 cursor: 'pointer',
+                 padding: '8px',
+                 display: 'flex',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 transition: 'all 0.2s ease',
+               }}
+               className="text-white/80 hover:text-white hover:bg-red-600 hover:border-red-500"
+               onClick={() => setActiveMedia(null)}
+               title="关闭 (ESC)"
+             >
+               <X size={24} />
+             </button>
+
+             {/* Video/Image content */}
+             <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+               {activeMedia.type === 'video' ? (
+                 <video
+                   src={activeMedia.url}
+                   controls
+                   autoPlay
+                   style={{
+                     display: 'block',
+                     maxWidth: '90vw',
+                     maxHeight: '90vh',
+                     objectFit: 'contain',
+                   }}
+                 />
+               ) : (
+                 <img
+                   src={activeMedia.url}
+                   alt="Preview"
+                   style={{
+                     display: 'block',
+                     maxWidth: '90vw',
+                     maxHeight: '90vh',
+                     objectFit: 'contain',
+                   }}
+                 />
+               )}
+             </div>
            </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

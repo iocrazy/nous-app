@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '../supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { DouyinBase } from '../types';
 
 const TABLE_NAME = 'douyin_videos';
@@ -11,6 +11,62 @@ const getApiUrl = (): string => {
     return import.meta.env.VITE_API_URL;
   }
   return 'http://localhost:8080';
+};
+
+/**
+ * 前端配置接口（用于 Supabase URL 和 Anon Key）
+ */
+export interface FrontendConfig {
+  supabase_url: string | null;
+  supabase_anon_key: string | null;
+  default_download_path: string | null;
+}
+
+/**
+ * 从后端 YAML 配置文件获取前端配置
+ * 优先级: YAML 配置 > .env 环境变量
+ */
+export const fetchFrontendConfig = async (): Promise<FrontendConfig | null> => {
+  try {
+    const response = await fetch(`${getApiUrl()}/api/v1/config`);
+    if (!response.ok) {
+      console.error('Failed to fetch frontend config:', response.status);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching frontend config:', error);
+    return null;
+  }
+};
+
+/**
+ * 保存前端配置到后端 YAML 文件
+ */
+export const saveFrontendConfig = async (config: {
+  supabase_url?: string;
+  supabase_anon_key?: string;
+  default_download_path?: string;
+}): Promise<FrontendConfig | null> => {
+  try {
+    const response = await fetch(`${getApiUrl()}/api/v1/config`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(config)
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: '保存配置失败' }));
+      throw new Error(error.detail || '保存配置失败');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error saving frontend config:', error);
+    throw error;
+  }
 };
 
 /**
@@ -28,6 +84,7 @@ export const getCoverDownloadUrl = (awemeId: string): string => {
 };
 
 export const fetchLibrary = async (): Promise<DouyinBase[]> => {
+  const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
@@ -43,7 +100,7 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
       .from(TABLE_NAME)
       .select('*')
       .eq('user_id', user.id)  // 只获取当前用户的数据
-      .order('video_created_time', { ascending: false });
+      .order('created_at', { ascending: false });  // 按添加时间降序（最新在前）
 
     if (error) throw error;
     return (data as DouyinBase[]) || [];
@@ -54,6 +111,7 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
 };
 
 export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
+  const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
@@ -69,7 +127,7 @@ export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
     video_download_urls: item.video_download_urls || [],
     image_download_urls: item.image_download_urls || [],
   };
-  
+
   const { data, error } = await supabase
     .from(TABLE_NAME)
     .upsert(payload, { onConflict: 'aweme_id' })
@@ -81,6 +139,7 @@ export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
 };
 
 export const updateItem = async (id: string, updates: Partial<DouyinBase>): Promise<DouyinBase> => {
+  const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
@@ -103,24 +162,41 @@ export const updateItem = async (id: string, updates: Partial<DouyinBase>): Prom
   return data as DouyinBase;
 };
 
-export const deleteItem = async (id: string): Promise<void> => {
+export interface DeleteResult {
+  success: boolean;
+  message: string;
+  files_deleted: string[];
+}
+
+export const deleteItem = async (id: string, deleteFiles: boolean = false): Promise<DeleteResult> => {
+  const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
 
-  // 获取当前用户 ID
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
+  // 获取认证 token
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
     throw new Error("User not authenticated");
   }
 
-  const { error } = await supabase
-    .from(TABLE_NAME)
-    .delete()
-    .eq('aweme_id', id)
-    .eq('user_id', user.id);  // 只能删除自己的数据
+  // 调用后端 API 删除（支持删除本地文件）
+  const response = await fetch(
+    `${getApiUrl()}/api/v1/douyin/videos/${id}?delete_files=${deleteFiles}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    }
+  );
 
-  if (error) throw error;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: '删除失败' }));
+    throw new Error(error.detail || '删除失败');
+  }
+
+  return await response.json();
 };
 
 /**
@@ -141,6 +217,7 @@ export interface UserLog {
  * 获取用户操作日志
  */
 export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
+  const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return [];
   }
@@ -296,4 +373,83 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     topTags,
     recentLogs,
   };
+};
+
+/**
+ * 用户设置接口
+ */
+export interface UserSettingsData {
+  id?: string;
+  user_id: string;
+  download_path: string;
+  settings_json?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * 获取用户设置
+ */
+export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    return null;
+  }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return null;
+    }
+
+    const response = await fetch(`${getApiUrl()}/api/v1/settings`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (!response.ok) {
+      console.error('Failed to fetch settings:', response.status);
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    return null;
+  }
+};
+
+/**
+ * 保存用户设置
+ */
+export const saveUserSettings = async (settings: {
+  download_path?: string;
+  settings_json?: Record<string, unknown>;
+}): Promise<UserSettingsData | null> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error("User not authenticated");
+  }
+
+  const response = await fetch(`${getApiUrl()}/api/v1/settings`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(settings)
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: '保存设置失败' }));
+    throw new Error(error.detail || '保存设置失败');
+  }
+
+  return await response.json();
 };

@@ -243,10 +243,37 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                         aweme_id,
                         parsed_data
                     )
+
+                    # 处理 datetime 对象转字符串
+                    video_created_time = parsed_data.get("video_created_time")
+                    if video_created_time and hasattr(video_created_time, 'isoformat'):
+                        video_created_time = video_created_time.isoformat()
+
+                    # 返回完整数据，供前端立即显示
                     results.append({
                         "url": url,
                         "aweme_id": aweme_id,
-                        "status": "submitted"
+                        "status": "submitted",
+                        "data": {
+                            "aweme_id": aweme_id,
+                            "video_title": parsed_data.get("video_title"),
+                            "video_desc": parsed_data.get("video_desc"),
+                            "author": parsed_data.get("author"),
+                            "aweme_type": parsed_data.get("aweme_type"),
+                            "video_download_urls": parsed_data.get("video_download_urls", []),
+                            "cover_urls": parsed_data.get("cover_urls", []),
+                            "video_digg_count": parsed_data.get("video_digg_count", 0),
+                            "video_comment_count": parsed_data.get("video_comment_count", 0),
+                            "video_share_count": parsed_data.get("video_share_count", 0),
+                            "video_collect_count": parsed_data.get("video_collect_count", 0),
+                            "video_duration": parsed_data.get("video_duration", "0"),
+                            "video_created_time": video_created_time,
+                            "image_urls": parsed_data.get("image_urls", []),
+                            "sec_uid": parsed_data.get("sec_uid"),
+                            "unique_id": parsed_data.get("unique_id"),
+                            "valid_url": url,
+                            "user_id": auth.user_id,
+                        }
                     })
                 else:
                     errors.append({"url": url, "error": "解析失败"})
@@ -328,39 +355,84 @@ async def get_video(aweme_id: str, auth: AuthDep):
 
 
 @router.delete("/videos/{aweme_id}", tags=TAGS_VIDEOS)
-async def delete_video(aweme_id: str, background_tasks: BackgroundTasks, auth: AuthDep):
+async def delete_video(
+    aweme_id: str,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
+    delete_files: bool = Query(False, description="是否同时删除本地已下载的文件")
+):
     """
     删除视频记录
 
-    从数据库中删除视频记录（不删除已下载的文件）。
+    从数据库中删除视频记录，可选择同时删除本地已下载的文件。
 
     - **aweme_id**: 视频唯一标识
+    - **delete_files**: 是否删除本地文件（默认 False）
 
     需要认证：Bearer Token 或 API Key（需要 `douyin:videos:write` 权限）
     """
     try:
         repo = SupabaseDouyinRepository()
 
-        # 先获取视频信息用于日志
+        # 先获取视频信息用于日志和文件删除
         video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
-        video_title = video.get("video_title", aweme_id)[:30] if video else aweme_id
+        if not video:
+            raise HTTPException(status_code=404, detail="视频不存在")
 
+        video_title = video.get("video_title", aweme_id)[:30] if video else aweme_id
+        files_deleted = []
+
+        # 删除本地文件
+        if delete_files:
+            import shutil
+
+            # 删除视频/图片文件
+            download_path = video.get("download_path")
+            if download_path:
+                path = Path(download_path)
+                if path.exists():
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                        files_deleted.append(f"目录: {path.name}")
+                    else:
+                        path.unlink()
+                        files_deleted.append(f"文件: {path.name}")
+
+            # 删除封面文件
+            cover_path = video.get("cover_download_path")
+            if cover_path:
+                path = Path(cover_path)
+                if path.exists():
+                    path.unlink()
+                    files_deleted.append(f"封面: {path.name}")
+
+        # 删除数据库记录
         result = await repo.delete(aweme_id, user_id=auth.user_id)
 
         if not result:
-            raise HTTPException(status_code=404, detail="视频不存在或删除失败")
+            raise HTTPException(status_code=404, detail="删除数据库记录失败")
+
+        # 构建日志消息
+        log_message = f"删除视频: {video_title}..."
+        if files_deleted:
+            log_message += f" (已删除 {len(files_deleted)} 个本地文件)"
 
         # 记录删除日志
         background_tasks.add_task(
             log_user_action,
             user_id=auth.user_id,
             action="delete",
-            message=f"删除视频: {video_title}...",
+            message=log_message,
             status="success",
-            aweme_id=aweme_id
+            aweme_id=aweme_id,
+            details={"files_deleted": files_deleted} if files_deleted else None
         )
 
-        return {"success": True, "message": "视频已删除"}
+        return {
+            "success": True,
+            "message": "视频已删除",
+            "files_deleted": files_deleted
+        }
     except HTTPException:
         raise
     except Exception as e:

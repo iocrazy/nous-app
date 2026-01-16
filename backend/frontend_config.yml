@@ -1,0 +1,15 @@
+# ===========================================
+# 前端配置文件 (frontend_config.yml)
+# 用于存储前端应用的配置信息
+# 优先级: 此文件 > .env 环境变量
+# ===========================================
+
+# Supabase 数据库配置
+# 如果为空，前端将使用 .env 中的 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY
+supabase:
+  url: ""
+  anon_key: ""
+
+# 默认下载路径（服务器端）
+# 如果用户已登录，将使用数据库中的用户设置覆盖此值
+default_download_path: "/home/user/downloads/douyin"

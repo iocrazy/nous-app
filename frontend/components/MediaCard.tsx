@@ -3,16 +3,17 @@ import React, { useState } from 'react';
 import { DouyinBase, DownloadStatus } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
-import { supabase } from '../supabaseClient';
+import { getSupabaseClient } from '../supabaseClient';
 
 interface MediaCardProps {
   data: DouyinBase;
   onSave?: (data: DouyinBase) => void;
   onUpdate?: (id: string, updates: Partial<DouyinBase>) => void;
+  onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -41,7 +42,7 @@ const getTagStyle = (tag: string) => {
   return styles[Math.abs(hash) % styles.length];
 };
 
-export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) => {
+export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, onDelete }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -50,11 +51,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
   const [retrySuccess, setRetrySuccess] = useState(false);
   const [showRetryMenu, setShowRetryMenu] = useState(false);
 
+  // Delete confirmation dialog states
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteWithFiles, setDeleteWithFiles] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // AI Feature States - 从数据中加载已有内容
   const [rewrittenText, setRewrittenText] = useState<string | null>(data.ai_rewrite_text || null);
   const [analysisText, setAnalysisText] = useState<string | null>(data.ai_analyze_text || null);
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  // 执行删除
+  const handleDelete = async () => {
+    if (!onDelete || !data.aweme_id) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(data.aweme_id, deleteWithFiles);
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error('Delete failed:', error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const isVideo = isVideoType(data.aweme_type);
   const images = data.image_download_urls || [];
@@ -131,7 +151,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
 
     try {
       // 获取认证 token
-      const { data: sessionData } = await supabase?.auth.getSession() || {};
+      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
       const token = sessionData?.session?.access_token;
 
       if (!token) {
@@ -212,7 +232,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
 
     try {
       // 获取认证 token
-      const { data: sessionData } = await supabase?.auth.getSession() || {};
+      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
       const token = sessionData?.session?.access_token;
 
       if (!token) {
@@ -460,34 +480,34 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
                <span className="text-xs font-medium">{copied ? 'Copied' : 'Copy'}</span>
              </button>
              
-             {/* Extract Button - Moved before Rewrite */}
-             <button 
+             {/* AI Extract Button */}
+             <button
                onClick={(e) => handleAction(e, 'extract')}
                disabled={loadingAction === 'extract'}
-               className="flex items-center justify-center gap-2 p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600 disabled:opacity-50"
+               className="ai-btn ai-btn-extract flex items-center justify-center gap-2 p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
              >
-               {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
-               <span className="text-xs font-medium">Extract</span>
+               {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <FileText size={16} className="relative z-10" />}
+               <span className="ai-text text-xs relative z-10">AI Extract</span>
              </button>
-             
-             {/* Rewrite Button */}
-             <button 
+
+             {/* AI Rewrite Button */}
+             <button
                onClick={(e) => handleAction(e, 'rewrite')}
                disabled={loadingAction === 'rewrite'}
-               className="flex items-center justify-center gap-2 p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600 disabled:opacity-50"
+               className="ai-btn ai-btn-rewrite flex items-center justify-center gap-2 p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
              >
-               {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin" /> : <PenTool size={16} />}
-               <span className="text-xs font-medium">Rewrite</span>
+               {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <PenTool size={16} className="relative z-10" />}
+               <span className="ai-text text-xs relative z-10">AI Rewrite</span>
              </button>
-             
-             {/* Analyze Button */}
-             <button 
+
+             {/* AI Analyze Button */}
+             <button
                onClick={(e) => handleAction(e, 'analyze')}
                disabled={loadingAction === 'analyze'}
-               className="flex items-center justify-center gap-2 p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600 disabled:opacity-50"
+               className="ai-btn ai-btn-analyze flex items-center justify-center gap-2 p-2.5 rounded-lg text-indigo-300 hover:text-indigo-100"
              >
-               {loadingAction === 'analyze' ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-               <span className="text-xs font-medium">Analyze</span>
+               {loadingAction === 'analyze' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <Wand2 size={16} className="relative z-10" />}
+               <span className="ai-text text-xs relative z-10">AI Analyze</span>
              </button>
           </div>
 
@@ -643,6 +663,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
                     </>
                   )}
                 </div>
+
+                {/* 删除按钮 */}
+                {onDelete && (
+                  <button
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="px-5 py-3 bg-red-950/50 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/50 hover:border-red-800"
+                    title="删除"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
              </div>
              
              {data.need_download_music && (
@@ -662,6 +693,101 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate }) 
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteDialog && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowDeleteDialog(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500/10 rounded-lg">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-white">确认删除</h3>
+              </div>
+              <button
+                onClick={() => setShowDeleteDialog(false)}
+                className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-sm text-zinc-400">
+                确定要删除这个媒体吗？此操作无法撤销。
+              </p>
+
+              {/* Media Preview */}
+              <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                <img
+                  src={coverUrl || "https://picsum.photos/80/80"}
+                  alt="Preview"
+                  className="w-12 h-12 rounded-lg object-cover"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white font-medium truncate">
+                    {data.video_title || 'Untitled'}
+                  </p>
+                  <p className="text-xs text-zinc-500">@{data.author}</p>
+                </div>
+              </div>
+
+              {/* Delete files option */}
+              <label className="flex items-start gap-3 p-3 bg-zinc-800/30 rounded-lg border border-zinc-700/50 cursor-pointer hover:bg-zinc-800/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={deleteWithFiles}
+                  onChange={(e) => setDeleteWithFiles(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
+                />
+                <div>
+                  <p className="text-sm text-zinc-300 font-medium">同时删除本地文件</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    删除服务器上已下载的视频、图片和封面文件
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-3 px-5 py-4 bg-zinc-800/30 border-t border-zinc-800">
+              <button
+                onClick={() => setShowDeleteDialog(false)}
+                className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    删除中...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    确认删除
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

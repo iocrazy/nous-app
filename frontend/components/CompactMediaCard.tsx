@@ -80,9 +80,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         onMouseLeave={() => isVideo && setIsPlaying(false)}
       >
         {isPlaying ? (
-            <video 
+            <video
                 src={videoUrl}
-                className="w-full h-full object-cover bg-black"
+                className="w-full h-full object-contain bg-black"
                 muted
                 loop
                 autoPlay
