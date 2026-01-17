@@ -702,7 +702,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         id: c.id,
                         name: c.name,
                         isShared: !!c.team_id,
-                        videoCount: 0
+                        videoCount: c.video_count || 0
                       }))}
                       selectedIds={videoCollectionIds}
                       onToggle={onToggleCollection}

@@ -1,12 +1,13 @@
 
 import React, { useState } from 'react';
 import { DouyinBase } from '../types';
-import { Video, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Video, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
 interface CompactMediaCardProps {
   data: DouyinBase;
   onClick: () => void;
+  isShared?: boolean;
 }
 
 // Helper for consistent tag colors matching the neon dark aesthetic
@@ -25,7 +26,7 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, isShared }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
@@ -121,8 +122,15 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 )}
                 
                 {/* Type Indicator (Right side) */}
-                <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90 z-10 pointer-events-none">
-                  {isVideo ? <Video size={12} /> : <ImageIcon size={12} />}
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
+                  {isShared && (
+                    <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
+                      <Users size={12} />
+                    </div>
+                  )}
+                  <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
+                    {isVideo ? <Video size={12} /> : <ImageIcon size={12} />}
+                  </div>
                 </div>
 
                 {/* Play Overlay (Desktop Hover - Only for Video) */}

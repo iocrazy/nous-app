@@ -352,6 +352,8 @@ export default function App() {
 
   // State for team library video IDs (all videos in team collections)
   const [teamLibraryVideoIds, setTeamLibraryVideoIds] = useState<string[]>([]);
+  // State for all shared video IDs (for showing shared badge in library)
+  const [sharedVideoIds, setSharedVideoIds] = useState<string[]>([]);
 
   // Load collection video IDs when collection is selected
   useEffect(() => {
@@ -419,6 +421,43 @@ export default function App() {
     };
     loadTeamLibraryVideos();
   }, [isTeamLibraryActive, activeCollectionId, collections]);
+
+  // Load all shared video IDs for badge display in library (regardless of Team Library mode)
+  useEffect(() => {
+    const loadAllSharedVideos = async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase || !isAuthenticated) {
+        setSharedVideoIds([]);
+        return;
+      }
+
+      // Get all team collections (collections with team_id)
+      const teamCollections = collections.filter(c => c.team_id);
+      if (teamCollections.length === 0) {
+        setSharedVideoIds([]);
+        return;
+      }
+
+      const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
+      const { data } = await supabase
+        .from('video_collections')
+        .select('video_id')
+        .in('collection_id', teamCollectionIds);
+
+      if (data && data.length > 0) {
+        const videoIds = [...new Set(data.map(v => v.video_id))];
+        const { data: videos } = await supabase
+          .from('douyin_videos')
+          .select('aweme_id')
+          .in('id', videoIds);
+
+        setSharedVideoIds(videos?.map(v => v.aweme_id) || []);
+      } else {
+        setSharedVideoIds([]);
+      }
+    };
+    loadAllSharedVideos();
+  }, [isAuthenticated, collections]);
 
   // Supabase Realtime 订阅 - 自动同步数据库变化
   useEffect(() => {
@@ -534,6 +573,9 @@ export default function App() {
               );
             }
           }
+
+          // 刷新集合列表以更新 video_count
+          fetchMyCollections().then(setCollections).catch(console.error);
         }
       )
       .subscribe((status) => {
@@ -1638,14 +1680,15 @@ export default function App() {
                   
                   <div className="columns-2 md:columns-3 gap-3 mx-auto space-y-3">
                       {batchResults.map((item, idx) => (
-                        <CompactMediaCard 
-                          key={`${item.aweme_id}-${idx}`} 
-                          data={item} 
+                        <CompactMediaCard
+                          key={`${item.aweme_id}-${idx}`}
+                          data={item}
                           onClick={() => {
-                             // Switch to library detail view mock-up if needed, 
+                             // Switch to library detail view mock-up if needed,
                              // for now just log since we are in parser mode
                              console.log("Clicked batch item:", item.video_title);
                           }}
+                          isShared={sharedVideoIds.includes(item.aweme_id)}
                         />
                       ))}
                   </div>
@@ -1865,6 +1908,7 @@ export default function App() {
                                     key={`${item.aweme_id}-${idx}`}
                                     data={item}
                                     onClick={() => setSelectedLibraryItem(item)}
+                                    isShared={sharedVideoIds.includes(item.aweme_id)}
                                   />
                                 ))}
                              </div>
