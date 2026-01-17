@@ -1,0 +1,95 @@
+{
+  "nav": {
+    "linkParser": "Link Parser",
+    "myLibrary": "My Library",
+    "allVideos": "All Videos",
+    "favorites": "Favorites",
+    "sharedCollections": "Shared Collections",
+    "newCollection": "New Collection",
+    "dashboard": "Dashboard",
+    "settings": "Settings"
+  },
+  "user": {
+    "profile": "Profile",
+    "account": "Account",
+    "signOut": "Sign Out",
+    "joinedTeams": "Joined Teams",
+    "createTeam": "Create Team",
+    "teamSettings": "Team Settings"
+  },
+  "auth": {
+    "login": "Log In",
+    "register": "Sign Up",
+    "email": "Email Address",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "noAccount": "Don't have an account? Sign up",
+    "hasAccount": "Already have an account? Log in",
+    "registerSuccess": "Registration successful. Please check your email.",
+    "passwordMismatch": "Passwords do not match"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all read",
+    "system": "System",
+    "team": "Team",
+    "empty": "No notifications",
+    "newMember": "{name} joined the team",
+    "newVideo": "{name} added a video to \"{collection}\""
+  },
+  "collections": {
+    "create": "New Collection",
+    "addTo": "Add to Collection",
+    "shared": "Shared",
+    "private": "Private",
+    "empty": "Collection is empty",
+    "confirmDelete": "Delete this collection?"
+  },
+  "team": {
+    "create": "Create Team",
+    "name": "Team Name",
+    "settings": "Team Settings",
+    "invite": "Invite Members",
+    "copyLink": "Copy Invite Link",
+    "linkCopied": "Link copied",
+    "members": "Members",
+    "leave": "Leave Team",
+    "delete": "Delete Team",
+    "confirmLeave": "Leave this team?",
+    "confirmDelete": "Delete this team? This cannot be undone."
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "search": "Search"
+  },
+  "parser": {
+    "title": "Douyin Media Parser",
+    "subtitle": "Paste shared links to analyze and download content watermark-free",
+    "singleLink": "Single Link",
+    "batchDownload": "Batch Download",
+    "placeholder": "Paste Douyin link (e.g., https://v.douyin.com/...)",
+    "analyze": "Analyze",
+    "processBatch": "Process Batch"
+  },
+  "library": {
+    "title": "Your Collection",
+    "subtitle": "Manage your saved downloads",
+    "empty": "No content yet",
+    "searchPlaceholder": "Search title, tags, notes..."
+  },
+  "dashboard": {
+    "title": "Analytics",
+    "subtitle": "Real-time statistics of your downloading habits",
+    "totalVideos": "Total Videos",
+    "storageUsed": "Storage Used",
+    "savedCreators": "Saved Creators",
+    "successRate": "Success Rate"
+  }
+}
