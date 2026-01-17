@@ -1797,6 +1797,22 @@ export default function App() {
                         ? `${teamLibraryVideoIds.length} videos shared in teams`
                         : t('library.subtitle')}
                     </p>
+                    {/* Team badge for collection */}
+                    {activeCollectionId && (() => {
+                      const collection = collections.find(c => c.id === activeCollectionId);
+                      if (collection?.team_id) {
+                        const team = teams.find(t => t.id === collection.team_id);
+                        if (team) {
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1 px-2 py-0.5 bg-indigo-500/20 rounded-full w-fit">
+                              <Users size={12} className="text-indigo-400" />
+                              <span className="text-xs text-indigo-300">{team.name}</span>
+                            </div>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
                   </div>
                   
                   <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
