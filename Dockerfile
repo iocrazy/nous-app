@@ -1,16 +1,31 @@
-# MediaHub Dockerfile
+# MediaHub Dockerfile - 前后端一体化部署
 # 包含 Chrome 浏览器用于 DrissionPage
 
-FROM python:3.11-slim
+# ========== 阶段1: 构建前端 ==========
+FROM node:20-slim AS frontend-builder
 
-# 安装 Chrome 和依赖
+WORKDIR /frontend
+
+# 复制前端代码
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ .
+RUN npm run build
+
+# ========== 阶段2: 构建后端 + 整合 ==========
+FROM python:3.12-slim
+
+# 安装 Chrome、构建工具和依赖
 RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     gnupg \
     chromium \
     chromium-driver \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
+    build-essential \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,8 +42,14 @@ WORKDIR /app
 # 复制后端代码
 COPY backend/ .
 
+# 删除可能存在的本地 venv（不同架构不兼容）
+RUN rm -rf .venv
+
 # 安装 Python 依赖
-RUN uv sync --frozen
+RUN uv sync
+
+# 复制前端构建产物
+COPY --from=frontend-builder /frontend/dist /app/static
 
 # 创建下载目录
 RUN mkdir -p /app/downloads

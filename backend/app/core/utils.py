@@ -6,8 +6,13 @@ import random
 import sys
 
 from loguru import logger
+import yaml
 
 from app.core.config import settings
+
+
+# 服务器配置文件路径
+SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"
 
 class SingletonMeta(type):
     _instances = {}
@@ -97,26 +102,77 @@ class Utils:
 
 
     @classmethod
-    def create_download_folder(cls) -> Path:
+    def get_download_base_path(cls) -> str:
+        """
+        获取下载基础路径
+
+        优先级: frontend_config.yml > .env (NAS_BASE_PATH)
+
+        Returns:
+            str: 下载基础路径
+
+        Raises:
+            ValueError: 未配置下载路径时抛出
+        """
+        # 1. 优先从 frontend_config.yml 读取
+        if SERVER_CONFIG_FILE.exists():
+            try:
+                with open(SERVER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f) or {}
+                    download_path = config.get("default_download_path")
+                    if download_path and download_path.strip():
+                        return download_path.strip()
+            except Exception as e:
+                logger.warning(f"读取 frontend_config.yml 失败: {e}")
+
+        # 2. 后备：从 .env 读取 NAS_BASE_PATH
+        if settings.NAS_BASE_PATH and settings.NAS_BASE_PATH.strip():
+            return settings.NAS_BASE_PATH.strip()
+
+        # 3. 都没配置，抛出错误
+        raise ValueError("未配置下载路径，请在设置中配置 Default Download Path")
+
+    @classmethod
+    def get_relative_month_folder(cls) -> str:
+        """
+        获取当前年月的相对路径
+
+        Returns:
+            str: 年月格式的相对路径，如 "2026-01"
+        """
+        now = datetime.datetime.now()
+        return now.strftime("%Y-%m")
+
+    @classmethod
+    def create_download_folder(cls) -> tuple[Path, str]:
         """
         创建按年月命名的下载文件夹
 
         Returns:
-            Path: 创建的文件夹路径
+            tuple[Path, str]: (完整路径, 相对路径)
+
+        Raises:
+            ValueError: 未配置下载路径时抛出
         """
         try:
-            # 创建按年月命名的文件夹，如"2023-04"格式
-            now = datetime.datetime.now()
-            year_month = now.strftime("%Y-%m")
+            # 获取基础路径
+            base_path = cls.get_download_base_path()
 
-            # 构建存储路径：NAS基础路径 + 年月子目录
-            storage_dir = Path(settings.NAS_BASE_PATH) / year_month
-            # 确保目录存在，不存在则创建，避免写入失败
+            # 获取年月相对路径
+            year_month = cls.get_relative_month_folder()
+
+            # 构建完整存储路径：基础路径 + 年月子目录
+            storage_dir = Path(base_path) / year_month
+
+            # 确保目录存在，不存在则创建
             os.makedirs(storage_dir, exist_ok=True)
-        except Exception as e:
-            raise ValueError("创建下载文件夹失败") from e
 
-        return storage_dir
+            return storage_dir, year_month
+
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"创建下载文件夹失败: {e}") from e
 
 
 

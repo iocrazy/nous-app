@@ -185,6 +185,208 @@ Frontend UI: http://localhost:5173
 
 ---
 
+## Docker Deployment / Docker 部署
+
+### Quick Start with Docker
+
+```bash
+# Clone repository
+git clone https://github.com/your-repo/mediahub.git
+cd mediahub
+
+# Configure environment
+cp backend/.env.example backend/.env
+# Edit backend/.env with your Supabase credentials
+
+# Build and run
+docker-compose up -d --build
+```
+
+Access: http://localhost:8080
+
+### Docker Architecture
+
+The Dockerfile uses multi-stage build to create a single container with both frontend and backend:
+
+```
+┌─────────────────────────────────────────────────┐
+│              mediahub:latest                     │
+├─────────────────────────────────────────────────┤
+│  Frontend (static)  →  /app/static              │
+│  Backend (FastAPI)  →  Port 8080                │
+│  Chrome/Chromium    →  For DrissionPage         │
+├─────────────────────────────────────────────────┤
+│  Endpoints:                                      │
+│  /           →  Frontend SPA                    │
+│  /api/v1/*   →  Backend API                     │
+│  /media/*    →  Downloaded media files          │
+│  /docs       →  API Documentation               │
+└─────────────────────────────────────────────────┘
+```
+
+### Volume Mounts
+
+| Host Path | Container Path | Description |
+|-----------|----------------|-------------|
+| `./downloads` | `/app/downloads` | Downloaded videos/images |
+| `./backend/.env` | `/app/.env` | Environment variables |
+| `./backend/frontend_config.yml` | `/app/frontend_config.yml` | Frontend config (Supabase URL, download path) |
+
+### docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+  mediahub:
+    build: .
+    image: mediahub:latest
+    container_name: mediahub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./downloads:/app/downloads                    # Media storage
+      - ./backend/.env:/app/.env                      # Backend config
+      - ./backend/frontend_config.yml:/app/frontend_config.yml  # Frontend config
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+```
+
+### Configuration
+
+#### 1. Backend Environment (.env)
+
+```bash
+# Supabase (Required)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Download path inside container (usually fixed)
+NAS_BASE_PATH=/app/downloads
+```
+
+#### 2. Frontend Config (frontend_config.yml)
+
+This file can be edited via the Settings page in the UI:
+
+```yaml
+supabase:
+  url: "https://your-project.supabase.co"
+  anon_key: "your-anon-key"
+
+# Download path (must match volume mount)
+default_download_path: "/app/downloads"
+```
+
+**Priority**: `frontend_config.yml` > `.env`
+
+### Synology NAS Deployment
+
+```bash
+# SSH to NAS
+ssh admin@your-nas-ip
+sudo -i
+
+# Create project directory
+mkdir -p /volume1/docker/mediahub
+cd /volume1/docker/mediahub
+
+# Clone code
+git clone https://github.com/your-repo/mediahub.git .
+
+# Configure
+cp backend/.env.example backend/.env
+nano backend/.env  # Edit Supabase credentials
+
+# Build and start
+docker-compose up -d --build
+
+# View logs
+docker logs -f mediahub
+```
+
+### Custom Download Path
+
+To save videos to a different location (e.g., NAS shared folder):
+
+1. **Modify docker-compose.yml volume mount**:
+   ```yaml
+   volumes:
+     - /volume1/video/douyin:/app/downloads  # Custom path
+   ```
+
+2. **Update frontend_config.yml**:
+   ```yaml
+   default_download_path: "/app/downloads"  # Keep container path
+   ```
+
+3. **Restart container**:
+   ```bash
+   docker-compose down && docker-compose up -d
+   ```
+
+### Manual Docker Commands
+
+```bash
+# Build image
+docker build -t mediahub:latest .
+
+# Run container
+docker run -d \
+    --name mediahub \
+    --restart unless-stopped \
+    -p 8080:8080 \
+    -v $(pwd)/downloads:/app/downloads \
+    -v $(pwd)/backend/.env:/app/.env \
+    -v $(pwd)/backend/frontend_config.yml:/app/frontend_config.yml \
+    -e TZ=Asia/Shanghai \
+    mediahub:latest
+
+# View logs
+docker logs -f mediahub
+
+# Stop
+docker stop mediahub
+
+# Remove
+docker rm mediahub
+```
+
+### Troubleshooting
+
+#### Build fails with memory error
+```bash
+docker build --memory=2g -t mediahub:latest .
+```
+
+#### Chrome/Chromium crashes
+Add shared memory:
+```bash
+docker run --shm-size=1g ...
+```
+
+Or in docker-compose.yml:
+```yaml
+services:
+  mediahub:
+    shm_size: '1g'
+```
+
+#### Media files not loading (404)
+1. Check `frontend_config.yml` has correct `default_download_path`
+2. Ensure volume mount matches the path
+3. Restart container after config changes
+
+---
+
 ## API Documentation / API 文档
 
 ### Authentication Methods

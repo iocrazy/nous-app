@@ -102,14 +102,15 @@ class DownloaderService:
 
             logger.info(f"准备下载视频: {aweme_id}")
 
-            # create file path
-            download_path = Utils.create_download_folder()
-            logger.debug(f"NAS_BASE_PATH: {settings.NAS_BASE_PATH}")
+            # create file path (返回完整路径和相对路径)
+            full_path, relative_month = Utils.create_download_folder()
+            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
 
             # generate file name
             video_title = video_data.get("video_title", "undefined")
             file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
-            video_path = os.path.join(download_path, file_name + ".mp4")
+            video_full_path = os.path.join(full_path, file_name + ".mp4")
+            video_relative_path = f"{relative_month}/{file_name}.mp4"  # 相对路径
             logger.debug(f"视频文件名: {file_name}")
 
             # 下载视频
@@ -131,11 +132,12 @@ class DownloaderService:
 
             # download video while one of the urls is successful
             for url in video_urls:
-                if await DownloaderService.download_file(url, video_path, headers):
+                if await DownloaderService.download_file(url, video_full_path, headers):
                     try:
+                        # 存储相对路径到数据库
                         await repo.mark_video_as_downloaded(
                             aweme_id=aweme_id,
-                            download_path=video_path,
+                            download_path=video_relative_path,  # 使用相对路径
                             duration=download_duration
                         )
                     except Exception as e:
@@ -144,9 +146,9 @@ class DownloaderService:
 
                     # 更新结果对象
                     result.video_download_status = DownloadStatus.COMPLETED
-                    result.video_path = video_path
+                    result.video_path = video_relative_path  # 返回相对路径
                     result.download_duration = download_duration
-                    logger.success(f"Video {aweme_id} downloaded successfully and saved to {video_path}.")
+                    logger.success(f"Video {aweme_id} downloaded successfully and saved to {video_full_path}.")
 
                     # 记录成功日志
                     if user_id:
@@ -220,17 +222,19 @@ class DownloaderService:
 
             logger.info(f"准备下载Douyin {aweme_id} 的图片集")
 
-            # create file path
-            logger.debug(f"NAS_BASE_PATH: {settings.NAS_BASE_PATH}")
-            parent_download_path = Utils.create_download_folder()
+            # create file path (返回完整路径和相对路径)
+            full_path, relative_month = Utils.create_download_folder()
+            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
 
             # generate file name
             video_title = video_data.get("video_title", "undefined")
             file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
 
-            sub_download_path = os.path.join(parent_download_path, file_name)
-            os.makedirs(sub_download_path, exist_ok=True)
-            logger.success(f"Successfully created download file path: {sub_download_path}")
+            # 完整路径和相对路径
+            sub_download_full_path = os.path.join(full_path, file_name)
+            sub_download_relative_path = f"{relative_month}/{file_name}"  # 相对路径
+            os.makedirs(sub_download_full_path, exist_ok=True)
+            logger.success(f"Successfully created download file path: {sub_download_full_path}")
 
             video_urls = video_data.get("video_download_urls")
             image_urls = video_data.get("image_download_urls")
@@ -249,7 +253,7 @@ class DownloaderService:
                 video_tasks = []
                 async with asyncio.TaskGroup() as tg:
                     for i, url_list in enumerate(video_urls):
-                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_path,file_name, headers))
+                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_full_path,file_name, headers))
                         logger.debug(f"添加视频第{i+1}下载任务: {task}")
                         video_tasks.append(task)
 
@@ -272,7 +276,7 @@ class DownloaderService:
                 image_tasks = []
                 async with asyncio.TaskGroup() as tg:
                     for i, url_list in enumerate(image_urls):
-                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_path,file_name, headers))
+                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_full_path,file_name, headers))
                         logger.debug(f"添加图片第{i+1}下载任务: {task}")
                         image_tasks.append(task)
 
@@ -304,7 +308,7 @@ class DownloaderService:
                 logger.success(f"Douyin {file_name} 下载完成，共下载了 {video_downloaded_count}个视频文件和 {image_downloaded_count}个图片文件。")
                 await repo.update(aweme_id, {
                     "video_download_status": DownloadStatus.COMPLETED,
-                    "download_path": sub_download_path
+                    "download_path": sub_download_relative_path  # 使用相对路径
                 }, user_id=user_id)
                 result.video_download_status = DownloadStatus.COMPLETED
 
@@ -319,7 +323,7 @@ class DownloaderService:
                     )
 
             else:
-                error_msg = f"Douyin {file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。Download Path: {sub_download_path}"
+                error_msg = f"Douyin {file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。Download Path: {sub_download_full_path}"
                 logger.error(error_msg)
                 await repo.update(aweme_id, {
                     "video_download_status": DownloadStatus.FAILED,
@@ -382,30 +386,31 @@ class DownloaderService:
             # 从字典中获取音乐URL列表
             music_urls = music_data.get("music_download_urls", [])
 
-            # 创建下载路径
-            download_path = Utils.create_download_folder()
+            # 创建下载路径 (返回完整路径和相对路径)
+            full_path, relative_month = Utils.create_download_folder()
 
             # 从字典中获取音乐名称
             music_name = music_data.get("music_name")
             if not music_name:
                 music_name = f"{aweme_id}_music"
 
-            # 生成音乐文件路径
-            music_path = os.path.join(download_path, f"{music_name}.mp3")
+            # 生成音乐文件路径 (完整路径和相对路径)
+            music_full_path = os.path.join(full_path, f"{music_name}.mp3")
+            music_relative_path = f"{relative_month}/{music_name}.mp3"
 
             # 尝试下载音乐
             for url in music_urls:
-                if await DownloaderService.download_file(url, music_path, headers):
+                if await DownloaderService.download_file(url, music_full_path, headers):
                     try:
                         await repo.mark_music_as_downloaded(aweme_id)
                     except Exception as e:
                         logger.error(f"Marked music {aweme_id} as downloaded successfully, but failed to update the database: {e}.")
                         result.error += f"Marked music {aweme_id} as downloaded successfully, but failed to update the database: {e}."
 
-                    result.music_path = music_path
+                    result.music_path = music_relative_path  # 返回相对路径
                     result.music_download_status = DownloadStatus.COMPLETED
 
-                    logger.success(f"Music for video {aweme_id} downloaded successfully and saved to {music_path}.")
+                    logger.success(f"Music for video {aweme_id} downloaded successfully and saved to {music_full_path}.")
                     break
 
             if result.music_download_status != DownloadStatus.COMPLETED:
@@ -427,11 +432,11 @@ class DownloaderService:
             return result
 
     @staticmethod
-    async def download_single_list_item(i, url_list, sub_download_path, file_name, headers):
+    async def download_single_list_item(i, url_list, sub_download_full_path, file_name, headers):
         """下载单个列表项（视频或图片），尝试多个URL直到成功"""
         # 确定文件扩展名
         extension = ".mp4" if "mp4" in str(url_list) else ".jpg"
-        file_path = os.path.join(sub_download_path, f"{file_name}_{i}{extension}")
+        file_path = os.path.join(sub_download_full_path, f"{file_name}_{i}{extension}")
 
         # 确保目录存在
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -489,29 +494,30 @@ class DownloaderService:
                 result.error = "没有封面 URL"
                 return result
 
-            # 创建下载路径
-            download_path = Utils.create_download_folder()
+            # 创建下载路径 (返回完整路径和相对路径)
+            full_path, relative_month = Utils.create_download_folder()
 
             # 生成文件名
             video_title = video_data.get("video_title", "undefined")
             file_name = Utils.concat_filename_safe_title(video_title, aweme_id)
-            cover_path = os.path.join(download_path, f"{file_name}_cover.jpg")
+            cover_full_path = os.path.join(full_path, f"{file_name}_cover.jpg")
+            cover_relative_path = f"{relative_month}/{file_name}_cover.jpg"
 
             # 尝试下载封面（尝试多个 URL）
             for url in cover_urls:
-                if await DownloaderService.download_file(url, cover_path, headers):
-                    # 更新数据库
+                if await DownloaderService.download_file(url, cover_full_path, headers):
+                    # 更新数据库（存储相对路径）
                     try:
                         await repo.update(aweme_id, {
                             "cover_download_status": DownloadStatus.COMPLETED.value,
-                            "cover_download_path": cover_path
+                            "cover_download_path": cover_relative_path  # 使用相对路径
                         }, user_id=user_id)
                     except Exception as e:
                         logger.error(f"更新封面下载状态失败: {e}")
 
                     result.cover_download_status = DownloadStatus.COMPLETED
-                    result.cover_path = cover_path
-                    logger.success(f"封面 {aweme_id} 下载成功: {cover_path}")
+                    result.cover_path = cover_relative_path  # 返回相对路径
+                    logger.success(f"封面 {aweme_id} 下载成功: {cover_full_path}")
 
                     # 记录成功日志
                     if user_id:

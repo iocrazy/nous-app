@@ -578,7 +578,7 @@ export default function App() {
           } as DouyinBase);
         }
       } else {
-        throw new Error(response.message || "解析失败");
+        throw new Error(response.message || "Parse failed");
       }
 
     } catch (err: any) {

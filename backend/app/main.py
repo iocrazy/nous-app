@@ -5,6 +5,7 @@ from fastapi import FastAPI, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse
 from loguru import logger
 
 
@@ -141,17 +142,23 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 # 挂载静态文件服务 - 用于访问下载的视频和封面
-media_path = Path(settings.NAS_BASE_PATH)
-if media_path.exists():
-    app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-    logger.info(f"静态文件服务已挂载: /media -> {media_path}")
-else:
-    logger.warning(f"媒体目录不存在: {media_path}，静态文件服务未挂载")
-
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
+# 优先从 frontend_config.yml 读取路径
+from app.core.utils import Utils
+try:
+    media_base_path = Utils.get_download_base_path()
+    media_path = Path(media_base_path)
+    if media_path.exists():
+        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
+        logger.info(f"静态文件服务已挂载: /media -> {media_path}")
+    else:
+        # 尝试创建目录
+        media_path.mkdir(parents=True, exist_ok=True)
+        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
+        logger.info(f"已创建媒体目录并挂载: /media -> {media_path}")
+except ValueError as e:
+    logger.warning(f"未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。")
+except Exception as e:
+    logger.warning(f"静态文件服务挂载失败: {e}")
 
 
 @app.get("/health")
@@ -159,6 +166,29 @@ async def health_check():
     """健康检查端点"""
     return {"status": "healthy", "message": "Service is running"}
 
+
+# 前端静态文件服务（Docker 部署时使用）
+frontend_path = Path("/app/static")
+if frontend_path.exists():
+    # 挂载静态资源（JS/CSS/图片等）
+    app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="frontend_assets")
+    logger.info(f"前端静态文件已挂载: /assets -> {frontend_path / 'assets'}")
+
+    # SPA 路由：所有非 API 请求返回 index.html
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """SPA 路由支持：非 API 请求返回 index.html"""
+        # 检查是否是静态文件
+        file_path = frontend_path / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        # 其他路由返回 index.html（SPA 前端路由）
+        return FileResponse(frontend_path / "index.html")
+else:
+    # 开发模式：前端独立运行
+    @app.get("/")
+    async def root():
+        return {"message": "MediaHub API", "docs": "/docs", "health": "/health"}
 
 
 if __name__ == '__main__':

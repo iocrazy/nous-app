@@ -669,7 +669,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                   <button
                     onClick={() => setShowDeleteDialog(true)}
                     className="px-5 py-3 bg-red-950/50 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/50 hover:border-red-800"
-                    title="删除"
+                    title="Delete"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
@@ -711,7 +711,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                 <div className="p-2 bg-red-500/10 rounded-lg">
                   <AlertTriangle className="w-5 h-5 text-red-500" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">确认删除</h3>
+                <h3 className="text-lg font-semibold text-white">Confirm Delete</h3>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(false)}
@@ -724,7 +724,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
             {/* Content */}
             <div className="px-5 py-4 space-y-4">
               <p className="text-sm text-zinc-400">
-                确定要删除这个媒体吗？此操作无法撤销。
+                Are you sure you want to delete this media? This action cannot be undone.
               </p>
 
               {/* Media Preview */}
@@ -751,9 +751,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                   className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
                 />
                 <div>
-                  <p className="text-sm text-zinc-300 font-medium">同时删除本地文件</p>
+                  <p className="text-sm text-zinc-300 font-medium">Also delete local files</p>
                   <p className="text-xs text-zinc-500 mt-0.5">
-                    删除服务器上已下载的视频、图片和封面文件
+                    Delete downloaded videos, images, and cover files from server
                   </p>
                 </div>
               </label>
@@ -765,7 +765,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                 onClick={() => setShowDeleteDialog(false)}
                 className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
               >
-                取消
+                Cancel
               </button>
               <button
                 onClick={handleDelete}
@@ -775,12 +775,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                 {isDeleting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    删除中...
+                    Deleting...
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    确认删除
+                    Confirm Delete
                   </>
                 )}
               </button>

@@ -66,7 +66,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
             onLogin({ email: data.user.email || email, id: data.user.id });
           }
         } catch (err: any) {
-          alert(err.message || '登录失败');
+          alert(err.message || 'Login failed');
         }
       } else {
         // Demo mode

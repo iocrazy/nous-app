@@ -465,7 +465,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                }}
                className="text-white/80 hover:text-white hover:bg-red-600 hover:border-red-500"
                onClick={() => setActiveMedia(null)}
-               title="关闭 (ESC)"
+               title="Close (ESC)"
              >
                <X size={24} />
              </button>

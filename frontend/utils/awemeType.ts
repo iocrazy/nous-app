@@ -56,20 +56,33 @@ const getApiUrl = (): string => {
   return 'http://localhost:8080';
 };
 
-// 本地路径前缀 - 与后端 NAS_BASE_PATH 对应
-const LOCAL_PATH_PREFIX = '/Volumes/program/Download/Test';
-
 /**
- * 将本地文件路径转换为后端静态文件 URL
- * /Volumes/program/Download/Test/2026-01/xxx.mp4 -> http://localhost:8080/media/2026-01/xxx.mp4
+ * 将文件路径转换为后端静态文件 URL
+ *
+ * 支持两种格式：
+ * 1. 相对路径（新格式）: 2026-01/xxx.mp4 -> http://localhost:8080/media/2026-01/xxx.mp4
+ * 2. 绝对路径（旧格式兼容）: /path/to/base/2026-01/xxx.mp4 -> http://localhost:8080/media/2026-01/xxx.mp4
  */
-const convertLocalPathToUrl = (localPath: string): string => {
-  if (localPath.startsWith(LOCAL_PATH_PREFIX)) {
-    const relativePath = localPath.substring(LOCAL_PATH_PREFIX.length);
-    return `${getApiUrl()}/media${relativePath}`;
+const convertPathToUrl = (path: string): string => {
+  // 如果已经是 URL，直接返回
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
   }
-  // 如果不是本地路径格式，直接返回
-  return localPath;
+
+  // 如果是相对路径（新格式：不以 / 开头），直接拼接 /media/
+  if (!path.startsWith('/')) {
+    return `${getApiUrl()}/media/${path}`;
+  }
+
+  // 绝对路径（旧格式兼容）：提取年月和文件名部分
+  // 例如: /Volumes/xxx/2026-01/file.mp4 -> /media/2026-01/file.mp4
+  const yearMonthMatch = path.match(/(\d{4}-\d{2}\/[^/]+)$/);
+  if (yearMonthMatch) {
+    return `${getApiUrl()}/media/${yearMonthMatch[1]}`;
+  }
+
+  // 无法识别的格式，返回完整 media 路径
+  return `${getApiUrl()}/media${path}`;
 };
 
 /**
@@ -83,7 +96,7 @@ export const getVideoUrl = (data: {
 }): string | undefined => {
   // 优先使用 download_path (转换为后端静态文件 URL)
   if (data.download_path && data.download_path !== '#') {
-    return convertLocalPathToUrl(data.download_path);
+    return convertPathToUrl(data.download_path);
   }
   // 其次使用 video_download_urls
   if (data.video_download_urls?.[0] && data.video_download_urls[0] !== '#') {
@@ -105,7 +118,7 @@ export const getCoverUrl = (data: {
 }): string | undefined => {
   // 优先使用 cover_download_path (转换为后端静态文件 URL)
   if (data.cover_download_path && data.cover_download_path !== '#') {
-    return convertLocalPathToUrl(data.cover_download_path);
+    return convertPathToUrl(data.cover_download_path);
   }
   if (data.cover_urls?.[0] && data.cover_urls[0] !== '#') {
     return data.cover_urls[0];
