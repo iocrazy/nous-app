@@ -121,3 +121,60 @@ export interface StatisticsResponse {
     skipped: number;
   };
 }
+
+// Team types
+export interface Team {
+  id: string;
+  name: string;
+  owner_id: string;
+  invite_code: string;
+  created_at: string;
+}
+
+export interface TeamMember {
+  team_id: string;
+  user_id: string;
+  role: 'owner' | 'member';
+  joined_at: string;
+  // Joined from auth.users
+  email?: string;
+  name?: string;
+}
+
+// Collection types
+export interface Collection {
+  id: string;
+  name: string;
+  owner_id: string;
+  team_id: string | null;
+  created_at: string;
+  // Computed
+  video_count?: number;
+  is_shared?: boolean;
+}
+
+export interface CollectionVideo {
+  collection_id: string;
+  video_aweme_id: string;
+  added_by: string;
+  added_at: string;
+}
+
+// Notification types
+export interface Notification {
+  id: string;
+  type: 'system' | 'team';
+  title: string;
+  content: string | null;
+  team_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface UserNotification {
+  user_id: string;
+  notification_id: string;
+  read_at: string | null;
+  // Joined
+  notification?: Notification;
+}
