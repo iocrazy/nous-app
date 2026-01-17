@@ -17,7 +17,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
 
   let query = supabase
     .from('collections')
-    .select('*, collection_videos(count)')
+    .select('*, video_collections(count)')
     .order('created_at', { ascending: false });
 
   if (teamIds.length > 0) {
@@ -31,7 +31,8 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
 
   return (data || []).map(c => ({
     ...c,
-    video_count: c.collection_videos?.[0]?.count || 0,
+    id: String(c.id), // Convert bigint to string
+    video_count: c.video_collections?.[0]?.count || 0,
     is_shared: !!c.team_id,
   }));
 };
@@ -54,7 +55,7 @@ export const createCollection = async (name: string, teamId?: string): Promise<C
     .single();
 
   if (error) throw error;
-  return { ...data, video_count: 0, is_shared: !!teamId };
+  return { ...data, id: String(data.id), video_count: 0, is_shared: !!teamId };
 };
 
 export const deleteCollection = async (collectionId: string): Promise<void> => {
@@ -64,7 +65,7 @@ export const deleteCollection = async (collectionId: string): Promise<void> => {
   const { error } = await supabase
     .from('collections')
     .delete()
-    .eq('id', collectionId);
+    .eq('id', parseInt(collectionId));
 
   if (error) throw error;
 };
@@ -76,11 +77,20 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
+  // Get video_id from aweme_id
+  const { data: video, error: videoError } = await supabase
+    .from('douyin_videos')
+    .select('id')
+    .eq('aweme_id', videoAwemeId)
+    .single();
+
+  if (videoError || !video) throw new Error('Video not found');
+
   const { error } = await supabase
-    .from('collection_videos')
+    .from('video_collections')
     .insert({
-      collection_id: collectionId,
-      video_aweme_id: videoAwemeId,
+      collection_id: parseInt(collectionId),
+      video_id: video.id,
       added_by: user.id,
     });
 
@@ -91,11 +101,20 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
+  // Get video_id from aweme_id
+  const { data: video, error: videoError } = await supabase
+    .from('douyin_videos')
+    .select('id')
+    .eq('aweme_id', videoAwemeId)
+    .single();
+
+  if (videoError || !video) throw new Error('Video not found');
+
   const { error } = await supabase
-    .from('collection_videos')
+    .from('video_collections')
     .delete()
-    .eq('collection_id', collectionId)
-    .eq('video_aweme_id', videoAwemeId);
+    .eq('collection_id', parseInt(collectionId))
+    .eq('video_id', video.id);
 
   if (error) throw error;
 };
@@ -104,11 +123,20 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
+  // Get video_id from aweme_id
+  const { data: video, error: videoError } = await supabase
+    .from('douyin_videos')
+    .select('id')
+    .eq('aweme_id', videoAwemeId)
+    .single();
+
+  if (videoError || !video) return [];
+
   const { data, error } = await supabase
-    .from('collection_videos')
+    .from('video_collections')
     .select('collection_id')
-    .eq('video_aweme_id', videoAwemeId);
+    .eq('video_id', video.id);
 
   if (error) throw error;
-  return (data || []).map(cv => cv.collection_id);
+  return (data || []).map(cv => String(cv.collection_id));
 };

@@ -154,8 +154,8 @@ export interface Collection {
 }
 
 export interface CollectionVideo {
-  collection_id: string;
-  video_aweme_id: string;
+  collection_id: number;
+  video_id: number;
   added_by: string;
   added_at: string;
 }
