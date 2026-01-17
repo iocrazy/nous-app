@@ -2,6 +2,48 @@
 
 本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
+## 开发规范
+
+### UI 语言规范
+
+**重要**：所有用户界面元素必须使用英文。
+
+| 元素类型 | 示例 |
+|----------|------|
+| 菜单项 | Settings, Dashboard, My Library |
+| 按钮 | Submit, Cancel, Save, Delete |
+| 标签页 | Overview, Analytics, Reports |
+| 表单标签 | Username, Password, Email |
+| 提示文字 | Loading..., No data found |
+| 导航 | Home, Back, Next |
+
+### 多语言支持（i18n）
+
+- 界面文案通过 i18n 实现多语言
+- 代码中使用英文 key，翻译文件提供中文值
+
+```tsx
+// ✅ 正确 - 使用翻译 key
+{t('common.submit')}
+
+// ❌ 错误 - 硬编码中文
+提交
+```
+
+### 命名风格
+
+| 类型 | 风格 | 示例 |
+|------|------|------|
+| UI 文本 | Title Case | `My Library` |
+| 翻译 key | camelCase | `myLibrary` |
+| 文件名 | kebab-case | `my-library.tsx` |
+
+### 测试数据
+
+创建测试内容时必须用英文：
+- ✅ `Test Team`、`My Collection`
+- ❌ `测试团队`、`我的集合`
+
 ## 项目结构
 
 ```
@@ -213,3 +255,59 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 1. 在 `supabase/migrations/` 创建新的 SQL 文件（按序号命名）
 2. 在 Supabase SQL Editor 执行
 3. 运行 `npm run generate:types`（前端）更新 TypeScript 类型
+
+
+
+## Discord 通知规则
+
+当以下场景发生时，**必须**通过 Discord MCP 发送通知：
+
+### 触发条件
+
+| 场景 | 通知内容 |
+|------|----------|
+| ✅ 任务完成 | 任务摘要 + 主要改动 |
+| ❌ 执行出错 | 错误信息 + 需要的操作 |
+| 🚀 部署完成 | 部署状态 + 访问地址 |
+| ⏸️ 需要人工确认 | 问题描述 + 选项 |
+
+### 配置信息
+
+- **Channel ID**: `1462033865911832628`
+- **Guild ID**: `1462033865299329180`
+
+### 发送方式
+
+使用 `discord_send` 工具，参数：
+- `channelId`: `1462033865911832628`
+- `message`: 消息内容
+
+### 消息格式模板
+
+**任务完成：**
+```
+✅ **任务完成**: [任务名称]
+📝 改动: [简要说明]
+⏱️ 耗时: [时间]
+```
+
+**执行失败：**
+```
+❌ **执行失败**: [任务名称]
+🔴 错误: [错误信息]
+👉 需要: [下一步操作]
+```
+
+**部署完成：**
+```
+🚀 **部署完成**: [项目名称]
+🌐 地址: [访问URL]
+📦 版本: [版本号]
+```
+
+**需要确认：**
+```
+⏸️ **需要确认**: [问题描述]
+🔹 选项1: [选项内容]
+🔹 选项2: [选项内容]
+```

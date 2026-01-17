@@ -26,8 +26,14 @@ export const createTeam = async (name: string): Promise<Team> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) {
+    console.error('Auth error:', authError);
+    throw new Error('Authentication failed: ' + authError.message);
+  }
+  if (!user) throw new Error('Not authenticated - please log in again');
+
+  console.log('Creating team for user:', user.id);
 
   const { data, error } = await supabase
     .from('teams')
@@ -35,7 +41,12 @@ export const createTeam = async (name: string): Promise<Team> => {
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('Create team error:', error);
+    throw new Error(error.message || 'Failed to create team');
+  }
+
+  console.log('Team created:', data);
   return data;
 };
 

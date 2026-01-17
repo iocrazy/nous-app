@@ -216,6 +216,7 @@ dist
 # Gatsby files
 .cache/
 public
+!frontend/public/locales/
 
 # Storybook build outputs
 .out

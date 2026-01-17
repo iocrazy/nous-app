@@ -4,7 +4,7 @@
     "myLibrary": "My Library",
     "allVideos": "All Videos",
     "favorites": "Favorites",
-    "sharedCollections": "Shared Collections",
+    "sharedCollections": "Team Library",
     "newCollection": "New Collection",
     "dashboard": "Dashboard",
     "settings": "Settings"
@@ -15,7 +15,11 @@
     "signOut": "Sign Out",
     "joinedTeams": "Joined Teams",
     "createTeam": "Create Team",
-    "teamSettings": "Team Settings"
+    "teamSettings": "Team Settings",
+    "teamName": "Team Name",
+    "teamNamePlaceholder": "Enter team name",
+    "teamNameRequired": "Team name is required",
+    "teamSettingsComingSoon": "Team settings coming soon"
   },
   "auth": {
     "login": "Log In",
@@ -38,21 +42,31 @@
     "newVideo": "{name} added a video to \"{collection}\""
   },
   "collections": {
+    "name": "Collection Name",
     "create": "New Collection",
     "addTo": "Add to Collection",
     "shared": "Shared",
     "private": "Private",
     "empty": "Collection is empty",
-    "confirmDelete": "Delete this collection?"
+    "confirmDelete": "Delete this collection?",
+    "namePlaceholder": "Enter collection name",
+    "shareWith": "Share with"
   },
   "team": {
     "create": "Create Team",
     "name": "Team Name",
     "settings": "Team Settings",
     "invite": "Invite Members",
-    "copyLink": "Copy Invite Link",
-    "linkCopied": "Link copied",
+    "inviteCode": "Invite Code",
+    "copyLink": "Copy Link",
+    "linkCopied": "Copied",
+    "resetCode": "Reset Code",
     "members": "Members",
+    "member": "Member",
+    "owner": "Owner",
+    "you": "you",
+    "removeMember": "Remove Member",
+    "confirmRemoveMember": "Remove this member?",
     "leave": "Leave Team",
     "delete": "Delete Team",
     "confirmLeave": "Leave this team?",
@@ -67,7 +81,9 @@
     "loading": "Loading...",
     "error": "Error",
     "success": "Success",
-    "search": "Search"
+    "search": "Search",
+    "create": "Create",
+    "creating": "Creating..."
   },
   "parser": {
     "title": "Douyin Media Parser",
@@ -76,7 +92,18 @@
     "batchDownload": "Batch Download",
     "placeholder": "Paste Douyin link (e.g., https://v.douyin.com/...)",
     "analyze": "Analyze",
-    "processBatch": "Process Batch"
+    "processBatch": "Process Batch",
+    "downloadVideo": "Download Video/Img",
+    "downloadAudio": "Download Audio",
+    "downloadCover": "Download Cover",
+    "tags": "Tags",
+    "tagsPlaceholder": "e.g. Food, Travel, Tutorial (Optional)",
+    "featureCloud": "Cloud Storage",
+    "featureCloudDesc": "Automatically save parsed metadata to Supabase.",
+    "featureMonitor": "Live Monitor",
+    "featureMonitorDesc": "Real-time WebSocket task tracking and logging.",
+    "featureFormat": "Multi-Format",
+    "featureFormatDesc": "Support for Videos, Image Atlases, and Audio."
   },
   "library": {
     "title": "Your Collection",

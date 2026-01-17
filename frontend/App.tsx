@@ -28,6 +28,7 @@ import { AuthOverlay } from './components/AuthOverlay';
 import { Header } from './components/Header';
 import { UserDropdown } from './components/UserDropdown';
 import { NotificationPanel } from './components/NotificationPanel';
+import { CreateTeamModal } from './components/CreateTeamModal';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -183,6 +184,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   
   // Parser Configuration State
   const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
@@ -458,9 +460,12 @@ export default function App() {
 
   // Team handlers
   const handleCreateTeam = () => {
-    // For now, just close dropdown - actual modal will be implemented later
     setIsUserDropdownOpen(false);
-    alert(t('user.createTeamComingSoon') || 'Create team feature coming soon');
+    setIsCreateTeamModalOpen(true);
+  };
+
+  const handleTeamCreated = (team: Team) => {
+    setTeams(prev => [...prev, team]);
   };
 
   const handleTeamSettings = (teamId: string) => {
@@ -939,6 +944,13 @@ export default function App() {
         onLogout={handleLogout}
       />
 
+      {/* Create Team Modal */}
+      <CreateTeamModal
+        isOpen={isCreateTeamModalOpen}
+        onClose={() => setIsCreateTeamModalOpen(false)}
+        onTeamCreated={handleTeamCreated}
+      />
+
       {/* Mobile Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
         
@@ -1091,33 +1103,6 @@ export default function App() {
           </div>
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-zinc-800">
-           {/* Clickable User Profile Area */}
-           <button 
-             onClick={() => setIsProfileModalOpen(true)}
-             className="flex items-center gap-3 px-2 py-2 mb-2 w-full hover:bg-zinc-900 rounded-lg transition-colors group text-left"
-           >
-              <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 overflow-hidden border border-zinc-700">
-                {userProfile.avatarUrl ? (
-                   <img src={userProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                   <User size={16} />
-                )}
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-medium truncate text-zinc-200 group-hover:text-white transition-colors">{userProfile.name}</p>
-                <p className="text-xs text-zinc-500">{userProfile.plan}</p>
-              </div>
-           </button>
-           
-           <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 px-2 transition-colors w-full"
-           >
-             <LogOut size={14} />
-             <span>Sign Out</span>
-           </button>
-        </div>
       </aside>
 
       {/* Main Content */}

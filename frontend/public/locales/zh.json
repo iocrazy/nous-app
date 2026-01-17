@@ -1,0 +1,122 @@
+{
+  "nav": {
+    "linkParser": "链接解析",
+    "myLibrary": "我的媒体库",
+    "allVideos": "全部视频",
+    "favorites": "收藏夹",
+    "sharedCollections": "团队媒体库",
+    "newCollection": "新建集合",
+    "dashboard": "数据面板",
+    "settings": "设置"
+  },
+  "user": {
+    "profile": "个人资料",
+    "account": "账户设置",
+    "signOut": "退出登录",
+    "joinedTeams": "已加入的团队",
+    "createTeam": "创建团队",
+    "teamSettings": "团队设置",
+    "teamName": "团队名称",
+    "teamNamePlaceholder": "输入团队名称",
+    "teamNameRequired": "请输入团队名称",
+    "teamSettingsComingSoon": "团队设置即将推出"
+  },
+  "auth": {
+    "login": "登录",
+    "register": "注册",
+    "email": "邮箱地址",
+    "password": "密码",
+    "confirmPassword": "确认密码",
+    "noAccount": "没有账户？立即注册",
+    "hasAccount": "已有账户？立即登录",
+    "registerSuccess": "注册成功，请查收邮件",
+    "passwordMismatch": "两次密码不一致"
+  },
+  "notifications": {
+    "title": "通知",
+    "markAllRead": "全部标记已读",
+    "system": "系统",
+    "team": "团队",
+    "empty": "暂无通知",
+    "newMember": "{name} 加入了团队",
+    "newVideo": "{name} 添加了视频到 \"{collection}\""
+  },
+  "collections": {
+    "name": "集合名称",
+    "create": "新建集合",
+    "addTo": "添加到集合",
+    "shared": "共享",
+    "private": "私有",
+    "empty": "集合为空",
+    "confirmDelete": "确定删除此集合？",
+    "namePlaceholder": "输入集合名称",
+    "shareWith": "分享到"
+  },
+  "team": {
+    "create": "创建团队",
+    "name": "团队名称",
+    "settings": "团队设置",
+    "invite": "邀请成员",
+    "inviteCode": "邀请码",
+    "copyLink": "复制链接",
+    "linkCopied": "已复制",
+    "resetCode": "重置邀请码",
+    "members": "成员列表",
+    "member": "成员",
+    "owner": "所有者",
+    "you": "你",
+    "removeMember": "移除成员",
+    "confirmRemoveMember": "确定移除此成员？",
+    "leave": "离开团队",
+    "delete": "删除团队",
+    "confirmLeave": "确定离开此团队？",
+    "confirmDelete": "确定删除此团队？此操作无法撤销。"
+  },
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "confirm": "确认",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功",
+    "search": "搜索",
+    "create": "创建",
+    "creating": "创建中..."
+  },
+  "parser": {
+    "title": "抖音媒体解析",
+    "subtitle": "粘贴分享链接，解析并下载无水印内容",
+    "singleLink": "单个链接",
+    "batchDownload": "批量下载",
+    "placeholder": "粘贴抖音链接（如 https://v.douyin.com/...）",
+    "analyze": "解析",
+    "processBatch": "批量处理",
+    "downloadVideo": "下载视频/图片",
+    "downloadAudio": "下载音频",
+    "downloadCover": "下载封面",
+    "tags": "标签",
+    "tagsPlaceholder": "如：美食、旅行、教程（可选）",
+    "featureCloud": "云端存储",
+    "featureCloudDesc": "自动保存解析数据到 Supabase",
+    "featureMonitor": "实时监控",
+    "featureMonitorDesc": "WebSocket 实时任务跟踪和日志",
+    "featureFormat": "多格式支持",
+    "featureFormatDesc": "支持视频、图集和音频"
+  },
+  "library": {
+    "title": "媒体收藏",
+    "subtitle": "管理已保存的下载内容",
+    "empty": "暂无内容",
+    "searchPlaceholder": "搜索标题、标签、备注..."
+  },
+  "dashboard": {
+    "title": "数据统计",
+    "subtitle": "实时统计下载习惯",
+    "totalVideos": "视频总数",
+    "storageUsed": "存储用量",
+    "savedCreators": "收藏作者",
+    "successRate": "成功率"
+  }
+}
