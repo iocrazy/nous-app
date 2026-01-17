@@ -1,17 +1,20 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  LayoutDashboard, Search, Library, Settings, LogOut, 
+import {
+  LayoutDashboard, Search, Library, Settings, LogOut,
   Link as LinkIcon, AlertCircle, Loader2, Sparkles, User, Database,
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
   Layers, Download
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { DouyinBase, ViewState, UserProfile, UserSettings } from './types';
+import { DouyinBase, ViewState, UserProfile, UserSettings, Team } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
+import { fetchMyTeams } from './services/teamService';
+import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
 import { MOCK_LIBRARY } from './constants';
 import { MediaCard } from './components/MediaCard';
 import { CompactMediaCard } from './components/CompactMediaCard';
@@ -22,6 +25,9 @@ import { SettingsView } from './components/SettingsView';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LandingPage } from './components/LandingPage';
 import { AuthOverlay } from './components/AuthOverlay';
+import { Header } from './components/Header';
+import { UserDropdown } from './components/UserDropdown';
+import { NotificationPanel } from './components/NotificationPanel';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -166,9 +172,17 @@ const TaskMonitor = ({
 
 
 export default function App() {
+  const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
   const [settingsTab, setSettingsTab] = useState<'general' | 'api'>('general');
   const [urlInput, setUrlInput] = useState('');
+
+  // Team and Notification State
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
+  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   
   // Parser Configuration State
   const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
@@ -223,6 +237,7 @@ export default function App() {
 
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Controls the visibility of the login modal when on Landing Page
   const [showAuthModal, setShowAuthModal] = useState(false);
 
@@ -282,6 +297,7 @@ export default function App() {
             name: session.user.email?.split('@')[0] || 'User',
             email: session.user.email || '',
           }));
+          setCurrentUserId(session.user.id);
           setIsAuthenticated(true);
 
           // Load user settings from Supabase
@@ -306,6 +322,16 @@ export default function App() {
   useEffect(() => {
     if (isAuthenticated) {
       loadLibraryData();
+    }
+  }, [isAuthenticated]);
+
+  // Fetch teams and notifications when user logs in
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Fetch teams
+      fetchMyTeams().then(setTeams).catch(console.error);
+      // Fetch notifications
+      fetchNotifications().then(setNotifications).catch(console.error);
     }
   }, [isAuthenticated]);
 
@@ -382,6 +408,7 @@ export default function App() {
       name: user.email.split('@')[0] || 'User',
       email: user.email,
     }));
+    setCurrentUserId(user.id);
     setIsAuthenticated(true);
     setShowAuthModal(false);
   };
@@ -393,15 +420,44 @@ export default function App() {
     }
     setIsAuthenticated(false);
     setIsProfileModalOpen(false);
+    setIsUserDropdownOpen(false);
     setUserProfile({
       name: 'Demo User',
       email: 'demo@example.com',
       avatarUrl: '',
       plan: 'Free Plan'
     });
+    // Reset team and notification state
+    setTeams([]);
+    setNotifications([]);
+    setActiveTeamId(null);
+    setCurrentUserId(null);
     // When logging out, we go back to landing page.
     // Ensure modal is closed
     setShowAuthModal(false);
+  };
+
+  // Notification handlers
+  const handleMarkNotificationRead = async (id: string) => {
+    await markAsRead(id);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    await markAllAsRead();
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  // Team handlers
+  const handleCreateTeam = () => {
+    // For now, just close dropdown - actual modal will be implemented later
+    setIsUserDropdownOpen(false);
+    alert(t('user.createTeamComingSoon') || 'Create team feature coming soon');
+  };
+
+  const handleTeamSettings = (teamId: string) => {
+    setIsUserDropdownOpen(false);
+    alert(t('user.teamSettingsComingSoon') || 'Team settings feature coming soon');
   };
 
   const handleUpdateSettings = async (newSettings: UserSettings) => {
@@ -773,10 +829,11 @@ export default function App() {
     });
 
   // Calculate main content classes based on view to handle mobile padding
+  // Added md:pt-20 to account for the fixed header on desktop
   const mainContentClass = `flex-1 md:ml-64 w-full ${
-    view === 'library' 
-      ? 'p-0 md:p-8 pb-20 md:pb-8' // No padding on mobile library to allow edge-to-edge feed
-      : 'p-4 md:p-8 pb-24 md:pb-8'
+    view === 'library'
+      ? 'p-0 md:p-8 md:pt-20 pb-20 md:pb-8' // No padding on mobile library to allow edge-to-edge feed
+      : 'p-4 md:p-8 md:pt-20 pb-24 md:pb-8'
   }`;
 
   // --- RENDER LOGIC ---
@@ -805,11 +862,72 @@ export default function App() {
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30">
       
       {/* User Profile Modal */}
-      <UserProfileModal 
-        isOpen={isProfileModalOpen} 
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         user={userProfile}
         onSave={(updated) => setUserProfile(updated)}
+        onLogout={handleLogout}
+      />
+
+      {/* Header - Desktop Only */}
+      <Header
+        userProfile={{
+          name: userProfile.name,
+          email: userProfile.email,
+          avatarUrl: userProfile.avatarUrl,
+        }}
+        unreadCount={notifications.filter(n => !n.read).length}
+        onNotificationClick={() => setIsNotificationPanelOpen(!isNotificationPanelOpen)}
+        onUserClick={() => setIsUserDropdownOpen(true)}
+      />
+
+      {/* Notification Panel - positioned relative to header */}
+      {isNotificationPanelOpen && (
+        <div className="hidden md:block fixed top-16 right-4 z-50">
+          <NotificationPanel
+            isOpen={isNotificationPanelOpen}
+            onClose={() => setIsNotificationPanelOpen(false)}
+            notifications={notifications.map(n => ({
+              id: n.id,
+              type: n.type,
+              title: n.title,
+              content: n.content || undefined,
+              createdAt: n.created_at,
+              read: n.read,
+            }))}
+            onMarkRead={handleMarkNotificationRead}
+            onMarkAllRead={handleMarkAllNotificationsRead}
+          />
+        </div>
+      )}
+
+      {/* User Dropdown */}
+      <UserDropdown
+        isOpen={isUserDropdownOpen}
+        onClose={() => setIsUserDropdownOpen(false)}
+        user={{
+          name: userProfile.name,
+          email: userProfile.email,
+          avatarUrl: userProfile.avatarUrl,
+        }}
+        teams={teams.map(t => ({
+          id: t.id,
+          name: t.name,
+          isOwner: t.owner_id === currentUserId,
+        }))}
+        activeTeamId={activeTeamId}
+        onTeamSelect={setActiveTeamId}
+        onCreateTeam={handleCreateTeam}
+        onTeamSettings={handleTeamSettings}
+        onProfile={() => {
+          setIsUserDropdownOpen(false);
+          setIsProfileModalOpen(true);
+        }}
+        onAccount={() => {
+          setIsUserDropdownOpen(false);
+          setView('settings');
+        }}
         onLogout={handleLogout}
       />
 
