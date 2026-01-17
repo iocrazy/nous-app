@@ -47,6 +47,7 @@ class VideoFetchRequest(BaseModel):
     music_bool: bool = False
     cover_bool: bool = True
     video_categories: Optional[str] = None
+    use_celery: bool = False  # 是否使用 Celery 异步任务
 
 
 class VideoSearchRequest(BaseModel):
@@ -67,6 +68,7 @@ class BatchFetchRequest(BaseModel):
     music_bool: bool = False
     cover_bool: bool = True
     video_categories: Optional[str] = None
+    use_celery: bool = False  # 是否使用 Celery 异步任务
 
 
 # ============================================
@@ -84,6 +86,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
     - **video_bool**: 是否下载视频文件
     - **music_bool**: 是否下载背景音乐
     - **video_categories**: 视频分类标签
+    - **use_celery**: 是否使用 Celery 异步任务（默认 False）
 
     需要认证：Bearer Token 或 API Key（需要 `douyin:fetch` 权限）
     """
@@ -97,6 +100,37 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
 
         logger.info(f"用户 {auth.user_id} 开始获取视频: {url}")
 
+        # 如果使用 Celery 异步任务
+        if request.use_celery:
+            from app.tasks.parse_tasks import parse_single_link_task
+
+            task = parse_single_link_task.delay(
+                url=url,
+                user_id=auth.user_id,
+                video_bool=request.video_bool,
+                music_bool=request.music_bool,
+                cover_bool=request.cover_bool,
+                categories=request.video_categories
+            )
+
+            # 记录日志
+            background_tasks.add_task(
+                log_user_action,
+                user_id=auth.user_id,
+                action="fetch",
+                message=f"提交 Celery 任务: {url[:30]}...",
+                status="pending"
+            )
+
+            return {
+                "success": True,
+                "message": "任务已提交到 Celery 队列",
+                "task_id": task.id,
+                "url": url,
+                "use_celery": True,
+            }
+
+        # 默认使用 BackgroundTasks（原有逻辑）
         # 获取视频数据
         aweme_detail = await DouyinAnalysis.fetch_one_video(url)
 
@@ -206,9 +240,41 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
     - **video_bool**: 是否下载视频文件
     - **music_bool**: 是否下载背景音乐
     - **video_categories**: 视频分类标签
+    - **use_celery**: 是否使用 Celery 异步任务（默认 False）
 
     需要认证：Bearer Token 或 API Key（需要 `douyin:fetch:batch` 权限）
     """
+    # 如果使用 Celery 异步任务
+    if request.use_celery:
+        from app.tasks.parse_tasks import parse_batch_links_task
+
+        task = parse_batch_links_task.delay(
+            urls=request.urls,
+            user_id=auth.user_id,
+            video_bool=request.video_bool,
+            music_bool=request.music_bool,
+            cover_bool=request.cover_bool,
+            categories=request.video_categories
+        )
+
+        # 记录日志
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="fetch_batch",
+            message=f"提交批量 Celery 任务: {len(request.urls)} 个链接",
+            status="pending"
+        )
+
+        return {
+            "success": True,
+            "message": f"批量任务已提交到 Celery 队列",
+            "task_id": task.id,
+            "total": len(request.urls),
+            "use_celery": True,
+        }
+
+    # 默认使用 BackgroundTasks（原有逻辑）
     results = []
     errors = []
 

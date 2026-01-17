@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  # Redis - 消息队列和结果存储
+  redis:
+    image: redis:7-alpine
+    container_name: mediahub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # MediaHub 主服务 (FastAPI)
   mediahub:
     build: .
     image: mediahub:latest
@@ -14,9 +31,68 @@ services:
       - ./backend/frontend_config.yml:/app/frontend_config.yml
     environment:
       - TZ=Asia/Shanghai
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # Celery Worker - 任务执行器
+  celery-worker:
+    build: .
+    image: mediahub:latest
+    container_name: mediahub-celery-worker
+    restart: unless-stopped
+    command: celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
+    volumes:
+      - ./downloads:/app/downloads
+      - ./backend/.env:/app/.env
+      - ./backend/frontend_config.yml:/app/frontend_config.yml
+    environment:
+      - TZ=Asia/Shanghai
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Celery Beat - 定时任务调度器
+  celery-beat:
+    build: .
+    image: mediahub:latest
+    container_name: mediahub-celery-beat
+    restart: unless-stopped
+    command: celery -A app.celery_app beat -l info
+    volumes:
+      - ./backend/.env:/app/.env
+    environment:
+      - TZ=Asia/Shanghai
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Flower - 任务监控 Web UI
+  flower:
+    image: mher/flower:2.0
+    container_name: mediahub-flower
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:

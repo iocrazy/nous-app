@@ -1,0 +1,69 @@
+# app/celery_app.py
+
+"""
+Celery 应用初始化模块
+
+用于创建和配置 Celery 实例，支持异步任务处理。
+"""
+
+from celery import Celery
+from app.core.config import settings
+
+# 创建 Celery 应用实例
+celery_app = Celery(
+    "mediahub",
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND,
+    include=[
+        "app.tasks.download_tasks",
+        "app.tasks.parse_tasks",
+        "app.tasks.scheduled_tasks",
+    ]
+)
+
+# Celery 配置
+celery_app.conf.update(
+    # 序列化配置
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+
+    # 时区配置
+    timezone="Asia/Shanghai",
+    enable_utc=True,
+
+    # 任务配置
+    task_track_started=True,
+    task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
+    task_soft_time_limit=settings.CELERY_TASK_TIME_LIMIT - 30,
+
+    # Worker 配置
+    worker_prefetch_multiplier=1,  # 公平调度，每次只取一个任务
+    worker_concurrency=settings.CELERY_WORKER_CONCURRENCY,
+
+    # 结果配置
+    result_expires=3600,  # 结果保留 1 小时
+
+    # 任务路由（可选，用于优先级队列）
+    task_routes={
+        "app.tasks.download_tasks.*": {"queue": "downloads"},
+        "app.tasks.parse_tasks.*": {"queue": "parsing"},
+        "app.tasks.scheduled_tasks.*": {"queue": "scheduled"},
+    },
+
+    # 定时任务调度（Celery Beat）
+    beat_schedule={
+        "cleanup-temp-files-daily": {
+            "task": "app.tasks.scheduled_tasks.cleanup_temp_files",
+            "schedule": 86400.0,  # 每天执行一次
+        },
+        "retry-failed-downloads-hourly": {
+            "task": "app.tasks.scheduled_tasks.retry_failed_downloads",
+            "schedule": 3600.0,  # 每小时执行一次
+        },
+        "update-statistics-6h": {
+            "task": "app.tasks.scheduled_tasks.update_statistics",
+            "schedule": 21600.0,  # 每 6 小时执行一次
+        },
+    },
+)

@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     NOTION_DATABASE_ID: str = Field(default="", description="Notion数据库ID")
     PUSH_TO_NOTION: bool = Field(default=False, description="是否推送到Notion")
 
+    # ============================================
+    # Celery 配置
+    # ============================================
+    CELERY_BROKER_URL: str = Field(default="redis://localhost:6379/0", description="Celery 消息队列 URL")
+    CELERY_RESULT_BACKEND: str = Field(default="redis://localhost:6379/0", description="Celery 结果存储 URL")
+    CELERY_TASK_TIME_LIMIT: int = Field(default=600, description="任务超时时间(秒)")
+    CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Worker 并发数")
+
 
 
     model_config = SettingsConfigDict(
