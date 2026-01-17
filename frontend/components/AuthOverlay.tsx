@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import {
   X, QrCode, Smartphone, Mail, Eye, EyeOff, AlertCircle
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 interface AuthOverlayProps {
@@ -36,6 +37,9 @@ const DouyinIcon = () => (
 
 
 export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) => {
+  const { t } = useTranslation();
+
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginMode, setLoginMode] = useState<'phone' | 'email'>('email');
   const [phoneTab, setPhoneTab] = useState<'sms' | 'password'>('password');
 
@@ -44,12 +48,15 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Style object to enforce visibility
   const inputStyle = { backgroundColor: 'white', color: 'black' };
 
   const handleLogin = async () => {
+    setError(null);
     if (loginMode === 'email' && email && password) {
       const supabase = getSupabaseClient();
       if (isSupabaseConfigured() && supabase) {
@@ -59,14 +66,14 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
             password,
           });
           if (error) {
-            alert(error.message);
+            setError(error.message);
             return;
           }
           if (data.user) {
             onLogin({ email: data.user.email || email, id: data.user.id });
           }
         } catch (err: any) {
-          alert(err.message || 'Login failed');
+          setError(err.message || 'Login failed');
         }
       } else {
         // Demo mode
@@ -75,6 +82,37 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
     } else {
       // Demo mode for phone login
       onLogin({ email: phone ? `${phone}@phone.local` : 'demo@example.com', id: 'demo-user' });
+    }
+  };
+
+  const handleRegister = async () => {
+    setError(null);
+    if (password !== confirmPassword) {
+      setError(t('auth.passwordMismatch'));
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          setError(error.message);
+          return;
+        }
+        alert(t('auth.registerSuccess'));
+        setAuthMode('login');
+        setPassword('');
+        setConfirmPassword('');
+      } catch (err: any) {
+        setError(err.message || 'Registration failed');
+      }
+    } else {
+      // Demo mode - simulate successful registration
+      alert(t('auth.registerSuccess'));
+      setAuthMode('login');
+      setPassword('');
+      setConfirmPassword('');
     }
   };
 
@@ -128,7 +166,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         {/* Right Side: Form */}
         <div className="flex-1 p-8 md:p-12 bg-white flex flex-col justify-center">
 
-           {/* Header: Tabs (Phone) or Title (Email) */}
+           {/* Header: Login/Register Toggle for Email mode, or Phone tabs */}
            <div className="flex items-center justify-center gap-8 mb-8 border-b border-zinc-100 min-h-[40px]">
               {loginMode === 'phone' ? (
                 <>
@@ -156,10 +194,30 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                   </button>
                 </>
               ) : (
-                <div className="pb-3 text-sm font-bold text-red-500 relative">
-                   Email Login
-                   <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-red-500 rounded-full" />
-                </div>
+                <>
+                  <button
+                    onClick={() => { setAuthMode('login'); setError(null); }}
+                    className={`pb-3 text-sm font-bold transition-all relative ${
+                      authMode === 'login' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                    }`}
+                  >
+                    {t('auth.login')}
+                    {authMode === 'login' && (
+                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setAuthMode('register'); setError(null); }}
+                    className={`pb-3 text-sm font-bold transition-all relative ${
+                      authMode === 'register' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                    }`}
+                  >
+                    {t('auth.register')}
+                    {authMode === 'register' && (
+                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
+                    )}
+                  </button>
+                </>
               )}
            </div>
 
@@ -213,10 +271,18 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               {/* --- EMAIL MODE INPUTS --- */}
               {loginMode === 'email' && (
                 <>
+                   {/* Error Message */}
+                   {error && (
+                     <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                       <AlertCircle size={16} />
+                       <span>{error}</span>
+                     </div>
+                   )}
+
                    <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11">
                      <input
                        type="email"
-                       placeholder="Email Address"
+                       placeholder={t('auth.email')}
                        value={email}
                        onChange={(e) => setEmail(e.target.value)}
                        className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
@@ -226,7 +292,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                    <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
                      <input
                        type={showPassword ? "text" : "password"}
-                       placeholder="Password"
+                       placeholder={t('auth.password')}
                        value={password}
                        onChange={(e) => setPassword(e.target.value)}
                        className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
@@ -239,16 +305,51 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                      </button>
                    </div>
+
+                   {/* Confirm Password - only shown in register mode */}
+                   {authMode === 'register' && (
+                     <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                       <input
+                         type={showPassword ? "text" : "password"}
+                         placeholder={t('auth.confirmPassword')}
+                         value={confirmPassword}
+                         onChange={(e) => setConfirmPassword(e.target.value)}
+                         className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                         style={inputStyle}
+                       />
+                     </div>
+                   )}
                 </>
               )}
 
-              {/* Login Button */}
+              {/* Login/Register Button */}
               <button
-                onClick={handleLogin}
+                onClick={authMode === 'register' ? handleRegister : handleLogin}
                 className="w-full bg-[#E53E3E] hover:bg-[#C53030] text-white font-bold py-2.5 rounded-md transition-all shadow-md shadow-red-500/20 active:scale-[0.99] mt-2"
               >
-                Log In
+                {authMode === 'register' ? t('auth.register') : t('auth.login')}
               </button>
+
+              {/* Toggle between Login and Register */}
+              {loginMode === 'email' && (
+                <p className="text-center text-sm text-zinc-500 mt-2">
+                  {authMode === 'login' ? (
+                    <button
+                      onClick={() => { setAuthMode('register'); setError(null); }}
+                      className="text-indigo-500 hover:underline"
+                    >
+                      {t('auth.noAccount')}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setAuthMode('login'); setError(null); }}
+                      className="text-indigo-500 hover:underline"
+                    >
+                      {t('auth.hasAccount')}
+                    </button>
+                  )}
+                </p>
+              )}
 
               {/* Social Login */}
               <div className="flex justify-center gap-6 mt-8 pt-6 border-t border-zinc-100">
