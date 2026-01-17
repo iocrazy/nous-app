@@ -422,41 +422,43 @@ export default function App() {
     loadTeamLibraryVideos();
   }, [isTeamLibraryActive, activeCollectionId, collections]);
 
+  // Function to load all shared video IDs for badge display
+  const loadAllSharedVideos = async (collectionsToCheck: Collection[]) => {
+    const supabase = getSupabaseClient();
+    if (!supabase || !isAuthenticated) {
+      setSharedVideoIds([]);
+      return;
+    }
+
+    // Get all team collections (collections with team_id)
+    const teamCollections = collectionsToCheck.filter(c => c.team_id);
+    if (teamCollections.length === 0) {
+      setSharedVideoIds([]);
+      return;
+    }
+
+    const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
+    const { data } = await supabase
+      .from('video_collections')
+      .select('video_id')
+      .in('collection_id', teamCollectionIds);
+
+    if (data && data.length > 0) {
+      const videoIds = [...new Set(data.map(v => v.video_id))];
+      const { data: videos } = await supabase
+        .from('douyin_videos')
+        .select('aweme_id')
+        .in('id', videoIds);
+
+      setSharedVideoIds(videos?.map(v => v.aweme_id) || []);
+    } else {
+      setSharedVideoIds([]);
+    }
+  };
+
   // Load all shared video IDs for badge display in library (regardless of Team Library mode)
   useEffect(() => {
-    const loadAllSharedVideos = async () => {
-      const supabase = getSupabaseClient();
-      if (!supabase || !isAuthenticated) {
-        setSharedVideoIds([]);
-        return;
-      }
-
-      // Get all team collections (collections with team_id)
-      const teamCollections = collections.filter(c => c.team_id);
-      if (teamCollections.length === 0) {
-        setSharedVideoIds([]);
-        return;
-      }
-
-      const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-      const { data } = await supabase
-        .from('video_collections')
-        .select('video_id')
-        .in('collection_id', teamCollectionIds);
-
-      if (data && data.length > 0) {
-        const videoIds = [...new Set(data.map(v => v.video_id))];
-        const { data: videos } = await supabase
-          .from('douyin_videos')
-          .select('aweme_id')
-          .in('id', videoIds);
-
-        setSharedVideoIds(videos?.map(v => v.aweme_id) || []);
-      } else {
-        setSharedVideoIds([]);
-      }
-    };
-    loadAllSharedVideos();
+    loadAllSharedVideos(collections);
   }, [isAuthenticated, collections]);
 
   // Supabase Realtime 订阅 - 自动同步数据库变化
@@ -574,8 +576,12 @@ export default function App() {
             }
           }
 
-          // 刷新集合列表以更新 video_count
-          fetchMyCollections().then(setCollections).catch(console.error);
+          // 刷新集合列表以更新 video_count 和 sharedVideoIds
+          fetchMyCollections().then(newCollections => {
+            setCollections(newCollections);
+            // 刷新共享视频ID列表以更新徽章显示
+            loadAllSharedVideos(newCollections);
+          }).catch(console.error);
         }
       )
       .subscribe((status) => {
