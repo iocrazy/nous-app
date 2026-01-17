@@ -543,13 +543,13 @@ export default function App() {
     }
 
     const collectionChannel = supabase
-      .channel('collection_videos_realtime')
+      .channel('video_collections_realtime')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'collection_videos',
+          table: 'video_collections',
         },
         async (payload) => {
           console.log('Collection videos realtime update:', payload.eventType, payload);
