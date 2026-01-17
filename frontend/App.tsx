@@ -355,33 +355,40 @@ export default function App() {
   // State for all shared video IDs (for showing shared badge in library)
   const [sharedVideoIds, setSharedVideoIds] = useState<string[]>([]);
 
-  // Load collection video IDs when collection is selected
-  useEffect(() => {
-    const loadCollectionVideos = async () => {
-      if (activeCollectionId) {
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          const { data } = await supabase
-            .from('video_collections')
-            .select('video_id')
-            .eq('collection_id', parseInt(activeCollectionId));
+  // Function to load collection video IDs
+  const loadCollectionVideos = async (collectionId: string | null) => {
+    if (collectionId) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data } = await supabase
+          .from('video_collections')
+          .select('video_id')
+          .eq('collection_id', parseInt(collectionId));
 
-          if (data) {
-            // Get aweme_ids from video_ids
-            const videoIds = data.map(v => v.video_id);
+        if (data) {
+          // Get aweme_ids from video_ids
+          const videoIds = data.map(v => v.video_id);
+          if (videoIds.length > 0) {
             const { data: videos } = await supabase
               .from('douyin_videos')
               .select('aweme_id')
               .in('id', videoIds);
-
             setCollectionVideoIds(videos?.map(v => v.aweme_id) || []);
+          } else {
+            setCollectionVideoIds([]);
           }
+        } else {
+          setCollectionVideoIds([]);
         }
-      } else {
-        setCollectionVideoIds([]);
       }
-    };
-    loadCollectionVideos();
+    } else {
+      setCollectionVideoIds([]);
+    }
+  };
+
+  // Load collection video IDs when collection is selected
+  useEffect(() => {
+    loadCollectionVideos(activeCollectionId);
   }, [activeCollectionId]);
 
   // Load all team collection video IDs when Team Library is active
@@ -547,33 +554,22 @@ export default function App() {
         async (payload) => {
           console.log('Collection videos realtime update:', payload.eventType, payload);
 
-          const newRecord = payload.new as { collection_id: string; video_aweme_id: string };
-          const oldRecord = payload.old as { collection_id: string; video_aweme_id: string };
+          // video_collections 表的字段: collection_id (number), video_id (number), added_by, added_at
+          const newRecord = payload.new as { collection_id: number; video_id: number };
+          const oldRecord = payload.old as { collection_id: number; video_id: number };
 
-          // 如果当前正在查看的集合有变化，刷新集合视频列表
-          if (payload.eventType === 'INSERT' && activeCollectionId === newRecord?.collection_id) {
-            setCollectionVideoIds(prev => {
-              if (prev.includes(newRecord.video_aweme_id)) return prev;
-              return [...prev, newRecord.video_aweme_id];
-            });
-          } else if (payload.eventType === 'DELETE' && activeCollectionId === oldRecord?.collection_id) {
-            setCollectionVideoIds(prev =>
-              prev.filter(id => id !== oldRecord.video_aweme_id)
-            );
+          const changedCollectionId = newRecord?.collection_id || oldRecord?.collection_id;
+
+          // 如果当前正在查看的集合有变化，重新加载集合视频列表
+          if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
+            loadCollectionVideos(activeCollectionId);
           }
 
-          // 如果正在查看的视频的集合关系变化，更新选中视频的集合列表
+          // 如果正在查看的视频的集合关系变化，重新加载选中视频的集合列表
           if (selectedLibraryItem?.aweme_id) {
-            if (payload.eventType === 'INSERT' && newRecord?.video_aweme_id === selectedLibraryItem.aweme_id) {
-              setSelectedVideoCollectionIds(prev => {
-                if (prev.includes(newRecord.collection_id)) return prev;
-                return [...prev, newRecord.collection_id];
-              });
-            } else if (payload.eventType === 'DELETE' && oldRecord?.video_aweme_id === selectedLibraryItem.aweme_id) {
-              setSelectedVideoCollectionIds(prev =>
-                prev.filter(id => id !== oldRecord.collection_id)
-              );
-            }
+            fetchVideoCollections(selectedLibraryItem.aweme_id)
+              .then(setSelectedVideoCollectionIds)
+              .catch(console.error);
           }
 
           // 刷新集合列表以更新 video_count 和 sharedVideoIds
