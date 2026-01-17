@@ -3,6 +3,20 @@
 -- Execute this in Supabase SQL Editor
 
 -- ============================================================================
+-- Part 0: Teams Table (if not exists)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS teams (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  owner_id UUID REFERENCES auth.users(id) NOT NULL,
+  invite_code VARCHAR(20) UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
 -- Part 1: Team Members Table
 -- ============================================================================
 

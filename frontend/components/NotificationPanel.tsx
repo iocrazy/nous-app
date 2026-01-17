@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { X, Bell, Users, CheckCheck } from 'lucide-react';
+import { Bell, Users, CheckCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface Notification {

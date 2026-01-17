@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Globe, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { changeLanguage, getCurrentLanguage } from '../i18n';
+import { changeLanguage } from '../i18n';
 
 interface LanguageSwitcherProps {
   variant?: 'dropdown' | 'inline';
