@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard, Search, Library, Settings, LogOut,
   Link as LinkIcon, AlertCircle, Loader2, Sparkles, User, Database,
-  LayoutGrid, LayoutList, ChevronDown, FolderOpen, Key, Smartphone, X,
+  LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
   Layers, Download, Users
@@ -195,6 +195,7 @@ export default function App() {
   const [collectionVideoIds, setCollectionVideoIds] = useState<string[]>([]);
   const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
   const [isTeamLibraryOpen, setIsTeamLibraryOpen] = useState(true);
+  const [isTeamLibraryActive, setIsTeamLibraryActive] = useState(false);
 
   // Parser Configuration State
   const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
@@ -349,6 +350,9 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  // State for team library video IDs (all videos in team collections)
+  const [teamLibraryVideoIds, setTeamLibraryVideoIds] = useState<string[]>([]);
+
   // Load collection video IDs when collection is selected
   useEffect(() => {
     const loadCollectionVideos = async () => {
@@ -377,6 +381,44 @@ export default function App() {
     };
     loadCollectionVideos();
   }, [activeCollectionId]);
+
+  // Load all team collection video IDs when Team Library is active
+  useEffect(() => {
+    const loadTeamLibraryVideos = async () => {
+      if (isTeamLibraryActive && !activeCollectionId) {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          // Get all team collections (collections with team_id)
+          const teamCollections = collections.filter(c => c.team_id);
+          if (teamCollections.length === 0) {
+            setTeamLibraryVideoIds([]);
+            return;
+          }
+
+          const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
+          const { data } = await supabase
+            .from('video_collections')
+            .select('video_id')
+            .in('collection_id', teamCollectionIds);
+
+          if (data && data.length > 0) {
+            const videoIds = [...new Set(data.map(v => v.video_id))];
+            const { data: videos } = await supabase
+              .from('douyin_videos')
+              .select('aweme_id')
+              .in('id', videoIds);
+
+            setTeamLibraryVideoIds(videos?.map(v => v.aweme_id) || []);
+          } else {
+            setTeamLibraryVideoIds([]);
+          }
+        }
+      } else if (!isTeamLibraryActive) {
+        setTeamLibraryVideoIds([]);
+      }
+    };
+    loadTeamLibraryVideos();
+  }, [isTeamLibraryActive, activeCollectionId, collections]);
 
   // Supabase Realtime 订阅 - 自动同步数据库变化
   useEffect(() => {
@@ -444,6 +486,65 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [isAuthenticated]);
+
+  // Supabase Realtime for collection_videos - 共享集合实时同步
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
+      return;
+    }
+
+    const collectionChannel = supabase
+      .channel('collection_videos_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'collection_videos',
+        },
+        async (payload) => {
+          console.log('Collection videos realtime update:', payload.eventType, payload);
+
+          const newRecord = payload.new as { collection_id: string; video_aweme_id: string };
+          const oldRecord = payload.old as { collection_id: string; video_aweme_id: string };
+
+          // 如果当前正在查看的集合有变化，刷新集合视频列表
+          if (payload.eventType === 'INSERT' && activeCollectionId === newRecord?.collection_id) {
+            setCollectionVideoIds(prev => {
+              if (prev.includes(newRecord.video_aweme_id)) return prev;
+              return [...prev, newRecord.video_aweme_id];
+            });
+          } else if (payload.eventType === 'DELETE' && activeCollectionId === oldRecord?.collection_id) {
+            setCollectionVideoIds(prev =>
+              prev.filter(id => id !== oldRecord.video_aweme_id)
+            );
+          }
+
+          // 如果正在查看的视频的集合关系变化，更新选中视频的集合列表
+          if (selectedLibraryItem?.aweme_id) {
+            if (payload.eventType === 'INSERT' && newRecord?.video_aweme_id === selectedLibraryItem.aweme_id) {
+              setSelectedVideoCollectionIds(prev => {
+                if (prev.includes(newRecord.collection_id)) return prev;
+                return [...prev, newRecord.collection_id];
+              });
+            } else if (payload.eventType === 'DELETE' && oldRecord?.video_aweme_id === selectedLibraryItem.aweme_id) {
+              setSelectedVideoCollectionIds(prev =>
+                prev.filter(id => id !== oldRecord.collection_id)
+              );
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Collection videos realtime subscription status:', status);
+      });
+
+    return () => {
+      console.log('Unsubscribing from collection videos realtime channel');
+      supabase.removeChannel(collectionChannel);
+    };
+  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.aweme_id]);
 
   // Load collections for selected video
   useEffect(() => {
@@ -931,8 +1032,12 @@ export default function App() {
   // Filter and sort library - 默认按添加时间降序（最新在前）
   const filteredLibrary = library
     .filter(item => {
-      // Filter by collection if selected
+      // Filter by specific collection if selected
       if (activeCollectionId && !collectionVideoIds.includes(item.aweme_id)) {
+        return false;
+      }
+      // Filter by team library (all team collections) if active but no specific collection
+      if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.aweme_id)) {
         return false;
       }
       if (!searchQuery) return true;
@@ -1181,23 +1286,40 @@ export default function App() {
           <SidebarItem
             icon={Library}
             label={t('nav.myLibrary')}
-            active={view === 'library' && !activeCollectionId}
+            active={view === 'library' && !activeCollectionId && !isTeamLibraryActive}
             onClick={() => {
               setActiveCollectionId(null);
+              setIsTeamLibraryActive(false);
               setView('library');
             }}
           />
 
           {/* Team Library with submenu */}
           <div className="space-y-1">
-            <SidebarItem
-              icon={Users}
-              label={t('nav.sharedCollections')}
-              active={!!activeCollectionId}
-              onClick={() => setIsTeamLibraryOpen(!isTeamLibraryOpen)}
-              hasSubmenu
-              isOpen={isTeamLibraryOpen}
-            />
+            <div className="flex items-center">
+              <button
+                onClick={() => {
+                  setIsTeamLibraryActive(true);
+                  setActiveCollectionId(null);
+                  setView('library');
+                  setIsTeamLibraryOpen(true);
+                }}
+                className={`flex-1 flex items-center px-4 py-3 rounded-xl transition-all duration-200 group ${
+                  isTeamLibraryActive && !activeCollectionId
+                    ? 'bg-indigo-600/10 text-indigo-400 font-medium'
+                    : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+                }`}
+              >
+                <Users className={`w-5 h-5 mr-3 ${isTeamLibraryActive && !activeCollectionId ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`} />
+                <span>{t('nav.sharedCollections')}</span>
+              </button>
+              <button
+                onClick={() => setIsTeamLibraryOpen(!isTeamLibraryOpen)}
+                className="p-2 text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                <ChevronDown size={16} className={`transition-transform duration-200 ${isTeamLibraryOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
 
             {/* Collections Sub-menu */}
             {isTeamLibraryOpen && (
@@ -1207,6 +1329,7 @@ export default function App() {
                     key={collection.id}
                     onClick={() => {
                       setActiveCollectionId(collection.id);
+                      setIsTeamLibraryActive(true);
                       setView('library');
                     }}
                     className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors flex items-center justify-between ${
@@ -1215,7 +1338,10 @@ export default function App() {
                         : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    <span className="truncate">{collection.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Folder size={14} className={activeCollectionId === collection.id ? 'text-indigo-400' : 'text-zinc-600'} />
+                      <span className="truncate">{collection.name}</span>
+                    </div>
                     <span className="text-xs text-zinc-600">{collection.video_count}</span>
                   </button>
                 ))}
@@ -1589,24 +1715,41 @@ export default function App() {
                 <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
                     <div className="flex items-center gap-3">
+                      {(activeCollectionId || isTeamLibraryActive) && (
+                        <button
+                          onClick={() => {
+                            setActiveCollectionId(null);
+                            setIsTeamLibraryActive(false);
+                          }}
+                          className="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                          title={t('common.back')}
+                        >
+                          <ArrowLeft size={20} />
+                        </button>
+                      )}
+                      {isTeamLibraryActive && !activeCollectionId && (
+                        <div className="p-2 bg-indigo-500/20 rounded-lg">
+                          <Users size={20} className="text-indigo-400" />
+                        </div>
+                      )}
+                      {activeCollectionId && (
+                        <div className="p-2 bg-indigo-500/20 rounded-lg">
+                          <Folder size={20} className="text-indigo-400" />
+                        </div>
+                      )}
                       <h1 className="text-2xl font-bold text-white">
                         {activeCollectionId
                           ? collections.find(c => c.id === activeCollectionId)?.name || 'Collection'
+                          : isTeamLibraryActive
+                          ? t('nav.sharedCollections')
                           : t('library.title')}
                       </h1>
-                      {activeCollectionId && (
-                        <button
-                          onClick={() => setActiveCollectionId(null)}
-                          className="px-2 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg flex items-center gap-1"
-                        >
-                          <X size={12} />
-                          {t('common.cancel')}
-                        </button>
-                      )}
                     </div>
                     <p className="text-zinc-400 text-sm">
                       {activeCollectionId
                         ? `${collectionVideoIds.length} videos in this collection`
+                        : isTeamLibraryActive
+                        ? `${teamLibraryVideoIds.length} videos shared in teams`
                         : t('library.subtitle')}
                     </p>
                   </div>
