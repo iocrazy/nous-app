@@ -6,15 +6,16 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
-  Layers, Download
+  Layers, Download, Users
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { DouyinBase, ViewState, UserProfile, UserSettings, Team } from './types';
+import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
+import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
 import { MOCK_LIBRARY } from './constants';
 import { MediaCard } from './components/MediaCard';
 import { CompactMediaCard } from './components/CompactMediaCard';
@@ -29,6 +30,8 @@ import { Header } from './components/Header';
 import { UserDropdown } from './components/UserDropdown';
 import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
+import { TeamSettingsModal } from './components/TeamSettingsModal';
+import { CreateCollectionModal } from './components/CreateCollectionModal';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -185,7 +188,14 @@ export default function App() {
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
-  
+  const [isTeamSettingsOpen, setIsTeamSettingsOpen] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
+  const [collectionVideoIds, setCollectionVideoIds] = useState<string[]>([]);
+  const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
+  const [isTeamLibraryOpen, setIsTeamLibraryOpen] = useState(true);
+
   // Parser Configuration State
   const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
   const [batchInput, setBatchInput] = useState('');
@@ -327,15 +337,46 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
-  // Fetch teams and notifications when user logs in
+  // Fetch teams, notifications, and collections when user logs in
   useEffect(() => {
     if (isAuthenticated) {
       // Fetch teams
       fetchMyTeams().then(setTeams).catch(console.error);
       // Fetch notifications
       fetchNotifications().then(setNotifications).catch(console.error);
+      // Fetch collections
+      fetchMyCollections().then(setCollections).catch(console.error);
     }
   }, [isAuthenticated]);
+
+  // Load collection video IDs when collection is selected
+  useEffect(() => {
+    const loadCollectionVideos = async () => {
+      if (activeCollectionId) {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { data } = await supabase
+            .from('video_collections')
+            .select('video_id')
+            .eq('collection_id', parseInt(activeCollectionId));
+
+          if (data) {
+            // Get aweme_ids from video_ids
+            const videoIds = data.map(v => v.video_id);
+            const { data: videos } = await supabase
+              .from('douyin_videos')
+              .select('aweme_id')
+              .in('id', videoIds);
+
+            setCollectionVideoIds(videos?.map(v => v.aweme_id) || []);
+          }
+        }
+      } else {
+        setCollectionVideoIds([]);
+      }
+    };
+    loadCollectionVideos();
+  }, [activeCollectionId]);
 
   // Supabase Realtime 订阅 - 自动同步数据库变化
   useEffect(() => {
@@ -404,6 +445,15 @@ export default function App() {
     };
   }, [isAuthenticated]);
 
+  // Load collections for selected video
+  useEffect(() => {
+    if (selectedLibraryItem?.aweme_id) {
+      loadSelectedVideoCollections(selectedLibraryItem.aweme_id);
+    } else {
+      setSelectedVideoCollectionIds([]);
+    }
+  }, [selectedLibraryItem?.aweme_id]);
+
   const handleLogin = (user: { email: string; id: string }) => {
     setUserProfile(prev => ({
       ...prev,
@@ -470,7 +520,65 @@ export default function App() {
 
   const handleTeamSettings = (teamId: string) => {
     setIsUserDropdownOpen(false);
-    alert(t('user.teamSettingsComingSoon') || 'Team settings feature coming soon');
+    setSelectedTeamId(teamId);
+    setIsTeamSettingsOpen(true);
+  };
+
+  const handleTeamUpdated = (updatedTeam: Team) => {
+    setTeams(prev => prev.map(t => t.id === updatedTeam.id ? updatedTeam : t));
+  };
+
+  const handleTeamDeleted = (teamId: string) => {
+    setTeams(prev => prev.filter(t => t.id !== teamId));
+    if (activeTeamId === teamId) {
+      setActiveTeamId(null);
+    }
+  };
+
+  const handleTeamLeft = (teamId: string) => {
+    setTeams(prev => prev.filter(t => t.id !== teamId));
+    if (activeTeamId === teamId) {
+      setActiveTeamId(null);
+    }
+  };
+
+  const handleCreateCollection = async (name: string, teamId: string | null) => {
+    const newCollection = await createCollection(name, teamId || undefined);
+    setCollections(prev => [newCollection, ...prev]);
+  };
+
+  // State for selected video's collection IDs
+  const [selectedVideoCollectionIds, setSelectedVideoCollectionIds] = useState<string[]>([]);
+
+  // Load collections for selected video
+  const loadSelectedVideoCollections = async (awemeId: string) => {
+    try {
+      const collectionIds = await fetchVideoCollections(awemeId);
+      setSelectedVideoCollectionIds(collectionIds);
+    } catch (err) {
+      console.error('Failed to load video collections:', err);
+      setSelectedVideoCollectionIds([]);
+    }
+  };
+
+  // Toggle video in collection
+  const handleToggleVideoCollection = async (collectionId: string) => {
+    if (!selectedLibraryItem?.aweme_id) return;
+
+    const awemeId = selectedLibraryItem.aweme_id;
+    const isInCollection = selectedVideoCollectionIds.includes(collectionId);
+
+    try {
+      if (isInCollection) {
+        await removeVideoFromCollection(collectionId, awemeId);
+        setSelectedVideoCollectionIds(prev => prev.filter(id => id !== collectionId));
+      } else {
+        await addVideoToCollection(collectionId, awemeId);
+        setSelectedVideoCollectionIds(prev => [...prev, collectionId]);
+      }
+    } catch (err) {
+      console.error('Failed to toggle video collection:', err);
+    }
   };
 
   const handleUpdateSettings = async (newSettings: UserSettings) => {
@@ -823,6 +931,10 @@ export default function App() {
   // Filter and sort library - 默认按添加时间降序（最新在前）
   const filteredLibrary = library
     .filter(item => {
+      // Filter by collection if selected
+      if (activeCollectionId && !collectionVideoIds.includes(item.aweme_id)) {
+        return false;
+      }
       if (!searchQuery) return true;
       const lowerQuery = searchQuery.toLowerCase();
       return (
@@ -951,6 +1063,30 @@ export default function App() {
         onTeamCreated={handleTeamCreated}
       />
 
+      {/* Team Settings Modal */}
+      {selectedTeamId && (
+        <TeamSettingsModal
+          isOpen={isTeamSettingsOpen}
+          onClose={() => {
+            setIsTeamSettingsOpen(false);
+            setSelectedTeamId(null);
+          }}
+          teamId={selectedTeamId}
+          currentUserId={currentUserId || ''}
+          onTeamUpdated={handleTeamUpdated}
+          onTeamDeleted={handleTeamDeleted}
+          onTeamLeft={handleTeamLeft}
+        />
+      )}
+
+      {/* Create Collection Modal */}
+      <CreateCollectionModal
+        isOpen={isCreateCollectionModalOpen}
+        onClose={() => setIsCreateCollectionModalOpen(false)}
+        onSubmit={handleCreateCollection}
+        teams={teams}
+      />
+
       {/* Mobile Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
         
@@ -1036,29 +1172,76 @@ export default function App() {
         </div>
 
         <nav className="flex-1 space-y-2">
-          <SidebarItem 
-            icon={Search} 
-            label="Link Parser" 
-            active={view === 'parser'} 
-            onClick={() => setView('parser')} 
+          <SidebarItem
+            icon={Search}
+            label={t('nav.linkParser')}
+            active={view === 'parser'}
+            onClick={() => setView('parser')}
           />
-          <SidebarItem 
-            icon={Library} 
-            label="My Library" 
-            active={view === 'library'} 
-            onClick={() => setView('library')} 
+          <SidebarItem
+            icon={Library}
+            label={t('nav.myLibrary')}
+            active={view === 'library' && !activeCollectionId}
+            onClick={() => {
+              setActiveCollectionId(null);
+              setView('library');
+            }}
           />
-          <SidebarItem 
-            icon={LayoutDashboard} 
-            label="Dashboard" 
-            active={view === 'dashboard'} 
-            onClick={() => setView('dashboard')} 
-          />
-          
+
+          {/* Team Library with submenu */}
           <div className="space-y-1">
-             <SidebarItem 
-              icon={Settings} 
-              label="Settings" 
+            <SidebarItem
+              icon={Users}
+              label={t('nav.sharedCollections')}
+              active={!!activeCollectionId}
+              onClick={() => setIsTeamLibraryOpen(!isTeamLibraryOpen)}
+              hasSubmenu
+              isOpen={isTeamLibraryOpen}
+            />
+
+            {/* Collections Sub-menu */}
+            {isTeamLibraryOpen && (
+              <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
+                {collections.map(collection => (
+                  <button
+                    key={collection.id}
+                    onClick={() => {
+                      setActiveCollectionId(collection.id);
+                      setView('library');
+                    }}
+                    className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors flex items-center justify-between ${
+                      activeCollectionId === collection.id
+                        ? 'text-indigo-400 bg-indigo-500/5'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    <span className="truncate">{collection.name}</span>
+                    <span className="text-xs text-zinc-600">{collection.video_count}</span>
+                  </button>
+                ))}
+                {/* Create Collection Button */}
+                <button
+                  onClick={() => setIsCreateCollectionModalOpen(true)}
+                  className="w-full text-left px-4 py-2 text-sm rounded-r-lg text-indigo-400 hover:bg-indigo-500/5 transition-colors flex items-center gap-2"
+                >
+                  <span>+</span>
+                  <span>{t('collections.create')}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <SidebarItem
+            icon={LayoutDashboard}
+            label={t('nav.dashboard')}
+            active={view === 'dashboard'}
+            onClick={() => setView('dashboard')}
+          />
+
+          <div className="space-y-1">
+             <SidebarItem
+              icon={Settings}
+              label={t('nav.settings')}
               active={view === 'settings'} 
               onClick={() => {
                 setView('settings');
@@ -1113,40 +1296,40 @@ export default function App() {
           <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="text-center space-y-2 mb-6">
               <h1 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
-                Douyin Media Parser
+                {t('parser.title')}
               </h1>
               <p className="text-zinc-400">
-                Paste shared links to analyze and download content watermark-free.
+                {t('parser.subtitle')}
               </p>
             </div>
 
             {/* Parsing Mode Toggle */}
             <div className="flex justify-center">
               <div className="bg-zinc-900 p-1 rounded-xl border border-zinc-800 inline-flex">
-                <button 
+                <button
                   onClick={() => setParserMode('single')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    parserMode === 'single' 
-                    ? 'bg-zinc-800 text-white shadow-sm' 
+                    parserMode === 'single'
+                    ? 'bg-zinc-800 text-white shadow-sm'
                     : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <LinkIcon size={14} />
-                    <span>Single Link</span>
+                    <span>{t('parser.singleLink')}</span>
                   </div>
                 </button>
-                <button 
+                <button
                   onClick={() => setParserMode('batch')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    parserMode === 'batch' 
-                    ? 'bg-zinc-800 text-white shadow-sm' 
+                    parserMode === 'batch'
+                    ? 'bg-zinc-800 text-white shadow-sm'
                     : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <Layers size={14} />
-                    <span>Batch Download</span>
+                    <span>{t('parser.batchDownload')}</span>
                   </div>
                 </button>
               </div>
@@ -1159,20 +1342,20 @@ export default function App() {
                 {parserMode === 'single' ? (
                   <div className="flex items-center">
                     <LinkIcon className="ml-3 text-zinc-500 w-5 h-5 flex-shrink-0" />
-                    <input 
-                      type="text" 
-                      placeholder="Paste Douyin link here (e.g., https://v.douyin.com/...)" 
+                    <input
+                      type="text"
+                      placeholder={t('parser.placeholder')}
                       className="flex-1 bg-transparent border-none outline-none text-zinc-200 placeholder-zinc-600 px-4 py-3"
                       value={urlInput}
                       onChange={(e) => setUrlInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleParse()}
                     />
-                    <button 
+                    <button
                       onClick={handleParse}
                       disabled={isParsing || !urlInput}
                       className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 flex-shrink-0"
                     >
-                      {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : 'Analyze'}
+                      {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : t('parser.analyze')}
                     </button>
                   </div>
                 ) : (
@@ -1188,12 +1371,12 @@ export default function App() {
                       <span className="text-xs text-zinc-500 ml-2">
                          {batchInput.split(/\r?\n/).filter(l => l.trim().length > 0).length} links detected
                       </span>
-                      <button 
+                      <button
                         onClick={handleParse}
                         disabled={isParsing || !batchInput}
                         className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
                       >
-                        {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : 'Process Batch'}
+                        {isParsing && taskProgress < 100 ? <Loader2 className="animate-spin w-4 h-4" /> : t('parser.processBatch')}
                       </button>
                     </div>
                   </div>
@@ -1204,11 +1387,11 @@ export default function App() {
             {/* Parser Configuration Options */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* Option: Video/Image */}
-              <button 
+              <button
                 onClick={() => setDownloadOptions(prev => ({ ...prev, video: !prev.video }))}
                 className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
-                  downloadOptions.video 
-                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300' 
+                  downloadOptions.video
+                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
                     : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
                 }`}
               >
@@ -1219,16 +1402,16 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Video size={16} />
-                  <span className="text-sm font-medium">Download Video/Img</span>
+                  <span className="text-sm font-medium">{t('parser.downloadVideo')}</span>
                 </div>
               </button>
 
               {/* Option: Audio */}
-              <button 
+              <button
                 onClick={() => setDownloadOptions(prev => ({ ...prev, audio: !prev.audio }))}
                 className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
-                  downloadOptions.audio 
-                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300' 
+                  downloadOptions.audio
+                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
                     : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
                 }`}
               >
@@ -1239,16 +1422,16 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Music size={16} />
-                  <span className="text-sm font-medium">Download Audio</span>
+                  <span className="text-sm font-medium">{t('parser.downloadAudio')}</span>
                 </div>
               </button>
 
               {/* Option: Cover */}
-              <button 
+              <button
                 onClick={() => setDownloadOptions(prev => ({ ...prev, cover: !prev.cover }))}
                 className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
-                  downloadOptions.cover 
-                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300' 
+                  downloadOptions.cover
+                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
                     : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
                 }`}
               >
@@ -1259,7 +1442,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <ImageIcon size={16} />
-                  <span className="text-sm font-medium">Download Cover</span>
+                  <span className="text-sm font-medium">{t('parser.downloadCover')}</span>
                 </div>
               </button>
             </div>
@@ -1267,12 +1450,12 @@ export default function App() {
             {/* Custom Tags Input */}
             <div className="relative">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-600">Tags</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-600">{t('parser.tags')}</span>
               </div>
-              <input 
+              <input
                 value={customTags}
                 onChange={e => setCustomTags(e.target.value)}
-                placeholder="e.g. Food, Travel, Tutorial (Optional)"
+                placeholder={t('parser.tagsPlaceholder')}
                 className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-16 pr-10 py-3.5 text-zinc-200 focus:border-indigo-500 outline-none transition-colors text-sm"
               />
               <Tag className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
@@ -1349,22 +1532,22 @@ export default function App() {
                     <div className="w-10 h-10 bg-indigo-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-indigo-400">
                       <Database size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Cloud Storage</h4>
-                    <p className="text-xs text-zinc-500">Automatically save parsed metadata to Supabase.</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureCloud')}</h4>
+                    <p className="text-xs text-zinc-500">{t('parser.featureCloudDesc')}</p>
                  </div>
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
                     <div className="w-10 h-10 bg-purple-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-purple-400">
                       <Terminal size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Live Monitor</h4>
-                    <p className="text-xs text-zinc-500">Real-time WebSocket task tracking and logging.</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureMonitor')}</h4>
+                    <p className="text-xs text-zinc-500">{t('parser.featureMonitorDesc')}</p>
                  </div>
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
                     <div className="w-10 h-10 bg-pink-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-pink-400">
                       <LinkIcon size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Multi-Format</h4>
-                    <p className="text-xs text-zinc-500">Support for Videos, Image Atlases, and Audio.</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureFormat')}</h4>
+                    <p className="text-xs text-zinc-500">{t('parser.featureFormatDesc')}</p>
                  </div>
               </div>
             )}
@@ -1388,7 +1571,15 @@ export default function App() {
                     <h2 className="text-xl font-bold text-white">Media Details</h2>
                  </div>
                  <div className="flex-1 min-h-0">
-                    <MediaCard data={selectedLibraryItem} onSave={(item) => handleSaveToLibrary(item)} onUpdate={handleUpdateLibraryItem} onDelete={handleDeleteLibraryItem} />
+                    <MediaCard
+                      data={selectedLibraryItem}
+                      onUpdate={handleUpdateLibraryItem}
+                      onDelete={handleDeleteLibraryItem}
+                      collections={collections}
+                      videoCollectionIds={selectedVideoCollectionIds}
+                      onToggleCollection={handleToggleVideoCollection}
+                      onCreateCollection={handleCreateCollection}
+                    />
                  </div>
               </div>
             ) : (
@@ -1397,8 +1588,27 @@ export default function App() {
                 {/* Desktop Header - HIDDEN ON MOBILE */}
                 <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
-                    <h1 className="text-2xl font-bold text-white">Your Collection</h1>
-                    <p className="text-zinc-400 text-sm">Manage your saved downloads.</p>
+                    <div className="flex items-center gap-3">
+                      <h1 className="text-2xl font-bold text-white">
+                        {activeCollectionId
+                          ? collections.find(c => c.id === activeCollectionId)?.name || 'Collection'
+                          : t('library.title')}
+                      </h1>
+                      {activeCollectionId && (
+                        <button
+                          onClick={() => setActiveCollectionId(null)}
+                          className="px-2 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg flex items-center gap-1"
+                        >
+                          <X size={12} />
+                          {t('common.cancel')}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-zinc-400 text-sm">
+                      {activeCollectionId
+                        ? `${collectionVideoIds.length} videos in this collection`
+                        : t('library.subtitle')}
+                    </p>
                   </div>
                   
                   <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
@@ -1415,9 +1625,9 @@ export default function App() {
                      {/* Search */}
                      <div className="relative flex-1 md:w-64">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 w-4 h-4" />
-                        <input 
-                          type="text" 
-                          placeholder="Search title, tags, notes..." 
+                        <input
+                          type="text"
+                          placeholder={t('library.searchPlaceholder')}
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           className="w-full bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm rounded-lg pl-9 pr-3 py-2 outline-none focus:border-indigo-500 transition-colors"
@@ -1543,8 +1753,8 @@ export default function App() {
         {view === 'dashboard' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <header className="mb-8">
-                <h1 className="text-2xl font-bold text-white">Analytics</h1>
-                <p className="text-zinc-400 text-sm">Real-time statistics of your downloading habits.</p>
+                <h1 className="text-2xl font-bold text-white">{t('dashboard.title')}</h1>
+                <p className="text-zinc-400 text-sm">{t('dashboard.subtitle')}</p>
              </header>
 
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -1564,25 +1774,25 @@ export default function App() {
                   const stats = dashboardStats;
                   return [
                     {
-                      label: "Total Videos",
+                      label: t('dashboard.totalVideos'),
                       val: stats?.totalVideos?.toLocaleString() || "0",
                       change: `${stats?.completedDownloads || 0} done`,
                       color: "text-indigo-400"
                     },
                     {
-                      label: "Storage Used",
+                      label: t('dashboard.storageUsed'),
                       val: formatStorage(stats?.totalStorageBytes || 0),
                       change: `${stats?.pendingDownloads || 0} pending`,
                       color: "text-purple-400"
                     },
                     {
-                      label: "Saved Creators",
+                      label: t('dashboard.savedCreators'),
                       val: (stats?.uniqueAuthors || 0).toString(),
                       change: `${stats?.failedDownloads || 0} failed`,
                       color: "text-pink-400"
                     },
                     {
-                      label: "Success Rate",
+                      label: t('dashboard.successRate'),
                       val: stats?.totalVideos
                         ? `${Math.round((stats.completedDownloads / stats.totalVideos) * 100)}%`
                         : "0%",

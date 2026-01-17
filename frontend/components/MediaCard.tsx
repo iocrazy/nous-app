@@ -1,19 +1,24 @@
 
 import React, { useState } from 'react';
-import { DouyinBase, DownloadStatus } from '../types';
+import { DouyinBase, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
+import { CollectionPicker } from './CollectionPicker';
 
 interface MediaCardProps {
   data: DouyinBase;
   onSave?: (data: DouyinBase) => void;
   onUpdate?: (id: string, updates: Partial<DouyinBase>) => void;
   onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
+  collections?: Collection[];
+  videoCollectionIds?: string[];
+  onToggleCollection?: (collectionId: string) => void;
+  onCreateCollection?: (name: string, teamId: string | null) => Promise<void>;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -42,7 +47,16 @@ const getTagStyle = (tag: string) => {
   return styles[Math.abs(hash) % styles.length];
 };
 
-export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, onDelete }) => {
+export const MediaCard: React.FC<MediaCardProps> = ({
+  data,
+  onSave,
+  onUpdate,
+  onDelete,
+  collections = [],
+  videoCollectionIds = [],
+  onToggleCollection,
+  onCreateCollection
+}) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -50,6 +64,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
   const [isRetrying, setIsRetrying] = useState(false);
   const [retrySuccess, setRetrySuccess] = useState(false);
   const [showRetryMenu, setShowRetryMenu] = useState(false);
+  const [showCollectionPicker, setShowCollectionPicker] = useState(false);
 
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -663,6 +678,42 @@ export const MediaCard: React.FC<MediaCardProps> = ({ data, onSave, onUpdate, on
                     </>
                   )}
                 </div>
+
+                {/* Add to Collection button */}
+                {onToggleCollection && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCollectionPicker(!showCollectionPicker)}
+                      className={`px-5 py-3 rounded-lg transition-colors border ${
+                        videoCollectionIds.length > 0
+                          ? 'bg-indigo-600/20 text-indigo-400 border-indigo-600/50 hover:bg-indigo-600/30'
+                          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white'
+                      }`}
+                      title="Add to Collection"
+                    >
+                      <FolderPlus className="w-5 h-5" />
+                    </button>
+
+                    {/* Collection Picker */}
+                    <CollectionPicker
+                      isOpen={showCollectionPicker}
+                      onClose={() => setShowCollectionPicker(false)}
+                      collections={collections.map(c => ({
+                        id: c.id,
+                        name: c.name,
+                        isShared: !!c.team_id,
+                        videoCount: 0
+                      }))}
+                      selectedIds={videoCollectionIds}
+                      onToggle={onToggleCollection}
+                      onCreate={(name) => {
+                        if (onCreateCollection) {
+                          onCreateCollection(name, null);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
 
                 {/* 删除按钮 */}
                 {onDelete && (
