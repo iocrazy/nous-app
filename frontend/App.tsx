@@ -30,7 +30,6 @@ import { Header } from './components/Header';
 import { UserDropdown } from './components/UserDropdown';
 import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
-import { TeamSettingsModal } from './components/TeamSettingsModal';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
 
 // --- Types for Monitor ---
@@ -1211,22 +1210,6 @@ export default function App() {
         onClose={() => setIsCreateTeamModalOpen(false)}
         onTeamCreated={handleTeamCreated}
       />
-
-      {/* Team Settings Modal */}
-      {selectedTeamId && (
-        <TeamSettingsModal
-          isOpen={isTeamSettingsOpen}
-          onClose={() => {
-            setIsTeamSettingsOpen(false);
-            setSelectedTeamId(null);
-          }}
-          teamId={selectedTeamId}
-          currentUserId={currentUserId || ''}
-          onTeamUpdated={handleTeamUpdated}
-          onTeamDeleted={handleTeamDeleted}
-          onTeamLeft={handleTeamLeft}
-        />
-      )}
 
       {/* Create Collection Modal */}
       <CreateCollectionModal
