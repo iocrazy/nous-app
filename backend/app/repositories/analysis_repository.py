@@ -1,0 +1,153 @@
+"""Repository for Video Analysis data access."""
+from typing import Optional, List
+from datetime import datetime
+
+from app.db.supabase_client import get_supabase_admin
+from loguru import logger
+
+
+class AnalysisRepository:
+    """Repository for video analysis CRUD operations."""
+
+    TABLE_NAME = "video_analysis"
+
+    def __init__(self):
+        # Use admin client to bypass RLS policies
+        self.client = get_supabase_admin()
+        self.table = self.client.table(self.TABLE_NAME)
+
+    async def get_analysis(self, video_id: int) -> Optional[dict]:
+        """Get analysis for a video."""
+        result = self.table.select("*").eq("video_id", video_id).maybe_single().execute()
+        return result.data
+
+    async def create_analysis(self, video_id: int, **kwargs) -> dict:
+        """Create analysis record for a video."""
+        data = {
+            "video_id": video_id,
+            "analysis_level": kwargs.get("analysis_level", "none"),
+            "visual_description": kwargs.get("visual_description"),
+            "detected_objects": kwargs.get("detected_objects", []),
+            "detected_scenes": kwargs.get("detected_scenes", []),
+            "detected_people": kwargs.get("detected_people", []),
+            "detected_text": kwargs.get("detected_text"),
+            "full_text_for_embedding": kwargs.get("full_text_for_embedding"),
+            "analysis_model": kwargs.get("analysis_model"),
+            "analysis_cost": kwargs.get("analysis_cost", 0),
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
+
+        # Filter out None values
+        data = {k: v for k, v in data.items() if v is not None}
+
+        result = self.table.insert(data).execute()
+        logger.info(f"Created analysis for video {video_id}")
+        return result.data[0]
+
+    async def update_analysis(self, video_id: int, **kwargs) -> Optional[dict]:
+        """Update analysis record."""
+        # Filter out None values
+        update_data = {k: v for k, v in kwargs.items() if v is not None}
+
+        if not update_data:
+            return await self.get_analysis(video_id)
+
+        update_data["analyzed_at"] = datetime.utcnow().isoformat()
+
+        result = self.table.update(update_data).eq("video_id", video_id).execute()
+        return result.data[0] if result.data else None
+
+    async def upsert_analysis(self, video_id: int, **kwargs) -> dict:
+        """Create or update analysis record."""
+        existing = await self.get_analysis(video_id)
+
+        if existing:
+            return await self.update_analysis(video_id, **kwargs)
+        else:
+            return await self.create_analysis(video_id, **kwargs)
+
+    async def update_embedding(self, video_id: int, embedding: List[float], full_text: str) -> dict:
+        """Update the embedding vector for a video."""
+        # Convert list to PostgreSQL vector format
+        embedding_str = f"[{','.join(map(str, embedding))}]"
+
+        result = self.table.update({
+            "content_embedding": embedding_str,
+            "full_text_for_embedding": full_text,
+        }).eq("video_id", video_id).execute()
+
+        logger.info(f"Updated embedding for video {video_id}")
+        return result.data[0] if result.data else None
+
+    async def get_videos_without_analysis(self, limit: int = 100) -> List[dict]:
+        """Get videos that don't have analysis yet."""
+        # Get video IDs that have analysis
+        analyzed = self.table.select("video_id").execute()
+        analyzed_ids = [r["video_id"] for r in analyzed.data]
+
+        # Get videos not in that list
+        query = self.client.table("douyin_videos").select("id, title, desc, cover_url").limit(limit)
+
+        if analyzed_ids:
+            query = query.not_.in_("id", analyzed_ids)
+
+        result = query.execute()
+        return result.data
+
+    async def get_videos_by_analysis_level(self, level: str, limit: int = 100) -> List[dict]:
+        """Get videos with a specific analysis level."""
+        result = self.table.select(
+            "*, douyin_videos(id, title, desc, cover_url)"
+        ).eq("analysis_level", level).limit(limit).execute()
+
+        return result.data
+
+    async def search_by_embedding(self, embedding: List[float], limit: int = 10, threshold: float = 0.7) -> List[dict]:
+        """Search for similar videos using vector similarity.
+
+        Note: Requires the 'match_videos_by_embedding' RPC function to be created in Supabase.
+        """
+        # Use Supabase's vector similarity search via RPC
+        embedding_str = f"[{','.join(map(str, embedding))}]"
+
+        result = self.client.rpc(
+            "match_videos_by_embedding",
+            {
+                "query_embedding": embedding_str,
+                "match_threshold": threshold,
+                "match_count": limit
+            }
+        ).execute()
+
+        return result.data
+
+    async def delete_analysis(self, video_id: int) -> bool:
+        """Delete analysis record for a video."""
+        result = self.table.delete().eq("video_id", video_id).execute()
+        return len(result.data) > 0
+
+    async def get_analysis_stats(self) -> dict:
+        """Get statistics about video analysis coverage."""
+        # Count by analysis level
+        result = self.client.rpc("get_analysis_stats").execute()
+
+        if result.data:
+            return result.data
+
+        # Fallback: manual count if RPC doesn't exist
+        all_analysis = self.table.select("analysis_level").execute()
+
+        stats = {
+            "none": 0,
+            "L1": 0,
+            "L2": 0,
+            "L3": 0,
+            "total": len(all_analysis.data)
+        }
+
+        for record in all_analysis.data:
+            level = record.get("analysis_level", "none")
+            if level in stats:
+                stats[level] += 1
+
+        return stats
