@@ -71,7 +71,12 @@ class Settings(BaseSettings):
     CELERY_TASK_TIME_LIMIT: int = Field(default=600, description="任务超时时间(秒)")
     CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Worker 并发数")
 
-
+    # ============================================
+    # OpenAI Configuration (for visual analysis)
+    # ============================================
+    OPENAI_API_KEY: str = Field(default="", description="OpenAI API Key")
+    OPENAI_MODEL: str = Field(default="gpt-4o", description="OpenAI model for visual analysis")
+    OPENAI_EMBEDDING_MODEL: str = Field(default="text-embedding-3-small", description="OpenAI embedding model")
 
     model_config = SettingsConfigDict(
         env_file=str(ROOT_DIR / '.env'),
