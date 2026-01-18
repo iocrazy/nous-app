@@ -83,6 +83,10 @@ tags_metadata = [
         "name": "Search",
         "description": "Semantic search using natural language queries and vector similarity.",
     },
+    {
+        "name": "Collections",
+        "description": "Smart collections with rule-based video grouping.",
+    },
 ]
 
 app = FastAPI(

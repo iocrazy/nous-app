@@ -17,6 +17,7 @@ from app.api.task_router import router as task_router
 from app.api.tags_router import router as tags_router
 from app.api.analysis_router import router as analysis_router
 from app.api.search_router import router as search_router
+from app.api.collections_router import router as collections_router
 
 api_router = APIRouter()
 
@@ -63,4 +64,9 @@ api_router.include_router(
 api_router.include_router(
     router=search_router,
     tags=["Search"]
+)
+
+api_router.include_router(
+    router=collections_router,
+    tags=["Collections"]
 )
