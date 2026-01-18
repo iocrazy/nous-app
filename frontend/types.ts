@@ -179,3 +179,87 @@ export interface UserNotification {
   // Joined
   notification?: Notification;
 }
+
+// Smart Organization Types
+
+// Tags
+export interface Tag {
+  id: number;
+  name: string;
+  color: string | null;
+  description: string | null;
+  video_count: number;
+  created_at: string;
+}
+
+// Smart Collections
+export interface SmartCollection {
+  id: number;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  rules: CollectionRules;
+  is_preset: boolean;
+  is_active: boolean;
+  sort_by: string;
+  sort_order: 'asc' | 'desc';
+  video_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionCondition {
+  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'aweme_type' | 'view_count';
+  operator: 'equals' | 'contains' | 'starts_with' | 'in' | 'gt' | 'lt' | 'gte' | 'lte';
+  value: string | number | string[];
+}
+
+export interface CollectionRules {
+  match: 'all' | 'any';
+  conditions: CollectionCondition[];
+}
+
+// Cleanup
+export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
+
+export interface CleanupSuggestion {
+  video_id: number;
+  title: string;
+  cover_url: string | null;
+  author: string | null;
+  reason: CleanupReason;
+  reason_detail: string;
+  storage_size: number | null;
+  created_at: string;
+  last_viewed_at: string | null;
+  view_count: number;
+  similarity_to: number | null;
+  similarity_score: number | null;
+}
+
+// Search
+export interface SearchResult {
+  video_id: number;
+  aweme_id: string;
+  title: string;
+  cover_url: string | null;
+  author: string | null;
+  similarity_score: number;
+  description: string | null;
+  tags: string[];
+  view_count: number;
+  created_at: string;
+}
+
+// Analysis
+export interface VideoAnalysis {
+  video_id: number;
+  aweme_id: string;
+  visual_analysis: string | null;
+  content_categories: string[];
+  detected_objects: string[];
+  scene_description: string | null;
+  suggested_tags: string[];
+  analyzed_at: string | null;
+}
