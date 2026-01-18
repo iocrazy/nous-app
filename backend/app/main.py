@@ -87,6 +87,10 @@ tags_metadata = [
         "name": "Collections",
         "description": "Smart collections with rule-based video grouping.",
     },
+    {
+        "name": "Cleanup",
+        "description": "Storage cleanup suggestions based on viewing patterns and duplicates.",
+    },
 ]
 
 app = FastAPI(
