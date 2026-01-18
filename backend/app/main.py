@@ -71,6 +71,10 @@ tags_metadata = [
         "name": "认证",
         "description": "用户注册、登录、登出等认证操作。",
     },
+    {
+        "name": "Tags",
+        "description": "Manage tags for organizing and categorizing videos.",
+    },
 ]
 
 app = FastAPI(
