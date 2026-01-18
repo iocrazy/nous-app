@@ -9,6 +9,7 @@ import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../uti
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { CollectionPicker } from './CollectionPicker';
+import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 
 interface MediaCardProps {
   data: DouyinBase;
@@ -19,6 +20,11 @@ interface MediaCardProps {
   videoCollectionIds?: string[];
   onToggleCollection?: (collectionId: string) => void;
   onCreateCollection?: (name: string, teamId: string | null) => Promise<void>;
+  // Download progress props for showing progress in the media preview area
+  downloadStatus?: ProgressStatus;
+  downloadPercent?: number;
+  downloadSpeed?: string;
+  progressStyle?: ProgressStyleType;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -55,7 +61,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   collections = [],
   videoCollectionIds = [],
   onToggleCollection,
-  onCreateCollection
+  onCreateCollection,
+  downloadStatus,
+  downloadPercent = 0,
+  downloadSpeed,
+  progressStyle = 'neon'
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -343,7 +353,18 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       <div className="flex flex-col md:flex-row">
         {/* Media Preview Section - Left Side */}
         <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
-          {isVideo ? (
+          {/* Show download progress when downloading */}
+          {downloadStatus && (downloadStatus === 'downloading' || downloadStatus === 'pending') ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <DownloadProgress
+                percent={downloadPercent}
+                status={downloadStatus}
+                speed={downloadSpeed}
+                style={progressStyle}
+                thumbnailUrl={coverUrl || undefined}
+              />
+            </div>
+          ) : isVideo ? (
             <div
               className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-500 cursor-pointer relative overflow-hidden"
               onClick={() => setIsPlaying(true)}
@@ -373,22 +394,22 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           ) : (
             <div className="w-full h-full relative">
                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
-               <img 
-                src={(isAlbum ? images[currentImageIndex] : images[0]) || "https://picsum.photos/400/600"} 
-                alt="Cover" 
+               <img
+                src={(isAlbum ? images[currentImageIndex] : images[0]) || "https://picsum.photos/400/600"}
+                alt="Cover"
                 className="w-full h-full object-cover transition-opacity duration-300"
                />
-               
+
                {isAlbum ? (
                  <>
                     {/* Carousel Controls */}
-                    <button 
+                    <button
                       onClick={() => handleSlide('left')}
                       className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-30"
                     >
                       <ChevronLeft size={20} />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleSlide('right')}
                       className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-30"
                     >
@@ -404,9 +425,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                )}
             </div>
           )}
-          
-          {/* Hide author overlay when playing to prevent obstruction of controls */}
-          {!isPlaying && (
+
+          {/* Hide author overlay when playing or downloading to prevent obstruction */}
+          {!isPlaying && !(downloadStatus && (downloadStatus === 'downloading' || downloadStatus === 'pending')) && (
             <div className="absolute bottom-4 left-4 z-20 flex items-center space-x-2 text-white pointer-events-none">
                 <User className="w-4 h-4" />
                 <span className="font-medium text-sm drop-shadow-md">@{data.author || 'Unknown'}</span>

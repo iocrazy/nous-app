@@ -300,3 +300,74 @@ class SupabaseDouyinService:
         except* Exception as exc_group:
             for exc in exc_group.exceptions:
                 logger.error(f"下载任务异常: {exc}")
+
+    @staticmethod
+    async def save_metadata_only(aweme_id: str, parsed_data: dict) -> Dict[str, Any]:
+        """
+        仅保存视频元数据到数据库（不执行下载）
+
+        用于 Progressive Download 流程：先保存元数据，下载由 Celery 任务处理
+
+        Args:
+            aweme_id: 视频ID
+            parsed_data: 解析后的视频数据
+
+        Returns:
+            Dict[str, Any]: 保存结果
+        """
+        try:
+            video_title = parsed_data.get("video_title", "undefined")
+            user_id = parsed_data.get("user_id")
+
+            need_download_video = parsed_data.get("need_download_video", False)
+            need_download_music = parsed_data.get("need_download_music", False)
+
+            # 数据验证
+            try:
+                douyin_data = DouyinCreate(**parsed_data)
+                logger.success(f"数据验证通过: aweme_id={aweme_id}, user_id={user_id}")
+            except Exception as e:
+                logger.error(f"数据验证失败: {str(e)}")
+                return {"success": False, "message": f"存储失败: {str(e)}"}
+
+            repo = SupabaseDouyinRepository()
+            data_dict = douyin_data.model_dump()
+
+            # 检查是否已存在
+            existing_video = await repo.get_by_aweme_id(aweme_id, user_id=user_id)
+
+            # 设置下载状态为 PENDING（等待 Celery 任务下载）
+            if need_download_video:
+                data_dict["video_download_status"] = DownloadStatus.PENDING.value
+            else:
+                data_dict["video_download_status"] = DownloadStatus.SKIPPED.value
+
+            if need_download_music:
+                data_dict["music_download_status"] = DownloadStatus.PENDING.value
+            else:
+                data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
+
+            if existing_video:
+                # 更新现有记录
+                update_data = {
+                    k: v for k, v in data_dict.items()
+                    if k not in ["download_path", "download_duration"]
+                }
+                await repo.update(aweme_id, update_data)
+                message = f"媒体 {aweme_id}_{video_title} 元数据已更新"
+            else:
+                # 创建新记录
+                await repo.create(data_dict)
+                message = f"媒体 {aweme_id}_{video_title} 元数据已创建"
+
+            logger.info(message)
+
+            return {
+                "success": True,
+                "message": message,
+                "aweme_id": aweme_id,
+            }
+
+        except Exception as e:
+            logger.error(f"保存元数据失败: {str(e)}")
+            return {"success": False, "message": f"保存失败: {str(e)}"}

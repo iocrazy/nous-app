@@ -53,6 +53,9 @@ const buildHeaders = (): HeadersInit => {
   return headers;
 };
 
+// Export for use in other services
+export const getAuthHeaders = buildHeaders;
+
 export interface FetchOptions {
   video_bool?: boolean;
   music_bool?: boolean;
@@ -85,6 +88,8 @@ export interface FetchResponse {
   video_resolution?: string;
   // 下载状态
   video_download_status?: string;
+  // Progressive download task ID (for polling progress)
+  download_task_id?: string;
 }
 
 /**

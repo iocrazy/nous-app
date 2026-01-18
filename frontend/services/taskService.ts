@@ -274,3 +274,71 @@ export const getTaskStatusColor = (status: TaskStatus): string => {
   };
   return colorMap[status] || 'text-gray-500';
 };
+
+// Download progress response
+export interface DownloadProgressResponse {
+  task_id: string;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  percent: number;
+  downloaded?: number;
+  total?: number;
+  speed?: string;
+  error?: string;
+}
+
+/**
+ * Get download progress for a task
+ */
+export const getDownloadProgress = async (taskId: string): Promise<DownloadProgressResponse> => {
+  const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}/progress`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get download progress: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Poll download progress
+ */
+export const pollDownloadProgress = (
+  taskId: string,
+  onUpdate: (progress: DownloadProgressResponse) => void,
+  interval: number = 1000
+): (() => void) => {
+  let isPolling = true;
+
+  const poll = async () => {
+    if (!isPolling) return;
+
+    try {
+      const progress = await getDownloadProgress(taskId);
+      onUpdate(progress);
+
+      // Stop polling if completed or failed
+      if (['completed', 'failed'].includes(progress.status)) {
+        isPolling = false;
+        return;
+      }
+
+      if (isPolling) {
+        setTimeout(poll, interval);
+      }
+    } catch (error) {
+      console.error('Failed to poll download progress:', error);
+      if (isPolling) {
+        setTimeout(poll, interval * 2);
+      }
+    }
+  };
+
+  poll();
+
+  return () => {
+    isPolling = false;
+  };
+};

@@ -81,6 +81,62 @@ async def get_task_status(task_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail=f"获取任务状态失败: {str(e)}")
 
 
+@router.get("/{task_id}/progress", tags=TAGS, summary="Get download progress")
+async def get_download_progress(task_id: str, auth: AuthDep):
+    """
+    Get download progress for a task from Redis.
+
+    Returns percent, speed, downloaded bytes, total bytes.
+
+    - **task_id**: 任务 ID
+
+    需要认证：Bearer Token 或 API Key
+    """
+    import json
+
+    try:
+        redis_client = celery_app.backend.client
+        progress_key = f"download_progress:{task_id}"
+
+        progress_data = redis_client.get(progress_key)
+
+        if progress_data:
+            data = json.loads(progress_data)
+            return {
+                "task_id": task_id,
+                "status": data.get("status", "downloading"),
+                "percent": data.get("percent", 0),
+                "downloaded": data.get("downloaded", 0),
+                "total": data.get("total", 0),
+                "speed": data.get("speed", "0 B/s"),
+            }
+
+        # Check if task is complete
+        result = AsyncResult(task_id, app=celery_app)
+        if result.state == "SUCCESS":
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "percent": 100,
+            }
+        elif result.state == "FAILURE":
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "error": str(result.result),
+            }
+
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "percent": 0,
+        }
+
+    except Exception as e:
+        logger.error(f"获取下载进度失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取下载进度失败: {str(e)}")
+
+
 @router.delete("/{task_id}", tags=TAGS)
 async def cancel_task(task_id: str, auth: AuthDep):
     """

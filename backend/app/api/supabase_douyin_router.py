@@ -130,14 +130,14 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 "use_celery": True,
             }
 
-        # 默认使用 BackgroundTasks（原有逻辑）
+        # 默认流程：解析元数据 + Celery 下载任务
         # 获取视频数据
         aweme_detail = await DouyinAnalysis.fetch_one_video(url)
 
         if not aweme_detail:
             raise HTTPException(status_code=404, detail="无法获取视频信息")
 
-        # 解析视频数据
+        # 解析视频数据（不下载）
         parsed_data = await DouyinParser.parse_aweme_detail(
             aweme_detail=aweme_detail,
             valid_url=url,
@@ -151,24 +151,43 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             raise HTTPException(status_code=500, detail="视频解析失败")
 
         aweme_id = parsed_data.get("aweme_id")
+        aweme_type = parsed_data.get("aweme_type", 0)
+        video_title = parsed_data.get("video_title", "")
 
         # 添加用户 ID
         parsed_data["user_id"] = auth.user_id
 
-        # 后台处理存储和下载
-        background_tasks.add_task(
-            SupabaseDouyinService.process_video,
-            aweme_id,
-            parsed_data
-        )
+        # 先保存元数据到数据库（必须等待完成，否则 Celery 任务找不到数据）
+        save_result = await SupabaseDouyinService.save_metadata_only(aweme_id, parsed_data)
+        if not save_result.get("success"):
+            logger.error(f"保存元数据失败: {save_result.get('message')}")
+            raise HTTPException(status_code=500, detail=save_result.get("message", "保存元数据失败"))
+
+        # 使用 Celery 任务进行下载（支持进度追踪）
+        download_task_id = None
+        need_download = request.video_bool or request.music_bool or request.cover_bool
+
+        if need_download:
+            from app.tasks.download_tasks import download_media_task
+
+            download_task = download_media_task.delay(
+                aweme_id=aweme_id,
+                user_id=auth.user_id,
+                download_video=request.video_bool,
+                download_music=request.music_bool,
+                download_cover=request.cover_bool,
+                aweme_type=aweme_type,
+                video_title=video_title[:50] if video_title else "undefined",
+            )
+            download_task_id = download_task.id
+            logger.info(f"下载任务已提交: {download_task_id}")
 
         # 记录日志
-        video_title = parsed_data.get("video_title", "")[:30]
         background_tasks.add_task(
             log_user_action,
             user_id=auth.user_id,
             action="fetch",
-            message=f"获取视频: {video_title}...",
+            message=f"获取视频: {video_title[:30]}...",
             status="pending",
             aweme_id=aweme_id
         )
@@ -204,6 +223,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             "video_resolution": parsed_data.get("video_resolution"),
             # 下载状态
             "video_download_status": parsed_data.get("video_download_status", "PENDING"),
+            # 下载任务 ID（用于前端轮询进度）
+            "download_task_id": download_task_id,
         }
 
     except HTTPException:

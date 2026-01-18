@@ -31,54 +31,97 @@ class DownloaderService:
 
 
     @staticmethod
-    async def download_file(url: str, file_path: str, headers: Dict[str, Any]= None) -> bool:
+    async def download_file(
+        url: str,
+        file_path: str,
+        headers: Dict[str, Any] = None,
+        progress_tracker=None
+    ) -> bool:
         """
-        下载单个文件
-        
+        下载单个文件，可选进度追踪
+
         Args:
             url: 下载URL
             file_path: 保存路径
             headers: 请求头
-            
+            progress_tracker: 可选的进度追踪器（DownloadProgressTracker实例）
+
         Returns:
             bool: 下载是否成功
         """
         if not headers:
             headers = Utils.get_headers()
-            
-        try:
 
+        try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             if os.path.exists(file_path):
                 logger.info(f"文件已存在，跳过下载: {os.path.basename(file_path)}")
+                if progress_tracker:
+                    progress_tracker.complete()
                 return True
-            
-            # 使用 httpx 下载文件
+
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, follow_redirects=True, timeout=settings.DOWNLOAD_TIMEOUT)
-                
-                if response.status_code == 200:
-                    # 保存文件
-                    async with aiofiles.open(file_path, mode='wb') as f:
-                        await f.write(response.content)
-                    logger.success(f"成功下载文件: {os.path.basename(file_path)}")
-                    return True
+                # Use streaming if progress tracker is provided
+                if progress_tracker:
+                    async with client.stream(
+                        "GET",
+                        url,
+                        headers=headers,
+                        follow_redirects=True,
+                        timeout=settings.DOWNLOAD_TIMEOUT,
+                    ) as response:
+                        if response.status_code != 200:
+                            logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")
+                            return False
+
+                        total = int(response.headers.get("content-length", 0))
+                        downloaded = 0
+
+                        async with aiofiles.open(file_path, mode='wb') as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                await f.write(chunk)
+                                downloaded += len(chunk)
+                                progress_tracker.update(downloaded, total)
+
+                        logger.success(f"成功下载文件: {os.path.basename(file_path)}")
+                        return True
                 else:
-                    logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")
-                    return False
-                    
+                    # Original non-streaming download
+                    response = await client.get(
+                        url,
+                        headers=headers,
+                        follow_redirects=True,
+                        timeout=settings.DOWNLOAD_TIMEOUT
+                    )
+
+                    if response.status_code == 200:
+                        async with aiofiles.open(file_path, mode='wb') as f:
+                            await f.write(response.content)
+                        logger.success(f"成功下载文件: {os.path.basename(file_path)}")
+                        return True
+                    else:
+                        logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")
+                        return False
+
         except Exception as e:
             logger.error(f"下载出错 {url}: {str(e)}")
+            if progress_tracker:
+                progress_tracker.failed(str(e))
             return False
 
     @staticmethod
-    async def download_video_by_aweme_id(aweme_id, user_id: str = None) -> DownloadVideoResult:
+    async def download_video_by_aweme_id(
+        aweme_id,
+        user_id: str = None,
+        progress_tracker=None
+    ) -> DownloadVideoResult:
         """
         下载视频和可选的音乐文件
 
         Args:
             aweme_id: 视频id
             user_id: 用户ID（用于数据隔离）
+            progress_tracker: 可选的进度追踪器
 
         Returns:
             DownloadResult: 下载结果信息
@@ -132,7 +175,7 @@ class DownloaderService:
 
             # download video while one of the urls is successful
             for url in video_urls:
-                if await DownloaderService.download_file(url, video_full_path, headers):
+                if await DownloaderService.download_file(url, video_full_path, headers, progress_tracker):
                     try:
                         # 存储相对路径到数据库
                         await repo.mark_video_as_downloaded(

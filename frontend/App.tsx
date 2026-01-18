@@ -31,6 +31,8 @@ import { UserDropdown } from './components/UserDropdown';
 import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
+import { DownloadProgress, DownloadStatus as ProgressStatus } from './components/DownloadProgress';
+import { useDownloadProgress } from './hooks/useDownloadProgress';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -214,7 +216,10 @@ export default function App() {
   
   const [currentResult, setCurrentResult] = useState<DouyinBase | null>(null);
   const [batchResults, setBatchResults] = useState<DouyinBase[]>([]);
-  
+
+  // Progressive download state
+  const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
+
   // Library State
   const [library, setLibrary] = useState<DouyinBase[]>([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
@@ -804,11 +809,29 @@ export default function App() {
     const time = new Date().toLocaleTimeString('en-US', {hour12: false, hour: "numeric", minute: "numeric", second: "numeric"});
     setSocketLogs(prev => [...prev, {
       id: Math.random().toString(36).substr(2, 9),
-      time, 
-      message: msg, 
+      time,
+      message: msg,
       type
     }]);
   };
+
+  // Download progress hook for progressive download tracking
+  const {
+    status: downloadStatus,
+    percent: downloadPercent,
+    speed: downloadSpeed,
+  } = useDownloadProgress(downloadTaskId, {
+    onComplete: () => {
+      addLog("Download completed successfully!", 'success');
+      setTaskProgress(100);
+      setTaskStatus('Completed');
+      // Refresh library to get the updated item with download paths
+      loadLibraryData();
+    },
+    onError: (error) => {
+      addLog(`Download failed: ${error}`, 'error');
+    },
+  });
 
   const handleParse = async () => {
     if (parserMode === 'batch') {
@@ -828,6 +851,7 @@ export default function App() {
     setSocketLogs([]);
     setTaskProgress(0);
     setTaskStatus('Initializing');
+    setDownloadTaskId(null); // Reset download task ID
 
     try {
       // Step 1: Initialize Connection
@@ -853,50 +877,50 @@ export default function App() {
       if (response.success) {
         addLog(`Video parsed: ${response.video_title || response.aweme_id}`, 'success');
         addLog(`Author: ${response.author || 'Unknown'}`, 'info');
-        addLog("Download task submitted to background queue", 'info');
-        setTaskProgress(80);
 
-        // Backend handles download in background, refresh library to get data
-        setTaskStatus('Processing');
-        addLog("Refreshing library data...", 'info');
+        // Create result from response data immediately (progressive: show metadata first)
+        const parsedResult: DouyinBase = {
+          aweme_id: response.aweme_id,
+          video_title: response.video_title,
+          author: response.author,
+          aweme_type: response.aweme_type,
+          video_original_url: response.video_original_url || urlInput,
+          // URLs
+          video_download_urls: response.video_download_urls || [],
+          cover_urls: response.cover_urls || [],
+          image_download_urls: response.image_download_urls || [],
+          // Stats
+          video_digg_count: response.video_digg_count || 0,
+          video_comment_count: response.video_comment_count || 0,
+          video_share_count: response.video_share_count || 0,
+          video_collect_count: response.video_collect_count || 0,
+          // Video info
+          video_duration: response.video_duration || "0",
+          video_created_time: response.video_created_time,
+          video_desc: response.video_desc,
+          video_categories: response.video_categories,
+          video_resolution: response.video_resolution,
+          video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
+        };
 
-        // Wait a moment for backend to save initial data
-        await new Promise(r => setTimeout(r, 1000));
-        await loadLibraryData();
+        // Show metadata immediately
+        setCurrentResult(parsedResult);
 
-        setTaskProgress(100);
-        setTaskStatus('Completed');
-        addLog("Task completed successfully!", 'success');
-
-        // Find the newly added item in library
-        const newItem = library.find(item => item.aweme_id === response.aweme_id);
-        if (newItem) {
-          setCurrentResult(newItem);
+        // Check if we have a download task to track
+        if (response.download_task_id) {
+          addLog("Download task submitted to background queue", 'info');
+          addLog(`Tracking download progress: ${response.download_task_id}`, 'info');
+          setTaskStatus('Downloading');
+          setTaskProgress(60);
+          // Set download task ID to start progress polling
+          setDownloadTaskId(response.download_task_id);
         } else {
-          // Create result from response data (now includes full parsed data)
-          setCurrentResult({
-            aweme_id: response.aweme_id,
-            video_title: response.video_title,
-            author: response.author,
-            aweme_type: response.aweme_type,
-            video_original_url: response.video_original_url || urlInput,
-            // URLs
-            video_download_urls: response.video_download_urls || [],
-            cover_urls: response.cover_urls || [],
-            image_download_urls: response.image_download_urls || [],
-            // Stats
-            video_digg_count: response.video_digg_count || 0,
-            video_comment_count: response.video_comment_count || 0,
-            video_share_count: response.video_share_count || 0,
-            video_collect_count: response.video_collect_count || 0,
-            // Video info
-            video_duration: response.video_duration || "0",
-            video_created_time: response.video_created_time,
-            video_desc: response.video_desc,
-            video_categories: response.video_categories,
-            video_resolution: response.video_resolution,
-            video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
-          } as DouyinBase);
+          // No download task, complete immediately (e.g., already downloaded or no download needed)
+          setTaskProgress(100);
+          setTaskStatus('Completed');
+          addLog("Task completed successfully!", 'success');
+          // Refresh library to get latest data
+          await loadLibraryData();
         }
       } else {
         throw new Error(response.message || "Parse failed");
@@ -1630,19 +1654,42 @@ export default function App() {
               />
             )}
 
-            {/* Final Result Card - Shows when complete */}
-            {parserMode === 'single' && currentResult && taskProgress === 100 && (
+            {/* Result Card with Progressive Download Progress */}
+            {parserMode === 'single' && currentResult && (
               <div className="mt-8 animate-in fade-in zoom-in-95 duration-300">
                  <div className="flex items-center justify-between mb-4 px-1">
                     <h3 className="text-lg font-semibold text-zinc-300">Analysis Result</h3>
                     <div className="flex items-center gap-2">
-                       <span className="text-xs text-green-400 flex items-center gap-1">
-                          <CheckCircle2 size={12} />
-                          Download Complete
-                       </span>
+                       {downloadTaskId && downloadStatus !== 'completed' && downloadStatus !== 'failed' ? (
+                         <span className="text-xs text-indigo-400 flex items-center gap-1">
+                            <Loader2 size={12} className="animate-spin" />
+                            {t('download.downloading')} {downloadPercent}%
+                            {downloadSpeed && <span className="text-zinc-500 ml-1">({downloadSpeed})</span>}
+                         </span>
+                       ) : downloadStatus === 'completed' || taskProgress === 100 ? (
+                         <span className="text-xs text-green-400 flex items-center gap-1">
+                            <CheckCircle2 size={12} />
+                            {t('download.completed')}
+                         </span>
+                       ) : downloadStatus === 'failed' ? (
+                         <span className="text-xs text-red-400 flex items-center gap-1">
+                            <AlertCircle size={12} />
+                            {t('download.failed')}
+                         </span>
+                       ) : null}
                     </div>
                  </div>
-                 <MediaCard data={currentResult} onSave={(item) => handleSaveToLibrary(item)} onUpdate={handleUpdateLibraryItem} />
+
+                 {/* MediaCard with integrated download progress in left section */}
+                 <MediaCard
+                   data={currentResult}
+                   onSave={(item) => handleSaveToLibrary(item)}
+                   onUpdate={handleUpdateLibraryItem}
+                   downloadStatus={downloadTaskId ? downloadStatus : undefined}
+                   downloadPercent={downloadPercent}
+                   downloadSpeed={downloadSpeed}
+                   progressStyle={userSettings.progressStyle || 'neon'}
+                 />
               </div>
             )}
 

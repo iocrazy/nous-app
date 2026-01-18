@@ -89,6 +89,7 @@ export interface UserSettings {
   supabaseAnonKey?: string;
   apiUrl?: string;
   apiKey?: string;
+  progressStyle?: 'neon' | 'wave';
 }
 
 export interface UserProfile {

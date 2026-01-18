@@ -49,7 +49,7 @@ services:
     image: mediahub:latest
     container_name: mediahub-celery-worker
     restart: unless-stopped
-    command: celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
+    command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
     volumes:
       - ./downloads:/app/downloads
       - ./backend/.env:/app/.env
@@ -68,7 +68,7 @@ services:
     image: mediahub:latest
     container_name: mediahub-celery-beat
     restart: unless-stopped
-    command: celery -A app.celery_app beat -l info
+    command: uv run celery -A app.celery_app beat -l info
     volumes:
       - ./backend/.env:/app/.env
     environment:

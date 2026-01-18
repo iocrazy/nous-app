@@ -28,6 +28,22 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
+async def log_user_action(user_id: str, action: str, message: str, status: str, aweme_id: str = None):
+    """Log user action helper."""
+    try:
+        from app.repositories.user_action_log_repository import UserActionLogRepository
+        repo = UserActionLogRepository()
+        await repo.log_action(
+            user_id=user_id,
+            action=action,
+            message=message,
+            status=status,
+            aweme_id=aweme_id
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log user action: {e}")
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def parse_single_link_task(
     self,
@@ -39,23 +55,26 @@ def parse_single_link_task(
     categories: str = None
 ):
     """
-    解析单个抖音链接的 Celery 任务
+    Parse metadata for a Douyin link (Phase 1).
+
+    This task quickly parses video metadata and returns it immediately.
+    Downloads are handled by a separate download_media_task (Phase 2).
 
     Args:
-        url: 抖音链接
-        user_id: 用户 ID
-        video_bool: 是否下载视频
-        music_bool: 是否下载音乐
-        cover_bool: 是否下载封面
-        categories: 视频分类
+        url: Douyin URL
+        user_id: User ID
+        video_bool: Whether to download video
+        music_bool: Whether to download music
+        cover_bool: Whether to download cover
+        categories: Video categories
 
     Returns:
-        dict: 解析结果
+        dict: Metadata + download_task_id for progress tracking
     """
-    logger.info(f"[Celery] 开始解析链接任务: {url[:50]}...")
+    logger.info(f"[Celery] Starting metadata parse: {url[:50]}...")
 
     try:
-        # 提取有效 URL
+        # Extract valid URL
         try:
             valid_urls = Utils.extract_valid_url(url)
             valid_url = valid_urls[0]
@@ -63,25 +82,25 @@ def parse_single_link_task(
             return {
                 "status": "failed",
                 "url": url,
-                "error": f"无法提取有效链接: {str(e)}",
+                "error": f"Invalid URL: {str(e)}",
             }
 
-        # 导入服务（延迟导入避免循环依赖）
         from app.services.douyin_analysis import DouyinAnalysis
         from app.services.douyin_parser import DouyinParser
-        from app.services.supabase_douyin_service import SupabaseDouyinService
+        from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
+        from app.tasks.download_tasks import download_media_task
 
-        # 获取视频数据
+        # Fetch video data from Douyin
         aweme_detail = run_async(DouyinAnalysis.fetch_one_video(valid_url))
 
         if not aweme_detail:
-            logger.warning(f"[Celery] 无法获取视频信息: {valid_url}")
+            logger.warning(f"[Celery] Cannot fetch video info: {valid_url}")
             raise self.retry(
-                exc=Exception("无法获取视频信息"),
+                exc=Exception("Cannot fetch video info"),
                 countdown=30 * (2 ** self.request.retries)
             )
 
-        # 解析视频数据
+        # Parse metadata (without downloading files)
         parsed_data = run_async(
             DouyinParser.parse_aweme_detail(
                 aweme_detail=aweme_detail,
@@ -94,40 +113,115 @@ def parse_single_link_task(
         )
 
         if not parsed_data:
-            logger.warning(f"[Celery] 视频解析失败: {valid_url}")
+            logger.warning(f"[Celery] Parse failed: {valid_url}")
             raise self.retry(
-                exc=Exception("视频解析失败"),
+                exc=Exception("Parse failed"),
                 countdown=30 * (2 ** self.request.retries)
             )
 
         aweme_id = parsed_data.get("aweme_id")
+        aweme_type = parsed_data.get("aweme_type", 0)
+        video_title = parsed_data.get("video_title", "undefined")
         parsed_data["user_id"] = user_id
 
-        # 处理存储和下载
-        result = run_async(
-            SupabaseDouyinService.process_video(aweme_id, parsed_data)
-        )
+        # Save metadata to database (without downloading)
+        from app.schemas.douyin import DouyinCreate
+        from app.core.enums import DownloadStatus
 
-        if result.get("success"):
-            logger.success(f"[Celery] 链接解析成功: {aweme_id}")
-            return {
-                "status": "success",
-                "url": valid_url,
-                "aweme_id": aweme_id,
-                "video_title": parsed_data.get("video_title"),
-                "message": result.get("message"),
-            }
-        else:
-            logger.warning(f"[Celery] 处理失败: {result.get('message')}")
+        repo = SupabaseDouyinRepository()
+
+        # Check if exists
+        existing = run_async(repo.get_by_aweme_id(aweme_id, user_id=user_id))
+
+        # Prepare data
+        try:
+            douyin_data = DouyinCreate(**parsed_data)
+            data_dict = douyin_data.model_dump()
+        except Exception as e:
+            logger.error(f"Data validation failed: {str(e)}")
             return {
                 "status": "failed",
                 "url": valid_url,
-                "aweme_id": aweme_id,
-                "error": result.get("message"),
+                "error": f"Data validation failed: {str(e)}",
             }
 
+        # Set download status to pending
+        if video_bool:
+            data_dict["video_download_status"] = DownloadStatus.PENDING.value
+        else:
+            data_dict["video_download_status"] = DownloadStatus.SKIPPED.value
+
+        if music_bool:
+            data_dict["music_download_status"] = DownloadStatus.PENDING.value
+        else:
+            data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
+
+        # Save or update
+        if existing:
+            run_async(repo.update(aweme_id, data_dict))
+            logger.info(f"[Celery] Updated metadata: {aweme_id}")
+        else:
+            run_async(repo.create(data_dict))
+            logger.info(f"[Celery] Created metadata: {aweme_id}")
+
+        # Determine what needs downloading
+        need_download = video_bool or music_bool or cover_bool
+        download_task_id = None
+
+        if need_download:
+            # Trigger download task (Phase 2)
+            download_task = download_media_task.delay(
+                aweme_id=aweme_id,
+                user_id=user_id,
+                download_video=video_bool,
+                download_music=music_bool,
+                download_cover=cover_bool,
+                aweme_type=aweme_type,
+                video_title=video_title,
+            )
+            download_task_id = download_task.id
+            logger.info(f"[Celery] Download task triggered: {download_task_id}")
+
+        # Log user action
+        run_async(log_user_action(
+            user_id=user_id,
+            action="fetch",
+            message=f"{video_title[:20]}...: Metadata parsed",
+            status="success",
+            aweme_id=aweme_id
+        ))
+
+        # Build metadata response
+        metadata = {
+            "aweme_id": aweme_id,
+            "video_title": parsed_data.get("video_title"),
+            "author": parsed_data.get("author"),
+            "author_avatar": parsed_data.get("author_avatar"),
+            "duration": parsed_data.get("duration"),
+            "aweme_type": aweme_type,
+            "create_time": parsed_data.get("create_time"),
+            "statistics": {
+                "likes": parsed_data.get("likes", 0),
+                "comments": parsed_data.get("comments", 0),
+                "shares": parsed_data.get("shares", 0),
+                "collects": parsed_data.get("collects", 0),
+            },
+            "cover_urls": parsed_data.get("cover_urls", []),
+            "description": parsed_data.get("description"),
+        }
+
+        logger.success(f"[Celery] Metadata parse complete: {aweme_id}")
+
+        return {
+            "status": "success",
+            "url": valid_url,
+            "aweme_id": aweme_id,
+            "download_task_id": download_task_id,
+            "metadata": metadata,
+        }
+
     except Exception as e:
-        logger.error(f"[Celery] 解析任务异常: {url}, 错误: {str(e)}")
+        logger.error(f"[Celery] Parse task error: {url}, error: {str(e)}")
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
         return {

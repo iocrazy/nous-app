@@ -1,9 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserSettings, ApiKey } from '../types';
-import { 
+import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  Clock, CheckCircle, Power, Database
+  Clock, CheckCircle, Power, Database, Zap, Check
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -27,6 +27,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+
+  // Animated progress for style preview
+  const [animatedProgress, setAnimatedProgress] = useState(0);
+
+  // Animation effect for progress preview
+  useEffect(() => {
+    if (activeTab !== 'general') return;
+
+    const interval = setInterval(() => {
+      setAnimatedProgress(prev => {
+        if (prev >= 100) return 0;
+        return prev + 2;
+      });
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, [activeTab]);
   
   // Mock API Keys State
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([
@@ -216,6 +233,146 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </div>
            </div>
 
+           {/* Section 3: Download Progress Style */}
+           <div className="px-6 py-4 border-y border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+              <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+                 <Zap size={20} />
+              </div>
+              <h2 className="font-semibold text-zinc-200">Download Progress Style</h2>
+           </div>
+           <div className="p-6">
+              <div className="grid grid-cols-2 gap-4">
+                 {/* Neon Style */}
+                 <label
+                    className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                       localSettings.progressStyle === 'neon' || !localSettings.progressStyle
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-zinc-800 hover:border-zinc-700'
+                    }`}
+                    onClick={() => setLocalSettings({...localSettings, progressStyle: 'neon'})}
+                 >
+                    <div className="flex flex-col items-center gap-3">
+                       <div className="w-full aspect-video rounded-lg bg-zinc-950 border border-purple-500/50 flex items-center justify-center relative overflow-hidden">
+                          {/* Neon border preview - animated only when selected */}
+                          <svg className="absolute inset-0 w-full h-full" style={{
+                             filter: (localSettings.progressStyle === 'neon' || !localSettings.progressStyle)
+                                ? 'drop-shadow(0 0 6px rgba(139, 92, 246, 0.6))'
+                                : undefined
+                          }}>
+                             <rect x="8" y="8" width="calc(100% - 16px)" height="calc(100% - 16px)" rx="6" fill="none" stroke="rgba(139, 92, 246, 0.2)" strokeWidth="2" />
+                             <rect x="8" y="8" width="calc(100% - 16px)" height="calc(100% - 16px)" rx="6" fill="none" stroke="url(#neonGradientPreview)" strokeWidth="3"
+                                strokeDasharray={`${(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) ? animatedProgress * 3.6 : 50 * 3.6} 360`}
+                                strokeLinecap="round" className="transition-all duration-100" />
+                             <defs>
+                                <linearGradient id="neonGradientPreview" x1="0%" y1="0%" x2="100%" y2="100%">
+                                   <stop offset="0%" stopColor="#a855f7" />
+                                   <stop offset="50%" stopColor="#6366f1" />
+                                   <stop offset="100%" stopColor="#a855f7" />
+                                </linearGradient>
+                             </defs>
+                          </svg>
+                          <span className="text-2xl font-bold text-white z-10">
+                             {(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) ? `${animatedProgress}%` : '50%'}
+                          </span>
+                       </div>
+                       <div className="text-center">
+                          <div className="font-medium text-zinc-200">Neon Border</div>
+                          <div className="text-xs text-zinc-500">Glowing border animation</div>
+                       </div>
+                    </div>
+                    {(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) && (
+                       <div className="absolute top-2 right-2 w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center">
+                          <Check size={12} className="text-white" />
+                       </div>
+                    )}
+                 </label>
+
+                 {/* Wave Style */}
+                 <label
+                    className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                       localSettings.progressStyle === 'wave'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-zinc-800 hover:border-zinc-700'
+                    }`}
+                    onClick={() => setLocalSettings({...localSettings, progressStyle: 'wave'})}
+                 >
+                    <div className="flex flex-col items-center gap-3">
+                       <div className="w-full aspect-video rounded-lg bg-zinc-950 border border-indigo-500/50 flex items-center justify-center relative overflow-hidden">
+                          {/* Wave preview - animated only when selected */}
+                          <div
+                             className="absolute inset-x-0 bottom-0 transition-all duration-300 ease-out"
+                             style={{ height: localSettings.progressStyle === 'wave' ? `${animatedProgress}%` : '50%' }}
+                          >
+                             {/* Wave layer 1 - back wave with gradient fill */}
+                             <svg
+                                className="absolute -top-5 left-0 w-[200%] h-[calc(100%+20px)]"
+                                style={{
+                                   animation: localSettings.progressStyle === 'wave' ? 'wavePreview 3s ease-in-out infinite' : 'none',
+                                   animationDelay: '-1s'
+                                }}
+                                viewBox="0 0 1200 200"
+                                preserveAspectRatio="none"
+                             >
+                                <defs>
+                                   <linearGradient id="waveGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                                      <stop offset="0%" stopColor="#7c3aed" />
+                                      <stop offset="100%" stopColor="#4f46e5" />
+                                   </linearGradient>
+                                </defs>
+                                <path d="M0,25 C150,50 250,0 400,25 C550,50 650,0 800,25 C950,50 1050,0 1200,25 L1200,200 L0,200 Z" fill="url(#waveGrad1)" />
+                             </svg>
+                             {/* Wave layer 2 - middle wave */}
+                             <svg
+                                className="absolute -top-4 left-0 w-[200%] h-[calc(100%+16px)]"
+                                style={{
+                                   animation: localSettings.progressStyle === 'wave' ? 'wavePreview 2.2s ease-in-out infinite reverse' : 'none',
+                                   animationDelay: '-0.5s'
+                                }}
+                                viewBox="0 0 1200 200"
+                                preserveAspectRatio="none"
+                             >
+                                <defs>
+                                   <linearGradient id="waveGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+                                      <stop offset="0%" stopColor="#8b5cf6" />
+                                      <stop offset="100%" stopColor="#6366f1" />
+                                   </linearGradient>
+                                </defs>
+                                <path d="M0,20 C100,45 200,0 300,25 C400,50 500,0 600,25 C700,50 800,0 900,25 C1000,50 1100,0 1200,20 L1200,200 L0,200 Z" fill="url(#waveGrad2)" />
+                             </svg>
+                             {/* Wave layer 3 - front wave (most visible) */}
+                             <svg
+                                className="absolute -top-6 left-0 w-[200%] h-[calc(100%+24px)]"
+                                style={{ animation: localSettings.progressStyle === 'wave' ? 'wavePreview 3s ease-in-out infinite' : 'none' }}
+                                viewBox="0 0 1200 200"
+                                preserveAspectRatio="none"
+                             >
+                                <defs>
+                                   <linearGradient id="waveGrad3" x1="0%" y1="0%" x2="0%" y2="100%">
+                                      <stop offset="0%" stopColor="#a78bfa" />
+                                      <stop offset="100%" stopColor="#818cf8" />
+                                   </linearGradient>
+                                </defs>
+                                <path d="M0,15 C80,40 160,0 240,20 C320,45 400,0 480,20 C560,45 640,0 720,20 C800,45 880,0 960,20 C1040,45 1120,0 1200,15 L1200,200 L0,200 Z" fill="url(#waveGrad3)" />
+                             </svg>
+                          </div>
+                          <span className="text-2xl font-bold text-white z-10 drop-shadow-lg">
+                             {localSettings.progressStyle === 'wave' ? `${animatedProgress}%` : '50%'}
+                          </span>
+                       </div>
+                       <div className="text-center">
+                          <div className="font-medium text-zinc-200">Wave Liquid</div>
+                          <div className="text-xs text-zinc-500">Rising wave animation</div>
+                       </div>
+                    </div>
+                    {localSettings.progressStyle === 'wave' && (
+                       <div className="absolute top-2 right-2 w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center">
+                          <Check size={12} className="text-white" />
+                       </div>
+                    )}
+                 </label>
+              </div>
+           </div>
+
            {/* Actions Footer */}
            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end">
               <button 
@@ -332,6 +489,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            </div>
         </section>
       )}
+
+      {/* Wave animation keyframes */}
+      <style>{`
+        @keyframes wavePreview {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        @keyframes shinePreview {
+          0%, 100% { transform: translateX(-100%); opacity: 0; }
+          50% { transform: translateX(100%); opacity: 1; }
+        }
+      `}</style>
 
       {/* Create/Edit Key Modal */}
       {isKeyModalOpen && (

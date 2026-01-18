@@ -119,5 +119,20 @@
     "storageUsed": "Storage Used",
     "savedCreators": "Saved Creators",
     "successRate": "Success Rate"
+  },
+  "settings": {
+    "progressStyle": "Download Progress Style",
+    "neonBorder": "Neon Border",
+    "neonBorderDesc": "Glowing border animation",
+    "waveLiquid": "Wave Liquid",
+    "waveLiquidDesc": "Rising wave animation"
+  },
+  "download": {
+    "downloading": "Downloading",
+    "completed": "Done",
+    "failed": "Failed",
+    "retry": "Retry",
+    "retrying": "Retrying",
+    "queued": "Queued"
   }
 }
