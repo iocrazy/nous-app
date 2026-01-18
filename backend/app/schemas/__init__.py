@@ -5,7 +5,9 @@ Pydantic Schema 模块
 """
 
 from app.schemas.douyin import *
+from app.schemas.tags import *
 
 __all__ = [
     # douyin schemas
+    # tags schemas
 ]
