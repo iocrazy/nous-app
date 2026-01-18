@@ -75,6 +75,10 @@ tags_metadata = [
         "name": "Tags",
         "description": "Manage tags for organizing and categorizing videos.",
     },
+    {
+        "name": "Analysis",
+        "description": "AI-powered video analysis: visual recognition, content understanding, and semantic search.",
+    },
 ]
 
 app = FastAPI(
