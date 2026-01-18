@@ -11,6 +11,7 @@ from celery import shared_task, group
 from loguru import logger
 
 from app.core.utils import Utils
+from app.services.classification_service import ClassificationService
 
 
 def run_async(coro):
@@ -157,12 +158,42 @@ def parse_single_link_task(
             data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
 
         # Save or update
+        saved_video = None
         if existing:
-            run_async(repo.update(aweme_id, data_dict))
+            saved_video = run_async(repo.update(aweme_id, data_dict))
             logger.info(f"[Celery] Updated metadata: {aweme_id}")
         else:
-            run_async(repo.create(data_dict))
+            saved_video = run_async(repo.create(data_dict))
             logger.info(f"[Celery] Created metadata: {aweme_id}")
+
+        # Auto-tag the video after saving metadata
+        try:
+            # Get the video's database ID (BIGINT primary key, not aweme_id)
+            video_db_id = saved_video.get("id") if saved_video else None
+            if video_db_id:
+                # Extract original hashtags from aweme_detail's text_extra
+                original_tags = []
+                text_extra = aweme_detail.get("text_extra", [])
+                if text_extra:
+                    original_tags = [
+                        tag.get("hashtag_name", "")
+                        for tag in text_extra
+                        if tag.get("hashtag_name")
+                    ]
+
+                added_tags = run_async(ClassificationService.auto_tag_video(
+                    video_id=video_db_id,
+                    title=video_title or "",
+                    description=parsed_data.get("video_desc", ""),
+                    original_tags=original_tags
+                ))
+                if added_tags:
+                    logger.info(f"[Celery] Auto-tagged video {aweme_id} with {len(added_tags)} tags")
+            else:
+                logger.warning(f"[Celery] Cannot auto-tag video {aweme_id}: no database ID returned")
+        except Exception as e:
+            # Auto-tagging is non-blocking - failures should not affect the main flow
+            logger.warning(f"[Celery] Auto-tagging failed for {aweme_id}: {e}")
 
         # Determine what needs downloading
         need_download = video_bool or music_bool or cover_bool
