@@ -213,6 +213,22 @@ def parse_single_link_task(
             download_task_id = download_task.id
             logger.info(f"[Celery] Download task triggered: {download_task_id}")
 
+        # Trigger L1 analysis automatically (non-blocking)
+        try:
+            cover_url = parsed_data.get("cover_urls", [None])[0] if parsed_data.get("cover_urls") else None
+            if video_db_id and cover_url:
+                from app.tasks.analysis_tasks import analyze_video_l1_task
+                analyze_video_l1_task.delay(
+                    video_id=video_db_id,
+                    cover_url=cover_url,
+                    title=video_title or "",
+                    description=parsed_data.get("video_desc", "")
+                )
+                logger.info(f"[Celery] Triggered L1 analysis for video {aweme_id}")
+        except Exception as e:
+            # L1 analysis is non-blocking - failures should not affect the main flow
+            logger.warning(f"[Celery] Failed to trigger L1 analysis for {aweme_id}: {e}")
+
         # Log user action
         run_async(log_user_action(
             user_id=user_id,
