@@ -9,6 +9,7 @@ from app.services.douyin_parser import DouyinParser
 from app.services.downloader import DownloaderService
 from app.services.supabase_douyin_service import SupabaseDouyinService
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseAdminAuthService
+from app.services.visual_analysis_service import VisualAnalysisService, VisualAnalysisResult
 
 __all__ = [
     "DouyinAnalysis",
@@ -17,4 +18,6 @@ __all__ = [
     "SupabaseDouyinService",
     "SupabaseAuthService",
     "SupabaseAdminAuthService",
+    "VisualAnalysisService",
+    "VisualAnalysisResult",
 ]
