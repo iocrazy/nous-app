@@ -56,7 +56,7 @@ class CleanupService:
         for video in never_viewed:
             suggestions.append(CleanupSuggestion(
                 video_id=video["id"],
-                title=video.get("title", ""),
+                title=video.get("video_title", ""),
                 cover_url=video.get("cover_url"),
                 author=video.get("author"),
                 reason="never_viewed",
@@ -73,7 +73,7 @@ class CleanupService:
         for video in old_unused:
             suggestions.append(CleanupSuggestion(
                 video_id=video["id"],
-                title=video.get("title", ""),
+                title=video.get("video_title", ""),
                 cover_url=video.get("cover_url"),
                 author=video.get("author"),
                 reason="old_unused",
@@ -92,7 +92,7 @@ class CleanupService:
             if video["id"] not in existing_ids:
                 suggestions.append(CleanupSuggestion(
                     video_id=video["id"],
-                    title=video.get("title", ""),
+                    title=video.get("video_title", ""),
                     cover_url=video.get("cover_url"),
                     author=video.get("author"),
                     reason="large_file",
@@ -112,7 +112,7 @@ class CleanupService:
                 if dup["video_id"] not in existing_ids:
                     suggestions.append(CleanupSuggestion(
                         video_id=dup["video_id"],
-                        title=dup.get("title", ""),
+                        title=dup.get("video_title", ""),
                         cover_url=dup.get("cover_url"),
                         author=dup.get("author"),
                         reason="duplicate_content",
@@ -137,7 +137,7 @@ class CleanupService:
         cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
 
         result = self.supabase.table("douyin_videos").select(
-            "id, title, cover_url, author, storage_size, created_at"
+            "id, video_title, cover_url, author, storage_size, created_at"
         ).eq("user_id", user_id).eq("keep_forever", False).eq("view_count", 0).lt("created_at", cutoff).limit(50).execute()
 
         return result.data
@@ -147,7 +147,7 @@ class CleanupService:
         cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat()
 
         result = self.supabase.table("douyin_videos").select(
-            "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+            "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).gt("view_count", 0).lt("last_viewed_at", cutoff).limit(50).execute()
 
         return result.data
@@ -165,7 +165,7 @@ class CleanupService:
         top_n = max(int(total * top_percent), 5)
 
         result = self.supabase.table("douyin_videos").select(
-            "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+            "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).not_.is_("storage_size", "null").order("storage_size", desc=True).limit(top_n).execute()
 
         return result.data
@@ -207,7 +207,7 @@ class CleanupService:
                 if similarity >= threshold:
                     # Get video details
                     video = self.supabase.table("douyin_videos").select(
-                        "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+                        "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
                     ).eq("id", vid2).maybe_single().execute()
 
                     if video.data:
