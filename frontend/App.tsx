@@ -6,7 +6,7 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
-  Layers, Download, Users
+  Layers, Download, Users, Trash2
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
@@ -33,6 +33,11 @@ import { CreateTeamModal } from './components/CreateTeamModal';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
 import { DownloadProgress, DownloadStatus as ProgressStatus } from './components/DownloadProgress';
 import { useDownloadProgress } from './hooks/useDownloadProgress';
+import { SmartCollectionsSidebar } from './components/SmartCollectionsSidebar';
+import { SemanticSearchBar } from './components/SemanticSearchBar';
+import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
+import { SmartCollection } from './services/smartCollectionService';
+import { SearchResult } from './services/searchService';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -197,6 +202,12 @@ export default function App() {
   const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
   const [isTeamLibraryOpen, setIsTeamLibraryOpen] = useState(true);
   const [isTeamLibraryActive, setIsTeamLibraryActive] = useState(false);
+
+  // Smart Collections State
+  const [activeSmartCollectionId, setActiveSmartCollectionId] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchQueryText, setSearchQueryText] = useState('');
 
   // Parser Configuration State
   const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
@@ -1097,33 +1108,39 @@ export default function App() {
   };
 
   // Filter and sort library - 默认按添加时间降序（最新在前）
-  const filteredLibrary = library
-    .filter(item => {
-      // Filter by specific collection if selected
-      if (activeCollectionId && !collectionVideoIds.includes(item.aweme_id)) {
-        return false;
-      }
-      // Filter by team library (all team collections) if active but no specific collection
-      if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.aweme_id)) {
-        return false;
-      }
-      if (!searchQuery) return true;
-      const lowerQuery = searchQuery.toLowerCase();
-      return (
-        item.video_title?.toLowerCase().includes(lowerQuery) ||
-        item.author?.toLowerCase().includes(lowerQuery) ||
-        item.notes?.toLowerCase().includes(lowerQuery) ||
-        item.tags?.some(tag => tag.toLowerCase().includes(lowerQuery)) ||
-        item.video_categories?.toLowerCase().includes(lowerQuery) ||
-        item.video_desc?.toLowerCase().includes(lowerQuery)
-      );
-    })
-    .sort((a, b) => {
-      // 按 created_at 降序排序（最新在前）
-      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return bTime - aTime;
-    });
+  const filteredLibrary = React.useMemo(() => {
+    // If semantic search is active, use search results to filter
+    if (isSearchActive && searchResults.length > 0) {
+      const searchAwemeIds = new Set(searchResults.map(r => r.aweme_id));
+      return library
+        .filter(item => searchAwemeIds.has(item.aweme_id))
+        .sort((a, b) => {
+          // Sort by search relevance (similarity score)
+          const aScore = searchResults.find(r => r.aweme_id === a.aweme_id)?.similarity_score || 0;
+          const bScore = searchResults.find(r => r.aweme_id === b.aweme_id)?.similarity_score || 0;
+          return bScore - aScore;
+        });
+    }
+
+    return library
+      .filter(item => {
+        // Filter by specific collection if selected
+        if (activeCollectionId && !collectionVideoIds.includes(item.aweme_id)) {
+          return false;
+        }
+        // Filter by team library (all team collections) if active but no specific collection
+        if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.aweme_id)) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        // 按 created_at 降序排序（最新在前）
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds]);
 
   // Calculate main content classes based on view to handle mobile padding
   // Added md:pt-20 to account for the fixed header on desktop
@@ -1413,6 +1430,25 @@ export default function App() {
             label={t('nav.dashboard')}
             active={view === 'dashboard'}
             onClick={() => setView('dashboard')}
+          />
+
+          {/* Smart Collections */}
+          <SmartCollectionsSidebar
+            activeCollectionId={activeSmartCollectionId}
+            onSelectCollection={(collection) => {
+              setActiveSmartCollectionId(collection?.id || null);
+              setView('library');
+              setActiveCollectionId(null);
+              setIsTeamLibraryActive(false);
+            }}
+          />
+
+          {/* Cleanup Suggestions */}
+          <SidebarItem
+            icon={Trash2}
+            label="Storage Cleanup"
+            active={view === 'cleanup'}
+            onClick={() => setView('cleanup')}
           />
 
           <div className="space-y-1">
@@ -1856,17 +1892,21 @@ export default function App() {
                         <RefreshCw size={20} className={isLoadingLibrary ? "animate-spin" : ""} />
                      </button>
 
-                     {/* Search */}
-                     <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 w-4 h-4" />
-                        <input
-                          type="text"
-                          placeholder={t('library.searchPlaceholder')}
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="w-full bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm rounded-lg pl-9 pr-3 py-2 outline-none focus:border-indigo-500 transition-colors"
-                        />
-                     </div>
+                     {/* Semantic Search */}
+                     <SemanticSearchBar
+                       onSearch={(results, query) => {
+                         setSearchResults(results);
+                         setSearchQueryText(query);
+                         setIsSearchActive(true);
+                       }}
+                       onClear={() => {
+                         setSearchResults([]);
+                         setSearchQueryText('');
+                         setIsSearchActive(false);
+                       }}
+                       placeholder={t('library.searchPlaceholder')}
+                       className="flex-1 md:w-80"
+                     />
 
                      {/* View Toggle */}
                      <div className="hidden md:flex bg-zinc-900 rounded-lg border border-zinc-800 p-1">
@@ -2078,11 +2118,22 @@ export default function App() {
         
         {/* VIEW: SETTINGS */}
         {view === 'settings' && (
-           <SettingsView 
+           <SettingsView
              settings={userSettings}
              onUpdateSettings={handleUpdateSettings}
              activeTab={settingsTab}
            />
+        )}
+
+        {/* VIEW: CLEANUP */}
+        {view === 'cleanup' && (
+          <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold text-white mb-2">Storage Cleanup</h1>
+              <p className="text-zinc-400">Review and clean up videos to free up storage space</p>
+            </div>
+            <CleanupSuggestionsView />
+          </div>
         )}
 
       </main>

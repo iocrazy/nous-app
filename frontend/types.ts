@@ -71,7 +71,7 @@ export interface DouyinBase {
   updated_at?: string;
 }
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup';
 
 export interface ApiKey {
   id: string;
