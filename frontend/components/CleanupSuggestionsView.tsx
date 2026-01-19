@@ -21,8 +21,7 @@ import {
   Filter,
 } from 'lucide-react';
 import {
-  getCleanupSuggestions,
-  getCleanupStats,
+  getCleanupData,
   takeCleanupAction,
   batchCleanupAction,
   CleanupSuggestion,
@@ -77,13 +76,11 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
     setIsLoading(true);
     setError(null);
     try {
-      const [suggestionsData, statsData] = await Promise.all([
-        getCleanupSuggestions(50, true),
-        getCleanupStats(),
-      ]);
-      setSuggestions(suggestionsData.suggestions);
-      setCategories(suggestionsData.categories);
-      setStats(statsData);
+      // Use combined API for optimal performance (single network request)
+      const data = await getCleanupData(50, true);
+      setSuggestions(data.suggestions);
+      setCategories(data.categories);
+      setStats(data.stats);
     } catch (err) {
       console.error('Failed to load cleanup data:', err);
       setError('Failed to load cleanup suggestions');

@@ -12,10 +12,70 @@ from app.schemas.cleanup import (
     CleanupAction,
     CleanupBatchAction,
     CleanupStats,
+    CleanupDataResponse,
 )
 
 
 router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
+
+
+@router.get("/data", response_model=CleanupDataResponse)
+async def get_cleanup_data(
+    limit: int = Query(50, ge=1, le=200),
+    include_duplicates: bool = Query(True, description="Include potential duplicate detection"),
+    auth: AuthDep = None,
+):
+    """
+    Get all cleanup data in a single optimized call.
+
+    Returns suggestions, stats, and categories together for better performance.
+    This endpoint reduces network round trips by combining multiple queries.
+    """
+    service = CleanupService()
+
+    data = await service.get_cleanup_data(
+        user_id=auth.user_id,
+        limit=limit,
+        include_duplicates=include_duplicates
+    )
+
+    suggestions = data["suggestions"]
+    stats = data["stats"]
+    categories = data["categories"]
+
+    total_reclaimable = sum(s.storage_size for s in suggestions)
+
+    return CleanupDataResponse(
+        suggestions=[
+            CleanupSuggestionSchema(
+                video_id=s.video_id,
+                title=s.title,
+                cover_url=s.cover_url,
+                author=s.author,
+                reason=s.reason,
+                reason_detail=s.reason_detail,
+                storage_size=s.storage_size,
+                created_at=s.created_at,
+                last_viewed_at=s.last_viewed_at,
+                view_count=s.view_count,
+                similarity_to=s.similarity_to,
+                similarity_score=s.similarity_score
+            )
+            for s in suggestions
+        ],
+        total_count=len(suggestions),
+        total_reclaimable_bytes=total_reclaimable,
+        categories=categories,
+        stats=CleanupStats(
+            total_videos=stats.get("total_videos", 0),
+            total_storage_bytes=stats.get("total_storage_bytes", 0),
+            videos_never_viewed=stats.get("videos_never_viewed", 0),
+            videos_not_viewed_30_days=stats.get("videos_not_viewed_30_days", 0),
+            potential_duplicates=categories.get("duplicate_content", 0),
+            videos_marked_keep=stats.get("videos_marked_keep", 0),
+            reclaimable_bytes=stats.get("reclaimable_bytes", 0)
+        )
+    )
 
 
 @router.get("/suggestions", response_model=CleanupSuggestionsResponse)

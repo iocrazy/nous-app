@@ -55,6 +55,19 @@ export interface CleanupStats {
   reclaimable_bytes: number;
 }
 
+export interface CleanupDataResponse {
+  suggestions: CleanupSuggestion[];
+  total_count: number;
+  total_reclaimable_bytes: number;
+  categories: {
+    never_viewed: number;
+    old_unused: number;
+    duplicate_content: number;
+    large_file: number;
+  };
+  stats: CleanupStats;
+}
+
 export interface StorageBreakdown {
   by_type: {
     video: number;
@@ -90,7 +103,36 @@ export interface BatchCleanupResponse {
 }
 
 /**
+ * Get all cleanup data in a single optimized call
+ * This is the preferred method as it reduces network round trips
+ */
+export const getCleanupData = async (
+  limit: number = 50,
+  includeDuplicates: boolean = true
+): Promise<CleanupDataResponse> => {
+  const apiUrl = getApiUrl();
+
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    include_duplicates: includeDuplicates.toString(),
+  });
+
+  const response = await fetch(`${apiUrl}/api/v1/cleanup/data?${params}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to get cleanup data' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+/**
  * Get cleanup suggestions
+ * @deprecated Use getCleanupData instead for better performance
  */
 export const getCleanupSuggestions = async (
   limit: number = 50,

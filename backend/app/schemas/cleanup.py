@@ -57,3 +57,12 @@ class StorageBreakdown(BaseModel):
     by_month: List[dict]  # [{month, count, bytes}]
     by_tag: List[dict]  # [{tag, count, bytes}]
     largest_videos: List[dict]  # top 10 by size
+
+
+class CleanupDataResponse(BaseModel):
+    """Combined response with suggestions, stats, and categories in one call."""
+    suggestions: List[CleanupSuggestion]
+    total_count: int
+    total_reclaimable_bytes: int
+    categories: dict
+    stats: CleanupStats
