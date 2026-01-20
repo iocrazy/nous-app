@@ -26,12 +26,14 @@ class HybridSearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     """A single search result item."""
     video_id: int
+    aweme_id: str  # Required for frontend filtering
     title: str
     description: Optional[str] = None
     cover_url: Optional[str] = None
-    similarity: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
+    similarity_score: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
     tags: List[str] = Field(default_factory=list)
     author: Optional[str] = None
+    view_count: int = 0
     created_at: Optional[str] = None
 
 

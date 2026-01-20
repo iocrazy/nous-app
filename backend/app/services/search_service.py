@@ -1,4 +1,5 @@
-"""Semantic search service using vector embeddings (异步)."""
+"""Semantic search service using vector embeddings (异步优化版)."""
+import asyncio
 from typing import Optional, List
 from dataclasses import dataclass, field
 
@@ -13,12 +14,14 @@ from app.db.supabase_client import get_async_supabase_admin
 class SearchResult:
     """A single search result."""
     video_id: int
+    aweme_id: str
     title: str
     description: Optional[str]
     cover_url: Optional[str]
     similarity: float
     tags: List[str] = field(default_factory=list)
     author: Optional[str] = None
+    view_count: int = 0
     created_at: Optional[str] = None
 
 
@@ -32,7 +35,7 @@ class SearchResponse:
 
 
 class SearchService:
-    """Service for semantic and hybrid video search (异步)."""
+    """Service for semantic and hybrid video search (异步优化版)."""
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
@@ -89,10 +92,14 @@ class SearchService:
         for r in raw_results:
             results.append(SearchResult(
                 video_id=r["video_id"],
+                aweme_id=r.get("aweme_id", ""),
                 title=r.get("title", ""),
                 description=r.get("description"),
                 cover_url=r.get("cover_url"),
-                similarity=r.get("similarity", 0)
+                similarity=r.get("similarity", 0),
+                author=r.get("author"),
+                view_count=r.get("view_count", 0),
+                created_at=r.get("created_at")
             ))
 
         return SearchResponse(
@@ -115,120 +122,161 @@ class SearchService:
     ) -> SearchResponse:
         """
         Hybrid search combining semantic similarity with metadata filters.
-
-        Applies filters first, then ranks by semantic similarity.
+        优化版：直接在数据库层做文本搜索，减少数据传输。
         """
         client = await self._get_client()
 
-        # Start with base query
+        # Normalize query for search (handle CJK text with spaces)
+        query_clean = query.strip() if query else ""
+        query_normalized = query_clean.replace(" ", "")  # "31 岁" -> "31岁"
+
+        # If query is provided, do text search in database
+        if query_clean:
+            # Use database-level text search with ILIKE for better performance
+            # Search pattern: match anywhere in the text
+            search_pattern = f"%{query_normalized}%"
+
+            # Build the search query with OR conditions using Supabase's or_ filter
+            # We search in: video_title, video_desc, author, video_hashtag_name
+            base_query = client.table("douyin_videos").select(
+                "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at, video_hashtag_name"
+            )
+
+            # Apply user filter first (required)
+            if user_id:
+                base_query = base_query.eq("user_id", user_id)
+
+            # Apply other filters
+            if author:
+                base_query = base_query.ilike("author", f"%{author}%")
+            if date_from:
+                base_query = base_query.gte("created_at", date_from)
+            if date_to:
+                base_query = base_query.lte("created_at", date_to)
+
+            # Use or_ filter for text search across multiple columns
+            # Supabase supports: or_(filter1,filter2,...)
+            base_query = base_query.or_(
+                f"video_title.ilike.{search_pattern},"
+                f"video_desc.ilike.{search_pattern},"
+                f"author.ilike.{search_pattern},"
+                f"video_hashtag_name.ilike.{search_pattern}"
+            )
+
+            # Execute the search query
+            search_result = await base_query.limit(limit).execute()
+            filtered_videos = search_result.data
+
+            logger.info(f"Database text search found {len(filtered_videos)} results for: {query_clean}")
+
+            # If no results from basic fields, try searching in video_analysis
+            if not filtered_videos:
+                logger.info(f"No results in basic fields, searching video_analysis for: {query_clean}")
+
+                # First get all user's video IDs
+                if user_id:
+                    user_videos = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+                    user_video_ids = [v["id"] for v in user_videos.data]
+                else:
+                    user_videos = await client.table("douyin_videos").select("id").limit(500).execute()
+                    user_video_ids = [v["id"] for v in user_videos.data]
+
+                if user_video_ids:
+                    # Search in video_analysis table
+                    analysis_search = await client.table("video_analysis").select(
+                        "video_id"
+                    ).in_("video_id", user_video_ids).or_(
+                        f"visual_description.ilike.{search_pattern},"
+                        f"detected_text.ilike.{search_pattern}"
+                    ).limit(limit).execute()
+
+                    if analysis_search.data:
+                        matched_video_ids = [a["video_id"] for a in analysis_search.data]
+                        # Fetch the full video data for matched IDs
+                        video_result = await client.table("douyin_videos").select(
+                            "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at"
+                        ).in_("id", matched_video_ids).execute()
+                        filtered_videos = video_result.data
+                        logger.info(f"Found {len(filtered_videos)} results in video_analysis")
+
+            # Apply tag filter if specified
+            if tag_ids and filtered_videos:
+                video_ids = [v["id"] for v in filtered_videos]
+                tag_filter_result = await client.table("video_tags").select(
+                    "video_id"
+                ).in_("video_id", video_ids).in_("tag_id", tag_ids).execute()
+
+                tagged_video_ids = set(r["video_id"] for r in tag_filter_result.data)
+                filtered_videos = [v for v in filtered_videos if v["id"] in tagged_video_ids]
+
+            # Build results
+            results = []
+            for video in filtered_videos:
+                results.append(SearchResult(
+                    video_id=video["id"],
+                    aweme_id=video.get("aweme_id", ""),
+                    title=video.get("video_title", ""),
+                    description=video.get("video_desc"),
+                    cover_url=video.get("cover_url"),
+                    similarity=0.5,  # Default score for text matches
+                    author=video.get("author"),
+                    view_count=video.get("view_count", 0),
+                    created_at=video.get("created_at")
+                ))
+
+            return SearchResponse(
+                results=results,
+                total=len(results),
+                query=query,
+                search_type="hybrid"
+            )
+
+        # No query, just return filtered results
         base_query = client.table("douyin_videos").select(
-            "id, title, desc, cover_url, author, created_at"
+            "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at"
         )
 
-        # Apply user filter if provided
         if user_id:
             base_query = base_query.eq("user_id", user_id)
-
-        # Apply author filter
         if author:
             base_query = base_query.ilike("author", f"%{author}%")
-
-        # Apply date filters
         if date_from:
             base_query = base_query.gte("created_at", date_from)
         if date_to:
             base_query = base_query.lte("created_at", date_to)
 
-        # Get filtered videos
-        filtered_result = await base_query.limit(500).execute()
-        filtered_videos = filtered_result.data
-
-        if not filtered_videos:
-            return SearchResponse(
-                results=[],
-                total=0,
-                query=query,
-                search_type="hybrid"
-            )
-
         # Apply tag filter if specified
         if tag_ids:
-            video_ids = [v["id"] for v in filtered_videos]
+            # Get video IDs that have the specified tags
             tag_filter_result = await client.table("video_tags").select(
                 "video_id"
-            ).in_("video_id", video_ids).in_("tag_id", tag_ids).execute()
+            ).in_("tag_id", tag_ids).execute()
+            tagged_video_ids = list(set(r["video_id"] for r in tag_filter_result.data))
 
-            tagged_video_ids = set(r["video_id"] for r in tag_filter_result.data)
-            filtered_videos = [v for v in filtered_videos if v["id"] in tagged_video_ids]
-
-        if not filtered_videos:
-            return SearchResponse(
-                results=[],
-                total=0,
-                query=query,
-                search_type="hybrid"
-            )
-
-        # If query is provided, rank by semantic similarity
-        if query and query.strip():
-            query_embedding = await self.embedding_service.generate_embedding(query)
-
-            if query_embedding:
-                # Get embeddings for filtered videos
-                video_ids = [v["id"] for v in filtered_videos]
-                analysis_result = await client.table("video_analysis").select(
-                    "video_id, content_embedding"
-                ).in_("video_id", video_ids).not_.is_("content_embedding", "null").execute()
-
-                # Calculate similarities
-                video_similarities = {}
-                for analysis in analysis_result.data:
-                    if analysis.get("content_embedding"):
-                        similarity = self._calculate_similarity(
-                            query_embedding,
-                            analysis["content_embedding"]
-                        )
-                        if similarity >= threshold:
-                            video_similarities[analysis["video_id"]] = similarity
-
-                # Sort filtered videos by similarity
-                results = []
-                for video in filtered_videos:
-                    video_id = video["id"]
-                    similarity = video_similarities.get(video_id, 0)
-
-                    if similarity > 0 or not query.strip():
-                        results.append(SearchResult(
-                            video_id=video_id,
-                            title=video.get("title", ""),
-                            description=video.get("desc"),
-                            cover_url=video.get("cover_url"),
-                            similarity=similarity,
-                            author=video.get("author"),
-                            created_at=video.get("created_at")
-                        ))
-
-                # Sort by similarity descending
-                results.sort(key=lambda x: x.similarity, reverse=True)
-                results = results[:limit]
-
+            if not tagged_video_ids:
                 return SearchResponse(
-                    results=results,
-                    total=len(results),
-                    query=query,
+                    results=[],
+                    total=0,
+                    query=query or "",
                     search_type="hybrid"
                 )
 
-        # No query, just return filtered results
+            base_query = base_query.in_("id", tagged_video_ids)
+
+        filtered_result = await base_query.limit(limit).execute()
+        filtered_videos = filtered_result.data
+
         results = []
-        for video in filtered_videos[:limit]:
+        for video in filtered_videos:
             results.append(SearchResult(
                 video_id=video["id"],
-                title=video.get("title", ""),
-                description=video.get("desc"),
+                aweme_id=video.get("aweme_id", ""),
+                title=video.get("video_title", ""),
+                description=video.get("video_desc"),
                 cover_url=video.get("cover_url"),
                 similarity=1.0,  # No semantic ranking
                 author=video.get("author"),
+                view_count=video.get("view_count", 0),
                 created_at=video.get("created_at")
             ))
 
@@ -286,10 +334,14 @@ class SearchService:
             if r["video_id"] != video_id:
                 results.append(SearchResult(
                     video_id=r["video_id"],
+                    aweme_id=r.get("aweme_id", ""),
                     title=r.get("title", ""),
                     description=r.get("description"),
                     cover_url=r.get("cover_url"),
-                    similarity=r.get("similarity", 0)
+                    similarity=r.get("similarity", 0),
+                    author=r.get("author"),
+                    view_count=r.get("view_count", 0),
+                    created_at=r.get("created_at")
                 ))
 
         results = results[:limit]

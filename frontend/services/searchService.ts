@@ -28,6 +28,9 @@ export interface SearchResultItem {
   created_at: string;
 }
 
+// Type alias for backwards compatibility
+export type SearchResult = SearchResultItem;
+
 export interface SearchResponse {
   results: SearchResultItem[];
   total: number;
@@ -168,4 +171,90 @@ export const quickSearch = async (
   }
 
   return response.json();
+};
+
+/**
+ * Local search - searches through already loaded library data (instant, no network)
+ * Use this for fast text search when library is already loaded
+ */
+export const localSearch = (
+  query: string,
+  library: Array<{
+    id?: number;
+    aweme_id: string;
+    video_title?: string;
+    video_desc?: string;
+    author?: string;
+    video_hashtag_name?: string;
+    cover_url?: string;
+    view_count?: number;
+    created_at?: string;
+  }>,
+  limit: number = 20
+): SearchResponse => {
+  if (!query || !query.trim()) {
+    return {
+      results: [],
+      total: 0,
+      query: '',
+      search_type: 'local',
+      processing_time_ms: 0,
+    };
+  }
+
+  const startTime = performance.now();
+
+  // Normalize query (remove spaces for CJK text matching)
+  const queryLower = query.toLowerCase();
+  const queryNormalized = queryLower.replace(/\s+/g, '');
+
+  const results: SearchResultItem[] = [];
+
+  for (const video of library) {
+    // Get searchable fields
+    const title = (video.video_title || '').toLowerCase();
+    const desc = (video.video_desc || '').toLowerCase();
+    const author = (video.author || '').toLowerCase();
+    const hashtags = (video.video_hashtag_name || '').toLowerCase();
+
+    // Normalized versions (no spaces)
+    const titleNorm = title.replace(/\s+/g, '');
+    const descNorm = desc.replace(/\s+/g, '');
+
+    // Check if query matches any field
+    const match =
+      title.includes(queryLower) ||
+      desc.includes(queryLower) ||
+      author.includes(queryLower) ||
+      hashtags.includes(queryLower) ||
+      titleNorm.includes(queryNormalized) ||
+      descNorm.includes(queryNormalized);
+
+    if (match) {
+      results.push({
+        video_id: video.id || 0,
+        aweme_id: video.aweme_id,
+        title: video.video_title || '',
+        description: video.video_desc || null,
+        cover_url: video.cover_url || null,
+        author: video.author || null,
+        similarity_score: 0.5,
+        tags: [],
+        view_count: video.view_count || 0,
+        created_at: video.created_at || '',
+      });
+
+      if (results.length >= limit) break;
+    }
+  }
+
+  const processingTime = performance.now() - startTime;
+
+  return {
+    results,
+    total: results.length,
+    query,
+    search_type: 'local',
+    processing_time_ms: Math.round(processingTime),
+  };
 };

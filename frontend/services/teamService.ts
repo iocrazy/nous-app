@@ -118,3 +118,48 @@ export const fetchTeamMembers = async (teamId: string): Promise<TeamMember[]> =>
   if (error) throw error;
   return data || [];
 };
+
+export const updateTeam = async (teamId: string, updates: { name?: string; description?: string }): Promise<Team> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase not configured');
+
+  const { data, error } = await supabase
+    .from('teams')
+    .update(updates)
+    .eq('id', teamId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateMemberRole = async (
+  teamId: string,
+  userId: string,
+  role: 'admin' | 'member'
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase not configured');
+
+  const { error } = await supabase
+    .from('team_members')
+    .update({ role })
+    .eq('team_id', teamId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+};
+
+export const removeMember = async (teamId: string, userId: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase not configured');
+
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+};

@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
 import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
-import { fetchLibrary, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
+import { fetchLibrary, fetchLibraryPaginated, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
@@ -40,6 +40,7 @@ import { SmartCollection } from './services/smartCollectionService';
 import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
 import { TeamLibraryView } from './components/TeamLibraryView';
+import { SettingsModal } from './components/SettingsModal';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -195,7 +196,8 @@ export default function App() {
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
-  const [isTeamSettingsOpen, setIsTeamSettingsOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsModalInitialTab, setSettingsModalInitialTab] = useState<'personal' | 'team'>('personal');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
     const saved = localStorage.getItem('mediahub_library_preferences');
     if (saved) {
@@ -292,6 +294,12 @@ export default function App() {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedLibraryItem, setSelectedLibraryItem] = useState<DouyinBase | null>(null); // For detail view
+
+  // Infinite scroll pagination state
+  const [currentPage, setCurrentPage] = useState(0);
+  const [hasMoreData, setHasMoreData] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   
   const [libraryViewMode, setLibraryViewMode] = useState<'grid' | 'list' | 'feed'>(() => {
     const saved = localStorage.getItem('mediahub_library_preferences');
@@ -767,7 +775,8 @@ export default function App() {
   const handleTeamSettings = (teamId: string) => {
     setIsUserDropdownOpen(false);
     setSelectedTeamId(teamId);
-    setIsTeamSettingsOpen(true);
+    setSettingsModalInitialTab('team');
+    setIsSettingsModalOpen(true);
   };
 
   const handleTeamUpdated = (updatedTeam: Team) => {
@@ -870,11 +879,18 @@ export default function App() {
   const loadLibraryData = async () => {
     setIsLoadingLibrary(true);
     setLibraryError(null);
+    // Reset pagination state
+    setCurrentPage(0);
+    setHasMoreData(true);
     try {
       let data: DouyinBase[];
       if (isSupabaseConfigured()) {
-        data = await fetchLibrary();
+        // Load first page with pagination
+        const result = await fetchLibraryPaginated(0);
+        data = result.data;
         setLibrary(data);
+        setHasMoreData(result.hasMore);
+        setCurrentPage(0);
         if (data.length === 0) {
            console.log("Supabase connected but returned no data. You may need to create the 'douyin_videos' table.");
         }
@@ -882,6 +898,7 @@ export default function App() {
         // Fallback to mock if not configured
         data = MOCK_LIBRARY;
         setLibrary(data);
+        setHasMoreData(false);
       }
       // Calculate dashboard stats from library data
       const stats = await fetchDashboardStats(data);
@@ -890,6 +907,7 @@ export default function App() {
       console.error("Failed to load library:", err);
       // Fallback to mock on error (e.g. table doesn't exist yet)
       setLibrary(MOCK_LIBRARY);
+      setHasMoreData(false);
       // Calculate dashboard stats even from mock data
       const stats = await fetchDashboardStats(MOCK_LIBRARY);
       setDashboardStats(stats);
@@ -900,6 +918,47 @@ export default function App() {
       setIsLoadingLibrary(false);
     }
   };
+
+  // Load more library data for infinite scroll
+  const loadMoreLibrary = async () => {
+    if (!hasMoreData || isLoadingMore || !isSupabaseConfigured()) return;
+
+    setIsLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      const result = await fetchLibraryPaginated(nextPage);
+
+      if (result.data.length > 0) {
+        setLibrary(prev => [...prev, ...result.data]);
+        setCurrentPage(nextPage);
+        setHasMoreData(result.hasMore);
+      } else {
+        setHasMoreData(false);
+      }
+    } catch (err) {
+      console.error("Failed to load more library data:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  // Intersection Observer for infinite scroll
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting && hasMoreData && !isLoadingMore && !isSearchActive) {
+          loadMoreLibrary();
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMoreData, isLoadingMore, isSearchActive, currentPage]);
 
   // Helper to add log with timestamp
   const addLog = (msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
@@ -1195,8 +1254,12 @@ export default function App() {
 
   // Filter and sort library - 默认按添加时间降序（最新在前）
   const filteredLibrary = React.useMemo(() => {
-    // If semantic search is active, use search results to filter
-    if (isSearchActive && searchResults.length > 0) {
+    // If semantic search is active, filter by search results
+    if (isSearchActive) {
+      // If search returned no results, return empty array
+      if (searchResults.length === 0) {
+        return [];
+      }
       const searchAwemeIds = new Set(searchResults.map(r => r.aweme_id));
       return library
         .filter(item => searchAwemeIds.has(item.aweme_id))
@@ -1326,11 +1389,13 @@ export default function App() {
         onTeamSettings={handleTeamSettings}
         onProfile={() => {
           setIsUserDropdownOpen(false);
-          setIsProfileModalOpen(true);
+          setSettingsModalInitialTab('personal');
+          setIsSettingsModalOpen(true);
         }}
         onAccount={() => {
           setIsUserDropdownOpen(false);
-          setView('settings');
+          setSettingsModalInitialTab('personal');
+          setIsSettingsModalOpen(true);
         }}
         onLogout={handleLogout}
       />
@@ -1340,6 +1405,38 @@ export default function App() {
         isOpen={isCreateTeamModalOpen}
         onClose={() => setIsCreateTeamModalOpen(false)}
         onTeamCreated={handleTeamCreated}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        initialTab={settingsModalInitialTab}
+        currentTeamId={selectedTeamId}
+        currentTeamName={teams.find(t => t.id === selectedTeamId)?.name}
+        isTeamOwner={teams.find(t => t.id === selectedTeamId)?.owner_id === currentUserId}
+        user={{
+          id: currentUserId || '',
+          name: userProfile.name,
+          email: userProfile.email,
+          avatarUrl: userProfile.avatarUrl,
+          bio: '', // TODO: Add bio to userProfile if needed
+        }}
+        onUserUpdated={() => {
+          // Refresh user profile
+        }}
+        onTeamDeleted={() => {
+          if (selectedTeamId) {
+            handleTeamDeleted(selectedTeamId);
+          }
+          setIsSettingsModalOpen(false);
+        }}
+        onTeamLeft={() => {
+          if (selectedTeamId) {
+            handleTeamLeft(selectedTeamId);
+          }
+          setIsSettingsModalOpen(false);
+        }}
       />
 
       {/* Create Collection Modal */}
@@ -1465,6 +1562,10 @@ export default function App() {
                 <SmartCollectionsSidebar
                   activeCollectionId={activeSmartCollectionId}
                   onSelectCollection={(collection) => {
+                    // Clear search state when selecting a smart collection
+                    setIsSearchActive(false);
+                    setSearchResults([]);
+                    setSearchQueryText('');
                     setActiveSmartCollectionId(collection?.id || null);
                     setView('library');
                     setActiveCollectionId(null);
@@ -1887,7 +1988,13 @@ export default function App() {
                   <TeamLibraryView
                       collections={collections.filter(c => c.team_id === selectedTeamId)}
                     activeCollectionId={activeCollectionId}
-                    onSelectCollection={(id) => setActiveCollectionId(id)}
+                    onSelectCollection={(id) => {
+                      // Clear search state when selecting a collection
+                      setIsSearchActive(false);
+                      setSearchResults([]);
+                      setSearchQueryText('');
+                      setActiveCollectionId(id);
+                    }}
                     onBackToFolders={() => setActiveCollectionId(null)}
                     onCreateCollection={() => {
                       // Pre-select current team when creating from Team Library
@@ -1959,6 +2066,7 @@ export default function App() {
                        }}
                        placeholder={t('library.searchPlaceholder')}
                        className="flex-1 md:w-80"
+                       library={library}
                      />
 
                      {/* View Toggle */}
@@ -2045,18 +2153,34 @@ export default function App() {
                       {libraryViewMode === 'grid' ? (
                         <div className="p-2 md:p-0 w-full">
                           {filteredLibrary.length > 0 ? (
-                             // UPDATED: Use CSS Grid for responsive layout
-                             // Auto-fill columns with minimum 200px width
-                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 w-full pb-20">
-                                {filteredLibrary.map((item, idx) => (
-                                  <CompactMediaCard
-                                    key={`${item.aweme_id}-${idx}`}
-                                    data={item}
-                                    onClick={() => setSelectedLibraryItem(item)}
-                                    isShared={sharedVideoIds.includes(item.aweme_id)}
-                                  />
-                                ))}
-                             </div>
+                             <>
+                               {/* Grid layout */}
+                               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 w-full">
+                                  {filteredLibrary.map((item, idx) => (
+                                    <CompactMediaCard
+                                      key={`${item.aweme_id}-${idx}`}
+                                      data={item}
+                                      onClick={() => setSelectedLibraryItem(item)}
+                                      isShared={sharedVideoIds.includes(item.aweme_id)}
+                                    />
+                                  ))}
+                               </div>
+                               {/* Infinite scroll trigger */}
+                               {!isSearchActive && (
+                                 <div ref={loadMoreRef} className="w-full py-8 flex justify-center">
+                                   {isLoadingMore ? (
+                                     <div className="flex items-center gap-2 text-zinc-500">
+                                       <Loader2 className="w-5 h-5 animate-spin" />
+                                       <span className="text-sm">Loading more...</span>
+                                     </div>
+                                   ) : hasMoreData ? (
+                                     <div className="text-zinc-600 text-sm">Scroll for more</div>
+                                   ) : library.length > 0 ? (
+                                     <div className="text-zinc-600 text-sm">All {library.length} items loaded</div>
+                                   ) : null}
+                                 </div>
+                               )}
+                             </>
                           ) : (
                             <div className="text-center py-20 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800 text-zinc-500">
                               {isLoadingLibrary ? "Searching..." : "No items found matching your search."}

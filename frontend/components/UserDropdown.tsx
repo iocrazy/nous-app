@@ -65,6 +65,13 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
 
   if (!isOpen) return null;
 
+  // Sort teams: active team first, then rest alphabetically
+  const sortedTeams = [...teams].sort((a, b) => {
+    if (a.id === activeTeamId) return -1;
+    if (b.id === activeTeamId) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
   return (
     <>
       {/* Backdrop */}
@@ -98,7 +105,7 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
             {t('user.joinedTeams')}
           </p>
           <div className="space-y-1">
-            {teams.map(team => (
+            {sortedTeams.map(team => (
               <div
                 key={team.id}
                 className="flex items-center justify-between px-2 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors group"

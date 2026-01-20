@@ -14,13 +14,27 @@ import {
   Filter,
   ChevronDown,
 } from 'lucide-react';
-import { semanticSearch, hybridSearch, SearchResult } from '../services/searchService';
+import { semanticSearch, hybridSearch, localSearch, SearchResultItem, SearchResponse } from '../services/searchService';
+
+interface VideoItem {
+  id?: number;
+  aweme_id: string;
+  video_title?: string;
+  video_desc?: string;
+  author?: string;
+  video_hashtag_name?: string;
+  cover_url?: string;
+  view_count?: number;
+  created_at?: string;
+}
 
 interface SemanticSearchBarProps {
-  onSearch: (results: SearchResult[], query: string) => void;
+  onSearch: (results: SearchResultItem[], query: string) => void;
   onClear: () => void;
   placeholder?: string;
   className?: string;
+  /** Library data for instant local search (keyword mode) */
+  library?: VideoItem[];
 }
 
 type SearchMode = 'hybrid' | 'semantic' | 'keyword';
@@ -30,10 +44,11 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
   onClear,
   placeholder = 'Search videos...',
   className = '',
+  library = [],
 }) => {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [searchMode, setSearchMode] = useState<SearchMode>('hybrid');
+  const [searchMode, setSearchMode] = useState<SearchMode>('keyword'); // Default to instant local search
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -76,20 +91,52 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
     saveRecentSearch(q);
 
     try {
-      let results: SearchResult[];
+      let results: SearchResultItem[] = [];
 
-      if (searchMode === 'semantic') {
-        results = await semanticSearch(q, 20);
+      if (searchMode === 'keyword') {
+        // Quick Search: 先本地搜索，结果不足时补充后端搜索
+        const localResults = localSearch(q, library, 20);
+        console.log(`Local search: ${localResults.total} results in ${localResults.processing_time_ms}ms`);
+        results = localResults.results;
+
+        // 如果本地结果少于 5 条，自动查后端补充（可能有更多在未缓存的数据中）
+        if (results.length < 5 && library.length >= 100) {
+          console.log('Local results insufficient, querying backend...');
+          try {
+            const backendResults = await hybridSearch(q, {}, 20, 0);
+            // 合并结果，去重
+            const existingIds = new Set(results.map(r => r.aweme_id));
+            for (const item of backendResults.results) {
+              if (!existingIds.has(item.aweme_id)) {
+                results.push(item);
+                existingIds.add(item.aweme_id);
+              }
+            }
+            console.log(`Combined: ${results.length} total results`);
+          } catch (backendError) {
+            console.warn('Backend search failed, using local results only:', backendError);
+          }
+        }
+      } else if (searchMode === 'semantic') {
+        // AI Search: 直接走后端
+        const response = await semanticSearch(q, 20);
+        results = response.results;
       } else {
-        // hybrid or keyword - use hybrid search
-        results = await hybridSearch(q, 20, searchMode === 'keyword' ? 0 : 0.5);
+        // Smart Search: 直接走后端
+        const response = await hybridSearch(q, {}, 20, 0.5);
+        results = response.results;
       }
 
       onSearch(results, q);
     } catch (error) {
       console.error('Search failed:', error);
-      // Fallback to empty results on error
-      onSearch([], q);
+      // Fallback to local search on error
+      if (library.length > 0) {
+        const fallback = localSearch(q, library, 20);
+        onSearch(fallback.results, q);
+      } else {
+        onSearch([], q);
+      }
     } finally {
       setIsSearching(false);
     }
@@ -111,22 +158,22 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
 
   const searchModes = [
     {
+      id: 'keyword' as SearchMode,
+      label: 'Quick Search',
+      description: 'Instant local search',
+      icon: Search,
+    },
+    {
       id: 'hybrid' as SearchMode,
       label: 'Smart Search',
-      description: 'Combines AI + keywords',
+      description: 'AI + keywords (slower)',
       icon: Sparkles,
     },
     {
       id: 'semantic' as SearchMode,
       label: 'AI Search',
-      description: 'Find by meaning',
+      description: 'Find by meaning (slower)',
       icon: Sparkles,
-    },
-    {
-      id: 'keyword' as SearchMode,
-      label: 'Keyword Search',
-      description: 'Exact matching',
-      icon: Search,
     },
   ];
 
@@ -149,7 +196,14 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
           ref={inputRef}
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            const newValue = e.target.value;
+            setQuery(newValue);
+            // Auto-clear when user manually deletes all text
+            if (!newValue.trim()) {
+              onClear();
+            }
+          }}
           onKeyDown={handleKeyDown}
           onFocus={() => setShowSuggestions(true)}
           placeholder={placeholder}

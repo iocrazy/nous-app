@@ -83,6 +83,67 @@ export const getCoverDownloadUrl = (awemeId: string): string => {
   return `${getApiUrl()}/api/v1/douyin/download/${awemeId}/cover`;
 };
 
+/** 分页配置 */
+const PAGE_SIZE = 100;  // 每页加载数量
+const LOCAL_CACHE_SIZE = 500;  // 本地缓存用于快速搜索
+
+export interface PaginatedResult<T> {
+  data: T[];
+  totalCount: number;
+  hasMore: boolean;
+  page: number;
+}
+
+/**
+ * 获取视频库（分页版本，适合大数据量）
+ * @param page 页码（从 0 开始）
+ * @param pageSize 每页数量
+ */
+export const fetchLibraryPaginated = async (
+  page: number = 0,
+  pageSize: number = PAGE_SIZE
+): Promise<PaginatedResult<DouyinBase>> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error("User not authenticated");
+    }
+
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+
+    // 使用 count: 'exact' 获取总数
+    const { data, error, count } = await supabase
+      .from(TABLE_NAME)
+      .select('*', { count: 'exact' })
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const totalCount = count || 0;
+    const hasMore = (page + 1) * pageSize < totalCount;
+
+    return {
+      data: (data as DouyinBase[]) || [],
+      totalCount,
+      hasMore,
+      page,
+    };
+  } catch (err: any) {
+    throw err;
+  }
+};
+
+/**
+ * 获取视频库（兼容旧版本，加载前 LOCAL_CACHE_SIZE 条用于本地搜索）
+ */
 export const fetchLibrary = async (): Promise<DouyinBase[]> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
@@ -90,22 +151,49 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
   }
 
   try {
-    // 获取当前用户 ID
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       throw new Error("User not authenticated");
     }
 
+    // 只加载最近 500 条用于本地缓存和快速搜索
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .select('*')
-      .eq('user_id', user.id)  // 只获取当前用户的数据
-      .order('created_at', { ascending: false });  // 按添加时间降序（最新在前）
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(LOCAL_CACHE_SIZE);
 
     if (error) throw error;
     return (data as DouyinBase[]) || [];
   } catch (err: any) {
-    // Re-throw with a slightly more informative message if it's a known shape, or just propagate
+    throw err;
+  }
+};
+
+/**
+ * 获取视频总数
+ */
+export const fetchLibraryCount = async (): Promise<number> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error("User not authenticated");
+    }
+
+    const { count, error } = await supabase
+      .from(TABLE_NAME)
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+    return count || 0;
+  } catch (err: any) {
     throw err;
   }
 };

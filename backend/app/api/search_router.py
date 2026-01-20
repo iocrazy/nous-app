@@ -47,12 +47,14 @@ async def semantic_search(
             results=[
                 SearchResultItem(
                     video_id=r.video_id,
+                    aweme_id=r.aweme_id,
                     title=r.title,
                     description=r.description,
                     cover_url=r.cover_url,
-                    similarity=round(r.similarity, 4),
+                    similarity_score=round(r.similarity, 4),
                     tags=r.tags,
                     author=r.author,
+                    view_count=r.view_count,
                     created_at=r.created_at
                 )
                 for r in response.results
@@ -103,12 +105,14 @@ async def hybrid_search(
             results=[
                 SearchResultItem(
                     video_id=r.video_id,
+                    aweme_id=r.aweme_id,
                     title=r.title,
                     description=r.description,
                     cover_url=r.cover_url,
-                    similarity=round(r.similarity, 4),
+                    similarity_score=round(r.similarity, 4),
                     tags=r.tags,
                     author=r.author,
+                    view_count=r.view_count,
                     created_at=r.created_at
                 )
                 for r in response.results
@@ -170,12 +174,14 @@ async def find_similar_videos(
             results=[
                 SearchResultItem(
                     video_id=r.video_id,
+                    aweme_id=r.aweme_id,
                     title=r.title,
                     description=r.description,
                     cover_url=r.cover_url,
-                    similarity=round(r.similarity, 4),
+                    similarity_score=round(r.similarity, 4),
                     tags=r.tags,
                     author=r.author,
+                    view_count=r.view_count,
                     created_at=r.created_at
                 )
                 for r in response.results
