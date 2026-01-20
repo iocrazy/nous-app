@@ -29,12 +29,44 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
   const { data, error } = await query;
   if (error) throw error;
 
-  return (data || []).map(c => ({
-    ...c,
-    id: String(c.id), // Convert bigint to string
-    video_count: c.video_collections?.[0]?.count || 0,
-    is_shared: !!c.team_id,
-  }));
+  // Get thumbnail for each collection (first video's cover)
+  const collectionsWithThumbnails = await Promise.all(
+    (data || []).map(async (c) => {
+      let thumbnail_url: string | undefined;
+
+      // Get first video in collection
+      const { data: firstVideo } = await supabase
+        .from('video_collections')
+        .select('video_id')
+        .eq('collection_id', c.id)
+        .order('added_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (firstVideo) {
+        // Get video's cover URL
+        const { data: video } = await supabase
+          .from('douyin_videos')
+          .select('cover_download_path, dynamic_cover_url')
+          .eq('id', firstVideo.video_id)
+          .single();
+
+        if (video) {
+          thumbnail_url = video.cover_download_path || video.dynamic_cover_url || undefined;
+        }
+      }
+
+      return {
+        ...c,
+        id: String(c.id),
+        video_count: c.video_collections?.[0]?.count || 0,
+        is_shared: !!c.team_id,
+        thumbnail_url,
+      };
+    })
+  );
+
+  return collectionsWithThumbnails;
 };
 
 export const createCollection = async (name: string, teamId?: string): Promise<Collection> => {

@@ -8,6 +8,7 @@ interface CreateCollectionModalProps {
   onClose: () => void;
   onSubmit: (name: string, teamId: string | null) => Promise<void>;
   teams: Team[];
+  defaultTeamId?: string | null;
 }
 
 export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
@@ -15,10 +16,18 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
   onClose,
   onSubmit,
   teams,
+  defaultTeamId = null,
 }) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(defaultTeamId);
+
+  // Update selectedTeamId when defaultTeamId changes (e.g., opening from Team Library)
+  React.useEffect(() => {
+    if (isOpen) {
+      setSelectedTeamId(defaultTeamId);
+    }
+  }, [isOpen, defaultTeamId]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

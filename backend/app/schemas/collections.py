@@ -45,11 +45,13 @@ class CollectionResponse(BaseModel):
     user_id: UUID
     name: str
     icon: str
+    color: Optional[str] = None
     description: Optional[str]
     rules: CollectionRules
-    cached_count: int
+    video_count: int = Field(default=0, description="Number of videos matching this collection")
     cached_at: Optional[datetime]
     is_preset: bool
+    is_active: bool = Field(default=True, description="Whether the collection is active")
     sort_by: str
     sort_order: str
     created_at: datetime

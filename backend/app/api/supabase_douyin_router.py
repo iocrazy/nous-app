@@ -163,24 +163,67 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             logger.error(f"保存元数据失败: {save_result.get('message')}")
             raise HTTPException(status_code=500, detail=save_result.get("message", "保存元数据失败"))
 
-        # 使用 Celery 任务进行下载（支持进度追踪）
+        # 下载媒体文件
         download_task_id = None
         need_download = request.video_bool or request.music_bool or request.cover_bool
 
         if need_download:
-            from app.tasks.download_tasks import download_media_task
+            # 尝试使用 Celery，如果不可用则使用 FastAPI background tasks
+            try:
+                from app.tasks.download_tasks import download_media_task
+                from app.celery_app import celery_app
 
-            download_task = download_media_task.delay(
-                aweme_id=aweme_id,
-                user_id=auth.user_id,
-                download_video=request.video_bool,
-                download_music=request.music_bool,
-                download_cover=request.cover_bool,
-                aweme_type=aweme_type,
-                video_title=video_title[:50] if video_title else "undefined",
-            )
-            download_task_id = download_task.id
-            logger.info(f"下载任务已提交: {download_task_id}")
+                # 检查 Celery 是否可用 - ping() 返回空列表表示无 worker
+                workers = celery_app.control.ping(timeout=1)
+                if not workers:
+                    raise RuntimeError("No Celery workers available")
+
+                download_task = download_media_task.delay(
+                    aweme_id=aweme_id,
+                    user_id=auth.user_id,
+                    download_video=request.video_bool,
+                    download_music=request.music_bool,
+                    download_cover=request.cover_bool,
+                    aweme_type=aweme_type,
+                    video_title=video_title[:50] if video_title else "undefined",
+                )
+                download_task_id = download_task.id
+                logger.info(f"Celery 下载任务已提交: {download_task_id}")
+            except Exception as celery_err:
+                # Celery 不可用，使用 FastAPI background tasks
+                logger.warning(f"Celery 不可用，使用 FastAPI background tasks: {celery_err}")
+                from app.services.downloader import DownloaderService
+
+                # 根据类型添加下载任务
+                if int(aweme_type) in (0, 4, 61):  # Video types
+                    if request.video_bool:
+                        background_tasks.add_task(
+                            DownloaderService.download_video_by_aweme_id,
+                            aweme_id,
+                            user_id=auth.user_id
+                        )
+                elif int(aweme_type) in (2, 68):  # Image types
+                    if request.video_bool:
+                        background_tasks.add_task(
+                            DownloaderService.download_images_by_aweme_id,
+                            aweme_id,
+                            user_id=auth.user_id
+                        )
+
+                if request.music_bool:
+                    background_tasks.add_task(
+                        DownloaderService.download_music_by_aweme_id,
+                        aweme_id=aweme_id,
+                        user_id=auth.user_id
+                    )
+
+                if request.cover_bool:
+                    background_tasks.add_task(
+                        DownloaderService.download_cover_by_aweme_id,
+                        aweme_id,
+                        user_id=auth.user_id
+                    )
+                logger.info(f"FastAPI 后台下载任务已添加: {aweme_id}")
 
         # 记录日志
         background_tasks.add_task(

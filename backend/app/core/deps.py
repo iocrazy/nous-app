@@ -4,6 +4,7 @@
 依赖注入模块
 
 提供 Supabase 客户端依赖注入和认证功能。
+支持同步和异步客户端。
 支持两种认证方式：
 1. Bearer Token (JWT) - 通过 Authorization header
 2. API Key - 通过 X-API-Key header
@@ -14,24 +15,44 @@ from typing import Annotated, Optional, List
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 from supabase import Client
+from supabase._async.client import AsyncClient
 
-from app.db.supabase_client import get_supabase as _get_supabase, get_supabase_admin as _get_supabase_admin
+from app.db.supabase_client import (
+    get_supabase as _get_supabase,
+    get_supabase_admin as _get_supabase_admin,
+    get_async_supabase as _get_async_supabase,
+    get_async_supabase_admin as _get_async_supabase_admin,
+)
 from app.core.api_key_scopes import get_required_scopes, check_scope_permission
 
 
+# 同步客户端 (for backward compatibility and Celery)
 def get_supabase() -> Client:
-    """获取 Supabase 客户端"""
+    """获取 Supabase 客户端 (同步)"""
     return _get_supabase()
 
 
 def get_supabase_admin() -> Client:
-    """获取 Supabase Admin 客户端"""
+    """获取 Supabase Admin 客户端 (同步)"""
     return _get_supabase_admin()
+
+
+# 异步客户端 (推荐用于 FastAPI)
+async def get_async_supabase() -> AsyncClient:
+    """获取异步 Supabase 客户端"""
+    return await _get_async_supabase()
+
+
+async def get_async_supabase_admin() -> AsyncClient:
+    """获取异步 Supabase Admin 客户端"""
+    return await _get_async_supabase_admin()
 
 
 # 依赖注入类型
 SupabaseDep = Annotated[Client, Depends(get_supabase)]
 SupabaseAdminDep = Annotated[Client, Depends(get_supabase_admin)]
+AsyncSupabaseDep = Annotated[AsyncClient, Depends(get_async_supabase)]
+AsyncSupabaseAdminDep = Annotated[AsyncClient, Depends(get_async_supabase_admin)]
 
 
 @dataclass
@@ -51,10 +72,10 @@ async def get_current_user(authorization: str = Header(...)):
     """
     try:
         token = authorization.replace("Bearer ", "")
-        client = _get_supabase()
+        client = await _get_async_supabase()
 
         # 验证 token 并获取用户
-        user_response = client.auth.get_user(token)
+        user_response = await client.auth.get_user(token)
 
         if not user_response or not user_response.user:
             raise HTTPException(
@@ -217,10 +238,10 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
         )
 
     token = authorization[7:]  # 移除 "Bearer " 前缀
-    client = _get_supabase()
+    client = await _get_async_supabase()
 
     try:
-        user_response = client.auth.get_user(token)
+        user_response = await client.auth.get_user(token)
 
         if not user_response or not user_response.user:
             raise HTTPException(

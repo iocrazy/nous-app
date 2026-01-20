@@ -4,6 +4,7 @@
 API 密钥数据仓储
 
 提供 API 密钥的 CRUD 操作和验证功能。
+使用异步 Supabase 客户端。
 """
 
 import hashlib
@@ -12,18 +13,27 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 from loguru import logger
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 
 
 class ApiKeyRepository:
-    """API 密钥数据仓储"""
+    """API 密钥数据仓储 (异步)"""
 
     TABLE_NAME = "api_keys"
 
     def __init__(self):
-        # 使用 admin 客户端绑过 RLS
-        self.client = get_supabase_admin()
-        self.table = self.client.table(self.TABLE_NAME)
+        self._client = None  # 延迟初始化
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
 
     @staticmethod
     def generate_key() -> Tuple[str, str, str, str]:
@@ -97,7 +107,8 @@ class ApiKeyRepository:
         }
 
         try:
-            result = self.table.insert(data).execute()
+            table = await self._get_table()
+            result = await table.insert(data).execute()
 
             if result.data:
                 record = result.data[0]
@@ -122,7 +133,8 @@ class ApiKeyRepository:
             密钥记录或 None
         """
         try:
-            result = self.table.select("*").eq("key_hash", key_hash).execute()
+            table = await self._get_table()
+            result = await table.select("*").eq("key_hash", key_hash).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"查询 API 密钥失败: {e}")
@@ -139,7 +151,8 @@ class ApiKeyRepository:
             密钥记录或 None
         """
         try:
-            result = self.table.select("*").eq("key_id", key_id).execute()
+            table = await self._get_table()
+            result = await table.select("*").eq("key_id", key_id).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"查询 API 密钥失败: {e}")
@@ -161,13 +174,14 @@ class ApiKeyRepository:
             密钥列表
         """
         try:
-            query = self.table.select("*").eq("user_id", user_id)
+            table = await self._get_table()
+            query = table.select("*").eq("user_id", user_id)
 
             if not include_revoked:
                 query = query.neq("status", "revoked")
 
             query = query.order("created_at", desc=True)
-            result = query.execute()
+            result = await query.execute()
             return result.data or []
 
         except Exception as e:
@@ -192,9 +206,10 @@ class ApiKeyRepository:
             更新后的记录或 None
         """
         try:
+            table = await self._get_table()
             data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-            result = self.table.update(data).eq(
+            result = await table.update(data).eq(
                 "key_id", key_id
             ).eq(
                 "user_id", user_id
@@ -221,7 +236,8 @@ class ApiKeyRepository:
             是否删除成功
         """
         try:
-            self.table.delete().eq(
+            table = await self._get_table()
+            await table.delete().eq(
                 "key_id", key_id
             ).eq(
                 "user_id", user_id
@@ -255,8 +271,9 @@ class ApiKeyRepository:
             key_id: 密钥公开标识符
         """
         try:
+            client = await self._get_client()
             # 使用 RPC 调用原子更新
-            self.client.rpc(
+            await client.rpc(
                 "increment_api_key_usage",
                 {"p_key_id": key_id}
             ).execute()
@@ -324,7 +341,8 @@ class ApiKeyRepository:
             活跃密钥数量
         """
         try:
-            result = self.table.select(
+            table = await self._get_table()
+            result = await table.select(
                 "*",
                 count="exact"
             ).eq(

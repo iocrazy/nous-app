@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { DouyinBase } from '../types';
-import { Video, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users } from 'lucide-react';
+import { Video, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
 interface CompactMediaCardProps {
@@ -29,6 +29,7 @@ const getTagColor = (tag: string) => {
 export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, isShared }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [copiedShare, setCopiedShare] = useState(false);
   
   const isVideo = isVideoType(data.aweme_type);
   const images = data.image_download_urls || [];
@@ -189,11 +190,26 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
               <MessageCircle size={14} className="text-sky-500 mb-1" />
               <span className="text-[10px] text-white font-bold">{formatNumber(data.video_comment_count)}</span>
            </div>
-           {/* Share */}
-           <div className="flex flex-col items-center justify-center py-2 bg-[#0F291E] rounded-lg border border-emerald-900/30">
-              <Share2 size={14} className="text-emerald-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.video_share_count)}</span>
-           </div>
+           {/* Share - Click to copy link */}
+           <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (data.video_original_url) {
+                  navigator.clipboard.writeText(data.video_original_url);
+                  setCopiedShare(true);
+                  setTimeout(() => setCopiedShare(false), 2000);
+                }
+              }}
+              className="flex flex-col items-center justify-center py-2 bg-[#0F291E] rounded-lg border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all cursor-pointer group"
+              title="Click to copy link"
+           >
+              {copiedShare ? (
+                <Check size={14} className="text-emerald-400 mb-1" />
+              ) : (
+                <Share2 size={14} className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
+              )}
+              <span className="text-[10px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
+           </button>
            {/* Collect */}
            <div className="flex flex-col items-center justify-center py-2 bg-[#2E2005] rounded-lg border border-amber-900/30">
               <Bookmark size={14} className="text-amber-500 mb-1" />

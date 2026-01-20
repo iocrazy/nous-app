@@ -4,25 +4,35 @@
 Supabase 抖音数据仓储
 
 基于 Supabase 的抖音视频数据访问层，提供 CRUD 操作和查询功能。
+使用异步 Supabase 客户端。
 """
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from loguru import logger
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 from app.core.enums import DownloadStatus
 
 
 class SupabaseDouyinRepository:
-    """Supabase 抖音数据仓储"""
+    """Supabase 抖音数据仓储 (异步)"""
 
     TABLE_NAME = "douyin_videos"
 
     def __init__(self):
-        # 使用 admin 客户端绕过 RLS 策略
-        self.client = get_supabase_admin()
-        self.table = self.client.table(self.TABLE_NAME)
+        self._client = None  # 延迟初始化
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -49,7 +59,8 @@ class SupabaseDouyinRepository:
             if "download_time" in data and isinstance(data["download_time"], datetime):
                 data["download_time"] = data["download_time"].isoformat()
 
-            result = self.table.insert(data).execute()
+            table = await self._get_table()
+            result = await table.insert(data).execute()
             logger.info(f"创建视频记录成功: {data.get('aweme_id')}")
             return result.data[0] if result.data else {}
         except Exception as e:
@@ -72,10 +83,11 @@ class SupabaseDouyinRepository:
             视频记录或 None
         """
         try:
-            query = self.table.select("*").eq("aweme_id", aweme_id)
+            table = await self._get_table()
+            query = table.select("*").eq("aweme_id", aweme_id)
             if user_id:
                 query = query.eq("user_id", user_id)
-            result = query.execute()
+            result = await query.execute()
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取视频记录失败: {e}")
@@ -116,10 +128,11 @@ class SupabaseDouyinRepository:
             # 添加更新时间
             data["updated_at"] = datetime.now().isoformat()
 
-            query = self.table.update(data).eq("aweme_id", aweme_id)
+            table = await self._get_table()
+            query = table.update(data).eq("aweme_id", aweme_id)
             if user_id:
                 query = query.eq("user_id", user_id)
-            result = query.execute()
+            result = await query.execute()
             logger.info(f"更新视频记录成功: {aweme_id}")
             return result.data[0] if result.data else None
         except Exception as e:
@@ -138,10 +151,11 @@ class SupabaseDouyinRepository:
             是否删除成功
         """
         try:
-            query = self.table.delete().eq("aweme_id", aweme_id)
+            table = await self._get_table()
+            query = table.delete().eq("aweme_id", aweme_id)
             if user_id:
                 query = query.eq("user_id", user_id)
-            result = query.execute()
+            await query.execute()
             logger.info(f"删除视频记录成功: {aweme_id}")
             return True
         except Exception as e:
@@ -250,10 +264,11 @@ class SupabaseDouyinRepository:
     ) -> List[Dict[str, Any]]:
         """获取待下载的视频列表"""
         try:
-            query = self.table.select("*").eq("video_download_status", status.value)
+            table = await self._get_table()
+            query = table.select("*").eq("video_download_status", status.value)
             if user_id:
                 query = query.eq("user_id", user_id)
-            result = query.limit(limit).execute()
+            result = await query.limit(limit).execute()
             return result.data or []
         except Exception as e:
             logger.error(f"获取待下载列表失败: {e}")
@@ -281,12 +296,13 @@ class SupabaseDouyinRepository:
             视频记录列表
         """
         try:
-            query = self.table.select("*")
+            table = await self._get_table()
+            query = table.select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             query = query.order(order_by, desc=not ascending)
             query = query.range(skip, skip + limit - 1)
-            result = query.execute()
+            result = await query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"获取视频列表失败: {e}")
@@ -324,7 +340,8 @@ class SupabaseDouyinRepository:
             匹配的视频记录列表
         """
         try:
-            query = self.table.select("*")
+            table = await self._get_table()
+            query = table.select("*")
 
             if user_id:
                 query = query.eq("user_id", user_id)
@@ -351,7 +368,7 @@ class SupabaseDouyinRepository:
                 query = query.lte("video_created_time", end_date.isoformat())
 
             query = query.order("created_at", desc=True).range(skip, skip + limit - 1)
-            result = query.execute()
+            result = await query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"搜索视频失败: {e}")
@@ -365,34 +382,39 @@ class SupabaseDouyinRepository:
             user_id: 用户 ID（如果提供则只统计该用户的视频）
         """
         try:
+            table = await self._get_table()
+
             # 总数
-            total_query = self.table.select("*", count="exact")
+            total_query = table.select("*", count="exact")
             if user_id:
                 total_query = total_query.eq("user_id", user_id)
-            total_result = total_query.execute()
+            total_result = await total_query.execute()
             total = total_result.count or 0
 
             # 各状态数量
-            pending_query = self.table.select("*", count="exact").eq(
+            pending_query = table.select("*", count="exact").eq(
                 "video_download_status", DownloadStatus.PENDING.value
             )
             if user_id:
                 pending_query = pending_query.eq("user_id", user_id)
-            pending = pending_query.execute().count or 0
+            pending_result = await pending_query.execute()
+            pending = pending_result.count or 0
 
-            completed_query = self.table.select("*", count="exact").eq(
+            completed_query = table.select("*", count="exact").eq(
                 "video_download_status", DownloadStatus.COMPLETED.value
             )
             if user_id:
                 completed_query = completed_query.eq("user_id", user_id)
-            completed = completed_query.execute().count or 0
+            completed_result = await completed_query.execute()
+            completed = completed_result.count or 0
 
-            failed_query = self.table.select("*", count="exact").eq(
+            failed_query = table.select("*", count="exact").eq(
                 "video_download_status", DownloadStatus.FAILED.value
             )
             if user_id:
                 failed_query = failed_query.eq("user_id", user_id)
-            failed = failed_query.execute().count or 0
+            failed_result = await failed_query.execute()
+            failed = failed_result.count or 0
 
             return {
                 "total": total,

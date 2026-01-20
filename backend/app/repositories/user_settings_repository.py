@@ -4,20 +4,31 @@
 用户设置数据访问层
 
 处理用户个人设置的 CRUD 操作。
+使用异步 Supabase 客户端。
 """
 
 from typing import Optional, Dict, Any
 from loguru import logger
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 
 
 class UserSettingsRepository:
-    """用户设置仓库类"""
+    """用户设置仓库类 (异步)"""
 
     def __init__(self):
-        self.client = get_supabase_admin()
-        self.table = self.client.table("user_settings")
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table("user_settings")
 
     async def get_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -30,7 +41,8 @@ class UserSettingsRepository:
             设置数据，如果不存在则返回 None
         """
         try:
-            result = self.table.select("*").eq("user_id", user_id).execute()
+            table = await self._get_table()
+            result = await table.select("*").eq("user_id", user_id).execute()
             if result.data and len(result.data) > 0:
                 return result.data[0]
             return None
@@ -55,7 +67,8 @@ class UserSettingsRepository:
                 **settings
             }
 
-            result = self.table.upsert(
+            table = await self._get_table()
+            result = await table.upsert(
                 data,
                 on_conflict="user_id"
             ).execute()
@@ -79,7 +92,8 @@ class UserSettingsRepository:
             是否删除成功
         """
         try:
-            self.table.delete().eq("user_id", user_id).execute()
+            table = await self._get_table()
+            await table.delete().eq("user_id", user_id).execute()
             logger.info(f"用户设置已删除: user_id={user_id}")
             return True
         except Exception as e:

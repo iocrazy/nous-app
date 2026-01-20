@@ -69,6 +69,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [copiedShare, setCopiedShare] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -482,11 +483,25 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <span className="text-sm font-bold text-white">{formatNumber(data.video_comment_count)}</span>
               <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
             </div>
-            <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Share2 className="w-5 h-5 text-emerald-500 mb-1" />
-              <span className="text-sm font-bold text-white">{formatNumber(data.video_share_count)}</span>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Shares</span>
-            </div>
+            <button
+              onClick={() => {
+                if (data.video_original_url) {
+                  navigator.clipboard.writeText(data.video_original_url);
+                  setCopiedShare(true);
+                  setTimeout(() => setCopiedShare(false), 2000);
+                }
+              }}
+              className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
+              title="Click to copy link"
+            >
+              {copiedShare ? (
+                <Check className="w-5 h-5 text-emerald-400 mb-1" />
+              ) : (
+                <Share2 className="w-5 h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
+              )}
+              <span className="text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
+            </button>
             <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <Bookmark className="w-5 h-5 text-amber-500 mb-1" />
               <span className="text-sm font-bold text-white">{formatNumber(data.video_collect_count)}</span>

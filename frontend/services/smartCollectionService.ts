@@ -28,7 +28,7 @@ export interface CollectionRules {
 }
 
 export interface SmartCollection {
-  id: number;
+  id: string;  // UUID from backend
   name: string;
   description: string | null;
   icon: string | null;
@@ -69,7 +69,7 @@ export interface SmartCollectionVideosResponse {
   total: number;
   page: number;
   page_size: number;
-  collection_id: number;
+  collection_id: string;  // UUID from backend
   collection_name: string;
 }
 
@@ -96,7 +96,7 @@ export const fetchSmartCollections = async (): Promise<SmartCollection[]> => {
 /**
  * Get a single smart collection by ID
  */
-export const getSmartCollection = async (collectionId: number): Promise<SmartCollection> => {
+export const getSmartCollection = async (collectionId: string): Promise<SmartCollection> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}`, {
@@ -138,7 +138,7 @@ export const createSmartCollection = async (
  * Update an existing smart collection
  */
 export const updateSmartCollection = async (
-  collectionId: number,
+  collectionId: string,
   updates: SmartCollectionUpdate
 ): Promise<SmartCollection> => {
   const apiUrl = getApiUrl();
@@ -160,7 +160,7 @@ export const updateSmartCollection = async (
 /**
  * Delete a smart collection
  */
-export const deleteSmartCollection = async (collectionId: number): Promise<void> => {
+export const deleteSmartCollection = async (collectionId: string): Promise<void> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}`, {
@@ -178,7 +178,7 @@ export const deleteSmartCollection = async (collectionId: number): Promise<void>
  * Get videos in a smart collection
  */
 export const getSmartCollectionVideos = async (
-  collectionId: number,
+  collectionId: string,
   page: number = 1,
   pageSize: number = 20,
   useCache: boolean = true
@@ -211,7 +211,7 @@ export const getSmartCollectionVideos = async (
  * Refresh a smart collection's cached video list
  */
 export const refreshSmartCollection = async (
-  collectionId: number
+  collectionId: string
 ): Promise<{ message: string; video_count: number }> => {
   const apiUrl = getApiUrl();
 

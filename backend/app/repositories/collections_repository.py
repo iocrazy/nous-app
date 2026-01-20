@@ -1,28 +1,40 @@
-"""Repository for Smart Collections data access."""
+"""Repository for Smart Collections data access (异步)."""
 from typing import Optional, List
 from datetime import datetime
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 from loguru import logger
 
 
 class CollectionsRepository:
-    """Repository for smart collections CRUD operations."""
+    """Repository for smart collections CRUD operations (异步)."""
 
     TABLE_NAME = "smart_collections"
 
     def __init__(self):
-        self.client = get_supabase_admin()
-        self.table = self.client.table(self.TABLE_NAME)
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
 
     async def get_all_collections(self, user_id: str) -> List[dict]:
         """Get all collections for a user."""
-        result = self.table.select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        table = await self._get_table()
+        result = await table.select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
         return result.data
 
     async def get_collection_by_id(self, collection_id: str, user_id: str) -> Optional[dict]:
         """Get a single collection by ID."""
-        result = self.table.select("*").eq("id", collection_id).eq("user_id", user_id).maybe_single().execute()
+        table = await self._get_table()
+        result = await table.select("*").eq("id", collection_id).eq("user_id", user_id).maybe_single().execute()
         return result.data
 
     async def create_collection(
@@ -48,7 +60,8 @@ class CollectionsRepository:
             "is_preset": False
         }
 
-        result = self.table.insert(data).execute()
+        table = await self._get_table()
+        result = await table.insert(data).execute()
         logger.info(f"Created collection: {name} for user: {user_id}")
         return result.data[0]
 
@@ -62,17 +75,20 @@ class CollectionsRepository:
 
         update_data["updated_at"] = datetime.utcnow().isoformat()
 
-        result = self.table.update(update_data).eq("id", collection_id).eq("user_id", user_id).execute()
+        table = await self._get_table()
+        result = await table.update(update_data).eq("id", collection_id).eq("user_id", user_id).execute()
         return result.data[0] if result.data else None
 
     async def delete_collection(self, collection_id: str, user_id: str) -> bool:
         """Delete a collection (non-preset only)."""
-        result = self.table.delete().eq("id", collection_id).eq("user_id", user_id).eq("is_preset", False).execute()
+        table = await self._get_table()
+        result = await table.delete().eq("id", collection_id).eq("user_id", user_id).eq("is_preset", False).execute()
         return len(result.data) > 0
 
     async def update_cache(self, collection_id: str, video_ids: List[int], count: int) -> dict:
         """Update the cached video IDs and count for a collection."""
-        result = self.table.update({
+        table = await self._get_table()
+        result = await table.update({
             "cached_video_ids": video_ids,
             "cached_count": count,
             "cached_at": datetime.utcnow().isoformat()
@@ -82,7 +98,8 @@ class CollectionsRepository:
 
     async def get_preset_collections(self, user_id: str) -> List[dict]:
         """Get preset collections for a user."""
-        result = self.table.select("*").eq("user_id", user_id).eq("is_preset", True).execute()
+        table = await self._get_table()
+        result = await table.select("*").eq("user_id", user_id).eq("is_preset", True).execute()
         return result.data
 
     async def create_default_presets(self, user_id: str) -> List[dict]:
@@ -146,6 +163,7 @@ class CollectionsRepository:
             }
         ]
 
+        table = await self._get_table()
         created = []
         for preset in presets:
             data = {
@@ -153,7 +171,7 @@ class CollectionsRepository:
                 **preset,
                 "cached_count": 0
             }
-            result = self.table.insert(data).execute()
+            result = await table.insert(data).execute()
             if result.data:
                 created.append(result.data[0])
 

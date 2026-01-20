@@ -1,12 +1,12 @@
-"""Semantic search service using vector embeddings."""
-from typing import Optional, List, Dict, Any
+"""Semantic search service using vector embeddings (异步)."""
+from typing import Optional, List
 from dataclasses import dataclass, field
 
 from loguru import logger
 
 from app.services.embedding_service import EmbeddingService
 from app.repositories.analysis_repository import AnalysisRepository
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 
 
 @dataclass
@@ -32,11 +32,18 @@ class SearchResponse:
 
 
 class SearchService:
-    """Service for semantic and hybrid video search."""
+    """Service for semantic and hybrid video search (异步)."""
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.analysis_repo = AnalysisRepository()
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
 
     async def semantic_search(
         self,
@@ -111,10 +118,10 @@ class SearchService:
 
         Applies filters first, then ranks by semantic similarity.
         """
-        supabase = get_supabase_admin()
+        client = await self._get_client()
 
         # Start with base query
-        base_query = supabase.table("douyin_videos").select(
+        base_query = client.table("douyin_videos").select(
             "id, title, desc, cover_url, author, created_at"
         )
 
@@ -133,7 +140,7 @@ class SearchService:
             base_query = base_query.lte("created_at", date_to)
 
         # Get filtered videos
-        filtered_result = base_query.limit(500).execute()
+        filtered_result = await base_query.limit(500).execute()
         filtered_videos = filtered_result.data
 
         if not filtered_videos:
@@ -147,7 +154,7 @@ class SearchService:
         # Apply tag filter if specified
         if tag_ids:
             video_ids = [v["id"] for v in filtered_videos]
-            tag_filter_result = supabase.table("video_tags").select(
+            tag_filter_result = await client.table("video_tags").select(
                 "video_id"
             ).in_("video_id", video_ids).in_("tag_id", tag_ids).execute()
 
@@ -169,7 +176,7 @@ class SearchService:
             if query_embedding:
                 # Get embeddings for filtered videos
                 video_ids = [v["id"] for v in filtered_videos]
-                analysis_result = supabase.table("video_analysis").select(
+                analysis_result = await client.table("video_analysis").select(
                     "video_id, content_embedding"
                 ).in_("video_id", video_ids).not_.is_("content_embedding", "null").execute()
 
@@ -243,8 +250,6 @@ class SearchService:
 
         Uses the video's embedding to find semantically similar content.
         """
-        supabase = get_supabase_admin()
-
         # Get the source video's embedding
         analysis = await self.analysis_repo.get_analysis(video_id)
 

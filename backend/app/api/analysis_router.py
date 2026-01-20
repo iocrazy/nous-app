@@ -65,16 +65,16 @@ async def get_analysis_stats(auth: AuthDep = None):
     Get analysis statistics.
     Shows counts by analysis level and total cost.
     """
-    from app.db.supabase_client import get_supabase_admin
+    from app.db.supabase_client import get_async_supabase_admin
 
-    supabase = get_supabase_admin()
+    supabase = await get_async_supabase_admin()
 
     # Total videos
-    total_result = supabase.table("douyin_videos").select("id", count="exact").execute()
+    total_result = await supabase.table("douyin_videos").select("id", count="exact").execute()
     total_videos = total_result.count or 0
 
     # Analyzed videos
-    analysis_result = supabase.table("video_analysis").select(
+    analysis_result = await supabase.table("video_analysis").select(
         "analysis_level, analysis_cost"
     ).execute()
 
@@ -163,13 +163,13 @@ async def trigger_analysis(
     - **L2**: Cover + keyframes analysis (requires downloaded video, ~$0.005)
     - **L3**: Full video analysis (manual, ~$0.05) - not yet implemented
     """
-    from app.db.supabase_client import get_supabase_admin
+    from app.db.supabase_client import get_async_supabase_admin
     from app.core.utils import Utils
 
-    supabase = get_supabase_admin()
+    supabase = await get_async_supabase_admin()
 
     # Get video info
-    result = supabase.table("douyin_videos").select(
+    result = await supabase.table("douyin_videos").select(
         "id, title, desc, cover_url, download_path"
     ).eq("id", video_id).maybe_single().execute()
 

@@ -1,4 +1,4 @@
-"""Cleanup suggestions service - Optimized version using PostgreSQL RPC functions."""
+"""Cleanup suggestions service - Optimized version using PostgreSQL RPC functions (异步)."""
 import asyncio
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 
 
 @dataclass
@@ -27,10 +27,16 @@ class CleanupSuggestion:
 
 
 class CleanupService:
-    """Service for generating and managing cleanup suggestions."""
+    """Service for generating and managing cleanup suggestions (异步)."""
 
     def __init__(self):
-        self.supabase = get_supabase_admin()
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
 
     async def get_cleanup_data(
         self,
@@ -44,7 +50,8 @@ class CleanupService:
         Returns dict with suggestions, stats, and categories.
         """
         try:
-            result = self.supabase.rpc(
+            client = await self._get_client()
+            result = await client.rpc(
                 "get_cleanup_data",
                 {
                     "p_user_id": user_id,
@@ -205,7 +212,8 @@ class CleanupService:
 
     async def _get_suggestions_via_rpc(self, user_id: str, limit: int) -> List[dict]:
         """Get suggestions using PostgreSQL RPC function."""
-        result = self.supabase.rpc(
+        client = await self._get_client()
+        result = await client.rpc(
             "get_cleanup_suggestions",
             {
                 "p_user_id": user_id,
@@ -218,7 +226,8 @@ class CleanupService:
 
     async def _get_duplicates_via_rpc(self, user_id: str, threshold: float = 0.85) -> List[dict]:
         """Find duplicates using PostgreSQL RPC function with pgvector."""
-        result = self.supabase.rpc(
+        client = await self._get_client()
+        result = await client.rpc(
             "find_duplicate_videos",
             {
                 "p_user_id": user_id,
@@ -283,22 +292,26 @@ class CleanupService:
 
     async def _query_never_viewed(self, user_id: str, cutoff: str) -> List[dict]:
         """Query never viewed videos."""
-        result = self.supabase.table("douyin_videos").select(
+        client = await self._get_client()
+        result = await client.table("douyin_videos").select(
             "id, video_title, cover_url, author, storage_size, created_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).eq("view_count", 0).lt("created_at", cutoff).limit(50).execute()
         return result.data
 
     async def _query_old_unused(self, user_id: str, cutoff: str) -> List[dict]:
         """Query old unused videos."""
-        result = self.supabase.table("douyin_videos").select(
+        client = await self._get_client()
+        result = await client.table("douyin_videos").select(
             "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).gt("view_count", 0).lt("last_viewed_at", cutoff).limit(50).execute()
         return result.data
 
     async def _query_large_files(self, user_id: str) -> List[dict]:
         """Query large files."""
+        client = await self._get_client()
+
         # Get total count
-        count_result = self.supabase.table("douyin_videos").select("id", count="exact").eq("user_id", user_id).execute()
+        count_result = await client.table("douyin_videos").select("id", count="exact").eq("user_id", user_id).execute()
         total = count_result.count or 0
 
         if total == 0:
@@ -307,7 +320,7 @@ class CleanupService:
         # Get top N by size
         top_n = max(int(total * 0.1), 5)
 
-        result = self.supabase.table("douyin_videos").select(
+        result = await client.table("douyin_videos").select(
             "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).not_.is_("storage_size", "null").order("storage_size", desc=True).limit(top_n).execute()
 
@@ -370,8 +383,9 @@ class CleanupService:
     async def get_cleanup_stats(self, user_id: str) -> dict:
         """Get overall cleanup statistics using RPC for better performance."""
         try:
+            client = await self._get_client()
             # Try RPC first
-            result = self.supabase.rpc(
+            result = await client.rpc(
                 "get_cleanup_stats",
                 {"p_user_id": user_id}
             ).execute()
@@ -395,7 +409,8 @@ class CleanupService:
 
     async def _get_cleanup_stats_fallback(self, user_id: str) -> dict:
         """Fallback stats calculation."""
-        total_result = self.supabase.table("douyin_videos").select(
+        client = await self._get_client()
+        total_result = await client.table("douyin_videos").select(
             "id, storage_size, view_count, last_viewed_at, keep_forever"
         ).eq("user_id", user_id).execute()
 
@@ -433,7 +448,8 @@ class CleanupService:
 
     async def mark_keep_forever(self, video_id: int, user_id: str) -> bool:
         """Mark a video to keep forever (exclude from suggestions)."""
-        result = self.supabase.table("douyin_videos").update({
+        client = await self._get_client()
+        result = await client.table("douyin_videos").update({
             "keep_forever": True
         }).eq("id", video_id).eq("user_id", user_id).execute()
 
@@ -441,7 +457,8 @@ class CleanupService:
 
     async def unmark_keep_forever(self, video_id: int, user_id: str) -> bool:
         """Remove keep forever mark from a video."""
-        result = self.supabase.table("douyin_videos").update({
+        client = await self._get_client()
+        result = await client.table("douyin_videos").update({
             "keep_forever": False
         }).eq("id", video_id).eq("user_id", user_id).execute()
 

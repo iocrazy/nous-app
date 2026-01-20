@@ -45,6 +45,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ notes: string; tags: string }>({ notes: '', tags: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
   
   // Sorting State - 默认按添加时间降序（最新在前）
@@ -108,6 +109,13 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleShareCopy = (id: string, url?: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopiedShareId(id);
+    setTimeout(() => setCopiedShareId(null), 2000);
   };
 
   const handleMediaClick = (item: DouyinBase) => {
@@ -334,8 +342,19 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                 <td className="px-4 py-4 text-center">
                    <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.video_comment_count)}</span>
                 </td>
-                <td className="px-4 py-4 text-center">
-                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.video_share_count)}</span>
+                <td
+                  className="px-4 py-4 text-center cursor-pointer hover:bg-emerald-500/5 transition-colors group/share"
+                  onClick={() => handleShareCopy(item.aweme_id, item.video_original_url)}
+                  title="Click to copy link"
+                >
+                  {copiedShareId === item.aweme_id ? (
+                    <div className="flex items-center justify-center gap-1 text-emerald-400">
+                      <Check size={12} />
+                      <span className="text-xs font-medium">Copied!</span>
+                    </div>
+                  ) : (
+                    <span className="font-mono text-zinc-300 text-xs group-hover/share:text-emerald-400 transition-colors">{formatNumber(item.video_share_count)}</span>
+                  )}
                 </td>
 
                 <td className="px-4 py-4">

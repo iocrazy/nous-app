@@ -1,19 +1,25 @@
-"""Smart Collections service with rule engine."""
+"""Smart Collections service with rule engine (异步)."""
 from typing import Optional, List, Any
 from datetime import datetime, timedelta
 
 from loguru import logger
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.collections_repository import CollectionsRepository
 
 
 class CollectionsService:
-    """Service for smart collection rule evaluation and video matching."""
+    """Service for smart collection rule evaluation and video matching (异步)."""
 
     def __init__(self):
         self.repo = CollectionsRepository()
-        self.supabase = get_supabase_admin()
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
 
     async def get_collection_videos(
         self,
@@ -75,9 +81,11 @@ class CollectionsService:
         match_type = rules.get("match", "all")
         conditions = rules.get("conditions", [])
 
+        client = await self._get_client()
+
         if not conditions:
             # No conditions = all user videos
-            result = self.supabase.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+            result = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
             return [r["id"] for r in result.data]
 
         # Start with base query
@@ -114,6 +122,7 @@ class CollectionsService:
         user_id: str
     ) -> List[int]:
         """Evaluate a single condition and return matching video IDs."""
+        client = await self._get_client()
 
         # Tag-based conditions
         if field == "tag":
@@ -124,7 +133,7 @@ class CollectionsService:
             return await self._match_date_condition(operator, value, user_id)
 
         # Direct field conditions on douyin_videos
-        query = self.supabase.table("douyin_videos").select("id").eq("user_id", user_id)
+        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
 
         field_mapping = {
             "author": "author",
@@ -155,13 +164,15 @@ class CollectionsService:
             if isinstance(value, list):
                 query = query.in_(db_field, value)
 
-        result = query.execute()
+        result = await query.execute()
         return [r["id"] for r in result.data]
 
     async def _match_tag_condition(self, operator: str, value: Any, user_id: str) -> List[int]:
         """Match videos by tag conditions."""
+        client = await self._get_client()
+
         # Get user's videos first
-        user_videos = self.supabase.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+        user_videos = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
         user_video_ids = [v["id"] for v in user_videos.data]
 
         if not user_video_ids:
@@ -169,20 +180,20 @@ class CollectionsService:
 
         if operator == "has":
             # Videos that have a specific tag
-            result = self.supabase.table("video_tags").select("video_id").eq("tag_id", value).in_("video_id", user_video_ids).execute()
+            result = await client.table("video_tags").select("video_id").eq("tag_id", value).in_("video_id", user_video_ids).execute()
             return list(set(r["video_id"] for r in result.data))
 
         elif operator == "has_any":
             # Videos that have any of the specified tags
             if isinstance(value, list):
-                result = self.supabase.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
+                result = await client.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
                 return list(set(r["video_id"] for r in result.data))
 
         elif operator == "has_all":
             # Videos that have all of the specified tags
             if isinstance(value, list):
                 video_tag_counts = {}
-                result = self.supabase.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
+                result = await client.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
                 for r in result.data:
                     vid = r["video_id"]
                     video_tag_counts[vid] = video_tag_counts.get(vid, 0) + 1
@@ -192,7 +203,8 @@ class CollectionsService:
 
     async def _match_date_condition(self, operator: str, value: Any, user_id: str) -> List[int]:
         """Match videos by date conditions."""
-        query = self.supabase.table("douyin_videos").select("id").eq("user_id", user_id)
+        client = await self._get_client()
+        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
 
         # Handle relative date values
         if isinstance(value, str):
@@ -215,7 +227,7 @@ class CollectionsService:
         elif operator == "lt":
             query = query.lt("created_at", value)
 
-        result = query.execute()
+        result = await query.execute()
         return [r["id"] for r in result.data]
 
     async def _fetch_videos_by_ids(self, video_ids: List[int], collection: dict) -> List[dict]:
@@ -223,10 +235,11 @@ class CollectionsService:
         if not video_ids:
             return []
 
+        client = await self._get_client()
         sort_by = collection.get("sort_by", "created_at")
         sort_order = collection.get("sort_order", "desc")
 
-        result = self.supabase.table("douyin_videos").select(
+        result = await client.table("douyin_videos").select(
             "id, title, desc, author, cover_url, duration, aweme_type, created_at, view_count, keep_forever"
         ).in_("id", video_ids).order(sort_by, desc=(sort_order == "desc")).execute()
 

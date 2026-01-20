@@ -38,6 +38,8 @@ import { SemanticSearchBar } from './components/SemanticSearchBar';
 import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
 import { SmartCollection } from './services/smartCollectionService';
 import { SearchResult } from './services/searchService';
+import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
+import { TeamLibraryView } from './components/TeamLibraryView';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -189,22 +191,76 @@ export default function App() {
 
   // Team and Notification State
   const [teams, setTeams] = useState<Team[]>([]);
-  const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [isTeamSettingsOpen, setIsTeamSettingsOpen] = useState(false);
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
+    const saved = localStorage.getItem('mediahub_library_preferences');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.selectedTeamId || null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
   const [collectionVideoIds, setCollectionVideoIds] = useState<string[]>([]);
   const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
-  const [isTeamLibraryOpen, setIsTeamLibraryOpen] = useState(true);
-  const [isTeamLibraryActive, setIsTeamLibraryActive] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Library Tab State (new unified library)
+  const [activeLibraryTab, setActiveLibraryTab] = useState<LibraryTab>(() => {
+    const saved = localStorage.getItem('mediahub_library_preferences');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.activeTab || 'my-library';
+      } catch {
+        return 'my-library';
+      }
+    }
+    return 'my-library';
+  });
+
+  // Accordion behavior - close other menus when opening one
+  const toggleLibraryMenu = () => {
+    const newState = !isLibraryOpen;
+    setIsLibraryOpen(newState);
+    if (newState) {
+      setIsSettingsOpen(false);
+    }
+  };
+
+  const toggleSettingsMenu = () => {
+    const newState = !isSettingsOpen;
+    setIsSettingsOpen(newState);
+    if (newState) {
+      setIsLibraryOpen(false);
+    }
+  };
+
+  // Helper: Check if team library is active (for filtering)
+  const isTeamLibraryActive = activeLibraryTab === 'team-library';
+
+  // Get current team based on selectedTeamId
+  const currentTeam = teams.find(t => t.id === selectedTeamId) || null;
 
   // Smart Collections State
   const [activeSmartCollectionId, setActiveSmartCollectionId] = useState<number | null>(null);
+
+  // Handle tab change (defined early, uses setActiveSmartCollectionId)
+  const handleLibraryTabChange = (tab: LibraryTab) => {
+    setActiveLibraryTab(tab);
+    setActiveCollectionId(null); // Reset collection when switching tabs
+    setActiveSmartCollectionId(null); // Reset smart collection
+  };
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQueryText, setSearchQueryText] = useState('');
@@ -237,7 +293,30 @@ export default function App() {
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedLibraryItem, setSelectedLibraryItem] = useState<DouyinBase | null>(null); // For detail view
   
-  const [libraryViewMode, setLibraryViewMode] = useState<'grid' | 'list' | 'feed'>('grid');
+  const [libraryViewMode, setLibraryViewMode] = useState<'grid' | 'list' | 'feed'>(() => {
+    const saved = localStorage.getItem('mediahub_library_preferences');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.viewMode && ['grid', 'list', 'feed'].includes(parsed.viewMode)) {
+          return parsed.viewMode;
+        }
+      } catch {
+        return 'grid';
+      }
+    }
+    return 'grid';
+  });
+
+  // Save library preferences to localStorage (must be after libraryViewMode is defined)
+  useEffect(() => {
+    localStorage.setItem('mediahub_library_preferences', JSON.stringify({
+      activeTab: activeLibraryTab,
+      selectedTeamId,
+      viewMode: libraryViewMode,
+    }));
+  }, [activeLibraryTab, selectedTeamId, libraryViewMode]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
@@ -364,6 +443,13 @@ export default function App() {
       fetchMyCollections().then(setCollections).catch(console.error);
     }
   }, [isAuthenticated]);
+
+  // Auto-select first team if no team is selected
+  useEffect(() => {
+    if (teams.length > 0 && !selectedTeamId) {
+      setSelectedTeamId(teams[0].id);
+    }
+  }, [teams, selectedTeamId]);
 
   // State for team library video IDs (all videos in team collections)
   const [teamLibraryVideoIds, setTeamLibraryVideoIds] = useState<string[]>([]);
@@ -690,15 +776,15 @@ export default function App() {
 
   const handleTeamDeleted = (teamId: string) => {
     setTeams(prev => prev.filter(t => t.id !== teamId));
-    if (activeTeamId === teamId) {
-      setActiveTeamId(null);
+    if (selectedTeamId === teamId) {
+      setSelectedTeamId(null);
     }
   };
 
   const handleTeamLeft = (teamId: string) => {
     setTeams(prev => prev.filter(t => t.id !== teamId));
-    if (activeTeamId === teamId) {
-      setActiveTeamId(null);
+    if (selectedTeamId === teamId) {
+      setSelectedTeamId(null);
     }
   };
 
@@ -1230,8 +1316,12 @@ export default function App() {
           name: t.name,
           isOwner: t.owner_id === currentUserId,
         }))}
-        activeTeamId={activeTeamId}
-        onTeamSelect={setActiveTeamId}
+        activeTeamId={selectedTeamId}
+        onTeamSelect={(teamId) => {
+          setSelectedTeamId(teamId);
+          // Reset collection when switching teams
+          setActiveCollectionId(null);
+        }}
         onCreateTeam={handleCreateTeam}
         onTeamSettings={handleTeamSettings}
         onProfile={() => {
@@ -1258,6 +1348,7 @@ export default function App() {
         onClose={() => setIsCreateCollectionModalOpen(false)}
         onSubmit={handleCreateCollection}
         teams={teams}
+        defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
       {/* Mobile Nav */}
@@ -1351,75 +1442,50 @@ export default function App() {
             active={view === 'parser'}
             onClick={() => setView('parser')}
           />
-          <SidebarItem
-            icon={Library}
-            label={t('nav.myLibrary')}
-            active={view === 'library' && !activeCollectionId && !isTeamLibraryActive}
-            onClick={() => {
-              setActiveCollectionId(null);
-              setIsTeamLibraryActive(false);
-              setView('library');
-            }}
-          />
-
-          {/* Team Library with submenu */}
+          {/* Library with submenu (unified My Library + Team Library) */}
           <div className="space-y-1">
-            <div className="flex items-center">
-              <button
-                onClick={() => {
-                  setIsTeamLibraryActive(true);
-                  setActiveCollectionId(null);
-                  setView('library');
-                  setIsTeamLibraryOpen(true);
-                }}
-                className={`flex-1 flex items-center px-4 py-3 rounded-xl transition-all duration-200 group ${
-                  isTeamLibraryActive && !activeCollectionId
-                    ? 'bg-indigo-600/10 text-indigo-400 font-medium'
-                    : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-                }`}
-              >
-                <Users className={`w-5 h-5 mr-3 ${isTeamLibraryActive && !activeCollectionId ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`} />
-                <span>{t('nav.sharedCollections')}</span>
-              </button>
-              <button
-                onClick={() => setIsTeamLibraryOpen(!isTeamLibraryOpen)}
-                className="p-2 text-zinc-400 hover:text-zinc-200 transition-colors"
-              >
-                <ChevronDown size={16} className={`transition-transform duration-200 ${isTeamLibraryOpen ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
+            <SidebarItem
+              icon={Library}
+              label="Library"
+              active={view === 'library'}
+              onClick={() => {
+                setView('library');
+                if (!isLibraryOpen) {
+                  toggleLibraryMenu();
+                }
+              }}
+              hasSubmenu
+              isOpen={isLibraryOpen}
+            />
 
-            {/* Collections Sub-menu */}
-            {isTeamLibraryOpen && (
+            {/* Library Sub-menu - Smart Collections */}
+            {isLibraryOpen && (
               <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-                {collections.map(collection => (
-                  <button
-                    key={collection.id}
-                    onClick={() => {
-                      setActiveCollectionId(collection.id);
-                      setIsTeamLibraryActive(true);
-                      setView('library');
-                    }}
-                    className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors flex items-center justify-between ${
-                      activeCollectionId === collection.id
-                        ? 'text-indigo-400 bg-indigo-500/5'
-                        : 'text-zinc-500 hover:text-zinc-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Folder size={14} className={activeCollectionId === collection.id ? 'text-indigo-400' : 'text-zinc-600'} />
-                      <span className="truncate">{collection.name}</span>
-                    </div>
-                    <span className="text-xs text-zinc-600">{collection.video_count}</span>
-                  </button>
-                ))}
-                {/* Create Collection Button */}
+                {/* Smart Collections inline */}
+                <SmartCollectionsSidebar
+                  activeCollectionId={activeSmartCollectionId}
+                  onSelectCollection={(collection) => {
+                    setActiveSmartCollectionId(collection?.id || null);
+                    setView('library');
+                    setActiveCollectionId(null);
+                    setActiveLibraryTab('my-library');
+                  }}
+                  isInline
+                />
+
+                {/* Storage Cleanup */}
                 <button
-                  onClick={() => setIsCreateCollectionModalOpen(true)}
-                  className="w-full text-left px-4 py-2 text-sm rounded-r-lg text-indigo-400 hover:bg-indigo-500/5 transition-colors flex items-center gap-2"
+                  onClick={() => setView('cleanup')}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'cleanup'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
                 >
-                  <span>+</span>
-                  <span>{t('collections.create')}</span>
+                  <div className="flex items-center gap-2">
+                    <Trash2 size={14} />
+                    <span>Storage Cleanup</span>
+                  </div>
                 </button>
               </div>
             )}
@@ -1432,47 +1498,31 @@ export default function App() {
             onClick={() => setView('dashboard')}
           />
 
-          {/* Smart Collections */}
-          <SmartCollectionsSidebar
-            activeCollectionId={activeSmartCollectionId}
-            onSelectCollection={(collection) => {
-              setActiveSmartCollectionId(collection?.id || null);
-              setView('library');
-              setActiveCollectionId(null);
-              setIsTeamLibraryActive(false);
-            }}
-          />
-
-          {/* Cleanup Suggestions */}
-          <SidebarItem
-            icon={Trash2}
-            label="Storage Cleanup"
-            active={view === 'cleanup'}
-            onClick={() => setView('cleanup')}
-          />
-
+          {/* Settings with submenu */}
           <div className="space-y-1">
-             <SidebarItem
+            <SidebarItem
               icon={Settings}
               label={t('nav.settings')}
-              active={view === 'settings'} 
+              active={view === 'settings'}
               onClick={() => {
-                setView('settings');
-                // Default to general when clicking parent
-                if (settingsTab === 'api') setSettingsTab('general');
+                toggleSettingsMenu();
+                if (!isSettingsOpen) {
+                  setView('settings');
+                  if (settingsTab === 'api') setSettingsTab('general');
+                }
               }}
               hasSubmenu
-              isOpen={view === 'settings'}
+              isOpen={isSettingsOpen}
             />
-            
+
             {/* Settings Sub-menu */}
-            {view === 'settings' && (
+            {isSettingsOpen && (
               <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-                <button 
-                  onClick={() => setSettingsTab('general')}
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('general'); }}
                   className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    settingsTab === 'general' 
-                      ? 'text-indigo-400 bg-indigo-500/5' 
+                    view === 'settings' && settingsTab === 'general'
+                      ? 'text-indigo-400 bg-indigo-500/5'
                       : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
@@ -1481,11 +1531,11 @@ export default function App() {
                     <span>General</span>
                   </div>
                 </button>
-                <button 
-                  onClick={() => setSettingsTab('api')}
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('api'); }}
                   className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    settingsTab === 'api' 
-                      ? 'text-indigo-400 bg-indigo-500/5' 
+                    view === 'settings' && settingsTab === 'api'
+                      ? 'text-indigo-400 bg-indigo-500/5'
                       : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
@@ -1822,63 +1872,66 @@ export default function App() {
             ) : (
               // LIST/GRID VIEW
               <>
-                {/* Desktop Header - HIDDEN ON MOBILE */}
+                {/* Library Tabs - My Library | Team Library */}
+                <div className="hidden md:block">
+                  <LibraryTabs
+                    activeTab={activeLibraryTab}
+                    onTabChange={handleLibraryTabChange}
+                    currentTeam={currentTeam}
+                    onTeamClick={() => setIsUserDropdownOpen(true)}
+                  />
+                </div>
+
+                {/* Team Library Folder View - When no collection is selected */}
+                {activeLibraryTab === 'team-library' && !activeCollectionId && (
+                  <TeamLibraryView
+                      collections={collections.filter(c => c.team_id === selectedTeamId)}
+                    activeCollectionId={activeCollectionId}
+                    onSelectCollection={(id) => setActiveCollectionId(id)}
+                    onBackToFolders={() => setActiveCollectionId(null)}
+                    onCreateCollection={() => {
+                      // Pre-select current team when creating from Team Library
+                      setIsCreateCollectionModalOpen(true);
+                    }}
+                    currentTeam={currentTeam}
+                    isLoading={isLoadingLibrary}
+                  />
+                )}
+
+                {/* Desktop Header - Show when in My Library or inside a collection */}
+                {(activeLibraryTab === 'my-library' || activeCollectionId) && (
                 <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
                     <div className="flex items-center gap-3">
-                      {(activeCollectionId || isTeamLibraryActive) && (
+                      {activeCollectionId && (
                         <button
-                          onClick={() => {
-                            setActiveCollectionId(null);
-                            setIsTeamLibraryActive(false);
-                          }}
+                          onClick={() => setActiveCollectionId(null)}
                           className="p-2 -ml-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
                           title={t('common.back')}
                         >
                           <ArrowLeft size={20} />
                         </button>
                       )}
-                      {isTeamLibraryActive && !activeCollectionId && (
-                        <div className="p-2 bg-indigo-500/20 rounded-lg">
-                          <Users size={20} className="text-indigo-400" />
-                        </div>
-                      )}
                       {activeCollectionId && (
                         <div className="p-2 bg-indigo-500/20 rounded-lg">
                           <Folder size={20} className="text-indigo-400" />
                         </div>
                       )}
-                      <h1 className="text-2xl font-bold text-white">
+                      <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                         {activeCollectionId
                           ? collections.find(c => c.id === activeCollectionId)?.name || 'Collection'
-                          : isTeamLibraryActive
-                          ? t('nav.sharedCollections')
                           : t('library.title')}
+                        {activeCollectionId && (
+                          <span className="flex items-center gap-1 text-sm font-normal px-2 py-0.5 bg-zinc-800 rounded text-zinc-400">
+                            <span>{collectionVideoIds.length}</span>
+                            <Video size={14} className="text-indigo-400" />
+                          </span>
+                        )}
                       </h1>
                     </div>
-                    <p className="text-zinc-400 text-sm">
-                      {activeCollectionId
-                        ? `${collectionVideoIds.length} videos in this collection`
-                        : isTeamLibraryActive
-                        ? `${teamLibraryVideoIds.length} videos shared in teams`
-                        : t('library.subtitle')}
-                    </p>
-                    {/* Team badge for collection */}
-                    {activeCollectionId && (() => {
-                      const collection = collections.find(c => c.id === activeCollectionId);
-                      if (collection?.team_id) {
-                        const team = teams.find(t => t.id === collection.team_id);
-                        if (team) {
-                          return (
-                            <div className="flex items-center gap-1.5 mt-1 px-2 py-0.5 bg-indigo-500/20 rounded-full w-fit">
-                              <Users size={12} className="text-indigo-400" />
-                              <span className="text-xs text-indigo-300">{team.name}</span>
-                            </div>
-                          );
-                        }
-                      }
-                      return null;
-                    })()}
+                    {!activeCollectionId && (
+                      <p className="text-zinc-400 text-sm">{t('library.subtitle')}</p>
+                    )}
                   </div>
                   
                   <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
@@ -1934,8 +1987,10 @@ export default function App() {
                      </div>
                   </div>
                 </header>
+                )}
 
                 {/* Mobile Header - Overlay style */}
+                {(activeLibraryTab === 'my-library' || activeCollectionId) && (
                 <div className="md:hidden fixed top-0 left-0 right-0 z-30 p-4 flex justify-end items-start pointer-events-none bg-gradient-to-b from-black/60 to-transparent">
                    <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
                       {isMobileSearchOpen ? (
@@ -1948,7 +2003,7 @@ export default function App() {
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
                             />
-                            <button 
+                            <button
                               onClick={() => {
                                 setIsMobileSearchOpen(false);
                                 setSearchQuery('');
@@ -1959,8 +2014,8 @@ export default function App() {
                             </button>
                          </div>
                       ) : (
-                         <button 
-                            onClick={() => setIsMobileSearchOpen(true)} 
+                         <button
+                            onClick={() => setIsMobileSearchOpen(true)}
                             className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
                          >
                             <Search size={22} className="drop-shadow-md" />
@@ -1968,8 +2023,10 @@ export default function App() {
                       )}
                    </div>
                 </div>
+                )}
 
-                {/* Library Content */}
+                {/* Library Content - Show when in My Library or inside a collection */}
+                {(activeLibraryTab === 'my-library' || activeCollectionId) && (
                 <div className="h-full relative flex-1 min-h-0">
                   {isLoadingLibrary && library.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-96 text-zinc-500">
@@ -2019,6 +2076,7 @@ export default function App() {
                     </>
                   )}
                 </div>
+                )}
               </>
             )}
           </div>

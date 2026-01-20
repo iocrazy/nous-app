@@ -1,59 +1,77 @@
-"""Repository for Tags data access."""
+"""Repository for Tags data access (异步)."""
 from typing import Optional, List
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 from loguru import logger
 
 
 class TagsRepository:
-    """Repository for tags CRUD operations."""
+    """Repository for tags CRUD operations (异步)."""
 
     TABLE_NAME = "tags"
     VIDEO_TAGS_TABLE = "video_tags"
 
     def __init__(self):
-        # Use admin client to bypass RLS policies
-        self.client = get_supabase_admin()
-        self.table = self.client.table(self.TABLE_NAME)
-        self.video_tags_table = self.client.table(self.VIDEO_TAGS_TABLE)
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
+
+    async def _get_video_tags_table(self):
+        """获取视频标签关联表引用"""
+        client = await self._get_client()
+        return client.table(self.VIDEO_TAGS_TABLE)
 
     async def get_all_tags(self, user_id: Optional[str] = None) -> List[dict]:
         """Get all tags (system + time + user's own tags)."""
+        table = await self._get_table()
+
         # Get system tags
-        system_result = self.table.select("*").eq("type", "system").execute()
+        system_result = await table.select("*").eq("type", "system").execute()
 
         # Get time tags
-        time_result = self.table.select("*").eq("type", "time").execute()
+        time_result = await table.select("*").eq("type", "time").execute()
 
         tags = system_result.data + time_result.data
 
         # Get user tags if user_id provided
         if user_id:
-            user_result = self.table.select("*").eq("user_id", user_id).execute()
+            user_result = await table.select("*").eq("user_id", user_id).execute()
             tags.extend(user_result.data)
 
         return tags
 
     async def get_tag_by_id(self, tag_id: str) -> Optional[dict]:
         """Get a single tag by ID."""
-        result = self.table.select("*").eq("id", tag_id).maybe_single().execute()
+        table = await self._get_table()
+        result = await table.select("*").eq("id", tag_id).maybe_single().execute()
         return result.data if result.data else None
 
     async def get_tag_by_name(self, name: str, user_id: Optional[str] = None) -> Optional[dict]:
         """Get a tag by name (checks system tags first, then user tags)."""
+        table = await self._get_table()
+
         # Check system tags
-        result = self.table.select("*").eq("name", name).eq("type", "system").maybe_single().execute()
+        result = await table.select("*").eq("name", name).eq("type", "system").maybe_single().execute()
         if result.data:
             return result.data
 
         # Check time tags
-        result = self.table.select("*").eq("name", name).eq("type", "time").maybe_single().execute()
+        result = await table.select("*").eq("name", name).eq("type", "time").maybe_single().execute()
         if result.data:
             return result.data
 
         # Check user tags
         if user_id:
-            result = self.table.select("*").eq("name", name).eq("user_id", user_id).maybe_single().execute()
+            result = await table.select("*").eq("name", name).eq("user_id", user_id).maybe_single().execute()
             if result.data:
                 return result.data
 
@@ -75,7 +93,8 @@ class TagsRepository:
             "icon": icon
         }
 
-        result = self.table.insert(data).execute()
+        table = await self._get_table()
+        result = await table.insert(data).execute()
         logger.info(f"Created tag: {name} for user: {user_id}")
         return result.data[0]
 
@@ -87,12 +106,14 @@ class TagsRepository:
         if not update_data:
             return await self.get_tag_by_id(tag_id)
 
-        result = self.table.update(update_data).eq("id", tag_id).eq("user_id", user_id).execute()
+        table = await self._get_table()
+        result = await table.update(update_data).eq("id", tag_id).eq("user_id", user_id).execute()
         return result.data[0] if result.data else None
 
     async def delete_tag(self, tag_id: str, user_id: str) -> bool:
         """Delete a user tag."""
-        result = self.table.delete().eq("id", tag_id).eq("user_id", user_id).eq("type", "user").execute()
+        table = await self._get_table()
+        result = await table.delete().eq("id", tag_id).eq("user_id", user_id).eq("type", "user").execute()
         return len(result.data) > 0
 
     async def add_tag_to_video(
@@ -118,18 +139,21 @@ class TagsRepository:
         if confidence is not None:
             data["confidence"] = confidence
 
-        result = self.video_tags_table.upsert(data).execute()
+        video_tags_table = await self._get_video_tags_table()
+        result = await video_tags_table.upsert(data).execute()
         logger.info(f"Added tag {tag_id} to video {video_id}")
         return result.data[0]
 
     async def remove_tag_from_video(self, video_id: int, tag_id: str) -> bool:
         """Remove a tag from a video."""
-        result = self.video_tags_table.delete().eq("video_id", video_id).eq("tag_id", tag_id).execute()
+        video_tags_table = await self._get_video_tags_table()
+        result = await video_tags_table.delete().eq("video_id", video_id).eq("tag_id", tag_id).execute()
         return len(result.data) > 0
 
     async def get_video_tags(self, video_id: int) -> List[dict]:
         """Get all tags for a video with tag details."""
-        result = self.video_tags_table.select(
+        video_tags_table = await self._get_video_tags_table()
+        result = await video_tags_table.select(
             "*, tags(*)"
         ).eq("video_id", video_id).execute()
 
@@ -143,7 +167,8 @@ class TagsRepository:
         offset: int = 0
     ) -> List[dict]:
         """Get all videos with a specific tag."""
-        result = self.video_tags_table.select(
+        video_tags_table = await self._get_video_tags_table()
+        result = await video_tags_table.select(
             "video_id, douyin_videos(*)"
         ).eq("tag_id", tag_id).range(offset, offset + limit - 1).execute()
 
@@ -165,7 +190,8 @@ class TagsRepository:
             for tag_id in tag_ids
         ]
 
-        result = self.video_tags_table.upsert(data).execute()
+        video_tags_table = await self._get_video_tags_table()
+        result = await video_tags_table.upsert(data).execute()
         logger.info(f"Added {len(tag_ids)} tags to video {video_id}")
         return result.data
 

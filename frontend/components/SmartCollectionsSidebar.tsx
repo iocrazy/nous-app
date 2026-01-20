@@ -22,10 +22,11 @@ import {
 } from '../services/smartCollectionService';
 
 interface SmartCollectionsSidebarProps {
-  activeCollectionId: number | null;
+  activeCollectionId: string | null;
   onSelectCollection: (collection: SmartCollection | null) => void;
   onCreateCollection?: () => void;
   isCollapsed?: boolean;
+  isInline?: boolean; // When true, renders as inline submenu items without header
 }
 
 // Icon mapping for presets
@@ -59,6 +60,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
   onSelectCollection,
   onCreateCollection,
   isCollapsed = false,
+  isInline = false,
 }) => {
   const [collections, setCollections] = useState<SmartCollection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -113,6 +115,60 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
           <Sparkles size={20} />
         </button>
       </div>
+    );
+  }
+
+  // Inline mode - renders as simple submenu items (like Settings > General)
+  if (isInline) {
+    return (
+      <>
+        {error ? (
+          <div className="px-4 py-2 text-xs text-red-400">{error}</div>
+        ) : (
+          <>
+            {/* All Videos */}
+            <button
+              onClick={() => onSelectCollection(null)}
+              className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                activeCollectionId === null
+                  ? 'text-indigo-400 bg-indigo-500/5'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Folder size={14} />
+                <span>All Videos</span>
+              </div>
+            </button>
+
+            {/* Preset Collections */}
+            {presetCollections.map((collection) => {
+              const Icon = getCollectionIcon(collection.icon, collection.name);
+              return (
+                <button
+                  key={collection.id}
+                  onClick={() => onSelectCollection(collection)}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    activeCollectionId === collection.id
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Icon size={14} />
+                      <span>{collection.name}</span>
+                    </div>
+                    {collection.video_count !== null && (
+                      <span className="text-xs text-zinc-600">{collection.video_count}</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </>
     );
   }
 

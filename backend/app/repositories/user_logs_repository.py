@@ -4,22 +4,33 @@
 用户日志仓库
 
 提供用户操作日志的存储和查询功能。
+使用异步 Supabase 客户端。
 """
 
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 from loguru import logger
 
-from app.db.supabase_client import SupabaseClient
+from app.db.supabase_client import get_async_supabase_admin
 
 
 class UserLogsRepository:
-    """用户日志仓库"""
+    """用户日志仓库 (异步)"""
 
     TABLE_NAME = "user_logs"
 
     def __init__(self):
-        self.client = SupabaseClient.get_admin_client()
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
 
     async def create(
         self,
@@ -57,7 +68,8 @@ class UserLogsRepository:
             if details:
                 data["details"] = details
 
-            result = self.client.table(self.TABLE_NAME).insert(data).execute()
+            table = await self._get_table()
+            result = await table.insert(data).execute()
 
             if result.data:
                 logger.debug(f"日志记录创建成功: {action} - {message}")
@@ -86,8 +98,9 @@ class UserLogsRepository:
             日志记录列表
         """
         try:
+            table = await self._get_table()
             query = (
-                self.client.table(self.TABLE_NAME)
+                table
                 .select("*")
                 .eq("user_id", user_id)
                 .order("created_at", desc=True)
@@ -97,7 +110,7 @@ class UserLogsRepository:
             if action:
                 query = query.eq("action", action)
 
-            result = query.execute()
+            result = await query.execute()
             return result.data or []
 
         except Exception as e:
@@ -122,8 +135,9 @@ class UserLogsRepository:
             日志记录列表
         """
         try:
-            result = (
-                self.client.table(self.TABLE_NAME)
+            table = await self._get_table()
+            result = await (
+                table
                 .select("*")
                 .eq("user_id", user_id)
                 .eq("aweme_id", aweme_id)

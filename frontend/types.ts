@@ -152,6 +152,7 @@ export interface Collection {
   // Computed
   video_count?: number;
   is_shared?: boolean;
+  thumbnail_url?: string; // First video's cover
 }
 
 export interface CollectionVideo {

@@ -168,10 +168,10 @@ async def take_cleanup_action(
 
     elif action.action == "delete":
         # Delete video
-        from app.db.supabase_client import get_supabase_admin
-        supabase = get_supabase_admin()
+        from app.db.supabase_client import get_async_supabase_admin
+        supabase = await get_async_supabase_admin()
 
-        result = supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+        result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
 
         if result.data:
             logger.info(f"Deleted video {video_id} via cleanup")
@@ -204,9 +204,9 @@ async def batch_cleanup_action(
             if action.action == "keep_forever":
                 success = await service.mark_keep_forever(video_id, auth.user_id)
             elif action.action == "delete":
-                from app.db.supabase_client import get_supabase_admin
-                supabase = get_supabase_admin()
-                result = supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+                from app.db.supabase_client import get_async_supabase_admin
+                supabase = await get_async_supabase_admin()
+                result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
                 success = len(result.data) > 0
             else:  # dismiss
                 success = True
@@ -266,12 +266,12 @@ async def get_storage_breakdown(auth: AuthDep = None):
 
     Shows storage usage by type, month, and tag.
     """
-    from app.db.supabase_client import get_supabase_admin
+    from app.db.supabase_client import get_async_supabase_admin
 
-    supabase = get_supabase_admin()
+    supabase = await get_async_supabase_admin()
 
     # Get all videos with storage info
-    result = supabase.table("douyin_videos").select(
+    result = await supabase.table("douyin_videos").select(
         "id, storage_size, aweme_type, created_at"
     ).eq("user_id", auth.user_id).execute()
 

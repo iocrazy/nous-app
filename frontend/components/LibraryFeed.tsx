@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { DouyinBase } from '../types';
 import {
-  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon
+  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
@@ -89,22 +89,23 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
 };
 
 // Sub-component for individual slides
-const FeedItem = ({ 
-  item, 
-  isPlaying, 
-  isMuted, 
-  onTogglePlay, 
+const FeedItem = ({
+  item,
+  isPlaying,
+  isMuted,
+  onTogglePlay,
   onToggleMute,
-  formatNumber 
-}: { 
-  item: DouyinBase; 
-  isPlaying: boolean; 
-  isMuted: boolean; 
+  formatNumber
+}: {
+  item: DouyinBase;
+  isPlaying: boolean;
+  isMuted: boolean;
   onTogglePlay: (e: React.MouseEvent) => void;
   onToggleMute: (e: React.MouseEvent) => void;
   formatNumber: (n?: number) => string;
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [copiedShare, setCopiedShare] = useState(false);
   const isVideo = isVideoType(item.aweme_type);
   // 视频 URL: 优先使用 download_path
   const videoUrl = getVideoUrl(item);
@@ -203,10 +204,25 @@ const FeedItem = ({
         </div>
 
         <div className="flex flex-col items-center gap-1">
-           <button className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors">
-              <Share2 className="w-8 h-8 text-white drop-shadow-md" />
+           <button
+             className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors"
+             onClick={(e) => {
+               e.stopPropagation();
+               if (item.video_original_url) {
+                 navigator.clipboard.writeText(item.video_original_url);
+                 setCopiedShare(true);
+                 setTimeout(() => setCopiedShare(false), 2000);
+               }
+             }}
+             title="Click to copy link"
+           >
+              {copiedShare ? (
+                <Check className="w-8 h-8 text-emerald-400 drop-shadow-md" />
+              ) : (
+                <Share2 className="w-8 h-8 text-white drop-shadow-md" />
+              )}
            </button>
-           <span className="text-white text-xs font-semibold drop-shadow-md">{formatNumber(item.video_share_count)}</span>
+           <span className="text-white text-xs font-semibold drop-shadow-md">{copiedShare ? 'Copied!' : formatNumber(item.video_share_count)}</span>
         </div>
       </div>
 

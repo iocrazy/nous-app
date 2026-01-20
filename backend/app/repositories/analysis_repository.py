@@ -1,24 +1,34 @@
-"""Repository for Video Analysis data access."""
+"""Repository for Video Analysis data access (异步)."""
 from typing import Optional, List
 from datetime import datetime
 
-from app.db.supabase_client import get_supabase_admin
+from app.db.supabase_client import get_async_supabase_admin
 from loguru import logger
 
 
 class AnalysisRepository:
-    """Repository for video analysis CRUD operations."""
+    """Repository for video analysis CRUD operations (异步)."""
 
     TABLE_NAME = "video_analysis"
 
     def __init__(self):
-        # Use admin client to bypass RLS policies
-        self.client = get_supabase_admin()
-        self.table = self.client.table(self.TABLE_NAME)
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase_admin()
+        return self._client
+
+    async def _get_table(self):
+        """获取表引用"""
+        client = await self._get_client()
+        return client.table(self.TABLE_NAME)
 
     async def get_analysis(self, video_id: int) -> Optional[dict]:
         """Get analysis for a video."""
-        result = self.table.select("*").eq("video_id", video_id).maybe_single().execute()
+        table = await self._get_table()
+        result = await table.select("*").eq("video_id", video_id).maybe_single().execute()
         return result.data
 
     async def create_analysis(self, video_id: int, **kwargs) -> dict:
@@ -40,7 +50,8 @@ class AnalysisRepository:
         # Filter out None values
         data = {k: v for k, v in data.items() if v is not None}
 
-        result = self.table.insert(data).execute()
+        table = await self._get_table()
+        result = await table.insert(data).execute()
         logger.info(f"Created analysis for video {video_id}")
         return result.data[0]
 
@@ -54,7 +65,8 @@ class AnalysisRepository:
 
         update_data["analyzed_at"] = datetime.utcnow().isoformat()
 
-        result = self.table.update(update_data).eq("video_id", video_id).execute()
+        table = await self._get_table()
+        result = await table.update(update_data).eq("video_id", video_id).execute()
         return result.data[0] if result.data else None
 
     async def upsert_analysis(self, video_id: int, **kwargs) -> dict:
@@ -71,7 +83,8 @@ class AnalysisRepository:
         # Convert list to PostgreSQL vector format
         embedding_str = f"[{','.join(map(str, embedding))}]"
 
-        result = self.table.update({
+        table = await self._get_table()
+        result = await table.update({
             "content_embedding": embedding_str,
             "full_text_for_embedding": full_text,
         }).eq("video_id", video_id).execute()
@@ -81,22 +94,26 @@ class AnalysisRepository:
 
     async def get_videos_without_analysis(self, limit: int = 100) -> List[dict]:
         """Get videos that don't have analysis yet."""
+        table = await self._get_table()
+        client = await self._get_client()
+
         # Get video IDs that have analysis
-        analyzed = self.table.select("video_id").execute()
+        analyzed = await table.select("video_id").execute()
         analyzed_ids = [r["video_id"] for r in analyzed.data]
 
         # Get videos not in that list
-        query = self.client.table("douyin_videos").select("id, title, desc, cover_url").limit(limit)
+        query = client.table("douyin_videos").select("id, title, desc, cover_url").limit(limit)
 
         if analyzed_ids:
             query = query.not_.in_("id", analyzed_ids)
 
-        result = query.execute()
+        result = await query.execute()
         return result.data
 
     async def get_videos_by_analysis_level(self, level: str, limit: int = 100) -> List[dict]:
         """Get videos with a specific analysis level."""
-        result = self.table.select(
+        table = await self._get_table()
+        result = await table.select(
             "*, douyin_videos(id, title, desc, cover_url)"
         ).eq("analysis_level", level).limit(limit).execute()
 
@@ -107,10 +124,11 @@ class AnalysisRepository:
 
         Note: Requires the 'match_videos_by_embedding' RPC function to be created in Supabase.
         """
+        client = await self._get_client()
         # Use Supabase's vector similarity search via RPC
         embedding_str = f"[{','.join(map(str, embedding))}]"
 
-        result = self.client.rpc(
+        result = await client.rpc(
             "match_videos_by_embedding",
             {
                 "query_embedding": embedding_str,
@@ -123,19 +141,23 @@ class AnalysisRepository:
 
     async def delete_analysis(self, video_id: int) -> bool:
         """Delete analysis record for a video."""
-        result = self.table.delete().eq("video_id", video_id).execute()
+        table = await self._get_table()
+        result = await table.delete().eq("video_id", video_id).execute()
         return len(result.data) > 0
 
     async def get_analysis_stats(self) -> dict:
         """Get statistics about video analysis coverage."""
+        client = await self._get_client()
+        table = await self._get_table()
+
         # Count by analysis level
-        result = self.client.rpc("get_analysis_stats").execute()
+        result = await client.rpc("get_analysis_stats").execute()
 
         if result.data:
             return result.data
 
         # Fallback: manual count if RPC doesn't exist
-        all_analysis = self.table.select("analysis_level").execute()
+        all_analysis = await table.select("analysis_level").execute()
 
         stats = {
             "none": 0,

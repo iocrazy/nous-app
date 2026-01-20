@@ -257,40 +257,46 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
     """
     Batch L1 analysis for multiple videos.
     Dispatches individual L1 tasks.
+
+    Note: Uses run_async helper to work with async Supabase client.
+    Celery workers run in separate processes and don't share event loops.
     """
-    from app.db.supabase_client import get_supabase_admin
+    async def _batch_dispatch():
+        from app.db.supabase_client import get_async_supabase_admin
 
-    supabase = get_supabase_admin()
-    dispatched = 0
+        supabase = await get_async_supabase_admin()
+        dispatched = 0
 
-    for video_id in video_ids[:batch_size]:
-        # Get video info
-        result = supabase.table("douyin_videos").select(
-            "id, title, desc, cover_url"
-        ).eq("id", video_id).maybe_single().execute()
+        for video_id in video_ids[:batch_size]:
+            # Get video info
+            result = await supabase.table("douyin_videos").select(
+                "id, title, desc, cover_url"
+            ).eq("id", video_id).maybe_single().execute()
 
-        if result.data:
-            video = result.data
-            cover_url = video.get("cover_url", "")
-            if cover_url:
-                analyze_video_l1_task.delay(
-                    video_id=video["id"],
-                    cover_url=cover_url,
-                    title=video.get("title", ""),
-                    description=video.get("desc", "")
-                )
-                dispatched += 1
-                logger.info(f"Dispatched L1 analysis for video {video_id}")
+            if result.data:
+                video = result.data
+                cover_url = video.get("cover_url", "")
+                if cover_url:
+                    analyze_video_l1_task.delay(
+                        video_id=video["id"],
+                        cover_url=cover_url,
+                        title=video.get("title", ""),
+                        description=video.get("desc", "")
+                    )
+                    dispatched += 1
+                    logger.info(f"Dispatched L1 analysis for video {video_id}")
+                else:
+                    logger.warning(f"Video {video_id} has no cover_url, skipping")
             else:
-                logger.warning(f"Video {video_id} has no cover_url, skipping")
-        else:
-            logger.warning(f"Video {video_id} not found, skipping")
+                logger.warning(f"Video {video_id} not found, skipping")
 
-    return {
-        "dispatched": dispatched,
-        "total_requested": len(video_ids),
-        "message": f"Dispatched {dispatched} L1 analysis tasks"
-    }
+        return {
+            "dispatched": dispatched,
+            "total_requested": len(video_ids),
+            "message": f"Dispatched {dispatched} L1 analysis tasks"
+        }
+
+    return run_async(_batch_dispatch())
 
 
 @shared_task

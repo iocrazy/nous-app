@@ -4,19 +4,26 @@
 Supabase 认证服务
 
 基于 Supabase Auth 的用户认证服务，提供注册、登录、登出等功能。
+使用异步 Supabase 客户端。
 """
 
 from typing import Optional, Dict, Any
 from loguru import logger
 
-from app.db.supabase_client import get_supabase, get_supabase_admin
+from app.db.supabase_client import get_async_supabase, get_async_supabase_admin
 
 
 class SupabaseAuthService:
-    """Supabase 认证服务"""
+    """Supabase 认证服务 (异步)"""
 
     def __init__(self):
-        self.client = get_supabase()
+        self._client = None
+
+    async def _get_client(self):
+        """获取异步客户端"""
+        if self._client is None:
+            self._client = await get_async_supabase()
+        return self._client
 
     async def sign_up(
         self,
@@ -36,11 +43,12 @@ class SupabaseAuthService:
             注册结果
         """
         try:
+            client = await self._get_client()
             options = {}
             if metadata:
                 options["data"] = metadata
 
-            response = self.client.auth.sign_up({
+            response = await client.auth.sign_up({
                 "email": email,
                 "password": password,
                 "options": options if options else None
@@ -80,7 +88,8 @@ class SupabaseAuthService:
             登录结果
         """
         try:
-            response = self.client.auth.sign_in_with_password({
+            client = await self._get_client()
+            response = await client.auth.sign_in_with_password({
                 "email": email,
                 "password": password
             })
@@ -111,7 +120,8 @@ class SupabaseAuthService:
     async def sign_out(self) -> Dict[str, Any]:
         """用户登出"""
         try:
-            self.client.auth.sign_out()
+            client = await self._get_client()
+            await client.auth.sign_out()
             logger.info("用户登出成功")
             return {"success": True, "message": "登出成功"}
         except Exception as e:
@@ -129,7 +139,8 @@ class SupabaseAuthService:
             用户信息或 None
         """
         try:
-            response = self.client.auth.get_user(access_token)
+            client = await self._get_client()
+            response = await client.auth.get_user(access_token)
             if response.user:
                 return {
                     "id": response.user.id,
@@ -154,7 +165,8 @@ class SupabaseAuthService:
             新的会话信息
         """
         try:
-            response = self.client.auth.refresh_session(refresh_token)
+            client = await self._get_client()
+            response = await client.auth.refresh_session(refresh_token)
             if response.session:
                 return {
                     "success": True,
@@ -180,7 +192,8 @@ class SupabaseAuthService:
             结果
         """
         try:
-            self.client.auth.reset_password_email(email)
+            client = await self._get_client()
+            await client.auth.reset_password_email(email)
             logger.info(f"密码重置邮件已发送: {email}")
             return {"success": True, "message": "密码重置邮件已发送"}
         except Exception as e:
@@ -207,6 +220,7 @@ class SupabaseAuthService:
             更新结果
         """
         try:
+            client = await self._get_client()
             update_data = {}
             if email:
                 update_data["email"] = email
@@ -216,9 +230,9 @@ class SupabaseAuthService:
                 update_data["data"] = metadata
 
             # 设置当前会话
-            self.client.auth.set_session(access_token, "")
+            await client.auth.set_session(access_token, "")
 
-            response = self.client.auth.update_user(update_data)
+            response = await client.auth.update_user(update_data)
             if response.user:
                 logger.info(f"用户信息更新成功: {response.user.email}")
                 return {
@@ -236,15 +250,22 @@ class SupabaseAuthService:
 
 
 class SupabaseAdminAuthService:
-    """Supabase 管理员认证服务（使用 service_role key）"""
+    """Supabase 管理员认证服务（使用 service_role key）(异步)"""
 
     def __init__(self):
-        self.admin_client = get_supabase_admin()
+        self._admin_client = None
+
+    async def _get_admin_client(self):
+        """获取异步管理员客户端"""
+        if self._admin_client is None:
+            self._admin_client = await get_async_supabase_admin()
+        return self._admin_client
 
     async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         """根据用户 ID 获取用户信息"""
         try:
-            response = self.admin_client.auth.admin.get_user_by_id(user_id)
+            client = await self._get_admin_client()
+            response = await client.auth.admin.get_user_by_id(user_id)
             if response.user:
                 return {
                     "id": response.user.id,
@@ -264,7 +285,8 @@ class SupabaseAdminAuthService:
     ) -> Dict[str, Any]:
         """获取用户列表"""
         try:
-            response = self.admin_client.auth.admin.list_users(
+            client = await self._get_admin_client()
+            response = await client.auth.admin.list_users(
                 page=page,
                 per_page=per_page
             )
@@ -284,7 +306,8 @@ class SupabaseAdminAuthService:
     async def delete_user(self, user_id: str) -> Dict[str, Any]:
         """删除用户"""
         try:
-            self.admin_client.auth.admin.delete_user(user_id)
+            client = await self._get_admin_client()
+            await client.auth.admin.delete_user(user_id)
             logger.info(f"用户已删除: {user_id}")
             return {"success": True, "message": "用户已删除"}
         except Exception as e:
@@ -298,7 +321,8 @@ class SupabaseAdminAuthService:
     ) -> Dict[str, Any]:
         """更新用户角色（存储在 app_metadata 中）"""
         try:
-            response = self.admin_client.auth.admin.update_user_by_id(
+            client = await self._get_admin_client()
+            response = await client.auth.admin.update_user_by_id(
                 user_id,
                 {"app_metadata": {"role": role}}
             )
