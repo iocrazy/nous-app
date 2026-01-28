@@ -416,13 +416,36 @@ class SupabaseDouyinRepository:
             failed_result = await failed_query.execute()
             failed = failed_result.count or 0
 
+            # Calculate total storage bytes
+            storage_query = table.select("video_datasize_bytes")
+            if user_id:
+                storage_query = storage_query.eq("user_id", user_id)
+            storage_result = await storage_query.execute()
+            total_storage_bytes = sum(
+                (row.get("video_datasize_bytes") or 0) for row in (storage_result.data or [])
+            )
+
+            # Count unique authors
+            authors_query = table.select("author")
+            if user_id:
+                authors_query = authors_query.eq("user_id", user_id)
+            authors_result = await authors_query.execute()
+            unique_authors = len(set(
+                row.get("author") for row in (authors_result.data or []) if row.get("author")
+            ))
+
             return {
                 "total": total,
                 "pending": pending,
                 "completed": completed,
                 "failed": failed,
-                "skipped": total - pending - completed - failed
+                "skipped": total - pending - completed - failed,
+                "total_storage_bytes": total_storage_bytes,
+                "unique_authors": unique_authors
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
-            return {"total": 0, "pending": 0, "completed": 0, "failed": 0, "skipped": 0}
+            return {
+                "total": 0, "pending": 0, "completed": 0, "failed": 0, "skipped": 0,
+                "total_storage_bytes": 0, "unique_authors": 0
+            }

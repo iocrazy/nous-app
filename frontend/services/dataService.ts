@@ -354,21 +354,59 @@ export interface DashboardStats {
 
 /**
  * 获取 Dashboard 统计数据
+ * Uses backend API for accurate total counts (across all videos, not just current page)
+ * Uses local library data for distribution/activity stats (works with loaded data)
  */
 export const fetchDashboardStats = async (library: DouyinBase[]): Promise<DashboardStats> => {
-  // 计算下载状态统计
-  const completedDownloads = library.filter(v => v.video_download_status === 'COMPLETED').length;
-  const pendingDownloads = library.filter(v => v.video_download_status === 'PENDING' || v.video_download_status === 'PROCESSING').length;
-  const failedDownloads = library.filter(v => v.video_download_status === 'FAILED').length;
+  // Fetch accurate stats from backend API (calculates across ALL user videos)
+  let backendStats = {
+    total: library.length,
+    completed: 0,
+    pending: 0,
+    failed: 0,
+    total_storage_bytes: 0,
+    unique_authors: 0
+  };
 
-  // 计算存储大小
-  const totalStorageBytes = library.reduce((sum, v) => {
-    const size = parseInt(v.video_datasize || '0', 10);
-    return sum + (isNaN(size) ? 0 : size);
-  }, 0);
+  try {
+    const apiUrl = getApiUrl();
+    const token = localStorage.getItem('supabase_access_token');
+    const apiKey = localStorage.getItem('douyin_api_key');
 
-  // 统计唯一创作者
-  const uniqueAuthors = new Set(library.map(v => v.author).filter(Boolean)).size;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (apiKey) headers['X-API-Key'] = apiKey;
+
+    const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.statistics) {
+        backendStats = {
+          total: data.statistics.total || library.length,
+          completed: data.statistics.completed || 0,
+          pending: data.statistics.pending || 0,
+          failed: data.statistics.failed || 0,
+          total_storage_bytes: data.statistics.total_storage_bytes || 0,
+          unique_authors: data.statistics.unique_authors || 0
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to fetch backend statistics, using local calculation:', e);
+  }
+
+  // Use backend stats for accurate counts across all videos
+  const completedDownloads = backendStats.completed;
+  const pendingDownloads = backendStats.pending;
+  const failedDownloads = backendStats.failed;
+  const totalStorageBytes = backendStats.total_storage_bytes;
+  const uniqueAuthors = backendStats.unique_authors;
 
   // 媒体类型分布
   const videoCount = library.filter(v => ['0', '4', '61', 0, 4, 61].includes(v.aweme_type as any)).length;
@@ -450,7 +488,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
   }
 
   return {
-    totalVideos: library.length,
+    totalVideos: backendStats.total,  // Use backend count for accurate total across all videos
     completedDownloads,
     pendingDownloads,
     failedDownloads,

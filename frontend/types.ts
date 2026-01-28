@@ -22,7 +22,8 @@ export interface DouyinBase {
   video_original_url: string;
   video_duration?: string; // seconds
   video_resolution?: string;
-  video_datasize?: string; // bytes
+  video_datasize?: string; // formatted size string (e.g., "3.15 MB")
+  video_datasize_bytes?: number; // raw size in bytes
   video_hashtag_name?: string;
   video_created_time?: string; // datetime string
   author?: string;

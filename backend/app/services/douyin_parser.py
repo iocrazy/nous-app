@@ -159,6 +159,7 @@ class DouyinParser:
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
             "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
+            "video_datasize_bytes": 0,  # Image/video mixed type doesn't have single file size
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
@@ -221,6 +222,7 @@ class DouyinParser:
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
             "video_datasize": Utils.format_file_size(aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0)),
+            "video_datasize_bytes": aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0) or 0,
             "video_duration": Utils.format_duration(aweme_detail.get("video", {}).get("duration")),
             "video_resolution": f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
             "video_download_urls": aweme_detail.get("video", {}).get("play_addr", {}).get("url_list", None),
@@ -291,6 +293,7 @@ class DouyinParser:
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
             "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
+            "video_datasize_bytes": 0,  # Image collections don't have video file size
             "image_download_urls": image_download_urls,
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
             "music_name": music_name,

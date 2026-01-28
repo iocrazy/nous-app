@@ -34,6 +34,7 @@ class DouyinBase(BaseModel):
     video_duration: Optional[str] = Field(None, description="视频时长(秒)")
     video_resolution: Optional[str] = Field(None, description="视频分辨率")
     video_datasize: Optional[str] = Field(None, description="视频文件大小(字节)")
+    video_datasize_bytes: Optional[int] = Field(None, description="视频文件大小(原始字节数)")
     video_hashtag_name: Optional[str] = Field(None, description="视频标签名称")
     video_created_time: Optional[datetime] = Field(None, description="视频创建时间")
     author: Optional[str] = Field(None, description="作者名称")

@@ -197,6 +197,8 @@ export const fetchStatistics = async (): Promise<{
     completed: number;
     failed: number;
     skipped: number;
+    total_storage_bytes: number;
+    unique_authors: number;
   };
 }> => {
   const apiUrl = getApiUrl();
