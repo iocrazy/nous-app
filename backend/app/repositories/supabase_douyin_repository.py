@@ -83,8 +83,9 @@ class SupabaseDouyinRepository:
             视频记录或 None
         """
         try:
-            table = await self._get_table()
-            query = table.select("*").eq("aweme_id", aweme_id)
+            client = await self._get_client()
+            # Use videos_with_tags view which includes tags array
+            query = client.table("videos_with_tags").select("*").eq("aweme_id", aweme_id)
             if user_id:
                 query = query.eq("user_id", user_id)
             result = await query.execute()
@@ -293,11 +294,12 @@ class SupabaseDouyinRepository:
             user_id: 用户 ID（如果提供则只返回该用户的视频）
 
         Returns:
-            视频记录列表
+            视频记录列表（包含 tags 数组）
         """
         try:
-            table = await self._get_table()
-            query = table.select("*")
+            client = await self._get_client()
+            # Use videos_with_tags view which includes tags array
+            query = client.table("videos_with_tags").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             query = query.order(order_by, desc=not ascending)
@@ -358,8 +360,9 @@ class SupabaseDouyinRepository:
             if aweme_type:
                 query = query.eq("aweme_type", aweme_type)
 
-            if category:
-                query = query.ilike("video_categories", f"%{category}%")
+            # TODO: category search needs to be reimplemented via video_tags table
+            # if category:
+            #     query = query.ilike("video_categories", f"%{category}%")
 
             if start_date:
                 query = query.gte("video_created_time", start_date.isoformat())

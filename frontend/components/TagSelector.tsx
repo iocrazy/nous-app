@@ -18,6 +18,8 @@ interface TagSelectorProps {
   videoId: number;
   onTagsChange?: (tags: Tag[]) => void;
   compact?: boolean;
+  inline?: boolean;  // When true, shows dropdown content directly without toggle button
+  initialTagNames?: string[];  // Initial tag names to display immediately (from data.tags)
 }
 
 // Color palette for tags
@@ -46,10 +48,13 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   videoId,
   onTagsChange,
   compact = false,
+  inline = false,
+  initialTagNames = [],
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(inline);  // Always open in inline mode
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [videoTags, setVideoTags] = useState<Tag[]>([]);
+  const [displayTagNames, setDisplayTagNames] = useState<string[]>(initialTagNames);  // For immediate display
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -58,25 +63,44 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   const [showCreateForm, setShowCreateForm] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load tags
+  // Update display names when initialTagNames changes
   useEffect(() => {
-    const loadTags = async () => {
+    setDisplayTagNames(initialTagNames);
+  }, [initialTagNames]);
+
+  // Load full tag objects only when dropdown is opened (for editing)
+  useEffect(() => {
+    const loadVideoTags = async () => {
       try {
-        const [tags, currentTags] = await Promise.all([
-          fetchTags(),
-          getVideoTags(videoId),
-        ]);
-        setAllTags(tags);
+        const currentTags = await getVideoTags(videoId);
         setVideoTags(currentTags);
+        // Update display names with full data
+        setDisplayTagNames(currentTags.map(t => t.name));
+      } catch (error) {
+        console.error('Failed to load video tags:', error);
+      }
+    };
+    // Only fetch when dropdown opens or in inline mode
+    if (isOpen || inline) {
+      loadVideoTags();
+    }
+  }, [videoId, isOpen, inline]);
+
+  // Load all available tags when dropdown is opened
+  useEffect(() => {
+    const loadAllTags = async () => {
+      try {
+        const tags = await fetchTags();
+        setAllTags(tags);
       } catch (error) {
         console.error('Failed to load tags:', error);
       }
     };
 
-    if (isOpen) {
-      loadTags();
+    if (isOpen || inline) {
+      loadAllTags();
     }
-  }, [isOpen, videoId]);
+  }, [isOpen, inline]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -114,7 +138,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
     }
   };
 
-  const handleRemoveTag = async (tagId: number) => {
+  const handleRemoveTag = async (tagId: string) => {
     setIsLoading(true);
     try {
       await removeTagFromVideo(videoId, tagId);
@@ -146,6 +170,29 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
       setIsCreating(false);
     }
   };
+
+  // Inline mode - render dropdown content directly without wrapper
+  if (inline) {
+    return (
+      <TagDropdownContent
+        videoTags={videoTags}
+        filteredTags={filteredTags}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        showCreateForm={showCreateForm}
+        setShowCreateForm={setShowCreateForm}
+        newTagName={newTagName}
+        setNewTagName={setNewTagName}
+        newTagColor={newTagColor}
+        setNewTagColor={setNewTagColor}
+        isLoading={isLoading}
+        isCreating={isCreating}
+        onAddTag={handleAddTag}
+        onRemoveTag={handleRemoveTag}
+        onCreateTag={handleCreateTag}
+      />
+    );
+  }
 
   if (compact) {
     return (
@@ -183,11 +230,21 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
     );
   }
 
+  // Use videoTags if loaded, otherwise show displayTagNames for immediate display
+  const tagsToDisplay = videoTags.length > 0 ? videoTags : displayTagNames.map((name, i) => ({
+    id: `temp-${i}`,
+    name,
+    color: null,
+    icon: null,
+    type: 'user' as const,
+    created_at: '',
+  }));
+
   return (
     <div className="space-y-3">
       {/* Current Tags */}
       <div className="flex flex-wrap gap-2">
-        {videoTags.map((tag) => (
+        {tagsToDisplay.map((tag) => (
           <span
             key={tag.id}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium"
@@ -195,13 +252,16 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           >
             <TagIcon size={10} />
             {tag.name}
-            <button
-              onClick={() => handleRemoveTag(tag.id)}
-              className="ml-1 hover:opacity-70 transition-opacity"
-              disabled={isLoading}
-            >
-              <X size={12} />
-            </button>
+            {/* Only show remove button if we have full tag data */}
+            {videoTags.length > 0 && (
+              <button
+                onClick={() => handleRemoveTag(tag.id)}
+                className="ml-1 hover:opacity-70 transition-opacity"
+                disabled={isLoading}
+              >
+                <X size={12} />
+              </button>
+            )}
           </span>
         ))}
 
@@ -257,7 +317,7 @@ interface TagDropdownContentProps {
   isLoading: boolean;
   isCreating: boolean;
   onAddTag: (tag: Tag) => void;
-  onRemoveTag: (tagId: number) => void;
+  onRemoveTag: (tagId: string) => void;
   onCreateTag: () => void;
 }
 
@@ -342,7 +402,7 @@ const TagDropdownContent: React.FC<TagDropdownContentProps> = ({
                   <TagIcon size={14} />
                   {tag.name}
                 </span>
-                <span className="text-xs text-zinc-500">{tag.video_count} videos</span>
+                <span className="text-xs text-zinc-500">{tag.video_count ?? 0} videos</span>
               </button>
             ))}
           </div>

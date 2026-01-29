@@ -347,8 +347,10 @@ class SupabaseDouyinService:
             else:
                 data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
 
+            video_id = None
             if existing_video:
                 # 更新现有记录
+                video_id = existing_video.get("id")
                 update_data = {
                     k: v for k, v in data_dict.items()
                     if k not in ["download_path", "download_duration"]
@@ -357,7 +359,8 @@ class SupabaseDouyinService:
                 message = f"媒体 {aweme_id}_{video_title} 元数据已更新"
             else:
                 # 创建新记录
-                await repo.create(data_dict)
+                result = await repo.create(data_dict)
+                video_id = result.get("id") if result else None
                 message = f"媒体 {aweme_id}_{video_title} 元数据已创建"
 
             logger.info(message)
@@ -366,6 +369,7 @@ class SupabaseDouyinService:
                 "success": True,
                 "message": message,
                 "aweme_id": aweme_id,
+                "id": video_id,  # Database ID for tag operations
             }
 
         except Exception as e:

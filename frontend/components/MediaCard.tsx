@@ -3,13 +3,14 @@ import React, { useState } from 'react';
 import { DouyinBase, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
+import { TagSelector } from './TagSelector';
 
 interface MediaCardProps {
   data: DouyinBase;
@@ -278,8 +279,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           url: data.video_original_url,
           video_bool: options.video ?? false,
           music_bool: options.music ?? false,
-          cover_bool: options.cover ?? false,
-          video_categories: data.video_categories || ''
+          cover_bool: options.cover ?? false
         })
       });
 
@@ -509,17 +509,24 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           </div>
 
-          {/* Tags */}
-          {data.tags && data.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              {data.tags.map((tag, i) => (
-                <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
-                  <Tag size={10} className="opacity-70" />
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
+          {/* Tags - Editable via TagSelector */}
+          <div className="mb-4">
+            {data.id ? (
+              <TagSelector videoId={data.id} initialTagNames={data.tags || []} />
+            ) : (
+              // Fallback for videos without database ID (e.g., just parsed)
+              data.tags && data.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {data.tags.map((tag, i) => (
+                    <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
+                      <Tag size={10} className="opacity-70" />
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
 
           {/* Action Buttons Row */}
           <div className="grid grid-cols-4 gap-2 mb-5">

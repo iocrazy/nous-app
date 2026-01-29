@@ -60,12 +60,12 @@ export interface FetchOptions {
   video_bool?: boolean;
   music_bool?: boolean;
   cover_bool?: boolean;
-  video_categories?: string;
 }
 
 export interface FetchResponse {
   success: boolean;
   message: string;
+  id?: number;  // Database ID for tag operations
   aweme_id: string;
   video_title?: string;
   author?: string;
@@ -83,7 +83,6 @@ export interface FetchResponse {
   video_duration?: string;
   video_created_time?: string;
   video_desc?: string;
-  video_categories?: string;
   video_original_url?: string;
   video_resolution?: string;
   // 下载状态
@@ -109,7 +108,6 @@ export const parseShareLink = async (
       video_bool: options.video_bool ?? true,
       music_bool: options.music_bool ?? false,
       cover_bool: options.cover_bool ?? true,
-      video_categories: options.video_categories,
     }),
   });
 
@@ -145,7 +143,6 @@ export const parseBatchLinks = async (
       video_bool: options.video_bool ?? true,
       music_bool: options.music_bool ?? false,
       cover_bool: options.cover_bool ?? true,
-      video_categories: options.video_categories,
     }),
   });
 

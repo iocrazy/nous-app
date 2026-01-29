@@ -26,7 +26,6 @@ export const MOCK_PARSED_DATA: DouyinBase = {
   need_download_music: true,
   video_download_status: DownloadStatus.COMPLETED,
   music_download_status: DownloadStatus.PENDING,
-  video_categories: "Tech/Programming",
   notes: "Check this out for the UI design inspiration.",
   tags: ["UI", "React", "Design"]
 };

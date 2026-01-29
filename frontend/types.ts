@@ -9,6 +9,7 @@ export enum DownloadStatus {
 
 export interface DouyinBase {
   // Video Identity
+  id?: number;  // Database auto-generated ID (bigint)
   aweme_id: string;
   user_id?: string;
 
@@ -55,7 +56,6 @@ export interface DouyinBase {
   download_path?: string;
   error_message?: string;
   download_time?: string;
-  video_categories?: string;
 
   // User Data
   notes?: string;
@@ -186,11 +186,13 @@ export interface UserNotification {
 
 // Tags
 export interface Tag {
-  id: number;
+  id: string;  // UUID string from backend
   name: string;
   color: string | null;
-  description: string | null;
-  video_count: number;
+  icon: string | null;
+  type: 'system' | 'user' | 'time';
+  user_id?: string;
+  video_count?: number;
   created_at: string;
 }
 

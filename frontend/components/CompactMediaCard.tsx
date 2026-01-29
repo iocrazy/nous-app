@@ -162,16 +162,16 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         onClick={onClick}
       >
         
-        {/* Tags Row */}
+        {/* Tags Row - Single line only */}
         {data.tags && data.tags.length > 0 ? (
-           <div className="flex flex-wrap gap-2">
+           <div className="flex items-center gap-1.5 overflow-hidden">
               {data.tags.slice(0, 3).map((tag, i) => (
-                 <span key={i} className={`text-[10px] px-2 py-0.5 rounded border font-medium ${getTagColor(tag)}`}>
+                 <span key={i} className={`text-[10px] px-2 py-0.5 rounded border font-medium whitespace-nowrap ${getTagColor(tag)}`}>
                     #{tag}
                  </span>
               ))}
               {data.tags.length > 3 && (
-                 <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">+{data.tags.length - 3}</span>
+                 <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 whitespace-nowrap">+{data.tags.length - 3}</span>
               )}
            </div>
         ) : (

@@ -66,7 +66,6 @@ class DouyinBase(BaseModel):
     download_path: Optional[str] = Field(None, description="下载路径")
     error_message: Optional[str] = Field(None, description="错误信息")
     download_time: Optional[datetime] = Field(None, description="下载时间")
-    video_categories: Optional[str] = Field(None, description="视频分类")
 
 
 
@@ -202,7 +201,6 @@ class VideoFetchRequest(BaseModel):
     url: str = Field(..., description="包含抖音视频URL的文本")
     video_bool: bool = Field(default=True, description="是否下载视频")
     music_bool: bool = Field(default=False, description="是否下载音频")
-    video_categories: Optional[str] = Field(None, description="视频分类")
 
     @model_validator(mode='after')
     def validate_url(self):
@@ -219,8 +217,7 @@ class VideoFetchRequest(BaseModel):
                 {
                     "url": "视频描述 https://v.douyin.com/example/ 复制此链接...",
                     "video_bool": True,
-                    "music_bool": True,
-                    "video_categories": "c1"
+                    "music_bool": True
                 }
             ]
         }

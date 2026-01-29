@@ -1,12 +1,13 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { DouyinBase } from '../types';
 import {
   Video, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
-  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play
+  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play, Plus
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { TagSelector } from './TagSelector';
 
 interface LibraryTableProps {
   data: DouyinBase[];
@@ -43,58 +44,87 @@ const getTagStyle = (tag: string) => {
 
 export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ notes: string; tags: string }>({ notes: '', tags: '' });
+  const [editForm, setEditForm] = useState<{ notes: string }>({ notes: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
-  
+
+  // Tag selector state
+  const [tagSelectorVideoId, setTagSelectorVideoId] = useState<number | null>(null);
+  const [tagSelectorPosition, setTagSelectorPosition] = useState<{ top: number; left: number } | null>(null);
+  const tagSelectorRef = useRef<HTMLDivElement>(null);
+
   // Sorting State - 默认按添加时间降序（最新在前）
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
 
-  // ESC 键关闭全屏预览
+  // ESC 键关闭全屏预览和标签选择器
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeMedia) {
-        setActiveMedia(null);
+      if (e.key === 'Escape') {
+        if (activeMedia) {
+          setActiveMedia(null);
+        }
+        if (tagSelectorVideoId) {
+          setTagSelectorVideoId(null);
+          setTagSelectorPosition(null);
+        }
       }
     };
 
-    if (activeMedia) {
+    if (activeMedia || tagSelectorVideoId) {
       document.addEventListener('keydown', handleKeyDown);
     }
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeMedia]);
+  }, [activeMedia, tagSelectorVideoId]);
 
   const startEditing = (item: DouyinBase) => {
     setEditingId(item.aweme_id);
-    // 优先使用 tags 数组，如果为空则从 video_categories 解析
-    const tagsValue = item.tags && item.tags.length > 0
-      ? item.tags.join(', ')
-      : item.video_categories || '';
     setEditForm({
-      notes: item.notes || '',
-      tags: tagsValue
+      notes: item.notes || ''
     });
   };
 
   const cancelEditing = () => {
     setEditingId(null);
-    setEditForm({ notes: '', tags: '' });
+    setEditForm({ notes: '' });
   };
 
   const saveEditing = (id: string) => {
-    const tagsArray = editForm.tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    // 同时更新 tags（前端数组）和 video_categories（数据库字段，逗号分隔字符串）
     onUpdate(id, {
-      notes: editForm.notes,
-      tags: tagsArray,
-      video_categories: tagsArray.join(', ')
+      notes: editForm.notes
     });
     setEditingId(null);
   };
+
+  // Handle tag cell click to open TagSelector
+  const handleTagCellClick = (item: DouyinBase, event: React.MouseEvent<HTMLTableCellElement>) => {
+    if (!item.id) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTagSelectorPosition({
+      top: rect.bottom + window.scrollY + 8,
+      left: rect.left + window.scrollX
+    });
+    setTagSelectorVideoId(item.id);
+  };
+
+  // Close TagSelector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (tagSelectorRef.current && !tagSelectorRef.current.contains(event.target as Node)) {
+        setTagSelectorVideoId(null);
+        setTagSelectorPosition(null);
+      }
+    };
+
+    if (tagSelectorVideoId) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [tagSelectorVideoId]);
 
   const handleSort = (key: SortKey) => {
     let direction: 'asc' | 'desc' = 'desc'; // Default to descending (highest first)
@@ -357,34 +387,37 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                   )}
                 </td>
 
-                <td className="px-4 py-4">
-                  {editingId === item.aweme_id ? (
-                    <input
-                      type="text"
-                      value={editForm.tags}
-                      onChange={(e) => setEditForm({...editForm, tags: e.target.value})}
-                      placeholder="e.g. funny, travel"
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-indigo-500 text-xs"
-                    />
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {(() => {
-                        // 优先使用 tags 数组，如果为空则从 video_categories 解析
-                        const displayTags = item.tags && item.tags.length > 0
-                          ? item.tags
-                          : item.video_categories?.split(',').map(t => t.trim()).filter(Boolean) || [];
+                <td
+                  className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors group/tags"
+                  onClick={(e) => handleTagCellClick(item, e)}
+                  title="Click to manage tags"
+                >
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {(() => {
+                      const displayTags = item.tags || [];
 
-                        return displayTags.length > 0
-                          ? displayTags.map((tag, i) => (
+                      return displayTags.length > 0
+                        ? (
+                          <>
+                            {displayTags.slice(0, 3).map((tag, i) => (
                               <span key={i} className={`px-2 py-0.5 text-[10px] rounded-full border flex items-center gap-1 ${getTagStyle(tag)}`}>
                                 <Tag size={8} className="opacity-50" />
                                 {tag}
                               </span>
-                            ))
-                          : <span className="text-zinc-600 italic text-xs">No tags</span>;
-                      })()}
-                    </div>
-                  )}
+                            ))}
+                            {displayTags.length > 3 && (
+                              <span className="text-[10px] text-zinc-500">+{displayTags.length - 3}</span>
+                            )}
+                          </>
+                        )
+                        : (
+                          <span className="text-zinc-600 italic text-xs flex items-center gap-1 group-hover/tags:text-zinc-400 transition-colors">
+                            <Plus size={10} className="opacity-0 group-hover/tags:opacity-100 transition-opacity" />
+                            Add tags
+                          </span>
+                        );
+                    })()}
+                  </div>
                 </td>
                 <td className="px-4 py-4">
                   {editingId === item.aweme_id ? (
@@ -434,6 +467,31 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
           </tbody>
         </table>
       </div>
+
+      {/* Tag Selector Popup - Using React Portal */}
+      {tagSelectorVideoId && tagSelectorPosition && createPortal(
+        <div
+          ref={tagSelectorRef}
+          style={{
+            position: 'absolute',
+            top: tagSelectorPosition.top,
+            left: tagSelectorPosition.left,
+            zIndex: 9999,
+          }}
+          className="animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <div className="w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+            <TagSelector
+              videoId={tagSelectorVideoId}
+              inline={true}
+              onTagsChange={() => {
+                // Tags will be updated via Realtime subscription in App.tsx
+              }}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Media Preview Modal - Using React Portal to render outside component hierarchy */}
       {activeMedia && createPortal(

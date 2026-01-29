@@ -2,6 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { DouyinBase } from '../types';
 
 const TABLE_NAME = 'douyin_videos';
+const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
 
 // 获取 API URL
 const getApiUrl = (): string => {
@@ -117,9 +118,9 @@ export const fetchLibraryPaginated = async (
     const from = page * pageSize;
     const to = from + pageSize - 1;
 
-    // 使用 count: 'exact' 获取总数
+    // 使用 count: 'exact' 获取总数，从 videos_with_tags 视图读取以包含 tags 数组
     const { data, error, count } = await supabase
-      .from(TABLE_NAME)
+      .from(VIEW_NAME)
       .select('*', { count: 'exact' })
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -156,9 +157,9 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
       throw new Error("User not authenticated");
     }
 
-    // 只加载最近 500 条用于本地缓存和快速搜索
+    // 只加载最近 500 条用于本地缓存和快速搜索，从 videos_with_tags 视图读取以包含 tags 数组
     const { data, error } = await supabase
-      .from(TABLE_NAME)
+      .from(VIEW_NAME)
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -443,20 +444,17 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     });
   }
 
-  // 统计标签（仅使用 video_categories）
-  const tagCounts: Record<string, number> = {};
-  library.forEach(v => {
-    // 只使用 video_categories 字段
-    const tags = v.video_categories?.split(',').map(t => t.trim()).filter(Boolean) || [];
-    tags.forEach(tag => {
-      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
-    });
-  });
-
-  const topTags = Object.entries(tagCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name, count]) => ({ name, count }));
+  // 统计标签（从 video_tags 表获取）
+  let topTags: { name: string; count: number }[] = [];
+  try {
+    const { fetchTagStatistics } = await import('./tagsService');
+    const tagStats = await fetchTagStatistics(10);
+    if (tagStats.success && tagStats.top_tags) {
+      topTags = tagStats.top_tags.map(t => ({ name: t.name, count: t.count }));
+    }
+  } catch (e) {
+    console.warn('Failed to fetch tag statistics:', e);
+  }
 
   // 最近日志（从 API 获取真实日志，如果失败则使用视频数据作为备用）
   let recentLogs: { message: string; time: string; status: 'success' | 'pending' | 'error' }[] = [];

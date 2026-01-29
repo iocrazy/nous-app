@@ -16,6 +16,7 @@ import { fetchLibrary, fetchLibraryPaginated, saveItem, updateItem, deleteItem, 
 import { fetchMyTeams } from './services/teamService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
+import { addTagsToVideo } from './services/tagsService';
 import { MOCK_LIBRARY } from './constants';
 import { MediaCard } from './components/MediaCard';
 import { CompactMediaCard } from './components/CompactMediaCard';
@@ -28,6 +29,7 @@ import { LandingPage } from './components/LandingPage';
 import { AuthOverlay } from './components/AuthOverlay';
 import { Header } from './components/Header';
 import { UserDropdown } from './components/UserDropdown';
+import { ParserTagSelector } from './components/ParserTagSelector';
 import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
@@ -275,7 +277,7 @@ export default function App() {
     audio: false,
     cover: true
   });
-  const [customTags, setCustomTags] = useState('');
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   
   // Parser & Task State
   const [isParsing, setIsParsing] = useState(false);
@@ -699,6 +701,66 @@ export default function App() {
     };
   }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.aweme_id]);
 
+  // Supabase Realtime for video_tags - 标签实时同步
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
+      return;
+    }
+
+    const tagsChannel = supabase
+      .channel('video_tags_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'video_tags',
+        },
+        async (payload) => {
+          console.log('Video tags realtime update:', payload.eventType, payload);
+
+          const newRecord = payload.new as { video_id: number; tag_id: string };
+          const oldRecord = payload.old as { video_id: number; tag_id: string };
+          const videoId = newRecord?.video_id || oldRecord?.video_id;
+
+          if (!videoId) return;
+
+          // Fetch updated video with tags from the view
+          const { data: updatedVideo, error } = await supabase
+            .from('videos_with_tags')
+            .select('*')
+            .eq('id', videoId)
+            .single();
+
+          if (error || !updatedVideo) {
+            console.error('Failed to fetch updated video:', error);
+            return;
+          }
+
+          // Update the video in library state with new tags
+          setLibrary(prev =>
+            prev.map(item =>
+              item.id === videoId ? { ...item, tags: updatedVideo.tags || [] } : item
+            )
+          );
+
+          // Also update selected item if it's the same video
+          setSelectedLibraryItem(prev =>
+            prev?.id === videoId ? { ...prev, tags: updatedVideo.tags || [] } : prev
+          );
+        }
+      )
+      .subscribe((status) => {
+        console.log('Video tags realtime subscription status:', status);
+      });
+
+    return () => {
+      console.log('Unsubscribing from video tags realtime channel');
+      supabase.removeChannel(tagsChannel);
+    };
+  }, [isAuthenticated]);
+
   // Load collections for selected video
   useEffect(() => {
     if (selectedLibraryItem?.aweme_id) {
@@ -1024,7 +1086,6 @@ export default function App() {
         video_bool: downloadOptions.video,
         music_bool: downloadOptions.audio,
         cover_bool: downloadOptions.cover,
-        video_categories: customTags || undefined,
       });
 
       addLog("Backend received the request", 'success');
@@ -1036,6 +1097,7 @@ export default function App() {
 
         // Create result from response data immediately (progressive: show metadata first)
         const parsedResult: DouyinBase = {
+          id: response.id,  // Database ID for tag operations
           aweme_id: response.aweme_id,
           video_title: response.video_title,
           author: response.author,
@@ -1054,13 +1116,24 @@ export default function App() {
           video_duration: response.video_duration || "0",
           video_created_time: response.video_created_time,
           video_desc: response.video_desc,
-          video_categories: response.video_categories,
           video_resolution: response.video_resolution,
           video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
         };
 
         // Show metadata immediately
         setCurrentResult(parsedResult);
+
+        // Add selected tags to the parsed video
+        if (selectedTagIds.length > 0 && response.id) {
+          try {
+            await addTagsToVideo(response.id, selectedTagIds);
+            addLog(`Added ${selectedTagIds.length} tag(s) to video`, 'success');
+            setSelectedTagIds([]);  // Clear after adding
+          } catch (tagError) {
+            console.error("Failed to add tags:", tagError);
+            addLog("Warning: Failed to add tags to video", 'warning');
+          }
+        }
 
         // Check if we have a download task to track
         if (response.download_task_id) {
@@ -1116,7 +1189,6 @@ export default function App() {
         video_bool: downloadOptions.video,
         music_bool: downloadOptions.audio,
         cover_bool: downloadOptions.cover,
-        video_categories: customTags || undefined,
       });
 
       setTaskProgress(50);
@@ -1162,12 +1234,12 @@ export default function App() {
     }
   };
 
-  const handleSaveToLibrary = async (item: DouyinBase, silent = false) => {
+  const handleSaveToLibrary = async (item: DouyinBase, silent = false, tagIds?: string[]) => {
     // Preserve existing notes/tags if they exist, otherwise init as empty
-    const newItem = { 
-      ...item, 
-      notes: item.notes || '', 
-      tags: item.tags || [] 
+    const newItem = {
+      ...item,
+      notes: item.notes || '',
+      tags: item.tags || []
     };
 
     try {
@@ -1179,7 +1251,21 @@ export default function App() {
       });
 
       if (isSupabaseConfigured()) {
-        await saveItem(newItem);
+        const savedItem = await saveItem(newItem);
+
+        // Add selected tags to the saved video
+        const tagsToAdd = tagIds || selectedTagIds;
+        if (tagsToAdd.length > 0 && savedItem.id) {
+          try {
+            await addTagsToVideo(savedItem.id, tagsToAdd);
+            // Clear selected tags after successful save
+            setSelectedTagIds([]);
+          } catch (tagError) {
+            console.error("Failed to add tags:", tagError);
+            // Don't fail the whole save if tag assignment fails
+          }
+        }
+
         if (!silent) alert("Saved to Cloud Collection!");
       } else {
         if (!silent) alert("Saved to Local Collection (Supabase not configured)");
@@ -1811,19 +1897,11 @@ export default function App() {
               </button>
             </div>
 
-            {/* Custom Tags Input */}
-            <div className="relative">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-600">{t('parser.tags')}</span>
-              </div>
-              <input
-                value={customTags}
-                onChange={e => setCustomTags(e.target.value)}
-                placeholder={t('parser.tagsPlaceholder')}
-                className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-16 pr-10 py-3.5 text-zinc-200 focus:border-indigo-500 outline-none transition-colors text-sm"
-              />
-              <Tag className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
-            </div>
+            {/* Tag Selector */}
+            <ParserTagSelector
+              selectedTagIds={selectedTagIds}
+              onTagsChange={setSelectedTagIds}
+            />
 
             {error && (
               <div className="bg-red-950/20 border border-red-900/50 text-red-200 p-4 rounded-xl flex items-center gap-3">

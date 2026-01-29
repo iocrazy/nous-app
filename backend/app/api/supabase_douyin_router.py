@@ -46,7 +46,6 @@ class VideoFetchRequest(BaseModel):
     video_bool: bool = True
     music_bool: bool = False
     cover_bool: bool = True
-    video_categories: Optional[str] = None
     use_celery: bool = False  # 是否使用 Celery 异步任务
 
 
@@ -67,7 +66,6 @@ class BatchFetchRequest(BaseModel):
     video_bool: bool = True
     music_bool: bool = False
     cover_bool: bool = True
-    video_categories: Optional[str] = None
     use_celery: bool = False  # 是否使用 Celery 异步任务
 
 
@@ -85,7 +83,6 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
     - **url**: 抖音视频链接（支持分享链接）
     - **video_bool**: 是否下载视频文件
     - **music_bool**: 是否下载背景音乐
-    - **video_categories**: 视频分类标签
     - **use_celery**: 是否使用 Celery 异步任务（默认 False）
 
     需要认证：Bearer Token 或 API Key（需要 `douyin:fetch` 权限）
@@ -109,8 +106,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 user_id=auth.user_id,
                 video_bool=request.video_bool,
                 music_bool=request.music_bool,
-                cover_bool=request.cover_bool,
-                categories=request.video_categories
+                cover_bool=request.cover_bool
             )
 
             # 记录日志
@@ -143,8 +139,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             valid_url=url,
             download_video=request.video_bool,
             download_music=request.music_bool,
-            download_cover=request.cover_bool,
-            categories=request.video_categories
+            download_cover=request.cover_bool
         )
 
         if not parsed_data:
@@ -244,6 +239,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         return {
             "success": True,
             "message": "视频处理任务已提交",
+            "id": save_result.get("id"),  # Database ID for tag operations
             "aweme_id": aweme_id,
             "video_title": parsed_data.get("video_title"),
             "author": parsed_data.get("author"),
@@ -261,7 +257,6 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             "video_duration": parsed_data.get("video_duration", "0"),
             "video_created_time": video_created_time,
             "video_desc": parsed_data.get("video_desc"),
-            "video_categories": parsed_data.get("video_categories"),
             "video_original_url": parsed_data.get("video_original_url"),
             "video_resolution": parsed_data.get("video_resolution"),
             # 下载状态
@@ -303,7 +298,6 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
     - **urls**: 抖音视频链接列表
     - **video_bool**: 是否下载视频文件
     - **music_bool**: 是否下载背景音乐
-    - **video_categories**: 视频分类标签
     - **use_celery**: 是否使用 Celery 异步任务（默认 False）
 
     需要认证：Bearer Token 或 API Key（需要 `douyin:fetch:batch` 权限）
@@ -317,8 +311,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
             user_id=auth.user_id,
             video_bool=request.video_bool,
             music_bool=request.music_bool,
-            cover_bool=request.cover_bool,
-            categories=request.video_categories
+            cover_bool=request.cover_bool
         )
 
         # 记录日志
@@ -360,8 +353,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                     valid_url=url,
                     download_video=request.video_bool,
                     download_music=request.music_bool,
-                    download_cover=request.cover_bool,
-                    categories=request.video_categories
+                    download_cover=request.cover_bool
                 )
 
                 if parsed_data:

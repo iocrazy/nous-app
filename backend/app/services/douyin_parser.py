@@ -22,19 +22,17 @@ class DouyinParser:
         valid_url: str,
         download_video: bool = True,
         download_music: bool = False,
-        download_cover: bool = True,
-        categories: Optional[str] = None
+        download_cover: bool = True
     ) -> Dict[str, Any]:
         """
         解析抖音视频详情数据，根据不同的媒体类型进行不同的处理
-        
+
         Args:
             aweme_detail: 抖音API返回的原始数据
             valid_url: 有效的抖音视频URL
             download_video: 是否下载视频
             download_music: 是否下载音乐
-            categories: 视频分类
-            
+
         Returns:
             Dict[str, Any]: 结构化后的视频数据
         """
@@ -49,13 +47,13 @@ class DouyinParser:
         # 根据不同的媒体类型进行不同的处理
         if aweme_type == 68:  # 图文类型
             logger.info(f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
+            return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
         elif aweme_type in (0, 4, 61):  # 视频类型
             logger.info(f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
+            return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
         elif aweme_type == 2:  # 图片合集
             logger.info(f"解析图片合集类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover, categories)
+            return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
         else:
             logger.warning(f"不支持的媒体类型: {aweme_type}")
             raise ValueError(f"不支持的媒体类型: {aweme_type}")
@@ -101,8 +99,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool,
-        categories: Optional[str] = None
+        download_cover: bool
     ) -> Dict[str, Any]:
         """
         解析图文类型的抖音数据
@@ -113,7 +110,6 @@ class DouyinParser:
             valid_url: 有效的抖音视频URL
             download_video: 是否需要下载视频
             download_music: 是否需要下载音乐
-            categories: 视频分类
 
         Returns:
             Dict[str, Any]: 结构化后的图文数据
@@ -169,9 +165,8 @@ class DouyinParser:
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
-            "video_categories": categories,
         }
-    
+
     @staticmethod
     async def _parse_video(
         aweme_detail: Dict[str, Any],
@@ -179,8 +174,7 @@ class DouyinParser:
         original_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool,
-        categories: Optional[str] = None
+        download_cover: bool
     ) -> Dict[str, Any]:
         """
         解析视频类型的抖音数据
@@ -191,8 +185,7 @@ class DouyinParser:
             original_url: 有效的抖音视频URL
             download_video: 是否下载视频
             download_music: 是否下载音乐
-            categories: 视频分类
-            
+
         Returns:
             Dict[str, Any]: 结构化后的视频数据
         """
@@ -233,9 +226,8 @@ class DouyinParser:
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
-            "video_categories": categories,
         }
-    
+
     @staticmethod
     async def _parse_image_collection(
         aweme_detail: Dict[str, Any],
@@ -243,8 +235,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool,
-        categories: Optional[str] = None
+        download_cover: bool
     ) -> Dict[str, Any]:
         """
         解析图片合集类型的抖音数据
@@ -256,7 +247,6 @@ class DouyinParser:
             download_video: 是否需要下载视频（图片）
             download_music: 是否需要下载音乐
             download_cover: 是否需要下载封面
-            categories: 视频分类
 
         Returns:
             Dict[str, Any]: 结构化后的图片合集数据
@@ -302,5 +292,4 @@ class DouyinParser:
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
-            "video_categories": categories,
         }

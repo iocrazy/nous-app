@@ -31,8 +31,9 @@ class TagsRepository:
         return client.table(self.VIDEO_TAGS_TABLE)
 
     async def get_all_tags(self, user_id: Optional[str] = None) -> List[dict]:
-        """Get all tags (system + time + user's own tags)."""
+        """Get all tags (system + time + user's own tags) with video_count."""
         table = await self._get_table()
+        video_tags_table = await self._get_video_tags_table()
 
         # Get system tags
         system_result = await table.select("*").eq("type", "system").execute()
@@ -46,6 +47,12 @@ class TagsRepository:
         if user_id:
             user_result = await table.select("*").eq("user_id", user_id).execute()
             tags.extend(user_result.data)
+
+        # Calculate video_count for each tag
+        for tag in tags:
+            tag_id = str(tag.get("id"))
+            count_result = await video_tags_table.select("*", count="exact").eq("tag_id", tag_id).execute()
+            tag["video_count"] = count_result.count or 0
 
         return tags
 
@@ -195,9 +202,63 @@ class TagsRepository:
         logger.info(f"Added {len(tag_ids)} tags to video {video_id}")
         return result.data
 
-    async def get_tag_counts(self, user_id: str) -> List[dict]:
-        """Get tag usage counts for a user's videos."""
-        # This would need a custom RPC or view in Supabase for optimal performance
-        # For now, we return an empty list - implement with Supabase function if needed
-        logger.warning("get_tag_counts not implemented - requires Supabase RPC")
-        return []
+    async def get_tag_counts(self, user_id: str, limit: int = 10) -> List[dict]:
+        """Get tag usage counts for a user's videos.
+
+        Returns tags sorted by usage count (most used first).
+        """
+        client = await self._get_client()
+
+        # Query video_tags joined with tags and douyin_videos to filter by user
+        # We need to count how many videos each tag is associated with for this user
+        result = await client.rpc(
+            'get_user_tag_counts',
+            {'p_user_id': user_id, 'p_limit': limit}
+        ).execute()
+
+        if result.data:
+            return result.data
+
+        # Fallback: manual query if RPC doesn't exist
+        logger.warning("RPC get_user_tag_counts not found, using fallback query")
+        return await self._get_tag_counts_fallback(user_id, limit)
+
+    async def _get_tag_counts_fallback(self, user_id: str, limit: int = 10) -> List[dict]:
+        """Fallback method to get tag counts without RPC."""
+        client = await self._get_client()
+
+        # Get all video IDs for this user
+        videos_result = await client.table('douyin_videos').select('id').eq('user_id', user_id).execute()
+        if not videos_result.data:
+            return []
+
+        video_ids = [v['id'] for v in videos_result.data]
+
+        # Get all video_tags for these videos
+        video_tags_result = await client.table('video_tags').select(
+            'tag_id, tags(id, name, color, icon, type)'
+        ).in_('video_id', video_ids).execute()
+
+        if not video_tags_result.data:
+            return []
+
+        # Count tags
+        tag_counts: dict = {}
+        for vt in video_tags_result.data:
+            tag_info = vt.get('tags')
+            if tag_info:
+                tag_id = tag_info['id']
+                if tag_id not in tag_counts:
+                    tag_counts[tag_id] = {
+                        'id': tag_id,
+                        'name': tag_info['name'],
+                        'color': tag_info.get('color', '#6366f1'),
+                        'icon': tag_info.get('icon'),
+                        'type': tag_info.get('type', 'system'),
+                        'count': 0
+                    }
+                tag_counts[tag_id]['count'] += 1
+
+        # Sort by count and limit
+        sorted_tags = sorted(tag_counts.values(), key=lambda x: x['count'], reverse=True)
+        return sorted_tags[:limit]

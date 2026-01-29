@@ -14,6 +14,8 @@ from app.schemas.tags import (
     VideoTagCreate,
     VideoTagsResponse,
     VideoTagResponse,
+    TagStatisticsResponse,
+    TagCountItem,
 )
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -36,6 +38,36 @@ async def list_tags(
         tags = [t for t in tags if t["type"] == type_filter]
 
     return TagListResponse(tags=tags, total=len(tags))
+
+
+@router.get("/statistics", response_model=TagStatisticsResponse)
+async def get_tag_statistics(
+    limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
+    auth: AuthDep = None,
+):
+    """
+    Get tag usage statistics for the current user.
+    Returns top tags sorted by video count.
+    """
+    user_id = auth.user_id
+    repo = TagsRepository()
+
+    try:
+        tag_counts = await repo.get_tag_counts(user_id, limit)
+        total_tagged = sum(t.get('count', 0) for t in tag_counts)
+
+        return TagStatisticsResponse(
+            success=True,
+            top_tags=[TagCountItem(**t) for t in tag_counts],
+            total_tagged_videos=total_tagged
+        )
+    except Exception as e:
+        logger.error(f"Failed to get tag statistics: {e}")
+        return TagStatisticsResponse(
+            success=False,
+            top_tags=[],
+            total_tagged_videos=0
+        )
 
 
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)

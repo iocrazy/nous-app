@@ -1,0 +1,35 @@
+# 全栈项目配置 (带 .env 端口同步)
+# 适用于: FastAPI + React/Vite
+
+FULLSTACK_MODE=true
+
+# 前端配置
+FRONTEND_DIR="frontend"
+FRONTEND_PORT_BASE=3000
+FRONTEND_CMD="npm run dev -- --port \$PORT"
+
+# 后端配置
+BACKEND_DIR="backend"
+BACKEND_PORT_BASE=8000
+BACKEND_CMD="source .venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port \$PORT"
+
+# ═══════════════════════════════════════════════════════════════
+# .env 端口同步配置 (新增)
+# ═══════════════════════════════════════════════════════════════
+
+# 后端 .env 文件路径 (相对于 BACKEND_DIR)
+BACKEND_ENV_FILE=".env"
+# 后端端口变量名
+BACKEND_PORT_VAR="APP_PORT"
+
+# 前端 .env 文件路径 (相对于 FRONTEND_DIR)
+FRONTEND_ENV_FILE=".env"
+# 前端调用后端 API 的变量名
+FRONTEND_API_VAR="VITE_API_URL"
+# API URL 格式 ($BACKEND_PORT 会被替换)
+FRONTEND_API_FORMAT="http://localhost:\$BACKEND_PORT"
+
+# 通用配置
+BROWSER="chrome"
+AUTO_OPEN_BROWSER=true
+BASE_BRANCH="main"

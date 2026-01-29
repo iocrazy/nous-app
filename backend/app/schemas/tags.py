@@ -74,3 +74,20 @@ class VideoTagsResponse(BaseModel):
     """Schema for video's tags response."""
     video_id: int = Field(..., description="Video ID (BIGINT in database)")
     tags: List[VideoTagResponse]
+
+
+class TagCountItem(BaseModel):
+    """Schema for tag count item."""
+    id: str
+    name: str
+    color: Optional[str] = "#6366f1"
+    icon: Optional[str] = None
+    type: str = "system"
+    count: int
+
+
+class TagStatisticsResponse(BaseModel):
+    """Schema for tag statistics response."""
+    success: bool = True
+    top_tags: List[TagCountItem]
+    total_tagged_videos: int = 0

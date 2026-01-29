@@ -1,0 +1,49 @@
+{
+  "name": "mediahub",
+  "description": "MediaHub - Douyin Analysis Platform (FastAPI + React/Vite + Supabase)",
+  "fullstackMode": true,
+
+  "frontend": {
+    "dir": "frontend",
+    "portBase": 3000,
+    "command": "npm run dev -- --port $PORT",
+    "envFile": ".env",
+    "apiVar": "VITE_API_URL",
+    "apiFormat": "http://localhost:$BACKEND_PORT"
+  },
+
+  "backend": {
+    "dir": "backend",
+    "portBase": 8000,
+    "command": "source .venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port $PORT",
+    "envFile": ".env",
+    "portVar": "APP_PORT"
+  },
+
+  "settings": {
+    "browser": "chrome",
+    "autoOpenBrowser": true,
+    "baseBranch": "master"
+  },
+
+  "services": {
+    "database": {
+      "type": "supabase",
+      "configuredVia": "env"
+    }
+  },
+
+  "scripts": {
+    "install": {
+      "frontend": "cd frontend && npm install",
+      "backend": "cd backend && uv sync"
+    },
+    "build": {
+      "frontend": "cd frontend && npm run build"
+    },
+    "test": {
+      "backend": "cd backend && uv run pytest"
+    },
+    "deploy": "./deploy.sh"
+  }
+}
