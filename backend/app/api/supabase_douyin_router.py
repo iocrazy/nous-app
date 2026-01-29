@@ -23,6 +23,7 @@ from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
+from app.services.lightweight_parser import LightweightParser
 from app.services.supabase_douyin_service import SupabaseDouyinService
 
 
@@ -127,11 +128,35 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             }
 
         # 默认流程：解析元数据 + Celery 下载任务
-        # 获取视频数据
-        aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+        # 优先使用轻量解析（HTTP 请求），失败则回退到浏览器自动化
+        aweme_detail = None
+        parse_method = "unknown"
+
+        # 方案一：轻量级 HTTP 解析（无需浏览器）
+        try:
+            logger.info(f"[解析] 尝试轻量级解析: {url}")
+            aweme_detail = await LightweightParser.parse(url)
+            if aweme_detail:
+                parse_method = "lightweight"
+                logger.success(f"[解析] 轻量级解析成功")
+        except Exception as e:
+            logger.warning(f"[解析] 轻量级解析异常: {e}")
+
+        # 方案二：浏览器自动化解析（备用方案）
+        if not aweme_detail:
+            try:
+                logger.info(f"[解析] 回退到浏览器解析: {url}")
+                aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                if aweme_detail:
+                    parse_method = "browser"
+                    logger.success(f"[解析] 浏览器解析成功")
+            except Exception as e:
+                logger.error(f"[解析] 浏览器解析失败: {e}")
 
         if not aweme_detail:
-            raise HTTPException(status_code=404, detail="无法获取视频信息")
+            raise HTTPException(status_code=404, detail="无法获取视频信息（两种解析方式均失败）")
+
+        logger.info(f"[解析] 使用 {parse_method} 方案完成解析")
 
         # 解析视频数据（不下载）
         parsed_data = await DouyinParser.parse_aweme_detail(
@@ -345,7 +370,21 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                 errors.append({"url": raw_url, "error": "无法提取有效链接"})
                 continue
 
-            aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+            # 优先使用轻量解析，失败则回退到浏览器自动化
+            aweme_detail = None
+
+            # 方案一：轻量级解析
+            try:
+                aweme_detail = await LightweightParser.parse(url)
+            except Exception as e:
+                logger.warning(f"[批量解析] 轻量解析失败: {e}")
+
+            # 方案二：浏览器自动化（备用）
+            if not aweme_detail:
+                try:
+                    aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                except Exception as e:
+                    logger.warning(f"[批量解析] 浏览器解析失败: {e}")
 
             if aweme_detail:
                 parsed_data = await DouyinParser.parse_aweme_detail(
