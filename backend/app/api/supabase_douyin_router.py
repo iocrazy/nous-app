@@ -131,32 +131,35 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         # 优先使用轻量解析（HTTP 请求），失败则回退到浏览器自动化
         aweme_detail = None
         parse_method = "unknown"
+        parse_method_name = "Unknown"
 
-        # 方案一：轻量级 HTTP 解析（无需浏览器）
+        # 方案一：LightHTTP（轻量 HTTP 解析，无需浏览器）
         try:
-            logger.info(f"[解析] 尝试轻量级解析: {url}")
+            logger.info(f"[LightHTTP] 尝试解析: {url}")
             aweme_detail = await LightweightParser.parse(url)
             if aweme_detail:
-                parse_method = "lightweight"
-                logger.success(f"[解析] 轻量级解析成功")
+                parse_method = "light_http"
+                parse_method_name = "LightHTTP"
+                logger.success(f"[LightHTTP] ✓ 解析成功")
         except Exception as e:
-            logger.warning(f"[解析] 轻量级解析异常: {e}")
+            logger.warning(f"[LightHTTP] ✗ 解析失败: {e}")
 
-        # 方案二：浏览器自动化解析（备用方案）
+        # 方案二：BrowserAuto（浏览器自动化解析，备用方案）
         if not aweme_detail:
             try:
-                logger.info(f"[解析] 回退到浏览器解析: {url}")
+                logger.info(f"[BrowserAuto] 回退到浏览器解析: {url}")
                 aweme_detail = await DouyinAnalysis.fetch_one_video(url)
                 if aweme_detail:
-                    parse_method = "browser"
-                    logger.success(f"[解析] 浏览器解析成功")
+                    parse_method = "browser_auto"
+                    parse_method_name = "BrowserAuto"
+                    logger.success(f"[BrowserAuto] ✓ 解析成功")
             except Exception as e:
-                logger.error(f"[解析] 浏览器解析失败: {e}")
+                logger.error(f"[BrowserAuto] ✗ 解析失败: {e}")
 
         if not aweme_detail:
-            raise HTTPException(status_code=404, detail="无法获取视频信息（两种解析方式均失败）")
+            raise HTTPException(status_code=404, detail="无法获取视频信息（LightHTTP 和 BrowserAuto 均失败）")
 
-        logger.info(f"[解析] 使用 {parse_method} 方案完成解析")
+        logger.info(f"[解析完成] 使用方案: {parse_method_name}")
 
         # 解析视频数据（不下载）
         parsed_data = await DouyinParser.parse_aweme_detail(
@@ -264,6 +267,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         return {
             "success": True,
             "message": "视频处理任务已提交",
+            "parse_method": parse_method,
+            "parse_method_name": parse_method_name,
             "id": save_result.get("id"),  # Database ID for tag operations
             "aweme_id": aweme_id,
             "video_title": parsed_data.get("video_title"),

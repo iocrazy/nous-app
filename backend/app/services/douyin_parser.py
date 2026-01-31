@@ -200,6 +200,12 @@ class DouyinParser:
         # 提取封面 URL
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
+        # 安全获取 bit_rate 数据（兼容轻量解析返回的数据结构）
+        video_data = aweme_detail.get("video", {}) or {}
+        bit_rate_list = video_data.get("bit_rate") or [{}]
+        first_bit_rate = bit_rate_list[0] if bit_rate_list else {}
+        data_size = first_bit_rate.get("play_addr", {}).get("data_size", 0) if first_bit_rate else 0
+
         # 构建返回数据
         return {
             "aweme_id": aweme_id,
@@ -214,11 +220,11 @@ class DouyinParser:
             "video_hashtag_name": Utils.concat_hashtag_name(aweme_detail),
             "aweme_type": str(aweme_detail.get("aweme_type")),
             "video_created_time": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
-            "video_datasize": Utils.format_file_size(aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0)),
-            "video_datasize_bytes": aweme_detail.get("video", {}).get("bit_rate", [{}])[0].get("play_addr", {}).get("data_size", 0) or 0,
-            "video_duration": Utils.format_duration(aweme_detail.get("video", {}).get("duration")),
-            "video_resolution": f"{aweme_detail.get('video', {}).get('width')}:{aweme_detail.get('video', {}).get('height')}",
-            "video_download_urls": aweme_detail.get("video", {}).get("play_addr", {}).get("url_list", None),
+            "video_datasize": Utils.format_file_size(data_size),
+            "video_datasize_bytes": data_size or 0,
+            "video_duration": Utils.format_duration(video_data.get("duration")),
+            "video_resolution": f"{video_data.get('width')}:{video_data.get('height')}",
+            "video_download_urls": video_data.get("play_addr", {}).get("url_list", None),
             "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
