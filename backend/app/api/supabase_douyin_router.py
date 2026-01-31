@@ -132,6 +132,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         aweme_detail = None
         parse_method = "unknown"
         parse_method_name = "Unknown"
+        fallback_used = False
+        fallback_reason = None
 
         # 方案一：LightHTTP（轻量 HTTP 解析，无需浏览器）
         try:
@@ -141,11 +143,15 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 parse_method = "light_http"
                 parse_method_name = "LightHTTP"
                 logger.success(f"[LightHTTP] ✓ 解析成功")
+            else:
+                fallback_reason = "LightHTTP returned empty result"
         except Exception as e:
+            fallback_reason = f"LightHTTP error: {str(e)[:50]}"
             logger.warning(f"[LightHTTP] ✗ 解析失败: {e}")
 
         # 方案二：BrowserAuto（浏览器自动化解析，备用方案）
         if not aweme_detail:
+            fallback_used = True
             try:
                 logger.info(f"[BrowserAuto] 回退到浏览器解析: {url}")
                 aweme_detail = await DouyinAnalysis.fetch_one_video(url)
@@ -269,6 +275,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             "message": "视频处理任务已提交",
             "parse_method": parse_method,
             "parse_method_name": parse_method_name,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
             "id": save_result.get("id"),  # Database ID for tag operations
             "aweme_id": aweme_id,
             "video_title": parsed_data.get("video_title"),

@@ -1093,7 +1093,11 @@ export default function App() {
 
       if (response.success) {
         addLog(`Video parsed: ${response.video_title || response.aweme_id}`, 'success');
-        addLog(`Parse method: ${response.parse_method_name || 'Unknown'}`, 'info');
+        if (response.fallback_used) {
+          addLog(`LightHTTP failed, used fallback: ${response.parse_method_name}`, 'warning');
+        } else {
+          addLog(`Parse method: ${response.parse_method_name || 'Unknown'}`, 'info');
+        }
         addLog(`Author: ${response.author || 'Unknown'}`, 'info');
 
         // Create result from response data immediately (progressive: show metadata first)
