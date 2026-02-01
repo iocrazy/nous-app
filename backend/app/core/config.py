@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = Field(default="", description="Supabase 项目 URL")
     SUPABASE_ANON_KEY: str = Field(default="", description="Supabase 匿名密钥")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", description="Supabase 服务角色密钥")
+    SUPABASE_TENANT_ID: str = Field(default="", description="Supabase 多租户 ID (自托管)")
 
     # ============================================
     # 下载设置

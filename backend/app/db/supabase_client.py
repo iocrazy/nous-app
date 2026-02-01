@@ -8,12 +8,21 @@ Supabase 客户端模块
 """
 
 from typing import Optional
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from supabase._async.client import AsyncClient
 from supabase._async.client import create_client as create_async_client
 from loguru import logger
 
 from app.core.config import settings
+
+
+def _get_client_options() -> ClientOptions:
+    """获取 Supabase 客户端配置（包含多租户 header）"""
+    headers = {}
+    if settings.SUPABASE_TENANT_ID:
+        headers["X-Tenant-ID"] = settings.SUPABASE_TENANT_ID
+        logger.debug(f"Using tenant ID: {settings.SUPABASE_TENANT_ID}")
+    return ClientOptions(headers=headers) if headers else ClientOptions()
 
 
 class SupabaseClient:
@@ -31,7 +40,8 @@ class SupabaseClient:
 
             cls._instance = create_client(
                 settings.SUPABASE_URL,
-                settings.SUPABASE_ANON_KEY
+                settings.SUPABASE_ANON_KEY,
+                options=_get_client_options()
             )
             logger.info("Supabase 客户端初始化成功")
 
@@ -46,7 +56,8 @@ class SupabaseClient:
 
             cls._admin_instance = create_client(
                 settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY
+                settings.SUPABASE_SERVICE_ROLE_KEY,
+                options=_get_client_options()
             )
             logger.info("Supabase 管理员客户端初始化成功")
 
@@ -75,7 +86,8 @@ class AsyncSupabaseClient:
 
             cls._instance = await create_async_client(
                 settings.SUPABASE_URL,
-                settings.SUPABASE_ANON_KEY
+                settings.SUPABASE_ANON_KEY,
+                options=_get_client_options()
             )
             logger.info("Supabase 异步客户端初始化成功")
 
@@ -90,7 +102,8 @@ class AsyncSupabaseClient:
 
             cls._admin_instance = await create_async_client(
                 settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY
+                settings.SUPABASE_SERVICE_ROLE_KEY,
+                options=_get_client_options()
             )
             logger.info("Supabase 异步管理员客户端初始化成功")
 

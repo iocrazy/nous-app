@@ -1,14 +1,8 @@
 {
   "mcpServers": {
     "supabase": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@supabase/mcp-server-supabase@latest"
-      ],
-      "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_9865ba6671de2d1996de5890cfe24d304871ae56"
-      }
+      "type": "http",
+      "url": "http://192.168.50.9:9080/mcp?features=docs%2Cdatabase%2Cdebugging%2Cdevelopment"
     }
   }
 }

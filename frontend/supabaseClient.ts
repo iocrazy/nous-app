@@ -56,8 +56,10 @@ export const isSupabaseConfigured = (): boolean => {
     return false;
   }
 
-  // Basic validation: URL should be a valid Supabase URL
-  if (!supabaseUrl?.includes('supabase.co')) {
+  // Basic validation: URL should be a valid URL (support self-hosted Supabase)
+  try {
+    new URL(supabaseUrl!);
+  } catch {
     console.warn('Invalid Supabase URL format');
     return false;
   }

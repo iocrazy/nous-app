@@ -14,6 +14,8 @@ from pydantic import BaseModel
 import yaml
 from loguru import logger
 
+from app.core.config import settings
+
 
 router = APIRouter(prefix="/config", tags=["前端配置"])
 
@@ -43,12 +45,17 @@ class UpdateConfigRequest(BaseModel):
 # 辅助函数
 # ============================================
 
+def get_default_download_path() -> str:
+    """获取默认下载路径（从环境变量）"""
+    return settings.NAS_BASE_PATH
+
+
 def load_config() -> dict:
     """加载配置文件"""
     if not CONFIG_FILE.exists():
         return {
             "supabase": {"url": "", "anon_key": ""},
-            "default_download_path": "/home/user/downloads/douyin"
+            "default_download_path": get_default_download_path()
         }
 
     try:
@@ -81,7 +88,7 @@ default_download_path: "{default_download_path}"
 """.format(
             supabase_url=config.get("supabase", {}).get("url", ""),
             supabase_anon_key=config.get("supabase", {}).get("anon_key", ""),
-            default_download_path=config.get("default_download_path", "/home/user/downloads/douyin")
+            default_download_path=config.get("default_download_path", get_default_download_path())
         )
 
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -112,7 +119,7 @@ async def get_frontend_config():
         return FrontendConfig(
             supabase_url=config.get("supabase", {}).get("url") or None,
             supabase_anon_key=config.get("supabase", {}).get("anon_key") or None,
-            default_download_path=config.get("default_download_path") or "/home/user/downloads/douyin"
+            default_download_path=config.get("default_download_path") or get_default_download_path()
         )
     except Exception as e:
         logger.error(f"获取前端配置失败: {e}")
@@ -152,7 +159,7 @@ async def update_frontend_config(request: UpdateConfigRequest):
         return FrontendConfig(
             supabase_url=config["supabase"].get("url") or None,
             supabase_anon_key=config["supabase"].get("anon_key") or None,
-            default_download_path=config.get("default_download_path") or "/home/user/downloads/douyin"
+            default_download_path=config.get("default_download_path") or get_default_download_path()
         )
     except HTTPException:
         raise

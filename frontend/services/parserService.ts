@@ -22,16 +22,31 @@ const getApiKey = (): string | null => {
 };
 
 // 获取认证 token（从 Supabase session）
+// 动态查找 localStorage 中的 Supabase auth token，支持自托管和云端
 const getAuthToken = (): string | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      const session = window.localStorage.getItem('sb-zesczfidxsikvohrxson-auth-token');
-      if (session) {
-        const parsed = JSON.parse(session);
-        return parsed?.access_token || null;
+      // 查找所有匹配 sb-*-auth-token 模式的 key
+      const keys = Object.keys(window.localStorage).filter(k =>
+        k.startsWith('sb-') && k.endsWith('-auth-token')
+      );
+
+      // 优先使用自托管 Supabase 的 token（非 zesczfidxsikvohrxson）
+      // 因为自托管使用 HS256，云端使用 ES256
+      const selfHostedKey = keys.find(k => !k.includes('zesczfidxsikvohrxson'));
+      const keyToUse = selfHostedKey || keys[0];
+
+      if (keyToUse) {
+        const session = window.localStorage.getItem(keyToUse);
+        if (session) {
+          const parsed = JSON.parse(session);
+          return parsed?.access_token || null;
+        }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Failed to get auth token:', e);
+  }
   return null;
 };
 
