@@ -5,11 +5,13 @@ import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   Clock, CheckCircle, Power, Database, Zap, Check
 } from 'lucide-react';
+import { LogsPanel } from './LogsPanel';
+import { SystemMonitorPanel } from './SystemMonitorPanel';
 
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor';
 }
 
 const API_SCOPES = [
@@ -396,7 +398,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                  </div>
                  <h2 className="font-semibold text-zinc-200">API Access Management</h2>
               </div>
-              <button 
+              <button
                  onClick={openCreateModal}
                  className="bg-zinc-100 hover:bg-white text-zinc-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
               >
@@ -424,7 +426,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                           <td className="px-6 py-4 font-mono text-xs">
                              <div className="flex items-center gap-2 max-w-[220px]">
                                 <span className="truncate opacity-50 bg-zinc-950 px-2 py-1 rounded border border-zinc-800 select-all">{key.key}</span>
-                                <button 
+                                <button
                                   onClick={() => handleCopyKey(key.key, key.id)}
                                   className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
                                   title="Copy"
@@ -435,11 +437,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                              </div>
                           </td>
                           <td className="px-6 py-4">
-                             <button 
+                             <button
                                 onClick={() => toggleKeyStatus(key.id)}
                                 className={`px-2.5 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5 transition-all hover:opacity-80 ${
-                                key.status === 'active' 
-                                   ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                                key.status === 'active'
+                                   ? 'bg-green-500/10 text-green-400 border-green-500/20'
                                    : 'bg-red-500/10 text-red-400 border-red-500/20'
                              }`}>
                                 <Power size={10} />
@@ -459,14 +461,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                           </td>
                           <td className="px-6 py-4 text-right">
                              <div className="flex items-center justify-end gap-2">
-                                <button 
+                                <button
                                   onClick={() => openEditModal(key)}
                                   className="p-1.5 hover:bg-zinc-800 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
                                   title="Edit"
                                 >
                                    <Edit2 size={14} />
                                 </button>
-                                <button 
+                                <button
                                    onClick={() => handleDeleteKey(key.id)}
                                    className="p-1.5 hover:bg-red-900/30 rounded text-zinc-500 hover:text-red-400 transition-colors"
                                    title="Delete"
@@ -488,6 +490,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </table>
            </div>
         </section>
+      )}
+
+      {/* Logs Tab */}
+      {activeTab === 'logs' && (
+        <LogsPanel />
+      )}
+
+      {/* Monitor Tab */}
+      {activeTab === 'monitor' && (
+        <SystemMonitorPanel />
       )}
 
       {/* Wave animation keyframes */}

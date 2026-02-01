@@ -259,8 +259,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             log_user_action,
             user_id=auth.user_id,
             action="fetch",
-            message=f"获取视频: {video_title[:30]}...",
-            status="pending",
+            message=f"解析视频成功: {video_title[:30]}...",
+            status="success",
             aweme_id=aweme_id
         )
 

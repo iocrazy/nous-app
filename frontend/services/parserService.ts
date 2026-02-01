@@ -1,12 +1,12 @@
 
 import { DouyinBase, DownloadStatus } from '../types';
 
-// API 配置
+// API 配置 - 空字符串表示使用相对路径（通过 Vite 代理）
 const getApiUrl = (): string => {
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
     // @ts-ignore
-    return import.meta.env.VITE_API_URL;
+    return import.meta.env.VITE_API_URL || '';
   }
   return 'http://localhost:8080';
 };

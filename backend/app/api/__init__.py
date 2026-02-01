@@ -19,6 +19,8 @@ from app.api.analysis_router import router as analysis_router
 from app.api.search_router import router as search_router
 from app.api.collections_router import router as collections_router
 from app.api.cleanup_router import router as cleanup_router
+from app.api.logs_router import router as logs_router
+from app.api.system_router import router as system_router
 
 api_router = APIRouter()
 
@@ -75,4 +77,14 @@ api_router.include_router(
 api_router.include_router(
     router=cleanup_router,
     tags=["Cleanup"]
+)
+
+api_router.include_router(
+    router=logs_router,
+    tags=["Logs"]
+)
+
+api_router.include_router(
+    router=system_router,
+    tags=["系统监控"]
 )

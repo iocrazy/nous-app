@@ -54,13 +54,26 @@ class DownloaderService:
 
         try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            if os.path.exists(file_path):
-                logger.info(f"文件已存在，跳过下载: {os.path.basename(file_path)}")
-                if progress_tracker:
-                    progress_tracker.complete()
-                return True
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(http2=True) as client:
+                # Check if file exists and is complete
+                if os.path.exists(file_path):
+                    existing_size = os.path.getsize(file_path)
+                    # Get expected size via HEAD request
+                    try:
+                        head_resp = await client.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                        expected_size = int(head_resp.headers.get("content-length", 0))
+                        if expected_size > 0 and existing_size >= expected_size:
+                            logger.info(f"文件已存在且完整，跳过下载: {os.path.basename(file_path)} ({existing_size} bytes)")
+                            if progress_tracker:
+                                progress_tracker.complete()
+                            return True
+                        else:
+                            logger.warning(f"文件不完整 ({existing_size}/{expected_size} bytes)，重新下载: {os.path.basename(file_path)}")
+                            os.remove(file_path)
+                    except Exception as e:
+                        logger.warning(f"无法验证文件完整性，重新下载: {e}")
+                        os.remove(file_path)
                 # Use streaming if progress tracker is provided
                 if progress_tracker:
                     async with client.stream(
@@ -78,7 +91,7 @@ class DownloaderService:
                         downloaded = 0
 
                         async with aiofiles.open(file_path, mode='wb') as f:
-                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                            async for chunk in response.aiter_bytes(chunk_size=65536):  # 64KB chunks
                                 await f.write(chunk)
                                 downloaded += len(chunk)
                                 progress_tracker.update(downloaded, total)
@@ -86,12 +99,12 @@ class DownloaderService:
                         logger.success(f"成功下载文件: {os.path.basename(file_path)}")
                         return True
                 else:
-                    # Original non-streaming download
+                    # Original non-streaming download (larger timeout for big files)
                     response = await client.get(
                         url,
                         headers=headers,
                         follow_redirects=True,
-                        timeout=settings.DOWNLOAD_TIMEOUT
+                        timeout=httpx.Timeout(settings.DOWNLOAD_TIMEOUT, connect=30.0)
                     )
 
                     if response.status_code == 200:
@@ -177,11 +190,15 @@ class DownloaderService:
             for url in video_urls:
                 if await DownloaderService.download_file(url, video_full_path, headers, progress_tracker):
                     try:
-                        # 存储相对路径到数据库
+                        # 计算文件大小
+                        file_size = os.path.getsize(video_full_path) if os.path.exists(video_full_path) else 0
+
+                        # 存储相对路径和文件大小到数据库
                         await repo.mark_video_as_downloaded(
                             aweme_id=aweme_id,
                             download_path=video_relative_path,  # 使用相对路径
-                            duration=download_duration
+                            duration=download_duration,
+                            storage_size=file_size
                         )
                     except Exception as e:
                         logger.error(f"Marked video {aweme_id} as downloaded successfully, but failed to update the database: {e}.")

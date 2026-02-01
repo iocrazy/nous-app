@@ -6,7 +6,7 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2
+  Layers, Download, Users, Trash2, ScrollText
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
@@ -43,6 +43,7 @@ import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
 import { TeamLibraryView } from './components/TeamLibraryView';
 import { SettingsModal } from './components/SettingsModal';
+import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -88,14 +89,16 @@ const SidebarItem = ({
 );
 
 // --- Task Monitor Component ---
-const TaskMonitor = ({ 
-  logs, 
-  progress, 
-  status 
-}: { 
-  logs: LogEntry[], 
-  progress: number, 
-  status: string 
+const TaskMonitor = ({
+  logs,
+  progress,
+  status,
+  systemStatus
+}: {
+  logs: LogEntry[],
+  progress: number,
+  status: string,
+  systemStatus: SystemStatus | null
 }) => {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -138,22 +141,38 @@ const TaskMonitor = ({
            <div className="flex flex-col items-center">
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Queue</span>
               <div className="flex items-center gap-1.5 text-zinc-300">
-                 <ListVideo size={14} className="text-indigo-400" />
-                 <span className="font-mono text-xs font-medium">Active</span>
+                 <ListVideo size={14} className={
+                   systemStatus?.queue.status === 'offline' ? 'text-red-400' :
+                   systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
+                 } />
+                 <span className="font-mono text-xs font-medium">
+                   {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
+                 </span>
               </div>
            </div>
            <div className="flex flex-col items-center border-l border-zinc-800/50">
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Network</span>
               <div className="flex items-center gap-1.5 text-zinc-300">
-                 <Wifi size={14} className="text-emerald-400" />
-                 <span className="font-mono text-xs font-medium">12.5 MB/s</span>
+                 <Wifi size={14} className={
+                   systemStatus?.network.status === 'active' ? 'text-emerald-400' :
+                   systemStatus?.network.status === 'error' ? 'text-red-400' : 'text-zinc-500'
+                 } />
+                 <span className="font-mono text-xs font-medium">
+                   {systemStatus?.network.speed || '0 B/s'}
+                 </span>
               </div>
            </div>
            <div className="flex flex-col items-center border-l border-zinc-800/50">
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Storage</span>
               <div className="flex items-center gap-1.5 text-zinc-300">
-                 <HardDrive size={14} className="text-purple-400" />
-                 <span className="font-mono text-xs font-medium">Write OK</span>
+                 <HardDrive size={14} className={
+                   systemStatus?.storage.status === 'ok' ? 'text-purple-400' :
+                   systemStatus?.storage.status === 'warning' ? 'text-yellow-400' :
+                   systemStatus?.storage.status === 'critical' ? 'text-red-400' : 'text-zinc-500'
+                 } />
+                 <span className="font-mono text-xs font-medium">
+                   {systemStatus ? getStorageDisplay(systemStatus.storage) : '...'}
+                 </span>
               </div>
            </div>
         </div>
@@ -189,7 +208,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -284,7 +303,8 @@ export default function App() {
   const [taskStatus, setTaskStatus] = useState('Idle');
   const [taskProgress, setTaskProgress] = useState(0);
   const [socketLogs, setSocketLogs] = useState<LogEntry[]>([]);
-  
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+
   const [currentResult, setCurrentResult] = useState<DouyinBase | null>(null);
   const [batchResults, setBatchResults] = useState<DouyinBase[]>([]);
 
@@ -452,6 +472,29 @@ export default function App() {
       // Fetch collections
       fetchMyCollections().then(setCollections).catch(console.error);
     }
+  }, [isAuthenticated]);
+
+  // Poll for system status (queue, storage, network)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const fetchStatus = async () => {
+      try {
+        const status = await getSystemStatus();
+        setSystemStatus(status);
+      } catch (err) {
+        // Silently fail - status is optional
+        console.debug('Failed to fetch system status:', err);
+      }
+    };
+
+    // Fetch immediately
+    fetchStatus();
+
+    // Poll every 10 seconds (reduced from 3s for better performance)
+    const interval = setInterval(fetchStatus, 10000);
+
+    return () => clearInterval(interval);
   }, [isAuthenticated]);
 
   // Auto-select first team if no team is selected
@@ -1736,6 +1779,19 @@ export default function App() {
                     <span>API Management</span>
                   </div>
                 </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('logs'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'logs'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <ScrollText size={14} />
+                    <span>Logs</span>
+                  </div>
+                </button>
               </div>
             )}
           </div>
@@ -1917,10 +1973,11 @@ export default function App() {
 
             {/* Task Monitor - Shows when parsing or downloading */}
             {(isParsing || taskProgress > 0) && taskProgress < 100 && (
-              <TaskMonitor 
+              <TaskMonitor
                 logs={socketLogs}
                 progress={taskProgress}
                 status={taskStatus}
+                systemStatus={systemStatus}
               />
             )}
 
@@ -1999,26 +2056,63 @@ export default function App() {
 
             {!currentResult && batchResults.length === 0 && !isParsing && taskProgress === 0 && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+                 {/* Queue Status */}
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className="w-10 h-10 bg-indigo-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-indigo-400">
-                      <Database size={20} />
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
+                      systemStatus?.queue.status === 'offline' ? 'bg-red-900/30 text-red-400' :
+                      systemStatus?.queue.active ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
+                    }`}>
+                      <ListVideo size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureCloud')}</h4>
-                    <p className="text-xs text-zinc-500">{t('parser.featureCloudDesc')}</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">Queue</h4>
+                    <p className={`text-sm font-mono ${
+                      systemStatus?.queue.status === 'offline' ? 'text-red-400' :
+                      systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
+                    }`}>
+                      {systemStatus ? getQueueDisplay(systemStatus.queue) : 'Loading...'}
+                    </p>
+                    {systemStatus?.queue.pending ? (
+                      <p className="text-xs text-zinc-600 mt-1">{systemStatus.queue.pending} pending</p>
+                    ) : null}
                  </div>
+                 {/* Network Status */}
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className="w-10 h-10 bg-purple-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-purple-400">
-                      <Terminal size={20} />
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
+                      systemStatus?.network.status === 'active' ? 'bg-emerald-900/30 text-emerald-400' :
+                      systemStatus?.network.status === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800/50 text-zinc-500'
+                    }`}>
+                      <Wifi size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureMonitor')}</h4>
-                    <p className="text-xs text-zinc-500">{t('parser.featureMonitorDesc')}</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">Network</h4>
+                    <p className={`text-sm font-mono ${
+                      systemStatus?.network.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'
+                    }`}>
+                      {systemStatus?.network.speed || '0 B/s'}
+                    </p>
+                    <p className="text-xs text-zinc-600 mt-1">
+                      {systemStatus?.network.status === 'active' ? 'Downloading' : 'Idle'}
+                    </p>
                  </div>
+                 {/* Storage Status */}
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className="w-10 h-10 bg-pink-900/30 rounded-lg flex items-center justify-center mx-auto mb-3 text-pink-400">
-                      <LinkIcon size={20} />
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
+                      systemStatus?.storage.status === 'ok' ? 'bg-purple-900/30 text-purple-400' :
+                      systemStatus?.storage.status === 'warning' ? 'bg-yellow-900/30 text-yellow-400' :
+                      systemStatus?.storage.status === 'critical' ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800/50 text-zinc-500'
+                    }`}>
+                      <HardDrive size={20} />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">{t('parser.featureFormat')}</h4>
-                    <p className="text-xs text-zinc-500">{t('parser.featureFormatDesc')}</p>
+                    <h4 className="font-semibold text-zinc-200 mb-1">Storage</h4>
+                    <p className={`text-sm font-mono ${
+                      systemStatus?.storage.status === 'ok' ? 'text-purple-400' :
+                      systemStatus?.storage.status === 'warning' ? 'text-yellow-400' :
+                      systemStatus?.storage.status === 'critical' ? 'text-red-400' : 'text-zinc-500'
+                    }`}>
+                      {systemStatus ? getStorageDisplay(systemStatus.storage) : 'Loading...'}
+                    </p>
+                    {systemStatus?.storage.percent_used ? (
+                      <p className="text-xs text-zinc-600 mt-1">{systemStatus.storage.percent_used}% used</p>
+                    ) : null}
                  </div>
               </div>
             )}

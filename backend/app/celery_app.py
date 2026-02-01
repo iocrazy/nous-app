@@ -44,13 +44,6 @@ celery_app.conf.update(
     # 结果配置
     result_expires=3600,  # 结果保留 1 小时
 
-    # 任务路由（可选，用于优先级队列）
-    task_routes={
-        "app.tasks.download_tasks.*": {"queue": "downloads"},
-        "app.tasks.parse_tasks.*": {"queue": "parsing"},
-        "app.tasks.scheduled_tasks.*": {"queue": "scheduled"},
-    },
-
     # 定时任务调度（Celery Beat）
     beat_schedule={
         "cleanup-temp-files-daily": {

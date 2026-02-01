@@ -8,7 +8,8 @@
 
 import { getAuthHeaders } from './parserService';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+// 空字符串表示使用相对路径（通过 Vite 代理）
+const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
 
 // 任务状态类型
 export type TaskStatus = 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED';

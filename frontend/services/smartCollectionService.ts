@@ -5,12 +5,12 @@
 import { getAuthHeaders } from './parserService';
 import { DouyinBase } from '../types';
 
-// API configuration
+// API configuration - empty string means use relative paths (via Vite proxy)
 const getApiUrl = (): string => {
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
     // @ts-ignore
-    return import.meta.env.VITE_API_URL;
+    return import.meta.env.VITE_API_URL || '';
   }
   return 'http://localhost:8080';
 };

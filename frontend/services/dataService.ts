@@ -4,12 +4,12 @@ import { DouyinBase } from '../types';
 const TABLE_NAME = 'douyin_videos';
 const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
 
-// 获取 API URL
+// 获取 API URL - 空字符串表示使用相对路径（通过 Vite 代理）
 const getApiUrl = (): string => {
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
     // @ts-ignore
-    return import.meta.env.VITE_API_URL;
+    return import.meta.env.VITE_API_URL || '';
   }
   return 'http://localhost:8080';
 };

@@ -193,15 +193,19 @@ class SupabaseDouyinRepository:
         self,
         aweme_id: str,
         download_path: str,
-        duration: float
+        duration: float,
+        storage_size: int = 0
     ) -> Optional[Dict[str, Any]]:
         """标记视频为已下载"""
-        return await self.update(aweme_id, {
+        data = {
             "video_download_status": DownloadStatus.COMPLETED.value,
             "download_path": download_path,
             "download_duration": duration,
             "download_time": datetime.now().isoformat()
-        })
+        }
+        if storage_size > 0:
+            data["storage_size"] = storage_size
+        return await self.update(aweme_id, data)
 
     async def mark_music_as_downloaded(self, aweme_id: str) -> Optional[Dict[str, Any]]:
         """标记音乐为已下载"""
