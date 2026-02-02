@@ -1,0 +1,42 @@
+# Backend Auto Deploy to NAS
+# Triggers on push to master branch, only when backend files change
+
+name: Deploy Backend to NAS
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to NAS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          port: ${{ secrets.NAS_PORT }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          script: |
+            cd ${{ secrets.NAS_PROJECT_PATH }}
+
+            echo "📥 Pulling latest code..."
+            git pull origin master
+
+            echo "🔨 Rebuilding containers..."
+            docker-compose build --no-cache backend
+
+            echo "🚀 Restarting services..."
+            docker-compose up -d --force-recreate backend celery-worker
+
+            echo "🧹 Cleaning up..."
+            docker image prune -f
+
+            echo "✅ Backend deployment complete!"

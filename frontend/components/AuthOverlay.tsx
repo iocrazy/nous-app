@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import {
-  X, QrCode, Smartphone, Mail, Eye, EyeOff, AlertCircle
+  X, Smartphone, Mail, Eye, EyeOff, AlertCircle, Play, Download, Shield, Zap
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
@@ -130,36 +130,46 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
           <X size={24} />
         </button>
 
-        {/* Left Side: QR Code (WeChat Style) */}
-        <div className="w-full md:w-[300px] bg-zinc-50 border-r border-zinc-100 p-8 flex flex-col items-center justify-center text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500" />
-
-          <h3 className="text-zinc-800 font-bold text-lg mb-8">Scan to Login</h3>
-
-          <div className="relative group cursor-pointer">
-             <div className="w-40 h-40 bg-white border-2 border-indigo-100 rounded-xl flex items-center justify-center shadow-sm group-hover:border-indigo-500 transition-colors">
-                <QrCode size={100} className="text-zinc-800" />
-
-                {/* Logo Overlay in Center */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                   <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md">
-                      <div className="w-6 h-6 bg-red-500 rounded-full"></div>
-                   </div>
-                </div>
-             </div>
-
-             {/* Scan Overlay Animation */}
-             <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-transparent via-indigo-500/10 to-transparent -translate-y-full group-hover:animate-[scan_2s_infinite]" />
+        {/* Left Side: Brand & Features */}
+        <div className="hidden md:flex w-[320px] bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-8 flex-col items-center justify-center text-center relative overflow-hidden">
+          {/* Background Pattern */}
+          <div className="absolute inset-0 opacity-10">
+            <div className="absolute top-10 left-10 w-32 h-32 border border-white/30 rounded-full" />
+            <div className="absolute bottom-20 right-5 w-24 h-24 border border-white/20 rounded-full" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border border-white/10 rounded-full" />
           </div>
 
-          <p className="text-sm text-zinc-500 mt-6 font-medium">
-             Open <span className="text-indigo-600">WeChat</span> to scan
-          </p>
+          {/* Logo */}
+          <div className="relative z-10 mb-6">
+            <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center shadow-lg border border-white/30">
+              <Play size={40} className="text-white fill-white" />
+            </div>
+          </div>
 
-          <div className="mt-8 flex gap-4">
-             <div className="w-2 h-2 rounded-full bg-zinc-300"></div>
-             <div className="w-2 h-2 rounded-full bg-zinc-300"></div>
-             <div className="w-2 h-2 rounded-full bg-zinc-300"></div>
+          {/* Brand Name */}
+          <h2 className="relative z-10 text-white text-2xl font-bold mb-2">MediaHub</h2>
+          <p className="relative z-10 text-white/70 text-sm mb-8">Your Media Collection Manager</p>
+
+          {/* Features */}
+          <div className="relative z-10 space-y-4 w-full">
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/10">
+              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                <Download size={16} className="text-white" />
+              </div>
+              <span className="text-white/90 text-sm font-medium">Smart Download</span>
+            </div>
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/10">
+              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                <Zap size={16} className="text-white" />
+              </div>
+              <span className="text-white/90 text-sm font-medium">Fast Parsing</span>
+            </div>
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/10">
+              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                <Shield size={16} className="text-white" />
+              </div>
+              <span className="text-white/90 text-sm font-medium">Secure Storage</span>
+            </div>
           </div>
         </div>
 

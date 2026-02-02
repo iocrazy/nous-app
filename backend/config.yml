@@ -22,8 +22,14 @@ USER_AGENTS:
   - "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0"
 
 # CORS 配置（结构化对象）
+# 注意：当 CORS_CREDENTIALS=true 时，不能使用 "*"，必须明确列出允许的域名
 CORS_ORIGINS:
-  - "*"
+  - "http://localhost:3000"
+  - "http://localhost:8080"
+  - "https://mediahubserver.heygo.cn:88"
+  - "https://mediahubserver.heygo.cn"
+  - "http://mediahubserver.heygo.cn:88"
+  - "http://mediahubserver.heygo.cn"
 CORS_CREDENTIALS: true
 
 # 应用程序固定配置
