@@ -247,3 +247,7 @@ cache/
 
 # Git worktrees
 .worktrees/
+backend/.celery/
+
+# MCP
+.playwright-mcp/

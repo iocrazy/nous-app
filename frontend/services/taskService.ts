@@ -343,3 +343,189 @@ export const pollDownloadProgress = (
     isPolling = false;
   };
 };
+
+// ========== Task Manager Types ==========
+
+export interface TaskManagerItem {
+  aweme_id: string;
+  video_title: string;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  percent: number;
+  downloaded: number;
+  total: number;
+  speed: string;
+  retry_count: number;
+  max_retries: number;
+  error: string | null;
+  started_at: string;
+  updated_at: string;
+}
+
+export interface TaskManagerStats {
+  pending: number;
+  downloading: number;
+  completed: number;
+  failed: number;
+  worker_online: boolean;
+  storage_free: string;
+  storage_used_percent: number;
+}
+
+export interface TaskManagerListResponse {
+  items: TaskManagerItem[];
+  total: number;
+}
+
+// ========== Task Manager API ==========
+
+/**
+ * Get task list from TaskManager
+ */
+export const getTaskManagerTasks = async (
+  status?: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<TaskManagerListResponse> => {
+  const params = new URLSearchParams();
+  if (status) params.append('status', status);
+  params.append('limit', String(limit));
+  params.append('offset', String(offset));
+
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks?${params}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tasks: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Get task statistics from TaskManager
+ */
+export const getTaskManagerStats = async (): Promise<TaskManagerStats> => {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/stats`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch task stats: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Retry a failed task
+ */
+export const retryFailedTask = async (awemeId: string, force: boolean = false): Promise<{
+  success: boolean;
+  message: string;
+  aweme_id?: string;
+}> => {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${awemeId}/retry?force=${force}`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to retry task: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Retry all failed tasks
+ */
+export const retryAllFailedTasks = async (force: boolean = false): Promise<{
+  success: boolean;
+  message: string;
+  retried_count: number;
+  failed_ids: string[];
+}> => {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/retry-all?force=${force}`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to retry all tasks: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Delete a task from TaskManager
+ */
+export const deleteTaskManagerTask = async (awemeId: string): Promise<{
+  success: boolean;
+  message: string;
+}> => {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${awemeId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete task: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Cleanup completed tasks
+ */
+export const cleanupCompletedTasks = async (keepRecent: number = 100): Promise<{
+  success: boolean;
+  removed_count: number;
+}> => {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/cleanup?keep_recent=${keepRecent}`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to cleanup tasks: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Format bytes to human readable string
+ */
+export const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+/**
+ * Format relative time
+ */
+export const formatRelativeTime = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+};

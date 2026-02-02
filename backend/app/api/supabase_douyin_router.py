@@ -21,6 +21,7 @@ from app.core.deps import AuthDep
 from app.core.utils import Utils
 from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
+from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
@@ -128,32 +129,29 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             }
 
         # 默认流程：解析元数据 + Celery 下载任务
-        # 优先使用轻量解析（HTTP 请求），失败则回退到浏览器自动化
+        # 根据用户设置选择解析模式
         aweme_detail = None
         parse_method = "unknown"
         parse_method_name = "Unknown"
         fallback_used = False
         fallback_reason = None
 
-        # 方案一：LightHTTP（轻量 HTTP 解析，无需浏览器）
+        # 读取用户的解析模式设置
+        user_parse_mode = "lighthttp"  # 默认值
         try:
-            logger.info(f"[LightHTTP] 尝试解析: {url}")
-            aweme_detail = await LightweightParser.parse(url)
-            if aweme_detail:
-                parse_method = "light_http"
-                parse_method_name = "LightHTTP"
-                logger.success(f"[LightHTTP] ✓ 解析成功")
-            else:
-                fallback_reason = "LightHTTP returned empty result"
+            settings_repo = UserSettingsRepository()
+            user_settings = await settings_repo.get_by_user_id(auth.user_id)
+            if user_settings and user_settings.get("settings_json"):
+                user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+            logger.info(f"[解析模式] 用户 {auth.user_id} 设置: {user_parse_mode}")
         except Exception as e:
-            fallback_reason = f"LightHTTP error: {str(e)[:50]}"
-            logger.warning(f"[LightHTTP] ✗ 解析失败: {e}")
+            logger.warning(f"读取用户解析模式失败，使用默认值: {e}")
 
-        # 方案二：BrowserAuto（浏览器自动化解析，备用方案）
-        if not aweme_detail:
-            fallback_used = True
+        # 根据用户设置选择解析方式
+        if user_parse_mode == "drissionpage":
+            # 用户选择了 DrissionPage，直接使用浏览器解析
             try:
-                logger.info(f"[BrowserAuto] 回退到浏览器解析: {url}")
+                logger.info(f"[BrowserAuto] 用户选择浏览器解析: {url}")
                 aweme_detail = await DouyinAnalysis.fetch_one_video(url)
                 if aweme_detail:
                     parse_method = "browser_auto"
@@ -161,6 +159,35 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                     logger.success(f"[BrowserAuto] ✓ 解析成功")
             except Exception as e:
                 logger.error(f"[BrowserAuto] ✗ 解析失败: {e}")
+                fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
+        else:
+            # 默认模式（lighthttp）：先 LightHTTP，失败则回退到浏览器自动化
+            # 方案一：LightHTTP（轻量 HTTP 解析，无需浏览器）
+            try:
+                logger.info(f"[LightHTTP] 尝试解析: {url}")
+                aweme_detail = await LightweightParser.parse(url)
+                if aweme_detail:
+                    parse_method = "light_http"
+                    parse_method_name = "LightHTTP"
+                    logger.success(f"[LightHTTP] ✓ 解析成功")
+                else:
+                    fallback_reason = "LightHTTP returned empty result"
+            except Exception as e:
+                fallback_reason = f"LightHTTP error: {str(e)[:50]}"
+                logger.warning(f"[LightHTTP] ✗ 解析失败: {e}")
+
+            # 方案二：BrowserAuto（浏览器自动化解析，备用方案）
+            if not aweme_detail:
+                fallback_used = True
+                try:
+                    logger.info(f"[BrowserAuto] 回退到浏览器解析: {url}")
+                    aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                    if aweme_detail:
+                        parse_method = "browser_auto"
+                        parse_method_name = "BrowserAuto"
+                        logger.success(f"[BrowserAuto] ✓ 解析成功")
+                except Exception as e:
+                    logger.error(f"[BrowserAuto] ✗ 解析失败: {e}")
 
         if not aweme_detail:
             raise HTTPException(status_code=404, detail="无法获取视频信息（LightHTTP 和 BrowserAuto 均失败）")
@@ -373,6 +400,17 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
     results = []
     errors = []
 
+    # 读取用户的解析模式设置
+    user_parse_mode = "lighthttp"  # 默认值
+    try:
+        settings_repo = UserSettingsRepository()
+        user_settings = await settings_repo.get_by_user_id(auth.user_id)
+        if user_settings and user_settings.get("settings_json"):
+            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+        logger.info(f"[批量解析] 用户 {auth.user_id} 解析模式: {user_parse_mode}")
+    except Exception as e:
+        logger.warning(f"读取用户解析模式失败，使用默认值: {e}")
+
     for raw_url in request.urls:
         try:
             # 从分享文本中提取有效 URL
@@ -383,21 +421,28 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                 errors.append({"url": raw_url, "error": "无法提取有效链接"})
                 continue
 
-            # 优先使用轻量解析，失败则回退到浏览器自动化
+            # 根据用户设置选择解析方式
             aweme_detail = None
 
-            # 方案一：轻量级解析
-            try:
-                aweme_detail = await LightweightParser.parse(url)
-            except Exception as e:
-                logger.warning(f"[批量解析] 轻量解析失败: {e}")
-
-            # 方案二：浏览器自动化（备用）
-            if not aweme_detail:
+            if user_parse_mode == "drissionpage":
+                # 用户选择了 DrissionPage，直接使用浏览器解析
                 try:
                     aweme_detail = await DouyinAnalysis.fetch_one_video(url)
                 except Exception as e:
                     logger.warning(f"[批量解析] 浏览器解析失败: {e}")
+            else:
+                # 默认模式：先 LightHTTP，失败则回退
+                try:
+                    aweme_detail = await LightweightParser.parse(url)
+                except Exception as e:
+                    logger.warning(f"[批量解析] 轻量解析失败: {e}")
+
+                # 回退到浏览器自动化
+                if not aweme_detail:
+                    try:
+                        aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                    except Exception as e:
+                        logger.warning(f"[批量解析] 浏览器解析失败: {e}")
 
             if aweme_detail:
                 parsed_data = await DouyinParser.parse_aweme_detail(

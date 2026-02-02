@@ -28,7 +28,60 @@ from app.core.config import settings
 
 class DownloaderService:
 
+    @staticmethod
+    async def verify_video_integrity(file_path: str) -> bool:
+        """
+        Verify video file integrity using ffmpeg.
 
+        Returns True if video is valid, False if corrupted.
+        """
+        import subprocess
+
+        try:
+            # Use ffmpeg to verify the file can be decoded
+            result = subprocess.run(
+                [
+                    'ffmpeg', '-v', 'error',
+                    '-i', file_path,
+                    '-f', 'null', '-',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60  # 1 minute timeout
+            )
+
+            # Check for critical errors
+            stderr = result.stderr.lower()
+            critical_errors = [
+                'partial file',
+                'invalid nal unit',
+                'error splitting',
+                'truncated',
+                'moov atom not found',
+            ]
+
+            for error in critical_errors:
+                if error in stderr:
+                    logger.error(f"视频文件损坏: {error} in {os.path.basename(file_path)}")
+                    return False
+
+            # If return code is non-zero and has errors, file is bad
+            if result.returncode != 0 and stderr:
+                logger.error(f"视频验证失败: {stderr[:200]}")
+                return False
+
+            logger.debug(f"视频完整性验证通过: {os.path.basename(file_path)}")
+            return True
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"视频验证超时: {os.path.basename(file_path)}")
+            return True  # Don't fail on timeout, assume OK
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found, skipping video integrity check")
+            return True  # Skip check if ffmpeg not installed
+        except Exception as e:
+            logger.warning(f"视频验证出错: {e}")
+            return True  # Don't fail on unknown errors
 
     @staticmethod
     async def download_file(
@@ -74,6 +127,14 @@ class DownloaderService:
                     except Exception as e:
                         logger.warning(f"无法验证文件完整性，重新下载: {e}")
                         os.remove(file_path)
+                # Get expected size via HEAD request first
+                expected_size = 0
+                try:
+                    head_resp = await client.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                    expected_size = int(head_resp.headers.get("content-length", 0))
+                except Exception as e:
+                    logger.warning(f"无法获取预期文件大小: {e}")
+
                 # Use streaming if progress tracker is provided
                 if progress_tracker:
                     async with client.stream(
@@ -88,6 +149,8 @@ class DownloaderService:
                             return False
 
                         total = int(response.headers.get("content-length", 0))
+                        if expected_size == 0:
+                            expected_size = total
                         downloaded = 0
 
                         async with aiofiles.open(file_path, mode='wb') as f:
@@ -96,7 +159,20 @@ class DownloaderService:
                                 downloaded += len(chunk)
                                 progress_tracker.update(downloaded, total)
 
-                        logger.success(f"成功下载文件: {os.path.basename(file_path)}")
+                        # Post-download verification
+                        actual_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                        if expected_size > 0 and actual_size < expected_size * 0.95:  # Allow 5% tolerance
+                            logger.error(f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes")
+                            os.remove(file_path)
+                            raise Exception(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+                        # Verify video file integrity with ffprobe
+                        if file_path.endswith('.mp4'):
+                            if not await DownloaderService.verify_video_integrity(file_path):
+                                os.remove(file_path)
+                                raise Exception(f"Video file corrupted or incomplete: {os.path.basename(file_path)}")
+
+                        logger.success(f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)")
                         return True
                 else:
                     # Original non-streaming download (larger timeout for big files)
@@ -110,7 +186,21 @@ class DownloaderService:
                     if response.status_code == 200:
                         async with aiofiles.open(file_path, mode='wb') as f:
                             await f.write(response.content)
-                        logger.success(f"成功下载文件: {os.path.basename(file_path)}")
+
+                        # Post-download verification
+                        actual_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                        if expected_size > 0 and actual_size < expected_size * 0.95:  # Allow 5% tolerance
+                            logger.error(f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes")
+                            os.remove(file_path)
+                            raise Exception(f"File size mismatch: expected {expected_size}, got {actual_size}")
+
+                        # Verify video file integrity with ffprobe
+                        if file_path.endswith('.mp4'):
+                            if not await DownloaderService.verify_video_integrity(file_path):
+                                os.remove(file_path)
+                                raise Exception(f"Video file corrupted or incomplete: {os.path.basename(file_path)}")
+
+                        logger.success(f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)")
                         return True
                     else:
                         logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")

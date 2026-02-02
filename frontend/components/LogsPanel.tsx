@@ -64,8 +64,8 @@ const LEVEL_OPTIONS = [
 
 // Date range options
 const DATE_RANGE_OPTIONS = [
-  { value: 'today', label: 'Today' },
   { value: '7days', label: 'Last 7 days' },
+  { value: 'today', label: 'Today' },
   { value: '30days', label: 'Last 30 days' },
   { value: 'custom', label: 'Custom range' },
 ];
@@ -113,7 +113,7 @@ export const LogsPanel: React.FC = () => {
 
   // Filters
   const [level, setLevel] = useState('');
-  const [dateRange, setDateRange] = useState('today');
+  const [dateRange, setDateRange] = useState('7days');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [search, setSearch] = useState('');

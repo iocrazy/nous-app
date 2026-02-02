@@ -94,5 +94,23 @@ services:
       redis:
         condition: service_healthy
 
+  # 前端 (Vite 构建后用 nginx 部署)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: mediahub-frontend:latest
+    container_name: mediahub-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      mediahub:
+        condition: service_healthy
+    environment:
+      - VITE_API_URL=http://mediahub:8080
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+
 volumes:
   redis_data:

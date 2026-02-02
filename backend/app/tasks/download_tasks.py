@@ -4,6 +4,7 @@
 下载任务模块
 
 包含视频、图集、音乐、封面的异步下载任务。
+集成 TaskManager 进行任务状态追踪和自动重试。
 """
 
 import asyncio
@@ -43,10 +44,10 @@ def download_media_task(
     video_title: str = "undefined",
 ):
     """
-    Download media files with progress tracking.
+    Download media files with progress tracking and TaskManager integration.
 
     This task runs after metadata is parsed and saved.
-    Progress is tracked in Redis and can be polled by frontend.
+    Progress is tracked in Redis via TaskManager and can be polled by frontend.
 
     Args:
         aweme_id: Video ID
@@ -63,6 +64,18 @@ def download_media_task(
     task_id = self.request.id
     logger.info(f"[Celery] Starting download task {task_id} for {aweme_id}")
 
+    # Initialize TaskManager
+    from app.services.task_manager import get_task_manager
+    task_manager = get_task_manager()
+
+    # Create or get task in TaskManager
+    task = task_manager.get_task(aweme_id)
+    if not task:
+        task = task_manager.create_task(aweme_id, video_title)
+
+    # Mark task as downloading
+    task_manager.start_download(aweme_id)
+
     try:
         from app.celery_app import celery_app
         from app.services.download_progress import DownloadProgressTracker
@@ -70,10 +83,12 @@ def download_media_task(
         # Get Redis client from Celery backend
         redis_client = celery_app.backend.client
 
-        # Create progress tracker
-        tracker = DownloadProgressTracker(
+        # Create progress tracker with TaskManager integration
+        tracker = DownloadProgressTrackerWithTaskManager(
             task_id=task_id,
+            aweme_id=aweme_id,
             redis_client=redis_client,
+            task_manager=task_manager,
         )
 
         # Execute downloads based on type
@@ -82,18 +97,19 @@ def download_media_task(
             "music": None,
             "cover": None,
         }
+        video_result = None
 
         if int(aweme_type) in (0, 4, 61):  # Video types
             if download_video:
                 logger.info(f"[Celery] Downloading video: {aweme_id}")
-                result = run_async(
+                video_result = run_async(
                     DownloaderService.download_video_by_aweme_id(
                         aweme_id,
                         user_id=user_id,
                         progress_tracker=tracker
                     )
                 )
-                results["video"] = result.video_download_status.value if hasattr(result, 'video_download_status') else "unknown"
+                results["video"] = video_result.video_download_status.value if hasattr(video_result, 'video_download_status') else "unknown"
 
             if download_music:
                 logger.info(f"[Celery] Downloading music: {aweme_id}")
@@ -112,10 +128,10 @@ def download_media_task(
         elif int(aweme_type) in (2, 68):  # Image types
             if download_video:  # "video" flag used for images too
                 logger.info(f"[Celery] Downloading images: {aweme_id}")
-                result = run_async(
+                video_result = run_async(
                     DownloaderService.download_images_by_aweme_id(aweme_id, user_id=user_id)
                 )
-                results["video"] = result.video_download_status.value if hasattr(result, 'video_download_status') else "unknown"
+                results["video"] = video_result.video_download_status.value if hasattr(video_result, 'video_download_status') else "unknown"
 
             if download_music:
                 logger.info(f"[Celery] Downloading music: {aweme_id}")
@@ -131,10 +147,27 @@ def download_media_task(
                 )
                 results["cover"] = result.cover_download_status.value if hasattr(result, 'cover_download_status') else "unknown"
 
-        # Mark complete in Redis
-        tracker.complete()
+        # Check if video download was successful
+        if video_result and hasattr(video_result, 'video_download_status'):
+            if video_result.video_download_status == DownloadStatus.COMPLETED:
+                # Mark complete in TaskManager
+                task_manager.complete_task(aweme_id)
+                tracker.complete()
+                logger.success(f"[Celery] Download task completed: {aweme_id}")
+                return {
+                    "status": "success",
+                    "aweme_id": aweme_id,
+                    "results": results,
+                }
+            else:
+                # Download failed
+                error_msg = video_result.error if hasattr(video_result, 'error') and video_result.error else "Download failed"
+                raise Exception(error_msg)
 
-        logger.success(f"[Celery] Download task completed: {aweme_id}")
+        # No video result means video download was not requested, mark as complete
+        task_manager.complete_task(aweme_id)
+        tracker.complete()
+        logger.success(f"[Celery] Download task completed (no video): {aweme_id}")
         return {
             "status": "success",
             "aweme_id": aweme_id,
@@ -142,14 +175,97 @@ def download_media_task(
         }
 
     except Exception as e:
-        logger.error(f"[Celery] Download task failed: {aweme_id}, error: {str(e)}")
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+        error_msg = str(e)
+        logger.error(f"[Celery] Download task failed: {aweme_id}, error: {error_msg}")
+
+        # Mark as failed in TaskManager
+        task_manager.fail_task(aweme_id, error_msg)
+
+        # Check if we should retry
+        current_task = task_manager.get_task(aweme_id)
+        retry_count = current_task.get("retry_count", 0) if current_task else 0
+
+        if retry_count < 3:
+            # Auto retry with exponential backoff
+            countdown = 30 * (2 ** retry_count)
+            logger.info(f"[Celery] Scheduling retry {retry_count + 1}/3 for {aweme_id} in {countdown}s")
+            raise self.retry(exc=e, countdown=countdown)
+
+        logger.error(f"[Celery] Max retries reached for {aweme_id}")
         return {
             "status": "failed",
             "aweme_id": aweme_id,
-            "error": str(e),
+            "error": error_msg,
+            "retry_count": retry_count,
         }
+
+
+class DownloadProgressTrackerWithTaskManager:
+    """Progress tracker that updates both the old format and TaskManager."""
+
+    def __init__(self, task_id: str, aweme_id: str, redis_client, task_manager):
+        self.task_id = task_id
+        self.aweme_id = aweme_id
+        self.redis = redis_client
+        self.task_manager = task_manager
+        self.last_update = 0
+
+    def update(self, downloaded: int, total: int):
+        """Update download progress."""
+        import time
+        import json
+
+        # Throttle updates to avoid Redis spam
+        now = time.time()
+        if now - self.last_update < 0.5:  # Update at most every 0.5s
+            return
+        self.last_update = now
+
+        percent = int((downloaded / total) * 100) if total > 0 else 0
+        speed = self._calculate_speed(downloaded)
+
+        # Update old format for backward compatibility
+        progress_data = {
+            "percent": percent,
+            "downloaded": downloaded,
+            "total": total,
+            "speed": speed,
+            "status": "downloading",
+        }
+        self.redis.setex(
+            f"download_progress:{self.task_id}",
+            3600,
+            json.dumps(progress_data)
+        )
+
+        # Update TaskManager
+        self.task_manager.update_progress(self.aweme_id, downloaded, total, speed)
+
+    def _calculate_speed(self, downloaded: int) -> str:
+        """Calculate download speed string."""
+        # Simple speed calculation (could be improved with time tracking)
+        if downloaded < 1024:
+            return f"{downloaded} B/s"
+        elif downloaded < 1024 * 1024:
+            return f"{downloaded / 1024:.1f} KB/s"
+        else:
+            return f"{downloaded / (1024 * 1024):.1f} MB/s"
+
+    def complete(self):
+        """Mark download as complete."""
+        import json
+        progress_data = {
+            "percent": 100,
+            "downloaded": 0,
+            "total": 0,
+            "speed": "0 B/s",
+            "status": "completed",
+        }
+        self.redis.setex(
+            f"download_progress:{self.task_id}",
+            3600,
+            json.dumps(progress_data)
+        )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)

@@ -21,6 +21,7 @@ from app.api.collections_router import router as collections_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.logs_router import router as logs_router
 from app.api.system_router import router as system_router
+from app.api.tasks_router import router as tasks_management_router
 
 api_router = APIRouter()
 
@@ -87,4 +88,9 @@ api_router.include_router(
 api_router.include_router(
     router=system_router,
     tags=["系统监控"]
+)
+
+api_router.include_router(
+    router=tasks_management_router,
+    tags=["Tasks"]
 )

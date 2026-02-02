@@ -7,11 +7,12 @@ import {
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
+import { TasksPanel } from './TasksPanel';
 
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks';
 }
 
 const API_SCOPES = [
@@ -500,6 +501,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Monitor Tab */}
       {activeTab === 'monitor' && (
         <SystemMonitorPanel />
+      )}
+
+      {/* Tasks Tab */}
+      {activeTab === 'tasks' && (
+        <TasksPanel />
       )}
 
       {/* Wave animation keyframes */}

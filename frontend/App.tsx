@@ -6,7 +6,7 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText
+  Layers, Download, Users, Trash2, ScrollText, ListTodo
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
@@ -28,6 +28,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { LandingPage } from './components/LandingPage';
 import { AuthOverlay } from './components/AuthOverlay';
 import { Header } from './components/Header';
+import { ParseModeCard } from './components/ParseModeCard';
 import { UserDropdown } from './components/UserDropdown';
 import { ParserTagSelector } from './components/ParserTagSelector';
 import { NotificationPanel } from './components/NotificationPanel';
@@ -208,7 +209,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -1792,6 +1793,19 @@ export default function App() {
                     <span>Logs</span>
                   </div>
                 </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('tasks'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'tasks'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <ListTodo size={14} />
+                    <span>Tasks</span>
+                  </div>
+                </button>
               </div>
             )}
           </div>
@@ -2075,24 +2089,8 @@ export default function App() {
                       <p className="text-xs text-zinc-600 mt-1">{systemStatus.queue.pending} pending</p>
                     ) : null}
                  </div>
-                 {/* Network Status */}
-                 <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
-                      systemStatus?.network.status === 'active' ? 'bg-emerald-900/30 text-emerald-400' :
-                      systemStatus?.network.status === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800/50 text-zinc-500'
-                    }`}>
-                      <Wifi size={20} />
-                    </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Network</h4>
-                    <p className={`text-sm font-mono ${
-                      systemStatus?.network.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'
-                    }`}>
-                      {systemStatus?.network.speed || '0 B/s'}
-                    </p>
-                    <p className="text-xs text-zinc-600 mt-1">
-                      {systemStatus?.network.status === 'active' ? 'Downloading' : 'Idle'}
-                    </p>
-                 </div>
+                 {/* Parse Mode */}
+                 <ParseModeCard />
                  {/* Storage Status */}
                  <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
@@ -2450,28 +2448,6 @@ export default function App() {
                mediaDistribution={dashboardStats?.mediaDistribution || []}
                topTags={dashboardStats?.topTags || []}
              />
-
-             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h3 className="text-lg font-semibold mb-4">Recent System Logs</h3>
-                <div className="space-y-3">
-                   {(dashboardStats?.recentLogs || []).length > 0 ? (
-                     dashboardStats?.recentLogs.map((log, i) => (
-                       <div key={i} className="flex items-center justify-between text-sm py-2 border-b border-zinc-800/50 last:border-0">
-                         <span className="text-zinc-400 flex items-center gap-2">
-                           <div className={`w-1.5 h-1.5 rounded-full ${
-                             log.status === 'success' ? 'bg-green-500' :
-                             log.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
-                           }`}></div>
-                           {log.message}
-                         </span>
-                         <span className="text-zinc-600 font-mono text-xs">{log.time}</span>
-                       </div>
-                     ))
-                   ) : (
-                     <div className="text-zinc-500 text-sm text-center py-4">No recent activity</div>
-                   )}
-                </div>
-             </div>
           </div>
         )}
         
