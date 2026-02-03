@@ -360,6 +360,122 @@ docker stop mediahub
 docker rm mediahub
 ```
 
+---
+
+## CI/CD Deployment / 自动化部署
+
+### GitHub Actions Workflow
+
+项目使用 GitHub Actions 实现自动化构建和部署，**只有推送版本标签时才触发**。
+
+#### 触发条件
+
+| 操作 | 是否触发部署 |
+|------|-------------|
+| `git push origin master` | ❌ 不触发 |
+| `git tag v0.3.0 && git push origin v0.3.0` | ✅ 触发 |
+| GitHub Actions 页面手动触发 | ✅ 触发 |
+
+#### 部署流程
+
+```
+推送版本标签 (v*)
+       ↓
+GitHub Actions 触发
+       ↓
+┌──────────────────────────────────┐
+│  Job 1: Build and Push           │
+│  ├─ Checkout code                │
+│  ├─ Setup Docker Buildx          │
+│  ├─ Login to Docker Hub          │
+│  ├─ Build multi-arch image       │
+│  │   (linux/amd64 + linux/arm64) │
+│  ├─ Push to Docker Hub           │
+│  │   - imheygo/mediahub:latest   │
+│  │   - imheygo/mediahub:v0.3.0   │
+│  │   - imheygo/mediahub:<sha>    │
+│  └─ Create GitHub Release        │
+└──────────────────────────────────┘
+       ↓
+┌──────────────────────────────────┐
+│  Job 2: Deploy to NAS            │
+│  ├─ SSH to NAS server            │
+│  ├─ Pull latest code             │
+│  ├─ Pull Docker image            │
+│  ├─ Restart services             │
+│  └─ Cleanup old images           │
+└──────────────────────────────────┘
+```
+
+### 发布新版本
+
+```bash
+# 1. 完成开发并提交代码
+git add .
+git commit -m "feat: your feature"
+git push origin master          # 不会触发部署
+
+# 2. 准备发布 - 更新版本号
+# 编辑 backend/pyproject.toml 中的 version
+
+# 3. 创建并推送版本标签
+git tag v0.4.0
+git push origin v0.4.0          # 触发自动部署
+```
+
+### 版本号规范 (Semantic Versioning)
+
+| 版本变化 | 示例 | 何时使用 |
+|----------|------|----------|
+| Major (主版本) | `v1.0.0` → `v2.0.0` | 不兼容的 API 变更 |
+| Minor (次版本) | `v1.0.0` → `v1.1.0` | 新增功能，向后兼容 |
+| Patch (补丁) | `v1.0.0` → `v1.0.1` | Bug 修复 |
+
+### 手动触发部署
+
+在 GitHub Actions 页面可以手动触发部署（用于紧急情况）：
+
+1. 访问 `https://github.com/<owner>/mediahub/actions`
+2. 选择 "Deploy Backend to NAS" 工作流
+3. 点击 "Run workflow"
+4. 输入版本号（可选）
+5. 点击 "Run workflow" 按钮
+
+### 并发控制
+
+工作流配置了并发控制，防止重复运行：
+
+```yaml
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+```
+
+- 同时只允许一个部署任务运行
+- 新的部署会取消正在进行的旧部署
+
+### 所需 Secrets
+
+在 GitHub 仓库 Settings > Secrets 中配置：
+
+| Secret | 说明 |
+|--------|------|
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| `DOCKERHUB_TOKEN` | Docker Hub 访问令牌 |
+| `NAS_HOST` | NAS 服务器地址 |
+| `NAS_PORT` | SSH 端口 |
+| `NAS_USER` | SSH 用户名 |
+| `NAS_SSH_KEY` | SSH 私钥 |
+| `NAS_PROJECT_PATH` | 项目在 NAS 上的路径 |
+
+### 查看部署状态
+
+1. **GitHub Actions**: 查看构建日志和状态
+2. **Docker Hub**: 确认镜像是否已推送
+3. **API 健康检查**: `curl https://your-server/api/v1/health`
+
+---
+
 ### Troubleshooting
 
 #### Build fails with memory error
