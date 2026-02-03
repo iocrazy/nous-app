@@ -9,7 +9,8 @@ import {
   Layers, Download, Users, Trash2, ScrollText, ListTodo
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
+import { isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
+import { connectRealtime, disconnectRealtime, onRealtimeEvent, RealtimeEvent } from './services/realtimeService';
 import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
@@ -586,183 +587,109 @@ export default function App() {
     loadAllSharedVideos(collections);
   }, [isAuthenticated, collections]);
 
-  // Supabase Realtime 订阅 - 自动同步数据库变化
+  // SSE Realtime 订阅 - 通过 FastAPI 后端自动同步数据库变化
   useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase || !currentUserId) {
+    if (!isAuthenticated || !currentUserId) {
       return;
     }
 
-    const channel = supabase
-      .channel('douyin_videos_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'douyin_videos',
-        },
-        (payload) => {
-          console.log('Realtime update:', payload.eventType, payload);
+    // Connect to SSE endpoint
+    connectRealtime();
 
-          const newRecord = payload.new as DouyinBase;
-          const oldRecord = payload.old as DouyinBase;
+    // Handle video changes
+    const unsubVideo = onRealtimeEvent('video', (event: RealtimeEvent) => {
+      console.log('Realtime video update:', event.event, event.data);
 
-          // 只处理当前用户的数据
-          if (payload.eventType === 'INSERT' && newRecord.user_id === currentUserId) {
-            setLibrary(prev => {
-              // 避免重复添加
-              if (prev.find(item => item.aweme_id === newRecord.aweme_id)) {
-                return prev;
-              }
-              return [newRecord, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === currentUserId) {
-            setLibrary(prev =>
-              prev.map(item =>
-                item.aweme_id === newRecord.aweme_id ? newRecord : item
-              )
-            );
-            // 如果当前选中的项被更新，也更新它
-            setSelectedLibraryItem(prev =>
-              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
-            );
-            // 如果当前解析结果被更新，也更新它
-            setCurrentResult(prev =>
-              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
-            );
-          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === currentUserId) {
-            setLibrary(prev =>
-              prev.filter(item => item.aweme_id !== oldRecord.aweme_id)
-            );
+      const record = event.data as DouyinBase;
+
+      if (event.event === 'insert') {
+        setLibrary(prev => {
+          // 避免重复添加
+          if (prev.find(item => item.aweme_id === record.aweme_id)) {
+            return prev;
           }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
+          return [record, ...prev];
+        });
+      } else if (event.event === 'update') {
+        setLibrary(prev =>
+          prev.map(item =>
+            item.aweme_id === record.aweme_id ? record : item
+          )
+        );
+        // 如果当前选中的项被更新，也更新它
+        setSelectedLibraryItem(prev =>
+          prev?.aweme_id === record.aweme_id ? record : prev
+        );
+        // 如果当前解析结果被更新，也更新它
+        setCurrentResult(prev =>
+          prev?.aweme_id === record.aweme_id ? record : prev
+        );
+      } else if (event.event === 'delete') {
+        setLibrary(prev =>
+          prev.filter(item => item.aweme_id !== record.aweme_id)
+        );
+      }
+    });
+
+    // Handle collection video changes
+    const unsubCollection = onRealtimeEvent('collection_video', (event: RealtimeEvent) => {
+      console.log('Realtime collection update:', event.event, event.data);
+
+      const record = event.data as { collection_id: number; video_id: number };
+      const changedCollectionId = record?.collection_id;
+
+      // 如果当前正在查看的集合有变化，重新加载集合视频列表
+      if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
+        loadCollectionVideos(activeCollectionId);
+      }
+
+      // 如果正在查看的视频的集合关系变化，重新加载选中视频的集合列表
+      if (selectedLibraryItem?.aweme_id) {
+        fetchVideoCollections(selectedLibraryItem.aweme_id)
+          .then(setSelectedVideoCollectionIds)
+          .catch(console.error);
+      }
+
+      // 刷新集合列表以更新 video_count 和 sharedVideoIds
+      fetchMyCollections().then(newCollections => {
+        setCollections(newCollections);
+        loadAllSharedVideos(newCollections);
+      }).catch(console.error);
+    });
+
+    // Handle video tag changes
+    const unsubTag = onRealtimeEvent('video_tag', (event: RealtimeEvent) => {
+      console.log('Realtime tag update:', event.event, event.data);
+
+      const record = event.data as { video_id: number; tags?: string[] };
+      const videoId = record?.video_id;
+
+      if (!videoId) return;
+
+      // Update the video in library state with new tags
+      if (record.tags) {
+        setLibrary(prev =>
+          prev.map(item =>
+            item.id === videoId ? { ...item, tags: record.tags || [] } : item
+          )
+        );
+
+        // Also update selected item if it's the same video
+        setSelectedLibraryItem(prev =>
+          prev?.id === videoId ? { ...prev, tags: record.tags || [] } : prev
+        );
+      }
+    });
 
     // 清理订阅
     return () => {
-      console.log('Unsubscribing from realtime channel');
-      supabase.removeChannel(channel);
+      console.log('Disconnecting from realtime');
+      unsubVideo();
+      unsubCollection();
+      unsubTag();
+      disconnectRealtime();
     };
-  }, [isAuthenticated, currentUserId]);
-
-  // Supabase Realtime for collection_videos - 共享集合实时同步
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
-      return;
-    }
-
-    const collectionChannel = supabase
-      .channel('video_collections_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'video_collections',
-        },
-        async (payload) => {
-          console.log('Collection videos realtime update:', payload.eventType, payload);
-
-          // video_collections 表的字段: collection_id (number), video_id (number), added_by, added_at
-          const newRecord = payload.new as { collection_id: number; video_id: number };
-          const oldRecord = payload.old as { collection_id: number; video_id: number };
-
-          const changedCollectionId = newRecord?.collection_id || oldRecord?.collection_id;
-
-          // 如果当前正在查看的集合有变化，重新加载集合视频列表
-          if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
-            loadCollectionVideos(activeCollectionId);
-          }
-
-          // 如果正在查看的视频的集合关系变化，重新加载选中视频的集合列表
-          if (selectedLibraryItem?.aweme_id) {
-            fetchVideoCollections(selectedLibraryItem.aweme_id)
-              .then(setSelectedVideoCollectionIds)
-              .catch(console.error);
-          }
-
-          // 刷新集合列表以更新 video_count 和 sharedVideoIds
-          fetchMyCollections().then(newCollections => {
-            setCollections(newCollections);
-            // 刷新共享视频ID列表以更新徽章显示
-            loadAllSharedVideos(newCollections);
-          }).catch(console.error);
-        }
-      )
-      .subscribe((status) => {
-        console.log('Collection videos realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('Unsubscribing from collection videos realtime channel');
-      supabase.removeChannel(collectionChannel);
-    };
-  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.aweme_id]);
-
-  // Supabase Realtime for video_tags - 标签实时同步
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
-      return;
-    }
-
-    const tagsChannel = supabase
-      .channel('video_tags_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'video_tags',
-        },
-        async (payload) => {
-          console.log('Video tags realtime update:', payload.eventType, payload);
-
-          const newRecord = payload.new as { video_id: number; tag_id: string };
-          const oldRecord = payload.old as { video_id: number; tag_id: string };
-          const videoId = newRecord?.video_id || oldRecord?.video_id;
-
-          if (!videoId) return;
-
-          // Fetch updated video with tags from the view
-          const { data: updatedVideo, error } = await supabase
-            .from('videos_with_tags')
-            .select('*')
-            .eq('id', videoId)
-            .single();
-
-          if (error || !updatedVideo) {
-            console.error('Failed to fetch updated video:', error);
-            return;
-          }
-
-          // Update the video in library state with new tags
-          setLibrary(prev =>
-            prev.map(item =>
-              item.id === videoId ? { ...item, tags: updatedVideo.tags || [] } : item
-            )
-          );
-
-          // Also update selected item if it's the same video
-          setSelectedLibraryItem(prev =>
-            prev?.id === videoId ? { ...prev, tags: updatedVideo.tags || [] } : prev
-          );
-        }
-      )
-      .subscribe((status) => {
-        console.log('Video tags realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('Unsubscribing from video tags realtime channel');
-      supabase.removeChannel(tagsChannel);
-    };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, currentUserId, activeCollectionId, selectedLibraryItem?.aweme_id]);
 
   // Load collections for selected video
   useEffect(() => {
