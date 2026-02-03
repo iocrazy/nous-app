@@ -127,7 +127,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
       <footer className="py-12 border-t border-white/5 bg-black">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="text-zinc-500 text-sm">
-            © 2024 DouyinMediaHub. All rights reserved.
+            © 2026 MediaHub. All rights reserved.
           </div>
           <div className="flex gap-6 text-zinc-500 text-sm">
             <a href="#" className="hover:text-zinc-300">Privacy</a>
