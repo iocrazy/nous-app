@@ -1,24 +1,24 @@
 # Backend Auto Deploy to NAS via Docker Hub
 # Triggers:
-#   - Push to master (with backend changes): builds 'latest' tag
-#   - Push version tag (v*): builds versioned release
+#   - Push version tag (v*): builds versioned release and deploys
+#   - Manual trigger: for emergency deployments
 
 name: Deploy Backend to NAS
 
 on:
   push:
-    branches: [master]
-    paths:
-      - 'backend/**'
-      - 'docker/**'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-backend.yml'
     tags:
       - 'v*'
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.3.0)'
+        required: false
+        default: 'latest'
 
-# Prevent duplicate runs - cancel previous runs for same ref
+# Prevent duplicate runs
 concurrency:
-  group: deploy-backend-${{ github.ref }}
+  group: deploy-backend
   cancel-in-progress: true
 
 env:
