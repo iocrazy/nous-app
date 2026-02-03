@@ -1,6 +1,6 @@
 # Backend Auto Deploy to NAS via Docker Hub
 # Triggers:
-#   - Push to master: builds 'latest' tag
+#   - Push to master (with backend changes): builds 'latest' tag
 #   - Push version tag (v*): builds versioned release
 
 name: Deploy Backend to NAS
@@ -15,6 +15,11 @@ on:
       - '.github/workflows/deploy-backend.yml'
     tags:
       - 'v*'
+
+# Prevent duplicate runs - cancel previous runs for same ref
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   IMAGE_NAME: imheygo/mediahub
