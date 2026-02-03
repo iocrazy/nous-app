@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request, HTTPException, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.core.deps import OptionalAuthDep
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -179,7 +179,7 @@ async def event_generator(user_id: str, request: Request) -> AsyncGenerator[str,
 async def subscribe_to_realtime(
     request: Request,
     token: str = None,
-    auth: AuthDep = None
+    auth: OptionalAuthDep = None
 ):
     """
     Subscribe to realtime updates via Server-Sent Events.
