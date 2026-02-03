@@ -1,0 +1,44 @@
+# ===========================================
+# YAML 配置文件 (config.yml)
+# 用于存储结构化配置和业务逻辑参数
+# ===========================================
+
+# 应用程序环境标识
+APP_NAME: "抖音推送下载app_yml"
+
+# HTTP 客户端配置
+HTTP_TIMEOUT: 30.0
+DOWNLOAD_TIMEOUT: 60.0
+
+# 用户代理列表（复杂数组配置）
+USER_AGENTS:
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15"
+  - "Mozilla/5.0 (Linux; Android 13; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.198 Mobile Safari/537.36"
+  - "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+  - "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0"
+
+# CORS 配置（结构化对象）
+# 注意：当 CORS_CREDENTIALS=true 时，不能使用 "*"，必须明确列出允许的域名
+CORS_ORIGINS:
+  - "http://localhost:3000"
+  - "http://localhost:8080"
+  - "https://mediahubserver.heygo.cn:88"
+  - "https://mediahubserver.heygo.cn"
+  - "http://mediahubserver.heygo.cn:88"
+  - "http://mediahubserver.heygo.cn"
+CORS_CREDENTIALS: true
+
+# 应用程序固定配置
+APP_PORT: 9999  # Docker 容器内部固定端口
+
+
+## 文件存储路径（环境特定）
+# 静态文件服务的根目录，所有下载的文件都在此目录下
+# 注意：.env 中的值会覆盖此配置
+# Mac 本地测试（SMB 挂载）: /Volumes/sources/MediaHub.library
+# Docker 部署（NAS）: /volume2/sources/MediaHub.library
+NAS_BASE_PATH: /Volumes/sources/MediaHub.library

@@ -251,3 +251,16 @@ backend/.celery/
 
 # MCP
 .playwright-mcp/
+
+# Toolkit (separate project)
+toolkit/
+
+# Local scripts
+start-dev.sh
+
+# SQLite databases
+*.sqlite3
+*.sqlite3-journal
+
+# uv lock file (if not needed)
+# uv.lock

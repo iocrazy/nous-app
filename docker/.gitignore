@@ -1,0 +1,8 @@
+# Environment file (contains secrets)
+.env
+
+# Downloaded files
+downloads/
+
+# Redis data
+redis_data/

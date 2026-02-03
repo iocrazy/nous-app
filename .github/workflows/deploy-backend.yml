@@ -1,4 +1,4 @@
-# Backend Auto Deploy to NAS
+# Backend Auto Deploy to NAS via Docker Hub
 # Triggers on push to master branch, only when backend files change
 
 name: Deploy Backend to NAS
@@ -8,13 +8,47 @@ on:
     branches: [master]
     paths:
       - 'backend/**'
-      - 'docker-compose.yml'
+      - 'docker/**'
       - 'Dockerfile'
       - '.github/workflows/deploy-backend.yml'
 
+env:
+  IMAGE_NAME: imheygo/mediahub
+
 jobs:
-  deploy:
+  build-and-push:
+    name: Build and Push to Docker Hub
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to NAS
+    runs-on: ubuntu-latest
+    needs: build-and-push
 
     steps:
       - name: Deploy to NAS via SSH
@@ -30,13 +64,14 @@ jobs:
             echo "📥 Pulling latest code..."
             git pull origin master
 
-            echo "🔨 Rebuilding containers..."
-            docker-compose build --no-cache backend
+            echo "🐳 Pulling Docker image from Docker Hub..."
+            docker pull imheygo/mediahub:latest
 
             echo "🚀 Restarting services..."
-            docker-compose up -d --force-recreate backend celery-worker
+            cd docker
+            docker-compose up -d --force-recreate mediahub celery-worker celery-beat
 
-            echo "🧹 Cleaning up..."
+            echo "🧹 Cleaning up old images..."
             docker image prune -f
 
             echo "✅ Backend deployment complete!"

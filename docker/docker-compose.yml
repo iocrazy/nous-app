@@ -1,7 +1,10 @@
 version: '3.8'
 
+# MediaHub Docker Compose Configuration
+# Usage: cd docker && docker-compose up -d
+
 services:
-  # Redis - 消息队列和结果存储
+  # Redis - Message queue and result storage
   redis:
     image: redis:7-alpine
     container_name: mediahub-redis
@@ -17,18 +20,17 @@ services:
       timeout: 5s
       retries: 3
 
-  # MediaHub 主服务 (FastAPI)
+  # MediaHub Main Service (FastAPI)
   mediahub:
-    build: .
-    image: mediahub:latest
+    image: imheygo/mediahub:latest
     container_name: mediahub
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ./downloads:/app/downloads
-      - ./backend/.env:/app/.env
-      - ./backend/frontend_config.yml:/app/frontend_config.yml
+      - ./.env:/app/.env
+      - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -43,17 +45,16 @@ services:
       retries: 3
       start_period: 60s
 
-  # Celery Worker - 任务执行器
+  # Celery Worker - Task executor
   celery-worker:
-    build: .
-    image: mediahub:latest
+    image: imheygo/mediahub:latest
     container_name: mediahub-celery-worker
     restart: unless-stopped
     command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
     volumes:
       - ./downloads:/app/downloads
-      - ./backend/.env:/app/.env
-      - ./backend/frontend_config.yml:/app/frontend_config.yml
+      - ./.env:/app/.env
+      - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -62,15 +63,14 @@ services:
       redis:
         condition: service_healthy
 
-  # Celery Beat - 定时任务调度器
+  # Celery Beat - Scheduled task scheduler
   celery-beat:
-    build: .
-    image: mediahub:latest
+    image: imheygo/mediahub:latest
     container_name: mediahub-celery-beat
     restart: unless-stopped
     command: uv run celery -A app.celery_app beat -l info
     volumes:
-      - ./backend/.env:/app/.env
+      - ./.env:/app/.env
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -79,7 +79,7 @@ services:
       redis:
         condition: service_healthy
 
-  # Flower - 任务监控 Web UI
+  # Flower - Task monitoring Web UI
   flower:
     image: mher/flower:2.0
     container_name: mediahub-flower
@@ -93,24 +93,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-
-  # 前端 (Vite 构建后用 nginx 部署)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: mediahub-frontend:latest
-    container_name: mediahub-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:80"
-    depends_on:
-      mediahub:
-        condition: service_healthy
-    environment:
-      - VITE_API_URL=http://mediahub:8080
-      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
-      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
 
 volumes:
   redis_data:
