@@ -40,30 +40,8 @@ const getSupabaseAnonKey = (): string | undefined => {
 };
 
 export const isSupabaseConfigured = (): boolean => {
-  const supabaseUrl = getSupabaseUrl();
-  const supabaseAnonKey = getSupabaseAnonKey();
-
-  // Check if variables are set
-  const isSet = (
-    typeof supabaseUrl === 'string' &&
-    supabaseUrl.trim().length > 0 &&
-    typeof supabaseAnonKey === 'string' &&
-    supabaseAnonKey.trim().length > 0
-  );
-
-  if (!isSet) {
-    console.warn('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env file or configure via backend.');
-    return false;
-  }
-
-  // Basic validation: URL should be a valid URL (support self-hosted Supabase)
-  try {
-    new URL(supabaseUrl!);
-  } catch {
-    console.warn('Invalid Supabase URL format');
-    return false;
-  }
-
+  // All data operations now go through backend API
+  // This function is kept for backward compatibility but always returns true
   return true;
 };
 
@@ -81,7 +59,6 @@ const initializeClient = (): SupabaseClient | null => {
 
   try {
     const newClient = createClient(supabaseUrl, supabaseAnonKey);
-    console.log(`Supabase Client initialized with URL: ${supabaseUrl}`);
     return newClient;
   } catch (error) {
     console.error("Failed to initialize Supabase client:", error);
@@ -89,8 +66,11 @@ const initializeClient = (): SupabaseClient | null => {
   }
 };
 
-// 初始尝试初始化（使用 .env 配置）
-if (isSupabaseConfigured()) {
+// Note: Supabase client is optional - all data operations go through backend API
+// Client is only initialized if credentials are available (for legacy compatibility)
+const supabaseUrl = getSupabaseUrl();
+const supabaseAnonKey = getSupabaseAnonKey();
+if (supabaseUrl && supabaseAnonKey) {
   client = initializeClient();
 }
 
