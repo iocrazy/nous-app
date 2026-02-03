@@ -1,93 +1,95 @@
-import { getSupabaseClient } from '../supabaseClient';
+/**
+ * Notification Service - Backend API proxy for notification operations
+ *
+ * All notification operations go through the backend API instead of direct Supabase calls.
+ */
+
+import { getAuthHeaders } from './parserService';
 import { Notification } from '../types';
+
+const getApiUrl = (): string => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_URL || '';
+  }
+  return 'http://localhost:8080';
+};
 
 export interface NotificationWithRead extends Notification {
   read: boolean;
 }
 
+/**
+ * Fetch all notifications for the current user
+ */
 export const fetchNotifications = async (): Promise<NotificationWithRead[]> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
+  const apiUrl = getApiUrl();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const response = await fetch(`${apiUrl}/api/v1/notifications`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 
-  const { data: memberships } = await supabase
-    .from('team_members')
-    .select('team_id')
-    .eq('user_id', user.id);
-
-  const teamIds = memberships?.map(m => m.team_id) || [];
-
-  let query = supabase
-    .from('notifications')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(50);
-
-  if (teamIds.length > 0) {
-    query = query.or(`type.eq.system,team_id.in.(${teamIds.join(',')})`);
-  } else {
-    query = query.eq('type', 'system');
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  const { data: notifications, error } = await query;
-  if (error) throw error;
-  if (!notifications?.length) return [];
-
-  const notificationIds = notifications.map(n => n.id);
-  const { data: readStatus } = await supabase
-    .from('user_notifications')
-    .select('notification_id, read_at')
-    .eq('user_id', user.id)
-    .in('notification_id', notificationIds);
-
-  const readMap = new Map(readStatus?.map(r => [r.notification_id, !!r.read_at]) || []);
-
-  return notifications.map(n => ({
-    ...n,
-    read: readMap.get(n.id) || false,
-  }));
+  const data = await response.json();
+  return data.notifications || [];
 };
 
+/**
+ * Mark a notification as read
+ */
 export const markAsRead = async (notificationId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const response = await fetch(`${apiUrl}/api/v1/notifications/${notificationId}/read`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+  });
 
-  await supabase
-    .from('user_notifications')
-    .upsert({
-      user_id: user.id,
-      notification_id: notificationId,
-      read_at: new Date().toISOString(),
-    });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };
 
+/**
+ * Mark all notifications as read
+ */
 export const markAllAsRead = async (): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const response = await fetch(`${apiUrl}/api/v1/notifications/read-all`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+  });
 
-  const notifications = await fetchNotifications();
-  const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-
-  if (unreadIds.length === 0) return;
-
-  const upserts = unreadIds.map(id => ({
-    user_id: user.id,
-    notification_id: id,
-    read_at: new Date().toISOString(),
-  }));
-
-  await supabase.from('user_notifications').upsert(upserts);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };
 
+/**
+ * Get count of unread notifications
+ */
 export const getUnreadCount = async (): Promise<number> => {
-  const notifications = await fetchNotifications();
-  return notifications.filter(n => !n.read).length;
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/notifications/unread-count`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.unread_count || 0;
 };

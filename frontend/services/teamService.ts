@@ -1,165 +1,217 @@
-import { getSupabaseClient } from '../supabaseClient';
+/**
+ * Team Service - Backend API proxy for team operations
+ *
+ * All team operations go through the backend API instead of direct Supabase calls.
+ */
+
+import { getAuthHeaders } from './parserService';
 import { Team, TeamMember } from '../types';
 
+const getApiUrl = (): string => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_URL || '';
+  }
+  return 'http://localhost:8080';
+};
+
+/**
+ * Fetch all teams the current user is a member of
+ */
 export const fetchMyTeams = async (): Promise<Team[]> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
+  const apiUrl = getApiUrl();
 
-  const { data: memberships } = await supabase
-    .from('team_members')
-    .select('team_id');
+  const response = await fetch(`${apiUrl}/api/v1/teams`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 
-  if (!memberships?.length) return [];
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 
-  const teamIds = memberships.map(m => m.team_id);
-  const { data, error } = await supabase
-    .from('teams')
-    .select('*')
-    .in('id', teamIds)
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
-  return data || [];
+  const data = await response.json();
+  return data.teams || [];
 };
 
+/**
+ * Create a new team
+ */
 export const createTeam = async (name: string): Promise<Team> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError) {
-    console.error('Auth error:', authError);
-    throw new Error('Authentication failed: ' + authError.message);
-  }
-  if (!user) throw new Error('Not authenticated - please log in again');
+  const response = await fetch(`${apiUrl}/api/v1/teams`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
 
-  console.log('Creating team for user:', user.id);
-
-  const { data, error } = await supabase
-    .from('teams')
-    .insert({ name, owner_id: user.id })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Create team error:', error);
-    throw new Error(error.message || 'Failed to create team');
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  console.log('Team created:', data);
-  return data;
+  return response.json();
 };
 
+/**
+ * Join a team by invite code
+ */
 export const joinTeamByCode = async (inviteCode: string): Promise<Team> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const response = await fetch(`${apiUrl}/api/v1/teams/join`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ invite_code: inviteCode }),
+  });
 
-  const { data: team, error: teamError } = await supabase
-    .from('teams')
-    .select('*')
-    .eq('invite_code', inviteCode.toUpperCase())
-    .single();
-
-  if (teamError || !team) throw new Error('Invalid invite code');
-
-  const { error: memberError } = await supabase
-    .from('team_members')
-    .insert({ team_id: team.id, user_id: user.id, role: 'member' });
-
-  if (memberError) {
-    if (memberError.code === '23505') throw new Error('Already a member');
-    throw memberError;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    if (response.status === 409) {
+      throw new Error('Already a member');
+    }
+    if (response.status === 404) {
+      throw new Error('Invalid invite code');
+    }
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return team;
+  return response.json();
 };
 
+/**
+ * Leave a team (remove self from team)
+ */
 export const leaveTeam = async (teamId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  // Get current user ID from session
+  const authHeaders = getAuthHeaders();
+  const meResponse = await fetch(`${apiUrl}/api/v1/auth/me`, {
+    method: 'GET',
+    headers: authHeaders,
+  });
 
-  const { error } = await supabase
-    .from('team_members')
-    .delete()
-    .eq('team_id', teamId)
-    .eq('user_id', user.id);
+  if (!meResponse.ok) {
+    throw new Error('Not authenticated');
+  }
 
-  if (error) throw error;
+  const meData = await meResponse.json();
+  const userId = meData.user?.id;
+
+  if (!userId) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}/members/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };
 
+/**
+ * Delete a team (owner only)
+ */
 export const deleteTeam = async (teamId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { error } = await supabase
-    .from('teams')
-    .delete()
-    .eq('id', teamId);
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
 
-  if (error) throw error;
+  if (!response.ok && response.status !== 204) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };
 
+/**
+ * Fetch all members of a team
+ */
 export const fetchTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
+  const apiUrl = getApiUrl();
 
-  const { data, error } = await supabase
-    .from('team_members')
-    .select('*')
-    .eq('team_id', teamId)
-    .order('joined_at', { ascending: true });
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}/members`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 
-  if (error) throw error;
-  return data || [];
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.members || [];
 };
 
-export const updateTeam = async (teamId: string, updates: { name?: string; description?: string }): Promise<Team> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+/**
+ * Update a team
+ */
+export const updateTeam = async (
+  teamId: string,
+  updates: { name?: string; description?: string }
+): Promise<Team> => {
+  const apiUrl = getApiUrl();
 
-  const { data, error } = await supabase
-    .from('teams')
-    .update(updates)
-    .eq('id', teamId)
-    .select()
-    .single();
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(updates),
+  });
 
-  if (error) throw error;
-  return data;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
 };
 
+/**
+ * Update a team member's role
+ */
 export const updateMemberRole = async (
   teamId: string,
   userId: string,
   role: 'admin' | 'member'
 ): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { error } = await supabase
-    .from('team_members')
-    .update({ role })
-    .eq('team_id', teamId)
-    .eq('user_id', userId);
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}/members/${userId}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ role }),
+  });
 
-  if (error) throw error;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };
 
+/**
+ * Remove a member from a team
+ */
 export const removeMember = async (teamId: string, userId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
+  const apiUrl = getApiUrl();
 
-  const { error } = await supabase
-    .from('team_members')
-    .delete()
-    .eq('team_id', teamId)
-    .eq('user_id', userId);
+  const response = await fetch(`${apiUrl}/api/v1/teams/${teamId}/members/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
 
-  if (error) throw error;
+  if (!response.ok && response.status !== 204) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
 };

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
-import { getSupabaseClient } from '../supabaseClient';
+import { getAuthHeaders } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { TagSelector } from './TagSelector';
@@ -177,25 +177,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     setIsDownloading(true);
 
     try {
-      // 获取认证 token
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        console.error('No auth token available');
-        // 回退到静态文件下载
-        if (videoUrl) {
-          handleDownload(videoUrl, `${data.aweme_id}.mp4`);
-        }
-        return;
-      }
-
       // 使用 API 下载端点（带认证）
       const downloadUrl = getDownloadUrl(data.aweme_id);
       const response = await fetch(downloadUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) {
@@ -258,23 +243,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     setShowRetryMenu(false);
 
     try {
-      // 获取认证 token
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        console.error('No auth token available');
-        return;
-      }
-
       // 调用后端 fetch API 重新获取
       const apiUrl = import.meta.env?.VITE_API_URL || 'http://localhost:8080';
       const response = await fetch(`${apiUrl}/api/v1/douyin/fetch`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           url: data.video_original_url,
           video_bool: options.video ?? false,

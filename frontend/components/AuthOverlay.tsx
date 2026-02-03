@@ -4,7 +4,7 @@ import {
   X, Smartphone, Mail, Eye, EyeOff, AlertCircle, Play, Download, Shield, Zap
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
+import { authService } from '../services/authService';
 
 interface AuthOverlayProps {
   onLogin: (user: { email: string; id: string }) => void;
@@ -58,26 +58,17 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
   const handleLogin = async () => {
     setError(null);
     if (loginMode === 'email' && email && password) {
-      const supabase = getSupabaseClient();
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-          if (error) {
-            setError(error.message);
-            return;
-          }
-          if (data.user) {
-            onLogin({ email: data.user.email || email, id: data.user.id });
-          }
-        } catch (err: any) {
-          setError(err.message || 'Login failed');
+      try {
+        const result = await authService.signIn(email, password);
+        if (!result.success) {
+          setError(result.message || 'Login failed');
+          return;
         }
-      } else {
-        // Demo mode
-        onLogin({ email: email || 'demo@example.com', id: 'demo-user' });
+        if (result.user) {
+          onLogin({ email: result.user.email || email, id: result.user.id });
+        }
+      } catch (err: any) {
+        setError(err.message || 'Login failed');
       }
     } else {
       // Demo mode for phone login
@@ -92,27 +83,18 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
       return;
     }
 
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          setError(error.message);
-          return;
-        }
-        alert(t('auth.registerSuccess'));
-        setAuthMode('login');
-        setPassword('');
-        setConfirmPassword('');
-      } catch (err: any) {
-        setError(err.message || 'Registration failed');
+    try {
+      const result = await authService.signUp(email, password);
+      if (!result.success) {
+        setError(result.message || 'Registration failed');
+        return;
       }
-    } else {
-      // Demo mode - simulate successful registration
       alert(t('auth.registerSuccess'));
       setAuthMode('login');
       setPassword('');
       setConfirmPassword('');
+    } catch (err: any) {
+      setError(err.message || 'Registration failed');
     }
   };
 
@@ -396,13 +378,6 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         </div>
       </div>
 
-      {/* Config Warning */}
-      {!isSupabaseConfigured() && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-yellow-500/10 border border-yellow-500/20 text-yellow-200 px-4 py-2 rounded-full flex items-center gap-2 text-xs backdrop-blur-sm">
-          <AlertCircle size={14} />
-          <span>Demo Mode: Database not configured</span>
-        </div>
-      )}
     </div>
   );
 };

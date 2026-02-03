@@ -1,8 +1,11 @@
-import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
-import { DouyinBase } from '../types';
+/**
+ * Data Service - Backend API proxy for video data operations
+ *
+ * All video data operations go through the backend API instead of direct Supabase calls.
+ */
 
-const TABLE_NAME = 'douyin_videos';
-const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
+import { DouyinBase } from '../types';
+import { getAuthHeaders } from './parserService';
 
 // 获取 API URL - 空字符串表示使用相对路径（通过 Vite 代理）
 const getApiUrl = (): string => {
@@ -104,151 +107,125 @@ export const fetchLibraryPaginated = async (
   page: number = 0,
   pageSize: number = PAGE_SIZE
 ): Promise<PaginatedResult<DouyinBase>> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
-  }
+  const apiUrl = getApiUrl();
 
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error("User not authenticated");
+  const skip = page * pageSize;
+  const response = await fetch(
+    `${apiUrl}/api/v1/douyin/videos?skip=${skip}&limit=${pageSize}`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
     }
+  );
 
-    const from = page * pageSize;
-    const to = from + pageSize - 1;
-
-    // 使用 count: 'exact' 获取总数，从 videos_with_tags 视图读取以包含 tags 数组
-    const { data, error, count } = await supabase
-      .from(VIEW_NAME)
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .range(from, to);
-
-    if (error) throw error;
-
-    const totalCount = count || 0;
-    const hasMore = (page + 1) * pageSize < totalCount;
-
-    return {
-      data: (data as DouyinBase[]) || [],
-      totalCount,
-      hasMore,
-      page,
-    };
-  } catch (err: any) {
-    throw err;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
+
+  const data = await response.json();
+  const videos = data.videos || [];
+
+  // Get total count from statistics for accurate pagination
+  let totalCount = videos.length;
+  try {
+    const statsResponse = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (statsResponse.ok) {
+      const statsData = await statsResponse.json();
+      if (statsData.success && statsData.statistics) {
+        totalCount = statsData.statistics.total || videos.length;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to fetch statistics for total count');
+  }
+
+  const hasMore = (page + 1) * pageSize < totalCount;
+
+  return {
+    data: videos as DouyinBase[],
+    totalCount,
+    hasMore,
+    page,
+  };
 };
 
 /**
  * 获取视频库（兼容旧版本，加载前 LOCAL_CACHE_SIZE 条用于本地搜索）
  */
 export const fetchLibrary = async (): Promise<DouyinBase[]> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
-  }
+  const apiUrl = getApiUrl();
 
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error("User not authenticated");
+  const response = await fetch(
+    `${apiUrl}/api/v1/douyin/videos?skip=0&limit=${LOCAL_CACHE_SIZE}`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
     }
+  );
 
-    // 只加载最近 500 条用于本地缓存和快速搜索，从 videos_with_tags 视图读取以包含 tags 数组
-    const { data, error } = await supabase
-      .from(VIEW_NAME)
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(LOCAL_CACHE_SIZE);
-
-    if (error) throw error;
-    return (data as DouyinBase[]) || [];
-  } catch (err: any) {
-    throw err;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
+
+  const data = await response.json();
+  return (data.videos as DouyinBase[]) || [];
 };
 
 /**
  * 获取视频总数
  */
 export const fetchLibraryCount = async (): Promise<number> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
-
-    const { count, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-    return count || 0;
-  } catch (err: any) {
-    throw err;
-  }
+  const data = await response.json();
+  return data.statistics?.total || 0;
 };
 
 export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
-  }
-
-  // Clean the object to ensure compatibility with JSON columns if necessary
-  // and remove any UI-specific temporary flags if they exist
-  const payload = {
-    ...item,
-    // Ensure dates are ISO strings if they are Date objects
-    video_created_time: item.video_created_time || new Date().toISOString(),
-    // Default to empty arrays for arrays if undefined
-    tags: item.tags || [],
-    video_download_urls: item.video_download_urls || [],
-    image_download_urls: item.image_download_urls || [],
-  };
-
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .upsert(payload, { onConflict: 'aweme_id' })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as DouyinBase;
+  // Note: saveItem is typically handled by the /douyin/fetch endpoint
+  // which saves the video when parsing. This function is kept for compatibility.
+  // If you need to create a new video record without parsing, you would need
+  // to add a POST /videos endpoint on the backend.
+  console.warn('saveItem: Use parseShareLink from parserService instead');
+  return item;
 };
 
 export const updateItem = async (id: string, updates: Partial<DouyinBase>): Promise<DouyinBase> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/douyin/videos/${id}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      notes: updates.notes,
+      tags: updates.tags,
+      video_title: updates.video_title,
+      video_desc: updates.video_desc,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  // 获取当前用户 ID
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("User not authenticated");
-  }
-
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .update(updates)
-    .eq('aweme_id', id)
-    .eq('user_id', user.id)  // 只能更新自己的数据
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as DouyinBase;
+  const data = await response.json();
+  return data.video as DouyinBase;
 };
 
 export interface DeleteResult {
@@ -258,25 +235,13 @@ export interface DeleteResult {
 }
 
 export const deleteItem = async (id: string, deleteFiles: boolean = false): Promise<DeleteResult> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
-  }
+  const apiUrl = getApiUrl();
 
-  // 获取认证 token
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) {
-    throw new Error("User not authenticated");
-  }
-
-  // 调用后端 API 删除（支持删除本地文件）
   const response = await fetch(
-    `${getApiUrl()}/api/v1/douyin/videos/${id}?delete_files=${deleteFiles}`,
+    `${apiUrl}/api/v1/douyin/videos/${id}?delete_files=${deleteFiles}`,
     {
       method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      }
+      headers: getAuthHeaders(),
     }
   );
 
@@ -306,22 +271,11 @@ export interface UserLog {
  * 获取用户操作日志
  */
 export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    return [];
-  }
+  const apiUrl = getApiUrl();
 
   try {
-    // 获取认证 token
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-      return [];
-    }
-
-    const response = await fetch(`${getApiUrl()}/api/v1/douyin/logs?limit=${limit}`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      }
+    const response = await fetch(`${apiUrl}/api/v1/douyin/logs?limit=${limit}`, {
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -371,18 +325,9 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
 
   try {
     const apiUrl = getApiUrl();
-    const token = localStorage.getItem('supabase_access_token');
-    const apiKey = localStorage.getItem('douyin_api_key');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (apiKey) headers['X-API-Key'] = apiKey;
-
     const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
       method: 'GET',
-      headers,
+      headers: getAuthHeaders(),
     });
 
     if (response.ok) {
@@ -515,21 +460,11 @@ export interface UserSettingsData {
  * 获取用户设置
  */
 export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    return null;
-  }
+  const apiUrl = getApiUrl();
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-      return null;
-    }
-
-    const response = await fetch(`${getApiUrl()}/api/v1/settings`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      }
+    const response = await fetch(`${apiUrl}/api/v1/settings`, {
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -551,22 +486,11 @@ export const saveUserSettings = async (settings: {
   download_path?: string;
   settings_json?: Record<string, unknown>;
 }): Promise<UserSettingsData | null> => {
-  const supabase = getSupabaseClient();
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error("Supabase is not configured");
-  }
+  const apiUrl = getApiUrl();
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) {
-    throw new Error("User not authenticated");
-  }
-
-  const response = await fetch(`${getApiUrl()}/api/v1/settings`, {
+  const response = await fetch(`${apiUrl}/api/v1/settings`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json'
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(settings)
   });
 

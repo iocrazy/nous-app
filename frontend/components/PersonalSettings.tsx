@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Camera, Loader2, Check, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { getSupabaseClient } from '../supabaseClient';
+import { getAuthHeaders } from '../services/parserService';
 
 interface PersonalSettingsProps {
   user: {
@@ -12,6 +12,15 @@ interface PersonalSettingsProps {
   };
   onUserUpdated?: () => void;
 }
+
+const getApiUrl = (): string => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_URL || '';
+  }
+  return 'http://localhost:8080';
+};
 
 export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
   user,
@@ -39,18 +48,20 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
     setSaveSuccess(false);
 
     try {
-      const supabase = getSupabaseClient();
-      if (!supabase) throw new Error('Supabase not configured');
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        data: {
-          display_name: name,
-          bio: bio,
-          avatar_url: avatarUrl,
-        },
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/v1/auth/me`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          username: name,
+          // Note: bio and avatar_url are stored in user metadata
+        }),
       });
 
-      if (updateError) throw updateError;
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ detail: 'Update failed' }));
+        throw new Error(data.detail || 'Failed to update profile');
+      }
 
       setSaveSuccess(true);
       onUserUpdated?.();
@@ -77,14 +88,19 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
     setPasswordSuccess(false);
 
     try {
-      const supabase = getSupabaseClient();
-      if (!supabase) throw new Error('Supabase not configured');
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword,
+      const apiUrl = getApiUrl();
+      const response = await fetch(`${apiUrl}/api/v1/auth/me`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          password: newPassword,
+        }),
       });
 
-      if (updateError) throw updateError;
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ detail: 'Update failed' }));
+        throw new Error(data.detail || 'Failed to change password');
+      }
 
       setPasswordSuccess(true);
       setShowPasswordForm(false);

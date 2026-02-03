@@ -14,8 +14,9 @@ import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } fr
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
+import { signOut as authSignOut, getCurrentUser } from './services/authService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
-import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
+import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection, fetchCollectionVideoIds, fetchMultipleCollectionsVideoIds } from './services/collectionService';
 import { addTagsToVideo } from './services/tagsService';
 import { MOCK_LIBRARY } from './constants';
 import { MediaCard } from './components/MediaCard';
@@ -418,38 +419,38 @@ export default function App() {
     if (!isConfigLoaded) return;
 
     const checkSession = async () => {
-      const supabase = getSupabaseClient();
-      if (isSupabaseConfigured() && supabase) {
-        // 更新 userSettings 中的 Supabase 凭据（从当前配置获取）
+      // 更新 userSettings 中的 Supabase 凭据（从当前配置获取）
+      if (isSupabaseConfigured()) {
         const credentials = getSupabaseCredentials();
         setUserSettings(prev => ({
           ...prev,
           supabaseUrl: credentials.url || prev.supabaseUrl,
           supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
         }));
+      }
 
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUserProfile(prev => ({
-            ...prev,
-            name: session.user.email?.split('@')[0] || 'User',
-            email: session.user.email || '',
-          }));
-          setCurrentUserId(session.user.id);
-          setIsAuthenticated(true);
+      // Check for existing session via backend API
+      const authResponse = await getCurrentUser();
+      if (authResponse.success && authResponse.user) {
+        setUserProfile(prev => ({
+          ...prev,
+          name: authResponse.user!.username || authResponse.user!.email?.split('@')[0] || 'User',
+          email: authResponse.user!.email || '',
+        }));
+        setCurrentUserId(authResponse.user.id);
+        setIsAuthenticated(true);
 
-          // Load user settings from Supabase
-          try {
-            const settings = await fetchUserSettings();
-            if (settings) {
-              setUserSettings(prev => ({
-                ...prev,
-                downloadPath: settings.download_path || prev.downloadPath,
-              }));
-            }
-          } catch (err) {
-            console.error('Failed to load user settings:', err);
+        // Load user settings from backend
+        try {
+          const settings = await fetchUserSettings();
+          if (settings) {
+            setUserSettings(prev => ({
+              ...prev,
+              downloadPath: settings.download_path || prev.downloadPath,
+            }));
           }
+        } catch (err) {
+          console.error('Failed to load user settings:', err);
         }
       }
     };
@@ -513,28 +514,12 @@ export default function App() {
   // Function to load collection video IDs
   const loadCollectionVideos = async (collectionId: string | null) => {
     if (collectionId) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        const { data } = await supabase
-          .from('video_collections')
-          .select('video_id')
-          .eq('collection_id', parseInt(collectionId));
-
-        if (data) {
-          // Get aweme_ids from video_ids
-          const videoIds = data.map(v => v.video_id);
-          if (videoIds.length > 0) {
-            const { data: videos } = await supabase
-              .from('douyin_videos')
-              .select('aweme_id')
-              .in('id', videoIds);
-            setCollectionVideoIds(videos?.map(v => v.aweme_id) || []);
-          } else {
-            setCollectionVideoIds([]);
-          }
-        } else {
-          setCollectionVideoIds([]);
-        }
+      try {
+        const awemeIds = await fetchCollectionVideoIds(collectionId);
+        setCollectionVideoIds(awemeIds);
+      } catch (error) {
+        console.error('Failed to load collection videos:', error);
+        setCollectionVideoIds([]);
       }
     } else {
       setCollectionVideoIds([]);
@@ -550,32 +535,20 @@ export default function App() {
   useEffect(() => {
     const loadTeamLibraryVideos = async () => {
       if (isTeamLibraryActive && !activeCollectionId) {
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          // Get all team collections (collections with team_id)
-          const teamCollections = collections.filter(c => c.team_id);
-          if (teamCollections.length === 0) {
-            setTeamLibraryVideoIds([]);
-            return;
-          }
+        // Get all team collections (collections with team_id)
+        const teamCollections = collections.filter(c => c.team_id);
+        if (teamCollections.length === 0) {
+          setTeamLibraryVideoIds([]);
+          return;
+        }
 
-          const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-          const { data } = await supabase
-            .from('video_collections')
-            .select('video_id')
-            .in('collection_id', teamCollectionIds);
-
-          if (data && data.length > 0) {
-            const videoIds = [...new Set(data.map(v => v.video_id))];
-            const { data: videos } = await supabase
-              .from('douyin_videos')
-              .select('aweme_id')
-              .in('id', videoIds);
-
-            setTeamLibraryVideoIds(videos?.map(v => v.aweme_id) || []);
-          } else {
-            setTeamLibraryVideoIds([]);
-          }
+        try {
+          const teamCollectionIds = teamCollections.map(c => c.id);
+          const awemeIds = await fetchMultipleCollectionsVideoIds(teamCollectionIds);
+          setTeamLibraryVideoIds(awemeIds);
+        } catch (error) {
+          console.error('Failed to load team library videos:', error);
+          setTeamLibraryVideoIds([]);
         }
       } else if (!isTeamLibraryActive) {
         setTeamLibraryVideoIds([]);
@@ -586,8 +559,7 @@ export default function App() {
 
   // Function to load all shared video IDs for badge display
   const loadAllSharedVideos = async (collectionsToCheck: Collection[]) => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !isAuthenticated) {
+    if (!isAuthenticated) {
       setSharedVideoIds([]);
       return;
     }
@@ -599,21 +571,12 @@ export default function App() {
       return;
     }
 
-    const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-    const { data } = await supabase
-      .from('video_collections')
-      .select('video_id')
-      .in('collection_id', teamCollectionIds);
-
-    if (data && data.length > 0) {
-      const videoIds = [...new Set(data.map(v => v.video_id))];
-      const { data: videos } = await supabase
-        .from('douyin_videos')
-        .select('aweme_id')
-        .in('id', videoIds);
-
-      setSharedVideoIds(videos?.map(v => v.aweme_id) || []);
-    } else {
+    try {
+      const teamCollectionIds = teamCollections.map(c => c.id);
+      const awemeIds = await fetchMultipleCollectionsVideoIds(teamCollectionIds);
+      setSharedVideoIds(awemeIds);
+    } catch (error) {
+      console.error('Failed to load shared videos:', error);
       setSharedVideoIds([]);
     }
   };
@@ -626,7 +589,7 @@ export default function App() {
   // Supabase Realtime 订阅 - 自动同步数据库变化
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
+    if (!isAuthenticated || !isSupabaseConfigured() || !supabase || !currentUserId) {
       return;
     }
 
@@ -639,18 +602,14 @@ export default function App() {
           schema: 'public',
           table: 'douyin_videos',
         },
-        async (payload) => {
+        (payload) => {
           console.log('Realtime update:', payload.eventType, payload);
-
-          // 获取当前用户 ID
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
 
           const newRecord = payload.new as DouyinBase;
           const oldRecord = payload.old as DouyinBase;
 
           // 只处理当前用户的数据
-          if (payload.eventType === 'INSERT' && newRecord.user_id === user.id) {
+          if (payload.eventType === 'INSERT' && newRecord.user_id === currentUserId) {
             setLibrary(prev => {
               // 避免重复添加
               if (prev.find(item => item.aweme_id === newRecord.aweme_id)) {
@@ -658,7 +617,7 @@ export default function App() {
               }
               return [newRecord, ...prev];
             });
-          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === user.id) {
+          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === currentUserId) {
             setLibrary(prev =>
               prev.map(item =>
                 item.aweme_id === newRecord.aweme_id ? newRecord : item
@@ -672,7 +631,7 @@ export default function App() {
             setCurrentResult(prev =>
               prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
             );
-          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === user.id) {
+          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === currentUserId) {
             setLibrary(prev =>
               prev.filter(item => item.aweme_id !== oldRecord.aweme_id)
             );
@@ -688,7 +647,7 @@ export default function App() {
       console.log('Unsubscribing from realtime channel');
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, currentUserId]);
 
   // Supabase Realtime for collection_videos - 共享集合实时同步
   useEffect(() => {
@@ -826,10 +785,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      await supabase.auth.signOut();
-    }
+    // Sign out via backend API
+    await authSignOut();
     setIsAuthenticated(false);
     setIsProfileModalOpen(false);
     setIsUserDropdownOpen(false);

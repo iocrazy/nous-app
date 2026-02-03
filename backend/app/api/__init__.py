@@ -22,6 +22,10 @@ from app.api.cleanup_router import router as cleanup_router
 from app.api.logs_router import router as logs_router
 from app.api.system_router import router as system_router
 from app.api.tasks_router import router as tasks_management_router
+from app.api.teams_router import router as teams_router
+from app.api.invites_router import router as invites_router
+from app.api.video_collections_router import router as video_collections_router
+from app.api.notifications_router import router as notifications_router
 
 api_router = APIRouter()
 
@@ -93,4 +97,24 @@ api_router.include_router(
 api_router.include_router(
     router=tasks_management_router,
     tags=["Tasks"]
+)
+
+api_router.include_router(
+    router=teams_router,
+    tags=["Teams"]
+)
+
+api_router.include_router(
+    router=invites_router,
+    tags=["Invites"]
+)
+
+api_router.include_router(
+    router=video_collections_router,
+    tags=["Video Collections"]
+)
+
+api_router.include_router(
+    router=notifications_router,
+    tags=["Notifications"]
 )

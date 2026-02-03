@@ -1,6 +1,6 @@
 [project]
 name = "douyin-analysis-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "抖音视频分析和下载工具后端 - 基于 FastAPI + Supabase"
 authors = [
     {name = "heygo", email = "8512939@qq.com"}

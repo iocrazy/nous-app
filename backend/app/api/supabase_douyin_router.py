@@ -71,6 +71,14 @@ class BatchFetchRequest(BaseModel):
     use_celery: bool = False  # 是否使用 Celery 异步任务
 
 
+class VideoUpdateRequest(BaseModel):
+    """视频更新请求"""
+    notes: Optional[str] = None
+    tags: Optional[list[str]] = None
+    video_title: Optional[str] = None
+    video_desc: Optional[str] = None
+
+
 # ============================================
 # 路由端点
 # ============================================
@@ -657,6 +665,64 @@ async def delete_video(
     except Exception as e:
         logger.error(f"删除视频失败: {e}")
         raise HTTPException(status_code=500, detail="删除视频失败")
+
+
+@router.put("/videos/{aweme_id}", tags=TAGS_VIDEOS)
+async def update_video(
+    aweme_id: str,
+    request: VideoUpdateRequest,
+    auth: AuthDep
+):
+    """
+    更新视频信息
+
+    更新视频的笔记、标签等可编辑字段。
+
+    - **aweme_id**: 视频唯一标识
+    - **notes**: 用户笔记
+    - **tags**: 标签列表
+    - **video_title**: 视频标题
+    - **video_desc**: 视频描述
+
+    需要认证：Bearer Token 或 API Key（需要 `douyin:videos:write` 权限）
+    """
+    try:
+        repo = SupabaseDouyinRepository()
+
+        # 验证视频存在且属于当前用户
+        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="视频不存在")
+
+        # 构建更新数据
+        update_data = {}
+        if request.notes is not None:
+            update_data["notes"] = request.notes
+        if request.tags is not None:
+            update_data["tags"] = request.tags
+        if request.video_title is not None:
+            update_data["video_title"] = request.video_title
+        if request.video_desc is not None:
+            update_data["video_desc"] = request.video_desc
+
+        if not update_data:
+            raise HTTPException(status_code=400, detail="没有提供要更新的数据")
+
+        # 执行更新
+        updated = await repo.update(aweme_id, update_data, user_id=auth.user_id)
+
+        if not updated:
+            raise HTTPException(status_code=500, detail="更新失败")
+
+        # 获取更新后的数据
+        updated_video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+
+        return {"success": True, "video": updated_video}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新视频失败: {e}")
+        raise HTTPException(status_code=500, detail="更新视频失败")
 
 
 @router.post("/videos/search", tags=TAGS_VIDEOS)
