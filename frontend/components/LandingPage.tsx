@@ -1,9 +1,10 @@
 
 import React from 'react';
-import { 
-  Sparkles, Download, BarChart3, Shield, Zap, Layers, 
-  ArrowRight, PlayCircle, CheckCircle2 
+import {
+  Sparkles, Download, BarChart3, Shield, Zap, Layers,
+  ArrowRight, PlayCircle, CheckCircle2
 } from 'lucide-react';
+import packageJson from '../package.json';
 
 interface LandingPageProps {
   onLoginClick: () => void;
@@ -126,8 +127,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
       {/* Footer */}
       <footer className="py-12 border-t border-white/5 bg-black">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-zinc-500 text-sm">
-            © 2026 MediaHub. All rights reserved.
+          <div className="text-zinc-500 text-sm flex items-center gap-3">
+            <span>© 2026 MediaHub. All rights reserved.</span>
+            <span className="px-2 py-0.5 bg-zinc-800 rounded text-xs font-mono text-zinc-400">
+              v{packageJson.version}
+            </span>
           </div>
           <div className="flex gap-6 text-zinc-500 text-sm">
             <a href="#" className="hover:text-zinc-300">Privacy</a>
