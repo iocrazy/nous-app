@@ -255,8 +255,8 @@ backend/.celery/
 # Toolkit (separate project)
 toolkit/
 
-# Local scripts
-start-dev.sh
+# Local development scripts (contains machine-specific paths)
+# scripts/start-dev.sh
 
 # SQLite databases
 *.sqlite3
