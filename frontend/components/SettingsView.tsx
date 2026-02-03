@@ -17,12 +17,28 @@ interface SettingsViewProps {
 }
 
 const API_SCOPES = [
+  // Video APIs
   '/api/v1/douyin/fetch',
   '/api/v1/douyin/fetch/batch',
   '/api/v1/douyin/videos',
   '/api/v1/douyin/videos/{id}',
   '/api/v1/douyin/statistics',
   '/api/v1/douyin/retry/{id}',
+  // Tags APIs
+  '/api/v1/tags',
+  '/api/v1/tags/{id}',
+  // Collections APIs
+  '/api/v1/collections',
+  '/api/v1/collections/{id}',
+  // Search API
+  '/api/v1/search',
+  // Download Tasks APIs
+  '/api/v1/download-tasks',
+  '/api/v1/download-tasks/stats',
+  // System APIs
+  '/api/v1/system/status',
+  '/api/v1/logs',
+  // Auth APIs
   '/api/v1/auth/*',
 ];
 
@@ -692,7 +708,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* Create/Edit Key Modal */}
       {isKeyModalOpen && (
-         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-20 p-4 overflow-y-auto">
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
                <div className="px-6 py-5 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
                   <h3 className="text-lg font-bold text-white">{editingKeyId ? 'Edit API Key' : 'Create New API Key'}</h3>
