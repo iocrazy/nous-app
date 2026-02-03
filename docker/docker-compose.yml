@@ -2,6 +2,7 @@ version: '3.8'
 
 # MediaHub Docker Compose Configuration
 # Usage: cd docker && docker-compose up -d
+# Image: imheygo/mediahub:latest
 
 services:
   # Redis - Message queue and result storage
