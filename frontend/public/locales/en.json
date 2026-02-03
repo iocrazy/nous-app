@@ -125,7 +125,25 @@
     "neonBorder": "Neon Border",
     "neonBorderDesc": "Glowing border animation",
     "waveLiquid": "Wave Liquid",
-    "waveLiquidDesc": "Rising wave animation"
+    "waveLiquidDesc": "Rising wave animation",
+    "tags": {
+      "title": "Tags Management",
+      "subtitle": "Organize your content with custom tags",
+      "searchPlaceholder": "Search tags...",
+      "createNew": "Create Tag",
+      "addPreset": "Add Preset",
+      "addPresetHint": "Add 19 commonly used tags at once",
+      "editTag": "Edit Tag",
+      "clickToEdit": "Click to edit",
+      "tagName": "Tag Name",
+      "tagNamePlaceholder": "Enter tag name",
+      "tagColor": "Tag Color",
+      "preview": "Preview",
+      "videos": "videos",
+      "system": "System",
+      "empty": "No tags yet. Create your first tag!",
+      "noResults": "No matching tags found"
+    }
   },
   "download": {
     "downloading": "Downloading",

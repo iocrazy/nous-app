@@ -209,7 +209,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -1804,6 +1804,19 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <ListTodo size={14} />
                     <span>Tasks</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('tags'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'tags'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Tag size={14} />
+                    <span>Tags</span>
                   </div>
                 </button>
               </div>

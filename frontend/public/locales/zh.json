@@ -125,7 +125,25 @@
     "neonBorder": "霓虹边框",
     "neonBorderDesc": "发光边框动画",
     "waveLiquid": "波浪液体",
-    "waveLiquidDesc": "上升波浪动画"
+    "waveLiquidDesc": "上升波浪动画",
+    "tags": {
+      "title": "标签管理",
+      "subtitle": "使用自定义标签组织您的内容",
+      "searchPlaceholder": "搜索标签...",
+      "createNew": "创建标签",
+      "addPreset": "添加预设",
+      "addPresetHint": "一次性添加 19 个常用标签",
+      "editTag": "编辑标签",
+      "clickToEdit": "点击编辑",
+      "tagName": "标签名称",
+      "tagNamePlaceholder": "输入标签名称",
+      "tagColor": "标签颜色",
+      "preview": "预览",
+      "videos": "个视频",
+      "system": "系统",
+      "empty": "暂无标签，创建第一个标签吧！",
+      "noResults": "未找到匹配的标签"
+    }
   },
   "download": {
     "downloading": "下载中",

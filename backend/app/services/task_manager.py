@@ -30,7 +30,7 @@ class TaskManager:
     STATS_KEY = "task:stats"
     TASK_LIST_KEY = "task:list"
     MAX_RETRIES = 3
-    TASK_TTL = 86400  # 24 hours
+    TASK_TTL = 604800  # 7 days
 
     def __init__(self, redis_client):
         self.redis = redis_client

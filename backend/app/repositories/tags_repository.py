@@ -66,21 +66,24 @@ class TagsRepository:
         """Get a tag by name (checks system tags first, then user tags)."""
         table = await self._get_table()
 
-        # Check system tags
-        result = await table.select("*").eq("name", name).eq("type", "system").maybe_single().execute()
-        if result.data:
-            return result.data
+        try:
+            # Check system tags
+            result = await table.select("*").eq("name", name).eq("type", "system").limit(1).execute()
+            if result and result.data and len(result.data) > 0:
+                return result.data[0]
 
-        # Check time tags
-        result = await table.select("*").eq("name", name).eq("type", "time").maybe_single().execute()
-        if result.data:
-            return result.data
+            # Check time tags
+            result = await table.select("*").eq("name", name).eq("type", "time").limit(1).execute()
+            if result and result.data and len(result.data) > 0:
+                return result.data[0]
 
-        # Check user tags
-        if user_id:
-            result = await table.select("*").eq("name", name).eq("user_id", user_id).maybe_single().execute()
-            if result.data:
-                return result.data
+            # Check user tags
+            if user_id:
+                result = await table.select("*").eq("name", name).eq("user_id", user_id).limit(1).execute()
+                if result and result.data and len(result.data) > 0:
+                    return result.data[0]
+        except Exception as e:
+            logger.error(f"Error in get_tag_by_name: {e}")
 
         return None
 
