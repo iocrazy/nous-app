@@ -35,8 +35,14 @@ RUN rm -rf .venv
 # Install Python dependencies
 RUN uv sync
 
-# Create downloads directory
-RUN mkdir -p /app/downloads
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Create downloads directory and set permissions
+RUN mkdir -p /app/downloads && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8080

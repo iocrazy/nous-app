@@ -21,6 +21,10 @@ concurrency:
   group: deploy-backend
   cancel-in-progress: true
 
+# Permissions for creating releases
+permissions:
+  contents: write
+
 env:
   IMAGE_NAME: imheygo/mediahub
 
