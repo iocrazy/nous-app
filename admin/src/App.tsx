@@ -12,6 +12,7 @@ import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { UserList } from './pages/users'
 import { TeamList } from './pages/teams'
+import { AuditLogList } from './pages/audit-logs'
 
 function App() {
   return (
@@ -50,7 +51,7 @@ function App() {
             <Route path="/videos" element={<PlaceholderPage title="Videos" />} />
             <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
             <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
-            <Route path="/audit-logs" element={<PlaceholderPage title="Audit Logs" />} />
+            <Route path="/audit-logs" element={<AuditLogList />} />
             <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
           </Route>
