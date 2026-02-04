@@ -76,7 +76,7 @@ function PlaceholderPage({ title }: { title: string }) {
       <h1 className="text-2xl font-bold text-gray-900 mb-4">{title}</h1>
       <div className="bg-white rounded-lg shadow p-6">
         <p className="text-gray-500">
-          This page will be implemented in upcoming tasks.
+          This page will be implemented in a future phase.
         </p>
       </div>
     </div>
