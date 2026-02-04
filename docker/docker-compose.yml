@@ -11,7 +11,7 @@ services:
     container_name: mediahub-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -92,7 +92,7 @@ services:
     container_name: mediahub-flower
     restart: unless-stopped
     ports:
-      - "5555:5555"
+      - "${FLOWER_PORT:-5555}:5555"
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - FLOWER_PORT=5555
