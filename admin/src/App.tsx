@@ -10,6 +10,7 @@ import { dataProvider } from './providers/dataProvider'
 import { Layout } from './components/Layout'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
+import { UserList } from './pages/users'
 
 function App() {
   return (
@@ -43,7 +44,7 @@ function App() {
             }
           >
             <Route index element={<Dashboard />} />
-            <Route path="/users" element={<PlaceholderPage title="Users" />} />
+            <Route path="/users" element={<UserList />} />
             <Route path="/teams" element={<PlaceholderPage title="Teams" />} />
             <Route path="/videos" element={<PlaceholderPage title="Videos" />} />
             <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
