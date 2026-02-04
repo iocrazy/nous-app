@@ -162,21 +162,16 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 # 挂载静态文件服务 - 用于访问下载的视频和封面
-# 优先从 frontend_config.yml 读取路径
-from app.core.utils import Utils
+# Docker 容器内固定使用 /app/downloads（通过 volume 挂载宿主机目录）
 try:
-    media_base_path = Utils.get_download_base_path()
-    media_path = Path(media_base_path)
+    media_path = Path(settings.DOWNLOAD_DIR)
     if media_path.exists():
         app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
         logger.info(f"静态文件服务已挂载: /media -> {media_path}")
     else:
-        # 尝试创建目录
         media_path.mkdir(parents=True, exist_ok=True)
         app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
         logger.info(f"已创建媒体目录并挂载: /media -> {media_path}")
-except ValueError as e:
-    logger.warning(f"未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。")
 except Exception as e:
     logger.warning(f"静态文件服务挂载失败: {e}")
 
