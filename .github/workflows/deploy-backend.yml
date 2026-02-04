@@ -100,7 +100,9 @@ jobs:
             cd ${{ secrets.NAS_PROJECT_PATH }}
 
             echo "📥 Pulling latest code..."
+            git stash
             git pull origin master
+            git stash pop || true
 
             echo "🐳 Pulling Docker image from Docker Hub..."
             sudo /usr/local/bin/docker pull imheygo/mediahub:latest
