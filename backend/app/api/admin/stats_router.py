@@ -32,7 +32,7 @@ async def get_overview_stats(auth: AdminAuthDep):
     total_teams = teams_result.count or 0
 
     # Total downloads (completed)
-    downloads_result = await supabase.table("douyin_videos").select("id", count="exact").eq("download_status", "completed").execute()
+    downloads_result = await supabase.table("douyin_videos").select("id", count="exact").eq("video_download_status", "completed").execute()
     total_downloads = downloads_result.count or 0
 
     # New users today
@@ -97,12 +97,12 @@ async def get_video_stats(
     supabase = await get_async_supabase_admin()
     start_date = datetime.utcnow() - timedelta(days=days)
 
-    result = await supabase.table("douyin_videos").select("created_at, download_status").gte("created_at", start_date.isoformat()).execute()
+    result = await supabase.table("douyin_videos").select("created_at, video_download_status").gte("created_at", start_date.isoformat()).execute()
 
     daily_data: dict[str, dict[str, int]] = {}
     for video in result.data:
         day = video["created_at"][:10]
-        status = video["download_status"]
+        status = video["video_download_status"]
 
         if day not in daily_data:
             daily_data[day] = {"total": 0, "completed": 0, "failed": 0}
@@ -130,7 +130,7 @@ async def get_storage_stats(auth: AdminAuthDep):
     """Get storage usage statistics."""
     supabase = await get_async_supabase_admin()
 
-    result = await supabase.table("douyin_videos").select("user_id, download_status").eq("download_status", "completed").execute()
+    result = await supabase.table("douyin_videos").select("user_id, video_download_status").eq("video_download_status", "completed").execute()
 
     user_video_counts: dict[str, int] = {}
     for video in result.data:

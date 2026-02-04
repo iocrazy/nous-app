@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 
 from app.core.deps import AuthContext, get_auth
-from app.db import get_async_supabase
+from app.db import get_async_supabase_admin
 
 
 async def get_admin_auth(
@@ -15,7 +15,7 @@ async def get_admin_auth(
 
     Raises HTTPException 403 if user is not an admin.
     """
-    supabase = await get_async_supabase()
+    supabase = await get_async_supabase_admin()
 
     # Get user profile to check role
     result = await supabase.table("user_profiles").select("role").eq("id", auth.user_id).single().execute()
