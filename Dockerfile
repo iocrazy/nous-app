@@ -35,11 +35,14 @@ RUN rm -rf .venv
 # Install Python dependencies
 RUN uv sync
 
-# Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Create non-root user for security (with home directory for uv cache)
+RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
 
 # Create downloads directory and set permissions
-RUN mkdir -p /app/downloads && chown -R appuser:appuser /app
+RUN mkdir -p /app/downloads && chown -R appuser:appuser /app /home/appuser
+
+# Set uv cache directory
+ENV UV_CACHE_DIR=/home/appuser/.cache/uv
 
 # Switch to non-root user
 USER appuser
