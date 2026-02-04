@@ -383,21 +383,14 @@ export default function App() {
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
 
   // Load frontend config from backend YAML on mount
+  // Note: In direct Supabase mode, we use .env.production config, not backend config
   useEffect(() => {
     const loadFrontendConfig = async () => {
       try {
         const config = await fetchFrontendConfig();
         if (config) {
-          // 如果后端YAML配置了Supabase凭据，使用它们重新初始化客户端
-          if (config.supabase_url && config.supabase_anon_key) {
-            reinitializeSupabaseClient(config.supabase_url, config.supabase_anon_key);
-            setUserSettings(prev => ({
-              ...prev,
-              supabaseUrl: config.supabase_url || '',
-              supabaseAnonKey: config.supabase_anon_key || '',
-              downloadPath: config.default_download_path || prev.downloadPath,
-            }));
-          } else if (config.default_download_path) {
+          // Only load download path from backend, Supabase config comes from .env.production
+          if (config.default_download_path) {
             setUserSettings(prev => ({
               ...prev,
               downloadPath: config.default_download_path || prev.downloadPath,
