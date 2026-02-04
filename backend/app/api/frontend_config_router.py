@@ -111,14 +111,18 @@ async def get_frontend_config():
     获取前端配置
 
     返回前端应用的配置信息。此端点不需要认证。
-    如果 YAML 文件中的值为空，前端应使用 .env 中的默认值。
+    优先级: frontend_config.yml > .env 环境变量
     """
     try:
         config = load_config()
 
+        # 优先使用 YAML 配置，如果为空则使用 .env 中的 settings
+        supabase_url = config.get("supabase", {}).get("url") or settings.SUPABASE_URL or None
+        supabase_anon_key = config.get("supabase", {}).get("anon_key") or settings.SUPABASE_ANON_KEY or None
+
         return FrontendConfig(
-            supabase_url=config.get("supabase", {}).get("url") or None,
-            supabase_anon_key=config.get("supabase", {}).get("anon_key") or None,
+            supabase_url=supabase_url,
+            supabase_anon_key=supabase_anon_key,
             default_download_path=config.get("default_download_path") or get_default_download_path()
         )
     except Exception as e:
