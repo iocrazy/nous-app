@@ -27,6 +27,7 @@ from app.api.invites_router import router as invites_router
 from app.api.video_collections_router import router as video_collections_router
 from app.api.notifications_router import router as notifications_router
 from app.api.realtime_router import router as realtime_router
+from app.api.admin import admin_router
 
 api_router = APIRouter()
 
@@ -123,4 +124,9 @@ api_router.include_router(
 api_router.include_router(
     router=realtime_router,
     tags=["Realtime"]
+)
+
+api_router.include_router(
+    router=admin_router,
+    tags=["Admin"]
 )
