@@ -35,14 +35,14 @@ RUN rm -rf .venv
 # Install Python dependencies
 RUN uv sync
 
-# Create non-root user for security (with home directory for uv cache)
-RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Create downloads directory and set permissions
-RUN mkdir -p /app/downloads && chown -R appuser:appuser /app /home/appuser
+# Create directories and set permissions
+RUN mkdir -p /app/downloads /app/.cache/uv && chown -R appuser:appuser /app
 
-# Set uv cache directory
-ENV UV_CACHE_DIR=/home/appuser/.cache/uv
+# Set uv cache directory (can be overridden by docker-compose volume mount)
+ENV UV_CACHE_DIR=/app/.cache/uv
 
 # Switch to non-root user
 USER appuser

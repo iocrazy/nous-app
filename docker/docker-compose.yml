@@ -32,10 +32,12 @@ services:
       - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
+      - ./cache/uv:/app/.cache/uv
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UV_CACHE_DIR=/app/.cache/uv
     depends_on:
       redis:
         condition: service_healthy
@@ -56,10 +58,12 @@ services:
       - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
+      - ./cache/uv:/app/.cache/uv
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UV_CACHE_DIR=/app/.cache/uv
     depends_on:
       redis:
         condition: service_healthy
@@ -72,10 +76,12 @@ services:
     command: uv run celery -A app.celery_app beat -l info
     volumes:
       - ./.env:/app/.env
+      - ./cache/uv:/app/.cache/uv
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UV_CACHE_DIR=/app/.cache/uv
     depends_on:
       redis:
         condition: service_healthy
