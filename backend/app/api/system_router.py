@@ -179,7 +179,7 @@ async def _get_queue_status() -> QueueStatus:
 def _get_storage_status() -> StorageStatus:
     """获取存储状态"""
     try:
-        storage_path = settings.NAS_BASE_PATH
+        storage_path = settings.DOWNLOAD_DIR
 
         if not os.path.exists(storage_path):
             return StorageStatus(

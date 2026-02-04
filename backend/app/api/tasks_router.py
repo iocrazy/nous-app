@@ -137,8 +137,8 @@ async def get_task_stats(auth: AuthDep):
         import shutil
         from app.core.config import settings
 
-        if settings.NAS_BASE_PATH:
-            usage = shutil.disk_usage(settings.NAS_BASE_PATH)
+        if settings.DOWNLOAD_DIR:
+            usage = shutil.disk_usage(settings.DOWNLOAD_DIR)
             free_gb = usage.free / (1024 ** 3)
             if free_gb >= 1024:
                 storage_free = f"{free_gb / 1024:.1f} TB"

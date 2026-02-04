@@ -43,4 +43,4 @@ APP_PORT: 9999  # Docker 容器内部固定端口
 # 注意：.env 中的值会覆盖此配置
 # Mac 本地测试（SMB 挂载）: /Volumes/sources/MediaHub.library
 # Docker 部署（NAS）: /volume2/sources/MediaHub.library
-NAS_BASE_PATH: /app/downloads
+# DOWNLOAD_DIR 是容器内部路径，固定为 /app/downloads，无需配置
