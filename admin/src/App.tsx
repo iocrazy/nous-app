@@ -1,24 +1,33 @@
-import { Refine } from "@refinedev/core";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
+import { Refine, Authenticated } from '@refinedev/core'
 import routerBindings, {
-  UnsavedChangesNotifier,
-  DocumentTitleHandler,
-} from "@refinedev/react-router-v6";
-import dataProvider from "@refinedev/simple-rest";
+  NavigateToResource,
+  CatchAllNavigate,
+} from '@refinedev/react-router-v6'
+import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+import { authProvider } from './providers/authProvider'
+import { dataProvider } from './providers/dataProvider'
+import { Layout } from './components/Layout'
+import { Login } from './pages/Login'
+import { Dashboard } from './pages/Dashboard'
 
 function App() {
   return (
     <BrowserRouter>
       <Refine
-        dataProvider={dataProvider(API_URL)}
+        authProvider={authProvider}
+        dataProvider={dataProvider}
         routerProvider={routerBindings}
         resources={[
-          {
-            name: "dashboard",
-            list: "/",
-          },
+          { name: 'dashboard', list: '/' },
+          { name: 'users', list: '/users', show: '/users/:id' },
+          { name: 'teams', list: '/teams', show: '/teams/:id' },
+          { name: 'videos', list: '/videos', show: '/videos/:id' },
+          { name: 'tags', list: '/tags' },
+          { name: 'credits', list: '/credits' },
+          { name: 'audit-logs', list: '/audit-logs' },
+          { name: 'api-keys', list: '/api-keys' },
+          { name: 'settings', list: '/settings' },
         ]}
         options={{
           syncWithLocation: true,
@@ -28,28 +37,47 @@ function App() {
         <Routes>
           <Route
             element={
-              <div className="min-h-screen bg-gray-100">
-                <Outlet />
-              </div>
+              <Authenticated key="authenticated-routes" fallback={<CatchAllNavigate to="/login" />}>
+                <Layout />
+              </Authenticated>
             }
           >
-            <Route index element={<DashboardPage />} />
+            <Route index element={<Dashboard />} />
+            <Route path="/users" element={<PlaceholderPage title="Users" />} />
+            <Route path="/teams" element={<PlaceholderPage title="Teams" />} />
+            <Route path="/videos" element={<PlaceholderPage title="Videos" />} />
+            <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
+            <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
+            <Route path="/audit-logs" element={<PlaceholderPage title="Audit Logs" />} />
+            <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
+            <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
+          </Route>
+          <Route
+            element={
+              <Authenticated key="auth-pages" fallback={<Outlet />}>
+                <NavigateToResource />
+              </Authenticated>
+            }
+          >
+            <Route path="/login" element={<Login />} />
           </Route>
         </Routes>
-        <UnsavedChangesNotifier />
-        <DocumentTitleHandler />
       </Refine>
     </BrowserRouter>
-  );
+  )
 }
 
-function DashboardPage() {
+function PlaceholderPage({ title }: { title: string }) {
   return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold text-gray-900">MediaHub Admin</h1>
-      <p className="mt-2 text-gray-600">Welcome to the admin dashboard.</p>
+    <div>
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">{title}</h1>
+      <div className="bg-white rounded-lg shadow p-6">
+        <p className="text-gray-500">
+          This page will be implemented in upcoming tasks.
+        </p>
+      </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
