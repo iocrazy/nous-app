@@ -11,6 +11,7 @@ import { Layout } from './components/Layout'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { UserList } from './pages/users'
+import { TeamList } from './pages/teams'
 
 function App() {
   return (
@@ -45,7 +46,7 @@ function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="/users" element={<UserList />} />
-            <Route path="/teams" element={<PlaceholderPage title="Teams" />} />
+            <Route path="/teams" element={<TeamList />} />
             <Route path="/videos" element={<PlaceholderPage title="Videos" />} />
             <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
             <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
