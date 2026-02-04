@@ -1,0 +1,99 @@
+# Admin Panel Auto Deploy to NAS via Docker Hub
+# Triggers:
+#   - Push admin version tag (admin-v*): builds versioned release and deploys
+#   - Manual trigger: for emergency deployments
+
+name: Deploy Admin Panel to NAS
+
+on:
+  push:
+    tags:
+      - 'admin-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., admin-v0.1.0)'
+        required: false
+        default: 'latest'
+
+# Prevent duplicate runs
+concurrency:
+  group: deploy-admin
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: imheygo/mediahub-admin
+
+jobs:
+  build-and-push:
+    name: Build and Push to Docker Hub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/admin-v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/admin-}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "version=latest" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin
+          file: ./admin/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to NAS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Deploy to NAS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          port: ${{ secrets.NAS_PORT }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          script: |
+            cd ${{ secrets.NAS_PROJECT_PATH }}
+
+            echo "🐳 Pulling Admin Panel Docker image..."
+            docker pull imheygo/mediahub-admin:latest
+
+            echo "🚀 Restarting Admin Panel service..."
+            cd docker
+            docker-compose up -d --force-recreate mediahub-admin
+
+            echo "🧹 Cleaning up old images..."
+            docker image prune -f
+
+            echo "✅ Admin Panel deployment complete!"
