@@ -23,6 +23,8 @@ jobs:
   build-and-push:
     name: Build and Push to Docker Hub
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for creating releases
 
     steps:
       - name: Checkout code
@@ -68,11 +70,9 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.version.outputs.is_release == 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy:
     name: Deploy to NAS
