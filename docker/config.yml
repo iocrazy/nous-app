@@ -37,4 +37,4 @@ CORS_CREDENTIALS: true
 # 应用程序固定配置
 APP_PORT: 9999  # Docker 容器内部固定端口
 
-# 注意：NAS_BASE_PATH 在 .env 中配置
+# 注意：下载路径 DOWNLOAD_PATH 在 .env 中配置
