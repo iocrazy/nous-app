@@ -1,6 +1,9 @@
 # Environment file (contains secrets)
 .env
 
+# Local config (use config.yml.example as template)
+config.yml
+
 # Downloaded files
 downloads/
 
