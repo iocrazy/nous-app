@@ -56,6 +56,9 @@ const TAG_TRANSLATIONS: Record<string, { en: string; zh: string }> = {
   'Other': { en: 'Other', zh: '其他' },
   'Food': { en: 'Food', zh: '美食' },
   'Dance': { en: 'Dance', zh: '舞蹈' },
+  'Pets': { en: 'Pets', zh: '宠物' },
+  'Gaming': { en: 'Gaming', zh: '游戏' },
+  'Vlog': { en: 'Vlog', zh: '日常' },
   // Chinese to English (reverse mapping)
   '运动': { en: 'Sports', zh: '运动' },
   '剧情': { en: 'Drama', zh: '剧情' },
@@ -76,29 +79,35 @@ const TAG_TRANSLATIONS: Record<string, { en: string; zh: string }> = {
   '其他': { en: 'Other', zh: '其他' },
   '美食': { en: 'Food', zh: '美食' },
   '舞蹈': { en: 'Dance', zh: '舞蹈' },
+  '宠物': { en: 'Pets', zh: '宠物' },
+  '游戏': { en: 'Gaming', zh: '游戏' },
+  '日常': { en: 'Vlog', zh: '日常' },
 };
 
 // Predefined tags with bilingual support
 const PREDEFINED_TAGS: { en: string; zh: string; color: string }[] = [
-  { en: 'Sports', zh: '运动', color: '#22c55e' },
-  { en: 'Drama', zh: '剧情', color: '#8b5cf6' },
+  { en: 'Food', zh: '美食', color: '#f97316' },
+  { en: 'Tutorial', zh: '教程', color: '#14b8a6' },
+  { en: 'Comedy', zh: '搞笑', color: '#eab308' },
+  { en: 'Dance', zh: '舞蹈', color: '#ec4899' },
   { en: 'Music', zh: '音乐', color: '#ec4899' },
+  { en: 'Beauty', zh: '颜值', color: '#ec4899' },
+  { en: 'Fashion', zh: '时尚', color: '#ec4899' },
+  { en: 'Gaming', zh: '游戏', color: '#8b5cf6' },
+  { en: 'Pets', zh: '宠物', color: '#f97316' },
+  { en: 'Travel', zh: '旅行', color: '#22c55e' },
+  { en: 'Tech', zh: '科技', color: '#3b82f6' },
+  { en: 'Sports', zh: '运动', color: '#22c55e' },
+  { en: 'Vlog', zh: '日常', color: '#3b82f6' },
+  { en: 'Other', zh: '其他', color: '#71717a' },
+  { en: 'Drama', zh: '剧情', color: '#8b5cf6' },
   { en: 'Text', zh: '文字', color: '#3b82f6' },
   { en: 'Family', zh: '亲子', color: '#f97316' },
-  { en: 'Beauty', zh: '颜值', color: '#ec4899' },
   { en: 'Filming', zh: '拍摄', color: '#14b8a6' },
   { en: 'Post-production', zh: '后期', color: '#8b5cf6' },
   { en: 'Recreation', zh: '仿拍', color: '#eab308' },
-  { en: 'Travel', zh: '旅行', color: '#22c55e' },
-  { en: 'Tech', zh: '科技', color: '#3b82f6' },
   { en: 'Finance', zh: '财经', color: '#ef4444' },
   { en: 'Variety', zh: '综艺', color: '#f97316' },
-  { en: 'Fashion', zh: '时尚', color: '#ec4899' },
-  { en: 'Comedy', zh: '搞笑', color: '#eab308' },
-  { en: 'Tutorial', zh: '教程', color: '#14b8a6' },
-  { en: 'Food', zh: '美食', color: '#f97316' },
-  { en: 'Dance', zh: '舞蹈', color: '#ec4899' },
-  { en: 'Other', zh: '其他', color: '#71717a' },
 ];
 
 // Helper to generate tag style from color
@@ -123,6 +132,7 @@ export const TagsSettings: React.FC = () => {
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTagName, setNewTagName] = useState('');
+  const [newTagNameZh, setNewTagNameZh] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[5].value);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -184,10 +194,12 @@ export const TagsSettings: React.FC = () => {
     try {
       const newTag = await createTag({
         name: newTagName.trim(),
+        name_zh: newTagNameZh.trim() || undefined,
         color: newTagColor,
       });
       setTags([...tags, newTag]);
       setNewTagName('');
+      setNewTagNameZh('');
       setShowCreateForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create tag');
@@ -427,15 +439,29 @@ export const TagsSettings: React.FC = () => {
             <div className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-zinc-300">
-                  {t('settings.tags.tagName')}
+                  {t('settings.tags.tagName')} (English)
                 </label>
                 <input
                   type="text"
-                  placeholder={t('settings.tags.tagNamePlaceholder')}
+                  placeholder="e.g. Food, Travel, Music"
                   value={newTagName}
                   onChange={(e) => setNewTagName(e.target.value)}
                   className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-300">
+                  {t('settings.tags.tagName')} (中文)
+                  <span className="text-zinc-500 text-xs ml-2">Optional</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="例如：美食、旅行、音乐"
+                  value={newTagNameZh}
+                  onChange={(e) => setNewTagNameZh(e.target.value)}
+                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
                 />
               </div>
@@ -464,13 +490,24 @@ export const TagsSettings: React.FC = () => {
                 <label className="text-sm font-medium text-zinc-300 block mb-2">
                   {t('settings.tags.preview')}
                 </label>
-                <span
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
-                  style={getTagStyle(newTagColor)}
-                >
-                  <TagIcon size={12} />
-                  {newTagName || t('settings.tags.tagNamePlaceholder')}
-                </span>
+                <div className="flex gap-2 flex-wrap">
+                  <span
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
+                    style={getTagStyle(newTagColor)}
+                  >
+                    <TagIcon size={12} />
+                    {newTagName || 'Tag Name'}
+                  </span>
+                  {newTagNameZh && (
+                    <span
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
+                      style={getTagStyle(newTagColor)}
+                    >
+                      <TagIcon size={12} />
+                      {newTagNameZh}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
