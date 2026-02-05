@@ -258,6 +258,67 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 
 
 
+## CI/CD 部署
+
+### 前端部署 (Vercel)
+
+**自动部署**: 推送到 `master` 分支自动触发
+
+| 配置项 | 值 |
+|--------|-----|
+| Framework | Vite |
+| Root Directory | `frontend` |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+
+**环境变量** (Vercel Dashboard 配置):
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_API_URL` → `https://mediahub.heygo.cn`
+
+### 后端部署 (GitHub Actions + SSH)
+
+**触发条件**: 推送到 `master` 且修改了 `backend/**` 文件
+
+**工作流文件**: `.github/workflows/deploy-backend.yml`
+
+```yaml
+- name: Deploy to NAS via SSH
+  uses: appleboy/ssh-action@v1.0.3
+  with:
+    host: ${{ secrets.NAS_HOST }}
+    port: ${{ secrets.NAS_PORT }}
+    username: ${{ secrets.NAS_USER }}
+    key: ${{ secrets.NAS_SSH_KEY }}
+    script: |
+      cd ${{ secrets.NAS_PROJECT_PATH }}
+      git pull origin master
+      docker-compose build --no-cache backend
+      docker-compose up -d --force-recreate backend celery-worker
+```
+
+**GitHub Secrets 配置**:
+
+| Secret | 说明 |
+|--------|------|
+| `NAS_HOST` | 公网 IP 或 DDNS 域名 |
+| `NAS_PORT` | SSH 端口 (如 2222) |
+| `NAS_USER` | SSH 用户名 |
+| `NAS_SSH_KEY` | 完整私钥 (含 BEGIN/END 行) |
+| `NAS_PROJECT_PATH` | 项目路径 |
+
+### 手动部署
+
+```bash
+# 前端 - 推送代码即可
+git push origin master
+
+# 后端 - SSH 到 NAS 执行
+ssh user@nas-ip -p 2222
+cd /path/to/mediahub
+git pull && docker-compose up -d --build backend
+```
+
 ## Discord 通知规则
 
 当以下场景发生时，**必须**通过 Discord MCP 发送通知：
