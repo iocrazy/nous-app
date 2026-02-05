@@ -180,16 +180,15 @@ async def _get_queue_status() -> QueueStatus:
 def _get_storage_status() -> StorageStatus:
     """获取存储状态"""
     try:
-        # Docker container path is always /app/downloads (the mounted volume)
-        # Priority: frontend_config.yml > /app/downloads fallback
-        try:
-            storage_path = Utils.get_download_base_path()
-        except ValueError:
-            storage_path = "/app/downloads"
-
-        # Final fallback: if frontend_config returns empty, use /app/downloads
-        if not storage_path:
-            storage_path = "/app/downloads"
+        # Docker container path is ALWAYS /app/downloads (the mounted volume)
+        # Check this first before any config lookup
+        storage_path = "/app/downloads"
+        if not os.path.exists(storage_path):
+            # Fallback to config-based path only if /app/downloads doesn't exist
+            try:
+                storage_path = Utils.get_download_base_path()
+            except ValueError:
+                storage_path = "/app/downloads"
 
         if not os.path.exists(storage_path):
             return StorageStatus(
