@@ -29,7 +29,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
+      - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
     environment:
@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
     command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
     volumes:
-      - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
+      - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
     environment:
