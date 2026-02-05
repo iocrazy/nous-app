@@ -86,55 +86,55 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
 }
 
 
-# 可用权限范围列表（供前端选择）
+# Available scopes list (for frontend selection)
 AVAILABLE_SCOPES = [
     {
         "scope": ApiKeyScope.DOUYIN_FETCH.value,
-        "name": "获取视频",
-        "description": "允许通过 URL 获取单个抖音视频信息",
-        "category": "抖音"
+        "name": "Fetch Video",
+        "description": "Fetch single video info via URL",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_FETCH_BATCH.value,
-        "name": "批量获取视频",
-        "description": "允许批量获取多个抖音视频信息",
-        "category": "抖音"
+        "name": "Batch Fetch",
+        "description": "Fetch multiple videos info in batch",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_VIDEOS_READ.value,
-        "name": "读取视频",
-        "description": "允许查看视频列表和详情",
-        "category": "抖音"
+        "name": "Read Videos",
+        "description": "View video list and details",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_VIDEOS_WRITE.value,
-        "name": "管理视频",
-        "description": "允许删除视频记录",
-        "category": "抖音"
+        "name": "Manage Videos",
+        "description": "Delete video records",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_SEARCH.value,
-        "name": "搜索视频",
-        "description": "允许搜索视频",
-        "category": "抖音"
+        "name": "Search Videos",
+        "description": "Search videos",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_STATISTICS.value,
-        "name": "查看统计",
-        "description": "允许查看统计信息",
-        "category": "抖音"
+        "name": "View Statistics",
+        "description": "View statistics data",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_RETRY.value,
-        "name": "重试下载",
-        "description": "允许重新触发视频下载",
-        "category": "抖音"
+        "name": "Retry Download",
+        "description": "Retry failed video downloads",
+        "category": "Video"
     },
     {
         "scope": ApiKeyScope.DOUYIN_ALL.value,
-        "name": "全部抖音权限",
-        "description": "拥有所有抖音相关操作权限",
-        "category": "抖音"
+        "name": "Full Access",
+        "description": "All video-related permissions",
+        "category": "Video"
     },
 ]
 
