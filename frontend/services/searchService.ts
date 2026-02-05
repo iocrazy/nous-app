@@ -189,6 +189,7 @@ export const localSearch = (
     cover_url?: string;
     view_count?: number;
     created_at?: string;
+    tags?: string[];
   }>,
   limit: number = 20
 ): SearchResponse => {
@@ -216,19 +217,24 @@ export const localSearch = (
     const desc = (video.video_desc || '').toLowerCase();
     const author = (video.author || '').toLowerCase();
     const hashtags = (video.video_hashtag_name || '').toLowerCase();
+    // Also search through user-added tags
+    const tags = (video.tags || []).join(' ').toLowerCase();
 
     // Normalized versions (no spaces)
     const titleNorm = title.replace(/\s+/g, '');
     const descNorm = desc.replace(/\s+/g, '');
+    const tagsNorm = tags.replace(/\s+/g, '');
 
-    // Check if query matches any field
+    // Check if query matches any field (including tags)
     const match =
       title.includes(queryLower) ||
       desc.includes(queryLower) ||
       author.includes(queryLower) ||
       hashtags.includes(queryLower) ||
+      tags.includes(queryLower) ||
       titleNorm.includes(queryNormalized) ||
-      descNorm.includes(queryNormalized);
+      descNorm.includes(queryNormalized) ||
+      tagsNorm.includes(queryNormalized);
 
     if (match) {
       results.push({
@@ -239,7 +245,7 @@ export const localSearch = (
         cover_url: video.cover_url || null,
         author: video.author || null,
         similarity_score: 0.5,
-        tags: [],
+        tags: video.tags || [],
         view_count: video.view_count || 0,
         created_at: video.created_at || '',
       });
