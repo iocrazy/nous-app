@@ -85,6 +85,38 @@ export const getCoverDownloadUrl = (awemeId: string): string => {
   return `${getApiUrl()}/api/v1/douyin/download/${awemeId}/cover`;
 };
 
+/**
+ * 通过 aweme_id 获取单个视频
+ */
+export const fetchVideoByAwemeId = async (awemeId: string): Promise<DouyinBase | null> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    return null;
+  }
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data, error } = await supabase
+      .from(VIEW_NAME)
+      .select('*')
+      .eq('aweme_id', awemeId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Failed to fetch video:', error);
+      return null;
+    }
+
+    return data as DouyinBase | null;
+  } catch (e) {
+    console.error('Error fetching video by aweme_id:', e);
+    return null;
+  }
+};
+
 /** 分页配置 */
 const PAGE_SIZE = 100;  // 每页加载数量
 const LOCAL_CACHE_SIZE = 500;  // 本地缓存用于快速搜索

@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
 import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
-import { fetchLibrary, fetchLibraryPaginated, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
+import { fetchLibrary, fetchLibraryPaginated, fetchVideoByAwemeId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
@@ -1083,12 +1083,19 @@ export default function App() {
     percent: downloadPercent,
     speed: downloadSpeed,
   } = useDownloadProgress(downloadTaskId, {
-    onComplete: () => {
+    onComplete: async () => {
       addLog("Download completed successfully!", 'success');
       setTaskProgress(100);
       setTaskStatus('Completed');
       // Refresh library to get the updated item with download paths
       loadLibraryData();
+      // Also refresh currentResult to update video player with download_path
+      if (currentResult?.aweme_id) {
+        const updatedVideo = await fetchVideoByAwemeId(currentResult.aweme_id);
+        if (updatedVideo) {
+          setCurrentResult(updatedVideo);
+        }
+      }
     },
     onError: (error) => {
       addLog(`Download failed: ${error}`, 'error');
