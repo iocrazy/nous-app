@@ -127,9 +127,17 @@ class Utils:
 
         # 2. 后备：从 .env 读取 DOWNLOAD_PATH
         if settings.DOWNLOAD_PATH and settings.DOWNLOAD_PATH.strip():
-            return settings.DOWNLOAD_PATH.strip()
+            path = settings.DOWNLOAD_PATH.strip()
+            # In Docker, settings might have wrong path - always prefer /app/downloads
+            if os.path.exists("/app/downloads"):
+                return "/app/downloads"
+            return path
 
-        # 3. 都没配置，抛出错误
+        # 3. Docker 环境默认路径
+        if os.path.exists("/app/downloads"):
+            return "/app/downloads"
+
+        # 4. 都没配置，抛出错误
         raise ValueError("未配置下载路径，请在设置中配置 Default Download Path")
 
     @classmethod
