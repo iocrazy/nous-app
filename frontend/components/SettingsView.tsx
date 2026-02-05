@@ -507,6 +507,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* API Management Tab */}
       {activeTab === 'api' && (
+        <>
         <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
            <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -646,12 +647,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </table>
            </div>
            )}
+        </section>
 
-           {/* Spacer between table and API Reference */}
-           <div className="my-6 mx-6 border-t border-zinc-700/50"></div>
-
-           {/* API Documentation Section */}
-           <div className="px-6 py-4 bg-zinc-900/50 flex items-center gap-3">
+        {/* API Reference Section - Separate Card */}
+        <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300 mt-6">
+           <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
               <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
                  <Shield size={20} />
               </div>
@@ -802,6 +802,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </div>
            </div>
         </section>
+        </>
       )}
 
       {/* Logs Tab */}
