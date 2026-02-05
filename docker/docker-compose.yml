@@ -29,14 +29,21 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
-      - ./.env:/app/.env
+      # Host media path -> Container internal path
+      - ${HOST_MEDIA_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
+      # Container internal path (fixed, do not change)
       - DOWNLOAD_PATH=/app/downloads
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Pass through secrets from .env
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
     depends_on:
       redis:
         condition: service_healthy
@@ -54,14 +61,18 @@ services:
     restart: unless-stopped
     command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,scheduled,celery
     volumes:
-      - ${DOWNLOAD_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
-      - ./.env:/app/.env
+      - ${HOST_MEDIA_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
       - DOWNLOAD_PATH=/app/downloads
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
     depends_on:
       redis:
         condition: service_healthy
@@ -72,8 +83,6 @@ services:
     container_name: mediahub-celery-beat
     restart: unless-stopped
     command: uv run celery -A app.celery_app beat -l info
-    volumes:
-      - ./.env:/app/.env
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
