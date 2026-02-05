@@ -26,7 +26,7 @@ async def migrate_storage_sizes():
     logger.info("开始迁移 storage_size...")
 
     client = await get_async_supabase_admin()
-    base_path = settings.NAS_BASE_PATH
+    base_path = settings.DOWNLOAD_PATH
 
     # 获取所有有 download_path 但没有 storage_size 的视频
     result = await client.table("douyin_videos").select(

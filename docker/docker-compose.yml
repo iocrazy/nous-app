@@ -34,6 +34,7 @@ services:
       - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
+      - DOWNLOAD_PATH=/app/downloads
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
@@ -58,6 +59,7 @@ services:
       - ./config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
+      - DOWNLOAD_PATH=/app/downloads
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:

@@ -38,7 +38,6 @@ APP_PORT: 9999  # Docker 容器内部固定端口
 
 ## 文件存储路径（环境特定）
 # 静态文件服务的根目录，所有下载的文件都在此目录下
-# 注意：.env 中的值会覆盖此配置
-# Mac 本地测试（SMB 挂载）: /Volumes/sources/MediaHub.library
-# Docker 部署（NAS）: /volume2/sources/MediaHub.library
-NAS_BASE_PATH: /Volumes/sources/MediaHub.library
+# Docker 环境下由 docker-compose.yml 设置为 /app/downloads
+# 此配置仅作为后备
+DOWNLOAD_PATH:

@@ -106,7 +106,7 @@ class Utils:
         """
         获取下载基础路径
 
-        优先级: frontend_config.yml > .env (NAS_BASE_PATH)
+        优先级: frontend_config.yml > .env (DOWNLOAD_PATH)
 
         Returns:
             str: 下载基础路径
@@ -125,9 +125,9 @@ class Utils:
             except Exception as e:
                 logger.warning(f"读取 frontend_config.yml 失败: {e}")
 
-        # 2. 后备：从 .env 读取 NAS_BASE_PATH
-        if settings.NAS_BASE_PATH and settings.NAS_BASE_PATH.strip():
-            return settings.NAS_BASE_PATH.strip()
+        # 2. 后备：从 .env 读取 DOWNLOAD_PATH
+        if settings.DOWNLOAD_PATH and settings.DOWNLOAD_PATH.strip():
+            return settings.DOWNLOAD_PATH.strip()
 
         # 3. 都没配置，抛出错误
         raise ValueError("未配置下载路径，请在设置中配置 Default Download Path")
