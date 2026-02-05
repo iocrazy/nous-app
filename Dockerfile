@@ -3,7 +3,7 @@
 
 FROM python:3.12-slim
 
-# Install Chrome, build tools and dependencies
+# Install Chrome, ffmpeg, build tools and dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     build-essential \
+    ffmpeg \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
