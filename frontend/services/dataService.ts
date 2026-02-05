@@ -1,5 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { DouyinBase } from '../types';
+import { getAuthHeaders } from './parserService';
 
 const TABLE_NAME = 'douyin_videos';
 const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
@@ -371,18 +372,10 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
 
   try {
     const apiUrl = getApiUrl();
-    const token = localStorage.getItem('supabase_access_token');
-    const apiKey = localStorage.getItem('douyin_api_key');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (apiKey) headers['X-API-Key'] = apiKey;
 
     const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
       method: 'GET',
-      headers,
+      headers: getAuthHeaders(),
     });
 
     if (response.ok) {
