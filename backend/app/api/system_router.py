@@ -16,7 +16,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.deps import AuthDep
-from app.core.utils import Utils
+from app.api.frontend_config_router import load_config
 
 router = APIRouter(prefix="/system")
 
@@ -180,15 +180,9 @@ async def _get_queue_status() -> QueueStatus:
 def _get_storage_status() -> StorageStatus:
     """获取存储状态"""
     try:
-        # Docker container path is ALWAYS /app/downloads (the mounted volume)
-        # Check this first before any config lookup
-        storage_path = "/app/downloads"
-        if not os.path.exists(storage_path):
-            # Fallback to config-based path only if /app/downloads doesn't exist
-            try:
-                storage_path = Utils.get_download_base_path()
-            except ValueError:
-                storage_path = "/app/downloads"
+        # Use same config source as /api/v1/config endpoint for consistency
+        config = load_config()
+        storage_path = config.get("default_download_path") or settings.DOWNLOAD_PATH or "/app/downloads"
 
         if not os.path.exists(storage_path):
             return StorageStatus(
