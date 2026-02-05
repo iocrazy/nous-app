@@ -35,10 +35,4 @@ CORS_CREDENTIALS: true
 # 应用程序固定配置
 APP_PORT: 9999  # Docker 容器内部固定端口
 
-
-## 文件存储路径（环境特定）
-# 静态文件服务的根目录，所有下载的文件都在此目录下
-# 注意：.env 中的值会覆盖此配置
-# Mac 本地测试（SMB 挂载）: /Volumes/sources/MediaHub.library
-# Docker 部署（NAS）: /volume2/sources/MediaHub.library
-DOWNLOAD_PATH: /volume2/sources/MediaHub.library
+# 注意: DOWNLOAD_PATH 已移至 .env，作为唯一配置源
