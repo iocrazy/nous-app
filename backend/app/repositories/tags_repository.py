@@ -92,9 +92,10 @@ class TagsRepository:
         name: str,
         user_id: str,
         color: str = "#6366f1",
-        icon: Optional[str] = None
+        icon: Optional[str] = None,
+        name_zh: Optional[str] = None
     ) -> dict:
-        """Create a new user tag."""
+        """Create a new user tag with optional Chinese name."""
         data = {
             "name": name,
             "type": "user",
@@ -102,10 +103,12 @@ class TagsRepository:
             "color": color,
             "icon": icon
         }
+        if name_zh:
+            data["name_zh"] = name_zh
 
         table = await self._get_table()
         result = await table.insert(data).execute()
-        logger.info(f"Created tag: {name} for user: {user_id}")
+        logger.info(f"Created tag: {name} (zh: {name_zh}) for user: {user_id}")
         return result.data[0]
 
     async def update_tag(self, tag_id: str, user_id: str, **kwargs) -> Optional[dict]:

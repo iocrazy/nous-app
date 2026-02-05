@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field
 
 class TagBase(BaseModel):
     """Base tag schema with common fields."""
-    name: str = Field(..., min_length=1, max_length=50, description="Tag name")
+    name: str = Field(..., min_length=1, max_length=50, description="Tag name (English)")
+    name_zh: Optional[str] = Field(None, max_length=50, description="Tag name in Chinese")
     color: Optional[str] = Field("#6366f1", description="Hex color code")
     icon: Optional[str] = Field(None, description="Emoji or icon identifier")
 

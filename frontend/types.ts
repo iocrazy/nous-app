@@ -194,6 +194,7 @@ export interface UserNotification {
 export interface Tag {
   id: string;  // UUID string from backend
   name: string;
+  name_zh?: string | null;  // Chinese name for bilingual support
   color: string | null;
   icon: string | null;
   type: 'system' | 'user' | 'time';

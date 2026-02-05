@@ -94,7 +94,8 @@ async def create_tag(
         name=tag.name,
         user_id=user_id,
         color=tag.color,
-        icon=tag.icon
+        icon=tag.icon,
+        name_zh=tag.name_zh
     )
 
     return created_tag

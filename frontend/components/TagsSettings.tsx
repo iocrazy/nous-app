@@ -154,22 +154,27 @@ export const TagsSettings: React.FC = () => {
   };
 
   // Get display name based on current language
-  const getDisplayName = (tagName: string): string => {
-    const translation = TAG_TRANSLATIONS[tagName];
-    if (translation) {
-      return isZh ? translation.zh : translation.en;
+  // Priority: database name_zh > TAG_TRANSLATIONS > original name
+  const getDisplayName = (tag: Tag): string => {
+    if (isZh) {
+      // Chinese mode: use name_zh from DB, fallback to translation map, then original
+      if (tag.name_zh) return tag.name_zh;
+      const translation = TAG_TRANSLATIONS[tag.name];
+      if (translation) return translation.zh;
+      return tag.name;
+    } else {
+      // English mode: use original name
+      return tag.name;
     }
-    return tagName;
   };
 
-  // Filter tags based on search (search both original and translated names)
+  // Filter tags based on search (search both English and Chinese names)
   const filteredTags = tags.filter((tag) => {
-    const displayName = getDisplayName(tag.name);
     const query = searchQuery.toLowerCase();
-    return (
-      tag.name.toLowerCase().includes(query) ||
-      displayName.toLowerCase().includes(query)
-    );
+    const nameMatch = tag.name.toLowerCase().includes(query);
+    const nameZhMatch = tag.name_zh?.toLowerCase().includes(query);
+    const translationMatch = TAG_TRANSLATIONS[tag.name]?.zh.toLowerCase().includes(query);
+    return nameMatch || nameZhMatch || translationMatch;
   });
 
   // Handle create tag
@@ -234,21 +239,24 @@ export const TagsSettings: React.FC = () => {
     }
   };
 
-  // Create predefined tags
+  // Create predefined tags with bilingual support
   const handleCreatePredefinedTags = async () => {
     setIsCreating(true);
     try {
+      // Check existing tags by both English and Chinese names
       const existingNames = tags.map((t) => t.name.toLowerCase());
+      const existingNamesZh = tags.map((t) => t.name_zh?.toLowerCase()).filter(Boolean);
       const tagsToCreate = PREDEFINED_TAGS.filter(
         (pt) =>
           !existingNames.includes(pt.en.toLowerCase()) &&
-          !existingNames.includes(pt.zh.toLowerCase())
+          !existingNamesZh.includes(pt.zh.toLowerCase())
       );
 
       for (const predefined of tagsToCreate) {
-        const tagName = isZh ? predefined.zh : predefined.en;
+        // Always store English as primary name, Chinese as name_zh
         const newTag = await createTag({
-          name: tagName,
+          name: predefined.en,
+          name_zh: predefined.zh,
           color: predefined.color,
         });
         setTags((prev) => [...prev, newTag]);
@@ -375,7 +383,7 @@ export const TagsSettings: React.FC = () => {
                     title={tag.type !== 'system' ? t('settings.tags.clickToEdit') : t('settings.tags.system')}
                   >
                     <TagIcon size={12} />
-                    <span>{getDisplayName(tag.name)}</span>
+                    <span>{getDisplayName(tag)}</span>
                     <span className="text-xs opacity-60">
                       {tag.video_count ?? 0}
                     </span>
