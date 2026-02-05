@@ -2,7 +2,10 @@
   "mcpServers": {
     "supabase": {
       "type": "http",
-      "url": "http://192.168.50.9:9080/mcp?features=docs%2Cdatabase%2Cdebugging%2Cdevelopment"
+      "url": "http://192.168.50.9:9080/mcp",
+      "headers": {
+        "x-api-key": "mcp_heygo_x7K9pL2mQ4vR8wY3"
+      }
     }
   }
 }
