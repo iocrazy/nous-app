@@ -47,7 +47,7 @@ class UpdateConfigRequest(BaseModel):
 
 def get_default_download_path() -> str:
     """获取默认下载路径（从环境变量）"""
-    return settings.NAS_BASE_PATH
+    return settings.DOWNLOAD_PATH
 
 
 def load_config() -> dict:

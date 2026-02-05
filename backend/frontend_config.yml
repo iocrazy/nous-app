@@ -12,4 +12,4 @@ supabase:
 
 # 默认下载路径（服务器端）
 # 如果用户已登录，将使用数据库中的用户设置覆盖此值
-default_download_path: "/Volumes/sources/MediaHub.library"
+default_download_path: "/volume2/sources/MediaHub.library"
