@@ -39,6 +39,7 @@ class TagResponse(TagBase):
     type: Literal["system", "user", "time"]
     user_id: Optional[UUID] = None
     created_at: datetime
+    video_count: Optional[int] = Field(0, description="Number of videos using this tag")
 
     model_config = {
         "from_attributes": True
