@@ -41,7 +41,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
         .eq('collection_id', c.id)
         .order('added_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (firstVideo) {
         // Get video's cover URL
@@ -49,7 +49,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
           .from('douyin_videos')
           .select('cover_download_path, dynamic_cover_url')
           .eq('id', firstVideo.video_id)
-          .single();
+          .maybeSingle();
 
         if (video) {
           thumbnail_url = video.cover_download_path || video.dynamic_cover_url || undefined;
@@ -110,13 +110,13 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
   if (!user) throw new Error('Not authenticated');
 
   // Get video_id from aweme_id
-  const { data: video, error: videoError } = await supabase
+  const { data: video } = await supabase
     .from('douyin_videos')
     .select('id')
     .eq('aweme_id', videoAwemeId)
-    .single();
+    .maybeSingle();
 
-  if (videoError || !video) throw new Error('Video not found');
+  if (!video) throw new Error('Video not found');
 
   const { error } = await supabase
     .from('video_collections')
@@ -134,13 +134,13 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
   if (!supabase) throw new Error('Supabase not configured');
 
   // Get video_id from aweme_id
-  const { data: video, error: videoError } = await supabase
+  const { data: video } = await supabase
     .from('douyin_videos')
     .select('id')
     .eq('aweme_id', videoAwemeId)
-    .single();
+    .maybeSingle();
 
-  if (videoError || !video) throw new Error('Video not found');
+  if (!video) throw new Error('Video not found');
 
   const { error } = await supabase
     .from('video_collections')
@@ -156,13 +156,13 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
   if (!supabase) return [];
 
   // Get video_id from aweme_id
-  const { data: video, error: videoError } = await supabase
+  const { data: video } = await supabase
     .from('douyin_videos')
     .select('id')
     .eq('aweme_id', videoAwemeId)
-    .single();
+    .maybeSingle();
 
-  if (videoError || !video) return [];
+  if (!video) return [];
 
   const { data, error } = await supabase
     .from('video_collections')
