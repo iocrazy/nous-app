@@ -16,6 +16,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.deps import AuthDep
+from app.core.utils import Utils
 
 router = APIRouter(prefix="/system")
 
@@ -179,7 +180,12 @@ async def _get_queue_status() -> QueueStatus:
 def _get_storage_status() -> StorageStatus:
     """获取存储状态"""
     try:
-        storage_path = settings.DOWNLOAD_PATH
+        # Use Utils.get_download_base_path() for consistent config source
+        # Priority: frontend_config.yml > settings.DOWNLOAD_PATH
+        try:
+            storage_path = Utils.get_download_base_path()
+        except ValueError:
+            storage_path = settings.DOWNLOAD_PATH or "/app/downloads"
 
         if not os.path.exists(storage_path):
             return StorageStatus(
