@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     # ============================================
     # 下载设置
     # ============================================
-    DOWNLOAD_PATH: str = Field(default="/volume2/sources/MediaHub.library", description="视频存储路径")
+    # Docker 部署时使用默认值 /app/downloads（容器内路径）
+    # 本地开发时可通过 .env 覆盖为实际路径
+    DOWNLOAD_PATH: str = Field(default="/app/downloads", description="视频存储路径")
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
 
