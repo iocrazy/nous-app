@@ -75,12 +75,18 @@ export interface DouyinBase {
 export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup';
 
 export interface ApiKey {
-  id: string;
+  id: number;
+  key_id: string;        // Identifier for API calls
+  key_prefix: string;    // Display prefix like dk_xxxx...
   name: string;
-  key: string;
-  status: 'active' | 'inactive';
+  description?: string;
+  status: 'active' | 'revoked';
   created_at: string;
-  expires_at: string; // 'Never' or ISO date
+  updated_at: string;
+  expires_at: string | null;
+  last_used_at?: string | null;
+  usage_count?: number;
+  rate_limit?: number | null;
   scopes: string[];
 }
 

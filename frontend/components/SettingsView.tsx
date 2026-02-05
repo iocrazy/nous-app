@@ -1,14 +1,15 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserSettings, ApiKey } from '../types';
 import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  Clock, CheckCircle, Power, Database, Zap, Check
+  Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle, Eye, EyeOff
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TasksPanel } from './TasksPanel';
 import { TagsSettings } from './TagsSettings';
+import * as apiKeyService from '../services/apiKeyService';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -16,30 +17,23 @@ interface SettingsViewProps {
   activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags';
 }
 
-const API_SCOPES = [
-  // Video APIs
-  '/api/v1/douyin/fetch',
-  '/api/v1/douyin/fetch/batch',
-  '/api/v1/douyin/videos',
-  '/api/v1/douyin/videos/{id}',
-  '/api/v1/douyin/statistics',
-  '/api/v1/douyin/retry/{id}',
-  // Tags APIs
-  '/api/v1/tags',
-  '/api/v1/tags/{id}',
-  // Collections APIs
-  '/api/v1/collections',
-  '/api/v1/collections/{id}',
-  // Search API
-  '/api/v1/search',
-  // Download Tasks APIs
-  '/api/v1/download-tasks',
-  '/api/v1/download-tasks/stats',
-  // System APIs
-  '/api/v1/system/status',
-  '/api/v1/logs',
-  // Auth APIs
-  '/api/v1/auth/*',
+// Default scopes (will be overwritten by backend scopes if available)
+const DEFAULT_SCOPES = [
+  'douyin:fetch',
+  'douyin:fetch:batch',
+  'douyin:videos:read',
+  'douyin:videos:write',
+  'douyin:videos:delete',
+  'douyin:statistics:read',
+  'tags:read',
+  'tags:write',
+  'tags:delete',
+  'collections:read',
+  'collections:write',
+  'collections:delete',
+  'search:read',
+  'tasks:read',
+  'system:read',
 ];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab }) => {
@@ -50,6 +44,81 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
   // Animated progress for style preview
   const [animatedProgress, setAnimatedProgress] = useState(0);
+
+  // API Keys State
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeysError, setApiKeysError] = useState<string | null>(null);
+
+  // Available scopes from backend
+  const [availableScopes, setAvailableScopes] = useState<apiKeyService.ApiKeyScopeInfo[]>([]);
+
+  // Newly created key secret (shown only once)
+  const [newKeySecret, setNewKeySecret] = useState<string | null>(null);
+  const [showKeySecret, setShowKeySecret] = useState(false);
+
+  // Form State for New/Edit Key
+  const [keyForm, setKeyForm] = useState({
+    name: '',
+    description: '',
+    expirationType: 'never' as 'never' | 'date',
+    expirationDate: '',
+    scopes: [] as string[],
+    rateLimit: '' as string
+  });
+  const [formLoading, setFormLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Load API keys from backend
+  const loadApiKeys = useCallback(async () => {
+    if (activeTab !== 'api') return;
+
+    setApiKeysLoading(true);
+    setApiKeysError(null);
+
+    try {
+      const keys = await apiKeyService.listApiKeys();
+      setApiKeys(keys.map(k => ({
+        id: k.id,
+        key_id: k.key_id,
+        key_prefix: k.key_prefix,
+        name: k.name,
+        description: k.description || undefined,
+        status: k.status as 'active' | 'revoked',
+        created_at: k.created_at,
+        updated_at: k.updated_at,
+        expires_at: k.expires_at,
+        last_used_at: k.last_used_at,
+        usage_count: k.usage_count,
+        rate_limit: k.rate_limit,
+        scopes: k.scopes,
+      })));
+    } catch (err) {
+      console.error('Failed to load API keys:', err);
+      setApiKeysError(err instanceof Error ? err.message : 'Failed to load API keys');
+    } finally {
+      setApiKeysLoading(false);
+    }
+  }, [activeTab]);
+
+  // Load available scopes from backend
+  const loadScopes = useCallback(async () => {
+    try {
+      const scopes = await apiKeyService.getAvailableScopes();
+      setAvailableScopes(scopes);
+    } catch (err) {
+      console.error('Failed to load scopes:', err);
+      // Use default scopes as fallback
+    }
+  }, []);
+
+  // Load data when API tab is active
+  useEffect(() => {
+    if (activeTab === 'api') {
+      loadApiKeys();
+      loadScopes();
+    }
+  }, [activeTab, loadApiKeys, loadScopes]);
 
   // Animation effect for progress preview
   useEffect(() => {
@@ -76,27 +145,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       document.body.style.overflow = '';
     };
   }, [isKeyModalOpen]);
-  
-  // Mock API Keys State
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([
-    {
-      id: '1',
-      name: 'heygo',
-      key: '2fk0czxa5FMllBkD12y0k3oZyzQnsYDfqRZ442e/uzNN8mIyTacq4EC2EA==',
-      status: 'active',
-      created_at: '2025-06-19',
-      expires_at: 'Never',
-      scopes: ['/api/v1/douyin/fetch', '/api/v1/douyin/videos']
-    }
-  ]);
-
-  // Form State for New/Edit Key
-  const [keyForm, setKeyForm] = useState({
-    name: '',
-    expirationType: 'never' as 'never' | 'date',
-    expirationDate: '',
-    scopes: [] as string[]
-  });
 
   const handleSaveSettings = () => {
     onUpdateSettings(localSettings);
@@ -110,67 +158,106 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
   const openCreateModal = () => {
     setEditingKeyId(null);
+    setFormError(null);
+    setNewKeySecret(null);
     setKeyForm({
       name: '',
+      description: '',
       expirationType: 'never',
       expirationDate: '',
-      scopes: []
+      scopes: [],
+      rateLimit: ''
     });
     setIsKeyModalOpen(true);
   };
 
   const openEditModal = (key: ApiKey) => {
-    setEditingKeyId(key.id);
+    setEditingKeyId(key.key_id);
+    setFormError(null);
+    setNewKeySecret(null);
     setKeyForm({
       name: key.name,
-      expirationType: key.expires_at === 'Never' ? 'never' : 'date',
-      expirationDate: key.expires_at === 'Never' ? '' : key.expires_at,
-      scopes: key.scopes
+      description: key.description || '',
+      expirationType: key.expires_at ? 'date' : 'never',
+      expirationDate: key.expires_at ? key.expires_at.split('T')[0] : '',
+      scopes: key.scopes,
+      rateLimit: key.rate_limit?.toString() || ''
     });
     setIsKeyModalOpen(true);
   };
 
-  const handleSaveKey = () => {
-    if (!keyForm.name) return;
-    
-    const finalExpiration = keyForm.expirationType === 'never' ? 'Never' : keyForm.expirationDate;
+  const handleSaveKey = async () => {
+    if (!keyForm.name || keyForm.scopes.length === 0) return;
 
-    if (editingKeyId) {
-      // Update existing
-      setApiKeys(prev => prev.map(k => k.id === editingKeyId ? {
-        ...k,
-        name: keyForm.name,
-        expires_at: finalExpiration,
-        scopes: keyForm.scopes
-      } : k));
-    } else {
-      // Create new
-      const newKey: ApiKey = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: keyForm.name,
-        key: Array(40).fill(0).map(() => Math.random().toString(36).charAt(2)).join('') + '==',
-        status: 'active',
-        created_at: new Date().toISOString().split('T')[0],
-        expires_at: finalExpiration,
-        scopes: keyForm.scopes
-      };
-      setApiKeys([...apiKeys, newKey]);
+    setFormLoading(true);
+    setFormError(null);
+
+    try {
+      if (editingKeyId) {
+        // Update existing key
+        await apiKeyService.updateApiKey(editingKeyId, {
+          name: keyForm.name,
+          description: keyForm.description || undefined,
+          scopes: keyForm.scopes,
+        });
+        setIsKeyModalOpen(false);
+        await loadApiKeys();
+      } else {
+        // Create new key
+        const result = await apiKeyService.createApiKey({
+          name: keyForm.name,
+          description: keyForm.description || undefined,
+          scopes: keyForm.scopes,
+          expires_at: keyForm.expirationType === 'date' && keyForm.expirationDate
+            ? new Date(keyForm.expirationDate).toISOString()
+            : undefined,
+          rate_limit: keyForm.rateLimit ? parseInt(keyForm.rateLimit) : undefined,
+        });
+
+        // Show the secret key (only shown once!)
+        setNewKeySecret(result.secret_key);
+        setShowKeySecret(true);
+        await loadApiKeys();
+      }
+    } catch (err) {
+      console.error('Failed to save API key:', err);
+      setFormError(err instanceof Error ? err.message : 'Failed to save API key');
+    } finally {
+      setFormLoading(false);
     }
+  };
 
+  const toggleKeyStatus = async (keyId: string, currentStatus: string) => {
+    try {
+      if (currentStatus === 'active') {
+        await apiKeyService.revokeApiKey(keyId);
+      } else {
+        await apiKeyService.updateApiKey(keyId, { status: 'active' });
+      }
+      await loadApiKeys();
+    } catch (err) {
+      console.error('Failed to toggle key status:', err);
+      setApiKeysError(err instanceof Error ? err.message : 'Failed to update key status');
+    }
+  };
+
+  const handleDeleteKey = async (keyId: string) => {
+    if (!confirm('Are you sure you want to delete this API Key?')) return;
+
+    try {
+      await apiKeyService.deleteApiKey(keyId);
+      await loadApiKeys();
+    } catch (err) {
+      console.error('Failed to delete API key:', err);
+      setApiKeysError(err instanceof Error ? err.message : 'Failed to delete API key');
+    }
+  };
+
+  const closeKeyModal = () => {
     setIsKeyModalOpen(false);
-  };
-
-  const toggleKeyStatus = (id: string) => {
-    setApiKeys(prev => prev.map(k => k.id === id ? {
-      ...k,
-      status: k.status === 'active' ? 'inactive' : 'active'
-    } : k));
-  };
-
-  const handleDeleteKey = (id: string) => {
-    if (confirm('Are you sure you want to delete this API Key?')) {
-      setApiKeys(apiKeys.filter(k => k.id !== id));
-    }
+    setNewKeySecret(null);
+    setShowKeySecret(false);
+    setFormError(null);
   };
 
   const toggleScope = (scope: string) => {
@@ -437,55 +524,94 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </button>
            </div>
 
+           {/* Loading/Error State */}
+           {apiKeysLoading && (
+              <div className="p-12 flex items-center justify-center gap-3 text-zinc-500">
+                 <Loader2 size={20} className="animate-spin" />
+                 <span>Loading API keys...</span>
+              </div>
+           )}
+
+           {apiKeysError && (
+              <div className="m-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400">
+                 <AlertCircle size={20} />
+                 <span>{apiKeysError}</span>
+                 <button
+                    onClick={loadApiKeys}
+                    className="ml-auto text-xs underline hover:no-underline"
+                 >
+                    Retry
+                 </button>
+              </div>
+           )}
+
+           {!apiKeysLoading && !apiKeysError && (
            <div className="overflow-x-auto">
               <table className="w-full text-left text-sm text-zinc-400">
                  <thead className="bg-zinc-950/50 text-zinc-500 border-b border-zinc-800 uppercase text-xs">
                     <tr>
                        <th className="px-6 py-4 font-medium">Name</th>
-                       <th className="px-6 py-4 font-medium">Key Secret</th>
+                       <th className="px-6 py-4 font-medium">Key Prefix</th>
                        <th className="px-6 py-4 font-medium">Status</th>
                        <th className="px-6 py-4 font-medium">Created</th>
                        <th className="px-6 py-4 font-medium">Expires</th>
+                       <th className="px-6 py-4 font-medium">Usage</th>
                        <th className="px-6 py-4 font-medium text-right">Actions</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-zinc-800/50">
                     {apiKeys.map((key) => (
                        <tr key={key.id} className="group hover:bg-zinc-800/30 transition-colors">
-                          <td className="px-6 py-4 font-medium text-zinc-300">{key.name}</td>
+                          <td className="px-6 py-4">
+                             <div className="flex flex-col">
+                                <span className="font-medium text-zinc-300">{key.name}</span>
+                                {key.description && (
+                                   <span className="text-xs text-zinc-500 truncate max-w-[200px]">{key.description}</span>
+                                )}
+                             </div>
+                          </td>
                           <td className="px-6 py-4 font-mono text-xs">
-                             <div className="flex items-center gap-2 max-w-[220px]">
-                                <span className="truncate opacity-50 bg-zinc-950 px-2 py-1 rounded border border-zinc-800 select-all">{key.key}</span>
+                             <div className="flex items-center gap-2">
+                                <span className="opacity-70 bg-zinc-950 px-2 py-1 rounded border border-zinc-800 select-all">{key.key_prefix}</span>
                                 <button
-                                  onClick={() => handleCopyKey(key.key, key.id)}
-                                  className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
-                                  title="Copy"
+                                  onClick={() => handleCopyKey(key.key_prefix, key.id.toString())}
+                                  className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id.toString() ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
+                                  title="Copy prefix"
                                 >
-                                   {copiedKeyId === key.id ? <CheckCircle size={14} /> : <Copy size={14} />}
+                                   {copiedKeyId === key.id.toString() ? <CheckCircle size={14} /> : <Copy size={14} />}
                                 </button>
-                                {copiedKeyId === key.id && <span className="text-xs text-green-500 animate-in fade-in duration-200">Copied!</span>}
                              </div>
                           </td>
                           <td className="px-6 py-4">
                              <button
-                                onClick={() => toggleKeyStatus(key.id)}
+                                onClick={() => toggleKeyStatus(key.key_id, key.status)}
                                 className={`px-2.5 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5 transition-all hover:opacity-80 ${
                                 key.status === 'active'
                                    ? 'bg-green-500/10 text-green-400 border-green-500/20'
                                    : 'bg-red-500/10 text-red-400 border-red-500/20'
                              }`}>
                                 <Power size={10} />
-                                {key.status === 'active' ? 'Active' : 'Inactive'}
+                                {key.status === 'active' ? 'Active' : 'Revoked'}
                              </button>
                           </td>
-                          <td className="px-6 py-4">{key.created_at}</td>
+                          <td className="px-6 py-4 text-xs">
+                             {new Date(key.created_at).toLocaleDateString()}
+                          </td>
                           <td className="px-6 py-4">
-                             {key.expires_at === 'Never' ? (
+                             {!key.expires_at ? (
                                 <span className="text-zinc-500">Never</span>
                              ) : (
                                 <div className="flex flex-col">
-                                   <span>{key.expires_at}</span>
+                                   <span className="text-xs">{new Date(key.expires_at).toLocaleDateString()}</span>
                                    <span className="text-xs text-zinc-600">{calculateDaysLeft(key.expires_at)} days left</span>
+                                </div>
+                             )}
+                          </td>
+                          <td className="px-6 py-4 text-xs">
+                             <span className="text-zinc-400">{key.usage_count || 0}</span>
+                             {key.last_used_at && (
+                                <div className="text-zinc-600 text-xs">
+                                   Last: {new Date(key.last_used_at).toLocaleDateString()}
                                 </div>
                              )}
                           </td>
@@ -499,7 +625,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                    <Edit2 size={14} />
                                 </button>
                                 <button
-                                   onClick={() => handleDeleteKey(key.id)}
+                                   onClick={() => handleDeleteKey(key.key_id)}
                                    className="p-1.5 hover:bg-red-900/30 rounded text-zinc-500 hover:text-red-400 transition-colors"
                                    title="Delete"
                                 >
@@ -511,7 +637,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                     ))}
                     {apiKeys.length === 0 && (
                        <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500 italic">
+                          <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 italic">
                              No API keys generated yet.
                           </td>
                        </tr>
@@ -519,6 +645,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                  </tbody>
               </table>
            </div>
+           )}
 
            {/* API Documentation Section */}
            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
@@ -711,54 +838,128 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-20 p-4 overflow-y-auto">
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
                <div className="px-6 py-5 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
-                  <h3 className="text-lg font-bold text-white">{editingKeyId ? 'Edit API Key' : 'Create New API Key'}</h3>
-                  <button onClick={() => setIsKeyModalOpen(false)} className="text-zinc-500 hover:text-zinc-300">
+                  <h3 className="text-lg font-bold text-white">
+                     {newKeySecret ? 'API Key Created!' : editingKeyId ? 'Edit API Key' : 'Create New API Key'}
+                  </h3>
+                  <button onClick={closeKeyModal} className="text-zinc-500 hover:text-zinc-300">
                      <X size={20} />
                   </button>
                </div>
-               
+
+               {/* Show Secret Key After Creation */}
+               {newKeySecret ? (
+                  <div className="p-6 space-y-6">
+                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                        <div className="flex items-start gap-3">
+                           <AlertCircle size={20} className="text-yellow-400 mt-0.5 flex-shrink-0" />
+                           <div className="text-sm text-yellow-300">
+                              <p className="font-medium">Save this key now!</p>
+                              <p className="text-yellow-300/70 mt-1">This is the only time you'll see this key. Copy it somewhere safe.</p>
+                           </div>
+                        </div>
+                     </div>
+
+                     <div className="space-y-2">
+                        <label className="text-sm font-medium text-zinc-300">Your API Key</label>
+                        <div className="flex items-center gap-2">
+                           <div className="flex-1 relative">
+                              <input
+                                 type={showKeySecret ? 'text' : 'password'}
+                                 value={newKeySecret}
+                                 readOnly
+                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 font-mono text-sm pr-20"
+                              />
+                              <button
+                                 onClick={() => setShowKeySecret(!showKeySecret)}
+                                 className="absolute right-12 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                              >
+                                 {showKeySecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                              </button>
+                              <button
+                                 onClick={() => handleCopyKey(newKeySecret, 'new-key')}
+                                 className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
+                              >
+                                 {copiedKeyId === 'new-key' ? <CheckCircle size={18} /> : <Copy size={18} />}
+                              </button>
+                           </div>
+                        </div>
+                        {copiedKeyId === 'new-key' && (
+                           <p className="text-xs text-green-500 animate-in fade-in duration-200">Copied to clipboard!</p>
+                        )}
+                     </div>
+
+                     <div className="pt-4 border-t border-zinc-800">
+                        <button
+                           onClick={closeKeyModal}
+                           className="w-full px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm"
+                        >
+                           Done
+                        </button>
+                     </div>
+                  </div>
+               ) : (
+                  <>
                <div className="p-6 overflow-y-auto space-y-6">
+                  {formError && (
+                     <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400 text-sm">
+                        <AlertCircle size={18} />
+                        <span>{formError}</span>
+                     </div>
+                  )}
+
                   <div className="space-y-2">
                      <label className="text-sm font-medium text-zinc-300">Key Name</label>
-                     <input 
-                        type="text" 
+                     <input
+                        type="text"
                         placeholder="e.g. Production Web Client"
                         value={keyForm.name}
                         onChange={(e) => setKeyForm({...keyForm, name: e.target.value})}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
                      />
                   </div>
-                  
+
+                  <div className="space-y-2">
+                     <label className="text-sm font-medium text-zinc-300">Description (Optional)</label>
+                     <input
+                        type="text"
+                        placeholder="e.g. Used for automated scripts"
+                        value={keyForm.description}
+                        onChange={(e) => setKeyForm({...keyForm, description: e.target.value})}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                     />
+                  </div>
+
+                  {!editingKeyId && (
                   <div className="space-y-2">
                      <label className="text-sm font-medium text-zinc-300">Expiration</label>
                      <div className="flex gap-4 mb-2">
                         <label className="flex items-center gap-2 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
-                           <input 
-                              type="radio" 
-                              name="expirationType" 
-                              checked={keyForm.expirationType === 'never'} 
+                           <input
+                              type="radio"
+                              name="expirationType"
+                              checked={keyForm.expirationType === 'never'}
                               onChange={() => setKeyForm({...keyForm, expirationType: 'never'})}
                               className="accent-indigo-500"
                            />
                            Never Expires
                         </label>
                         <label className="flex items-center gap-2 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
-                           <input 
-                              type="radio" 
-                              name="expirationType" 
-                              checked={keyForm.expirationType === 'date'} 
+                           <input
+                              type="radio"
+                              name="expirationType"
+                              checked={keyForm.expirationType === 'date'}
                               onChange={() => setKeyForm({...keyForm, expirationType: 'date'})}
                               className="accent-indigo-500"
                            />
                            Select Date
                         </label>
                      </div>
-                     
+
                      {keyForm.expirationType === 'date' && (
                        <div className="relative animate-in fade-in slide-in-from-top-2">
                           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 w-4 h-4" />
-                          <input 
-                             type="date" 
+                          <input
+                             type="date"
                              value={keyForm.expirationDate}
                              min={new Date().toISOString().split('T')[0]}
                              onChange={(e) => setKeyForm({...keyForm, expirationDate: e.target.value})}
@@ -772,6 +973,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                        </div>
                      )}
                   </div>
+                  )}
 
                   <div className="space-y-3">
                      <div className="flex items-center justify-between">
@@ -779,54 +981,70 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                            <Shield size={14} className="text-indigo-400"/>
                            API Scopes (Required)
                         </label>
-                        <button 
-                           onClick={() => setKeyForm({...keyForm, scopes: API_SCOPES})}
+                        <button
+                           onClick={() => {
+                              const allScopes = availableScopes.length > 0
+                                 ? availableScopes.map(s => s.scope)
+                                 : DEFAULT_SCOPES;
+                              setKeyForm({...keyForm, scopes: allScopes});
+                           }}
                            className="text-xs text-indigo-400 hover:text-indigo-300"
                         >
                            Select All
                         </button>
                      </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-48 overflow-y-auto border border-zinc-800 rounded-lg p-3 bg-zinc-950/30">
-                        {API_SCOPES.map((scope) => (
-                           <label 
-                              key={scope} 
+                        {(availableScopes.length > 0 ? availableScopes : DEFAULT_SCOPES.map(s => ({ scope: s, name: s, description: '', category: '' }))).map((scopeInfo) => {
+                           const scope = typeof scopeInfo === 'string' ? scopeInfo : scopeInfo.scope;
+                           const name = typeof scopeInfo === 'string' ? scopeInfo : scopeInfo.name;
+                           const desc = typeof scopeInfo === 'string' ? '' : scopeInfo.description;
+                           return (
+                           <label
+                              key={scope}
                               onClick={(e) => {
                                  e.preventDefault();
                                  toggleScope(scope);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                                 keyForm.scopes.includes(scope) 
-                                    ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-300' 
+                                 keyForm.scopes.includes(scope)
+                                    ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-300'
                                     : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'
                               }`}
                            >
-                              <div className={`w-4 h-4 rounded flex items-center justify-center border ${
+                              <div className={`w-4 h-4 rounded flex items-center justify-center border flex-shrink-0 ${
                                  keyForm.scopes.includes(scope) ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'
                               }`}>
-                                 {keyForm.scopes.includes(scope) && <CheckSquare size={12} className="text-white" />}
+                                 {keyForm.scopes.includes(scope) && <Check size={10} className="text-white" />}
                               </div>
-                              <span className="text-xs font-mono truncate" title={scope}>{scope}</span>
+                              <div className="min-w-0 flex-1">
+                                 <span className="text-xs font-medium block truncate" title={scope}>{name}</span>
+                                 {desc && <span className="text-xs text-zinc-500 block truncate">{desc}</span>}
+                              </div>
                            </label>
-                        ))}
+                        )})}
                      </div>
                   </div>
                </div>
 
                <div className="px-6 py-5 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
-                  <button 
-                     onClick={() => setIsKeyModalOpen(false)}
+                  <button
+                     onClick={closeKeyModal}
                      className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm"
+                     disabled={formLoading}
                   >
                      Cancel
                   </button>
-                  <button 
+                  <button
                      onClick={handleSaveKey}
-                     disabled={!keyForm.name || keyForm.scopes.length === 0 || (keyForm.expirationType === 'date' && !keyForm.expirationDate)}
-                     className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-900/20"
+                     disabled={formLoading || !keyForm.name || keyForm.scopes.length === 0 || (keyForm.expirationType === 'date' && !keyForm.expirationDate)}
+                     className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-900/20 flex items-center gap-2"
                   >
+                     {formLoading && <Loader2 size={16} className="animate-spin" />}
                      {editingKeyId ? 'Save Changes' : 'Create Key'}
                   </button>
                </div>
+                  </>
+               )}
             </div>
          </div>
       )}
