@@ -29,6 +29,74 @@ from app.core.config import settings
 class DownloaderService:
 
     @staticmethod
+    async def optimize_video_for_streaming(file_path: str) -> bool:
+        """
+        Optimize video for web streaming by moving moov atom to the beginning.
+
+        Uses ffmpeg with -movflags faststart to enable progressive playback.
+        This allows browsers to start playing before the entire file is downloaded.
+
+        Returns True if optimization succeeded, False otherwise.
+        """
+        import subprocess
+        import shutil
+
+        if not file_path.endswith('.mp4'):
+            return True  # Skip non-MP4 files
+
+        temp_path = file_path + '.optimizing.mp4'
+
+        try:
+            # Run ffmpeg to optimize the video
+            result = subprocess.run(
+                [
+                    'ffmpeg', '-y',  # Overwrite output
+                    '-i', file_path,
+                    '-c', 'copy',  # Copy streams without re-encoding (fast)
+                    '-movflags', 'faststart',  # Move moov atom to beginning
+                    temp_path
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout for large files
+            )
+
+            if result.returncode == 0 and os.path.exists(temp_path):
+                # Check if the optimized file is valid
+                optimized_size = os.path.getsize(temp_path)
+                original_size = os.path.getsize(file_path)
+
+                # Optimized file should be similar size (within 5%)
+                if optimized_size >= original_size * 0.95:
+                    # Replace original with optimized version
+                    shutil.move(temp_path, file_path)
+                    logger.info(f"视频已优化为流式播放: {os.path.basename(file_path)}")
+                    return True
+                else:
+                    logger.warning(f"优化后文件大小异常，保留原文件: {os.path.basename(file_path)}")
+                    os.remove(temp_path)
+                    return False
+            else:
+                logger.warning(f"视频优化失败: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"视频优化超时: {os.path.basename(file_path)}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return False
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found, skipping video optimization")
+            return False
+        except Exception as e:
+            logger.warning(f"视频优化出错: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return False
+
+    @staticmethod
     async def verify_video_integrity(file_path: str) -> bool:
         """
         Verify video file integrity using ffmpeg.
@@ -279,8 +347,11 @@ class DownloaderService:
             # download video while one of the urls is successful
             for url in video_urls:
                 if await DownloaderService.download_file(url, video_full_path, headers, progress_tracker):
+                    # 优化视频以支持流式播放（移动 moov atom 到文件开头）
+                    await DownloaderService.optimize_video_for_streaming(video_full_path)
+
                     try:
-                        # 计算文件大小
+                        # 计算文件大小（优化后的大小）
                         file_size = os.path.getsize(video_full_path) if os.path.exists(video_full_path) else 0
 
                         # 存储相对路径和文件大小到数据库
