@@ -1,64 +1,30 @@
 """Admin API routes for User management."""
 
-from datetime import datetime, timezone
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase, get_async_supabase_admin
+from app.db import get_async_supabase_admin
 from app.schemas.admin import (
     AdminUserResponse,
     AdminUserListResponse,
     AdminUserUpdate,
     AdminUserBanRequest,
 )
+from app.utils.admin_helpers import (
+    create_audit_log,
+    batch_get_user_auth_info,
+    batch_get_user_counts,
+    get_user_auth_info,
+    get_user_video_count,
+    get_user_team_count,
+)
 
 
 router = APIRouter()
-
-
-# ============================================
-# Helper Functions
-# ============================================
-
-
-async def create_audit_log(
-    admin_id: str,
-    action: str,
-    target_type: str,
-    target_id: str,
-    details: Optional[dict] = None,
-    ip_address: Optional[str] = None,
-) -> None:
-    """Create an audit log entry for admin actions."""
-    try:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("audit_logs").insert({
-            "admin_id": admin_id,
-            "action": action,
-            "target_type": target_type,
-            "target_id": target_id,
-            "details": details,
-            "ip_address": ip_address,
-        }).execute()
-    except Exception as e:
-        logger.error(f"Failed to create audit log: {e}")
-        # Don't raise - audit log failures shouldn't block the main operation
-
-
-async def get_user_email_by_id(user_id: str) -> Optional[str]:
-    """Get user email from Supabase Auth."""
-    try:
-        supabase = await get_async_supabase_admin()
-        response = await supabase.auth.admin.get_user_by_id(user_id)
-        if response and response.user:
-            return response.user.email
-        return None
-    except Exception as e:
-        logger.warning(f"Failed to get user email for {user_id}: {e}")
-        return None
 
 
 # ============================================
@@ -104,48 +70,34 @@ async def list_users(
     if not result.data:
         return AdminUserListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Get video counts for each user
+    # Get additional data for all users concurrently (avoiding N+1 queries)
     user_ids = [u["id"] for u in result.data]
-    video_counts = {}
-    team_counts = {}
-    user_emails = {}
-    last_sign_ins = {}
 
-    # Get video counts
-    for user_id in user_ids:
-        video_result = await supabase.table("douyin_videos").select("id", count="exact").eq("user_id", user_id).execute()
-        video_counts[user_id] = video_result.count or 0
-
-        # Get team counts
-        team_result = await supabase.table("team_members").select("team_id", count="exact").eq("user_id", user_id).execute()
-        team_counts[user_id] = team_result.count or 0
-
-        # Get email and last sign in from auth
-        try:
-            auth_response = await supabase.auth.admin.get_user_by_id(user_id)
-            if auth_response and auth_response.user:
-                user_emails[user_id] = auth_response.user.email
-                last_sign_ins[user_id] = auth_response.user.last_sign_in_at
-        except Exception as e:
-            logger.warning(f"Failed to get auth info for user {user_id}: {e}")
+    # Batch fetch: counts and auth info in parallel
+    user_counts, auth_info = await asyncio.gather(
+        batch_get_user_counts(user_ids),
+        batch_get_user_auth_info(user_ids),
+    )
 
     # Build response
-    items = [
-        AdminUserResponse(
-            id=str(u["id"]),
-            email=user_emails.get(u["id"]),
+    items = []
+    for u in result.data:
+        uid = u["id"]
+        video_count, team_count = user_counts.get(uid, (0, 0))
+        email, last_sign_in_at = auth_info.get(uid, (None, None))
+        items.append(AdminUserResponse(
+            id=str(uid),
+            email=email,
             username=u.get("username"),
             avatar_url=u.get("avatar_url"),
             role=str(u.get("role", "user")),
             is_banned=u.get("is_banned", False),
             created_at=u["created_at"],
             updated_at=u.get("updated_at"),
-            last_sign_in_at=last_sign_ins.get(u["id"]),
-            video_count=video_counts.get(u["id"], 0),
-            team_count=team_counts.get(u["id"], 0),
-        )
-        for u in result.data
-    ]
+            last_sign_in_at=last_sign_in_at,
+            video_count=video_count,
+            team_count=team_count,
+        ))
 
     return AdminUserListResponse(
         items=items,
@@ -174,24 +126,11 @@ async def get_user(
 
     u = result.data
 
-    # Get video count
-    video_result = await supabase.table("douyin_videos").select("id", count="exact").eq("user_id", user_id).execute()
-    video_count = video_result.count or 0
-
-    # Get team count
-    team_result = await supabase.table("team_members").select("team_id", count="exact").eq("user_id", user_id).execute()
-    team_count = team_result.count or 0
-
-    # Get email and last sign in from auth
-    email = None
-    last_sign_in_at = None
-    try:
-        auth_response = await supabase.auth.admin.get_user_by_id(user_id)
-        if auth_response and auth_response.user:
-            email = auth_response.user.email
-            last_sign_in_at = auth_response.user.last_sign_in_at
-    except Exception as e:
-        logger.warning(f"Failed to get auth info for user {user_id}: {e}")
+    # Get counts and auth info concurrently
+    (video_count, team_count), (email, last_sign_in_at) = await asyncio.gather(
+        asyncio.gather(get_user_video_count(user_id), get_user_team_count(user_id)),
+        get_user_auth_info(user_id),
+    )
 
     return AdminUserResponse(
         id=str(u["id"]),

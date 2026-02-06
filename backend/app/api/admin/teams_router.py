@@ -1,5 +1,6 @@
 """Admin API routes for Team management."""
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -12,67 +13,16 @@ from app.schemas.admin import (
     AdminTeamListResponse,
     AdminTeamMemberResponse,
 )
+from app.utils.admin_helpers import (
+    create_audit_log,
+    get_user_info,
+    get_team_member_count,
+    batch_get_user_info,
+    batch_get_team_member_counts,
+)
 
 
 router = APIRouter()
-
-
-# ============================================
-# Helper Functions
-# ============================================
-
-
-async def create_audit_log(
-    admin_id: str,
-    action: str,
-    target_type: str,
-    target_id: str,
-    details: Optional[dict] = None,
-    ip_address: Optional[str] = None,
-) -> None:
-    """Create an audit log entry for admin actions."""
-    try:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("audit_logs").insert({
-            "admin_id": admin_id,
-            "action": action,
-            "target_type": target_type,
-            "target_id": target_id,
-            "details": details,
-            "ip_address": ip_address,
-        }).execute()
-    except Exception as e:
-        logger.error(f"Failed to create audit log: {e}")
-        # Don't raise - audit log failures shouldn't block the main operation
-
-
-async def get_user_info_by_id(user_id: str) -> tuple[Optional[str], Optional[str]]:
-    """Get user email and username from Supabase Auth and profiles."""
-    try:
-        supabase = await get_async_supabase_admin()
-
-        # Get email from auth
-        email = None
-        try:
-            auth_response = await supabase.auth.admin.get_user_by_id(user_id)
-            if auth_response and auth_response.user:
-                email = auth_response.user.email
-        except Exception as e:
-            logger.warning(f"Failed to get auth info for user {user_id}: {e}")
-
-        # Get username from profile
-        username = None
-        try:
-            profile_result = await supabase.table("user_profiles").select("username").eq("id", user_id).single().execute()
-            if profile_result.data:
-                username = profile_result.data.get("username")
-        except Exception as e:
-            logger.warning(f"Failed to get profile for user {user_id}: {e}")
-
-        return email, username
-    except Exception as e:
-        logger.warning(f"Failed to get user info for {user_id}: {e}")
-        return None, None
 
 
 # ============================================
@@ -113,25 +63,30 @@ async def list_teams(
     if not result.data:
         return AdminTeamListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Get member counts and owner info for each team
+    # Batch fetch: member counts and owner info in parallel (avoiding N+1 queries)
+    team_ids = [t["id"] for t in result.data]
+    owner_ids = list(set(t["owner_id"] for t in result.data))
+
+    member_counts, owner_info = await asyncio.gather(
+        batch_get_team_member_counts(team_ids),
+        batch_get_user_info(owner_ids),
+    )
+
+    # Build response
     items = []
     for team in result.data:
-        # Get member count
-        member_result = await supabase.table("team_members").select("user_id", count="exact").eq("team_id", team["id"]).execute()
-        member_count = member_result.count or 0
-
-        # Get owner info
-        owner_email, owner_username = await get_user_info_by_id(team["owner_id"])
-
+        tid = team["id"]
+        oid = team["owner_id"]
+        owner_email, owner_username = owner_info.get(oid, (None, None))
         items.append(AdminTeamResponse(
-            id=str(team["id"]),
+            id=str(tid),
             name=team["name"],
-            owner_id=str(team["owner_id"]),
+            owner_id=str(oid),
             owner_email=owner_email,
             owner_username=owner_username,
             invite_code=team["invite_code"],
             description=team.get("description"),
-            member_count=member_count,
+            member_count=member_counts.get(tid, 0),
             created_at=team["created_at"],
         ))
 
@@ -162,12 +117,11 @@ async def get_team(
 
     team = result.data
 
-    # Get member count
-    member_result = await supabase.table("team_members").select("user_id", count="exact").eq("team_id", team_id).execute()
-    member_count = member_result.count or 0
-
-    # Get owner info
-    owner_email, owner_username = await get_user_info_by_id(team["owner_id"])
+    # Get member count and owner info concurrently
+    member_count, (owner_email, owner_username) = await asyncio.gather(
+        get_team_member_count(team_id),
+        get_user_info(team["owner_id"]),
+    )
 
     return AdminTeamResponse(
         id=str(team["id"]),
@@ -204,12 +158,17 @@ async def get_team_members(
     if not result.data:
         return []
 
-    # Build response with user info
+    # Batch fetch user info for all members (avoiding N+1 queries)
+    user_ids = [m["user_id"] for m in result.data]
+    user_info = await batch_get_user_info(user_ids)
+
+    # Build response
     members = []
     for member in result.data:
-        email, username = await get_user_info_by_id(member["user_id"])
+        uid = member["user_id"]
+        email, username = user_info.get(uid, (None, None))
         members.append(AdminTeamMemberResponse(
-            user_id=str(member["user_id"]),
+            user_id=str(uid),
             email=email,
             username=username,
             role=member["role"],

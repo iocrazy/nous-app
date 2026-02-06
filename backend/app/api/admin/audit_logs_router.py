@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, Query
-from loguru import logger
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
@@ -13,6 +12,7 @@ from app.schemas.admin import (
     AuditLogResponse,
     AuditLogListResponse,
 )
+from app.utils.admin_helpers import batch_get_user_info
 
 
 router = APIRouter()
@@ -47,37 +47,6 @@ class AuditStatsResponse(BaseModel):
     by_target: List[AuditTargetCount]
     by_day: List[AuditDayCount]
     total: int
-
-
-# ============================================
-# Helper Functions
-# ============================================
-
-
-async def get_admin_email_by_id(admin_id: str) -> Optional[str]:
-    """Get admin email from Supabase Auth."""
-    try:
-        supabase = await get_async_supabase_admin()
-        response = await supabase.auth.admin.get_user_by_id(admin_id)
-        if response and response.user:
-            return response.user.email
-        return None
-    except Exception as e:
-        logger.warning(f"Failed to get admin email for {admin_id}: {e}")
-        return None
-
-
-async def get_admin_username_by_id(admin_id: str) -> Optional[str]:
-    """Get admin username from user_profiles."""
-    try:
-        supabase = await get_async_supabase_admin()
-        result = await supabase.table("user_profiles").select("username").eq("id", admin_id).single().execute()
-        if result.data:
-            return result.data.get("username")
-        return None
-    except Exception as e:
-        logger.warning(f"Failed to get admin username for {admin_id}: {e}")
-        return None
 
 
 # ============================================
@@ -137,31 +106,27 @@ async def list_audit_logs(
     if not result.data:
         return AuditLogListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Get admin info for each log entry
+    # Batch fetch admin info (avoiding N+1 queries)
     admin_ids = list(set(log["admin_id"] for log in result.data if log.get("admin_id")))
-    admin_emails = {}
-    admin_usernames = {}
-
-    for aid in admin_ids:
-        admin_emails[aid] = await get_admin_email_by_id(aid)
-        admin_usernames[aid] = await get_admin_username_by_id(aid)
+    admin_info = await batch_get_user_info(admin_ids)
 
     # Build response items
-    items = [
-        AuditLogResponse(
+    items = []
+    for log in result.data:
+        aid = log["admin_id"]
+        admin_email, admin_username = admin_info.get(aid, (None, None))
+        items.append(AuditLogResponse(
             id=str(log["id"]),
-            admin_id=log["admin_id"],
-            admin_email=admin_emails.get(log["admin_id"]),
-            admin_username=admin_usernames.get(log["admin_id"]),
+            admin_id=aid,
+            admin_email=admin_email,
+            admin_username=admin_username,
             action=log["action"],
             target_type=log["target_type"],
             target_id=log["target_id"],
             details=log.get("details"),
             ip_address=log.get("ip_address"),
             created_at=log["created_at"],
-        )
-        for log in result.data
-    ]
+        ))
 
     return AuditLogListResponse(
         items=items,

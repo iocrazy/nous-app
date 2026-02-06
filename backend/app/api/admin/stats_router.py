@@ -1,8 +1,10 @@
 """Admin statistics API routes."""
 
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
+from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.db import get_async_supabase_admin
@@ -19,45 +21,41 @@ async def get_overview_stats(auth: AdminAuthDep):
     today = datetime.utcnow().date()
     today_start = datetime.combine(today, datetime.min.time())
 
-    # Total users
-    users_result = await supabase.table("user_profiles").select("id", count="exact").execute()
-    total_users = users_result.count or 0
+    async def get_active_users() -> int:
+        """Get active users today from user_logs."""
+        try:
+            result = await supabase.table("user_logs").select("user_id").gte("created_at", today_start.isoformat()).execute()
+            return len(set(log["user_id"] for log in result.data)) if result.data else 0
+        except Exception:
+            return 0
 
-    # Total videos
-    videos_result = await supabase.table("douyin_videos").select("id", count="exact").execute()
-    total_videos = videos_result.count or 0
-
-    # Total teams
-    teams_result = await supabase.table("teams").select("id", count="exact").execute()
-    total_teams = teams_result.count or 0
-
-    # Total downloads (completed)
-    downloads_result = await supabase.table("douyin_videos").select("id", count="exact").eq("video_download_status", "completed").execute()
-    total_downloads = downloads_result.count or 0
-
-    # New users today
-    new_users_result = await supabase.table("user_profiles").select("id", count="exact").gte("created_at", today_start.isoformat()).execute()
-    new_users_today = new_users_result.count or 0
-
-    # New videos today
-    new_videos_result = await supabase.table("douyin_videos").select("id", count="exact").gte("created_at", today_start.isoformat()).execute()
-    new_videos_today = new_videos_result.count or 0
-
-    # Active users today (from user_logs if exists, otherwise 0)
-    try:
-        active_result = await supabase.table("user_logs").select("user_id").gte("created_at", today_start.isoformat()).execute()
-        active_users_today = len(set(log["user_id"] for log in active_result.data)) if active_result.data else 0
-    except Exception:
-        active_users_today = 0
+    # Execute all queries concurrently
+    (
+        users_result,
+        videos_result,
+        teams_result,
+        downloads_result,
+        new_users_result,
+        new_videos_result,
+        active_users_today,
+    ) = await asyncio.gather(
+        supabase.table("user_profiles").select("id", count="exact").execute(),
+        supabase.table("douyin_videos").select("id", count="exact").execute(),
+        supabase.table("teams").select("id", count="exact").execute(),
+        supabase.table("douyin_videos").select("id", count="exact").eq("video_download_status", "completed").execute(),
+        supabase.table("user_profiles").select("id", count="exact").gte("created_at", today_start.isoformat()).execute(),
+        supabase.table("douyin_videos").select("id", count="exact").gte("created_at", today_start.isoformat()).execute(),
+        get_active_users(),
+    )
 
     return AdminStatsResponse(
-        total_users=total_users,
-        total_videos=total_videos,
-        total_teams=total_teams,
-        total_downloads=total_downloads,
+        total_users=users_result.count or 0,
+        total_videos=videos_result.count or 0,
+        total_teams=teams_result.count or 0,
+        total_downloads=downloads_result.count or 0,
         active_users_today=active_users_today,
-        new_users_today=new_users_today,
-        new_videos_today=new_videos_today,
+        new_users_today=new_users_result.count or 0,
+        new_videos_today=new_videos_result.count or 0,
     )
 
 
