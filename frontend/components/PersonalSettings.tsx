@@ -101,13 +101,13 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
   return (
     <div className="space-y-8">
       {/* Avatar */}
-      <div className="flex items-start gap-6">
-        <div className="relative">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
+      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+        <div className="relative flex-shrink-0">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
             {avatarUrl ? (
               <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
-              <span className="text-3xl font-bold text-white">
+              <span className="text-2xl sm:text-3xl font-bold text-white">
                 {name.charAt(0).toUpperCase() || 'U'}
               </span>
             )}
@@ -116,7 +116,7 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
             <Camera size={14} className="text-zinc-300" />
           </button>
         </div>
-        <div className="flex-1 space-y-1">
+        <div className="flex-1 space-y-1 text-center sm:text-left w-full">
           <h3 className="text-sm font-medium text-zinc-400">Profile Photo</h3>
           <p className="text-xs text-zinc-500">
             Click the camera icon to upload a new photo

@@ -80,7 +80,13 @@ const initializeClient = (): SupabaseClient | null => {
   }
 
   try {
-    const newClient = createClient(supabaseUrl, supabaseAnonKey);
+    const newClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,        // Enable session persistence in localStorage
+        autoRefreshToken: true,      // Automatically refresh tokens before expiry
+        detectSessionInUrl: true,    // Handle OAuth redirects
+      },
+    });
     console.log(`Supabase Client initialized with URL: ${supabaseUrl}`);
     return newClient;
   } catch (error) {

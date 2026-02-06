@@ -413,47 +413,76 @@ export default function App() {
     loadFrontendConfig();
   }, []);
 
-  // Check for existing session after config is loaded
+  // Check for existing session and listen for auth state changes
   useEffect(() => {
     if (!isConfigLoaded) return;
 
-    const checkSession = async () => {
-      const supabase = getSupabaseClient();
-      if (isSupabaseConfigured() && supabase) {
-        // 更新 userSettings 中的 Supabase 凭据（从当前配置获取）
-        const credentials = getSupabaseCredentials();
-        setUserSettings(prev => ({
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    // Update userSettings with Supabase credentials
+    const credentials = getSupabaseCredentials();
+    setUserSettings(prev => ({
+      ...prev,
+      supabaseUrl: credentials.url || prev.supabaseUrl,
+      supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
+    }));
+
+    // Handle session state
+    const handleSession = async (session: { user: { id: string; email?: string | null } } | null) => {
+      if (session?.user) {
+        setUserProfile(prev => ({
           ...prev,
-          supabaseUrl: credentials.url || prev.supabaseUrl,
-          supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
+          name: session.user.email?.split('@')[0] || 'User',
+          email: session.user.email || '',
         }));
+        setCurrentUserId(session.user.id);
+        setIsAuthenticated(true);
 
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUserProfile(prev => ({
-            ...prev,
-            name: session.user.email?.split('@')[0] || 'User',
-            email: session.user.email || '',
-          }));
-          setCurrentUserId(session.user.id);
-          setIsAuthenticated(true);
-
-          // Load user settings from Supabase
-          try {
-            const settings = await fetchUserSettings();
-            if (settings) {
-              setUserSettings(prev => ({
-                ...prev,
-                downloadPath: settings.download_path || prev.downloadPath,
-              }));
-            }
-          } catch (err) {
-            console.error('Failed to load user settings:', err);
+        // Load user settings from Supabase
+        try {
+          const settings = await fetchUserSettings();
+          if (settings) {
+            setUserSettings(prev => ({
+              ...prev,
+              downloadPath: settings.download_path || prev.downloadPath,
+            }));
           }
+        } catch (err) {
+          console.error('Failed to load user settings:', err);
         }
+      } else {
+        setIsAuthenticated(false);
+        setCurrentUserId(null);
       }
     };
-    checkSession();
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleSession(session);
+    });
+
+    // Listen for auth state changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event);
+        if (event === 'SIGNED_OUT') {
+          setIsAuthenticated(false);
+          setCurrentUserId(null);
+          setLibrary([]);
+          setTeams([]);
+          setCollections([]);
+          setNotifications([]);
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          handleSession(session);
+        }
+      }
+    );
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [isConfigLoaded]);
 
   // Fetch Library Data on Mount

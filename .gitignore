@@ -217,6 +217,7 @@ dist
 .cache/
 public
 !frontend/public/locales/
+!frontend/public/favicon.svg
 
 # Storybook build outputs
 .out

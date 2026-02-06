@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d946ef;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#818cf8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c084fc;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="96" ry="96" fill="url(#grad1)"/>
+
+  <!-- Inner glow effect -->
+  <rect x="48" y="48" width="416" height="416" rx="88" ry="88" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+
+  <!-- Play button / Media icon -->
+  <g filter="url(#glow)">
+    <!-- Outer circle -->
+    <circle cx="256" cy="256" r="120" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)" stroke-width="3"/>
+
+    <!-- Play triangle -->
+    <path d="M220 176 L220 336 L340 256 Z" fill="white" opacity="0.95"/>
+  </g>
+
+  <!-- Sparkle accents -->
+  <circle cx="380" cy="120" r="8" fill="white" opacity="0.6"/>
+  <circle cx="400" cy="160" r="4" fill="white" opacity="0.4"/>
+  <circle cx="120" cy="380" r="6" fill="white" opacity="0.5"/>
+</svg>

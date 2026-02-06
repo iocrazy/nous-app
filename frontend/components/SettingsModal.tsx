@@ -84,10 +84,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[85vh] flex overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        {/* Sidebar */}
-        <div className="w-56 bg-zinc-950/50 border-r border-zinc-800 flex flex-col">
+      {/* Modal - Full screen on mobile, constrained on desktop */}
+      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-4xl md:mx-4 h-full md:h-auto md:max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+
+        {/* Mobile Header with Close Button */}
+        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xs font-bold text-white">
+                  {user.name.charAt(0).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <span className="text-sm font-medium text-white">{user.name}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Mobile Tab Bar */}
+        <div className="md:hidden flex border-b border-zinc-800 bg-zinc-950/30">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === item.id
+                  ? 'text-white'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <item.icon size={16} />
+              <span className="truncate">{item.id === 'personal' ? 'Personal' : 'Team'}</span>
+              {activeTab === item.id && (
+                <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-500 rounded-full" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop Sidebar - Hidden on mobile */}
+        <div className="hidden md:flex w-56 bg-zinc-950/50 border-r border-zinc-800 flex-col">
           {/* Sidebar Header */}
           <div className="p-4 border-b border-zinc-800">
             <div className="flex items-center gap-3">
@@ -135,8 +179,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+          {/* Desktop Header - Hidden on mobile */}
+          <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-zinc-800">
             <h2 className="text-lg font-semibold text-white">
               {activeTab === 'personal' ? 'Personal Settings' : (
                 <>
@@ -156,9 +200,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6">
             {activeTab === 'personal' && (
-              <div className="max-w-xl">
+              <div className="max-w-xl mx-auto md:mx-0">
                 <PersonalSettings user={user} onUserUpdated={onUserUpdated} />
               </div>
             )}
