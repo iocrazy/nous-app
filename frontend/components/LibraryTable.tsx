@@ -229,9 +229,100 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     );
   }
 
+  // Mobile Card Component
+  const MobileCard = ({ item }: { item: DouyinBase }) => (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3">
+      <div className="flex gap-3">
+        {/* Thumbnail */}
+        <div
+          onClick={() => handleMediaClick(item)}
+          className="w-20 h-20 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700"
+        >
+          <img
+            src={getCoverUrl(item) || "https://picsum.photos/400/600"}
+            alt="Preview"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+            {isVideoType(item.aweme_type) ? (
+              <div className="bg-black/40 p-1.5 rounded-full">
+                <Play size={16} className="text-white fill-white" />
+              </div>
+            ) : (
+              <ImageIcon size={16} className="text-white drop-shadow-md" />
+            )}
+          </div>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0 space-y-1">
+          <h3 className="font-medium text-zinc-200 text-sm line-clamp-2 leading-tight">
+            {item.video_title || 'Untitled'}
+          </h3>
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>@{item.author}</span>
+            <span>•</span>
+            <span>{formatDate(item.video_created_time)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">
+              {getAwemeTypeLabel(item.aweme_type)}
+            </span>
+            <a href={item.video_original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
+              <ExternalLink size={12} />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div className="flex items-center justify-between px-1">
+        <div className="flex items-center gap-4 text-xs">
+          <span className="flex items-center gap-1 text-zinc-400">
+            <Heart size={12} className="text-rose-500" />
+            {formatNumber(item.video_digg_count)}
+          </span>
+          <span className="flex items-center gap-1 text-zinc-400">
+            <MessageCircle size={12} className="text-sky-500" />
+            {formatNumber(item.video_comment_count)}
+          </span>
+          <span className="flex items-center gap-1 text-zinc-400">
+            <Share2 size={12} className="text-emerald-500" />
+            {formatNumber(item.video_share_count)}
+          </span>
+        </div>
+        <span className="text-[10px] text-zinc-600">
+          {formatDate(item.created_at)}
+        </span>
+      </div>
+
+      {/* Tags */}
+      {item.tags && item.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {item.tags.slice(0, 4).map((tag, i) => (
+            <span key={i} className={`px-2 py-0.5 text-[10px] rounded-full border ${getTagStyle(tag)}`}>
+              {tag}
+            </span>
+          ))}
+          {item.tags.length > 4 && (
+            <span className="text-[10px] text-zinc-500">+{item.tags.length - 4}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <div className="w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/50">
+      {/* Mobile View - Card List */}
+      <div className="md:hidden space-y-3">
+        {sortedData.map((item) => (
+          <MobileCard key={item.aweme_id} item={item} />
+        ))}
+      </div>
+
+      {/* Desktop View - Table */}
+      <div className="hidden md:block w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/50">
         <table className="w-full text-left text-sm text-zinc-400">
           <thead className="bg-zinc-900 text-zinc-200 uppercase text-xs font-semibold tracking-wider">
             <tr>

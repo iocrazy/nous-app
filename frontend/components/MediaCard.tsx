@@ -627,30 +627,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
           {/* Downloads Footer */}
           <div className="space-y-3 pt-4 border-t border-zinc-800/50 mt-auto">
-             <div className="flex gap-3">
+             <div className="flex gap-2">
                 {isVideo && videoUrl && (
                   <button
                     onClick={onDownloadVideo}
                     disabled={isDownloading}
-                    className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-3 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5 disabled:opacity-70"
+                    className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5 disabled:opacity-70"
                   >
                     {isDownloading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
-                    {isDownloading ? 'Downloading...' : 'Download Video'}
+                    {isDownloading ? 'Downloading...' : 'Download'}
                   </button>
                 )}
                 {data.image_download_urls && data.image_download_urls.length > 0 && (
-                   <button 
+                   <button
                      onClick={onDownloadImages}
-                     className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-3 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5"
+                     className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5"
                    >
                    <Download className="w-4 h-4" />
-                   Download Images
+                   Images
                  </button>
                 )}
                 {onSave && (
                    <button
                     onClick={() => onSave(data)}
-                    className="px-5 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg transition-colors border border-zinc-700"
+                    className="w-11 h-11 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg transition-colors border border-zinc-700"
                     title="Save to Library"
                    >
                      <Bookmark className="w-5 h-5" />
@@ -661,7 +661,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   <button
                     onClick={() => setShowRetryMenu(!showRetryMenu)}
                     disabled={isRetrying}
-                    className={`px-5 py-3 rounded-lg transition-colors border ${
+                    className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
                       retrySuccess
                         ? 'bg-emerald-600/20 text-emerald-400 border-emerald-600/50'
                         : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white'
@@ -727,7 +727,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   <div className="relative">
                     <button
                       onClick={() => setShowCollectionPicker(!showCollectionPicker)}
-                      className={`px-5 py-3 rounded-lg transition-colors border ${
+                      className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
                         videoCollectionIds.length > 0
                           ? 'bg-indigo-600/20 text-indigo-400 border-indigo-600/50 hover:bg-indigo-600/30'
                           : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white'
@@ -762,7 +762,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 {onDelete && (
                   <button
                     onClick={() => setShowDeleteDialog(true)}
-                    className="px-5 py-3 bg-red-950/50 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/50 hover:border-red-800"
+                    className="w-11 h-11 flex items-center justify-center bg-red-950/50 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/50 hover:border-red-800"
                     title="Delete"
                   >
                     <Trash2 className="w-5 h-5" />

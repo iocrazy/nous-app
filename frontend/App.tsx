@@ -1621,55 +1621,57 @@ export default function App() {
 
       {/* Mobile Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
-        
-        {/* Mobile Popup Menu for View Selection */}
-        {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
-           <div className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-zinc-800/90 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-              <button 
-                onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-                className={`p-2 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Table View"
-              >
-                <LayoutList size={20} />
-              </button>
-              <button 
-                onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-                className={`p-2 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Grid View"
-              >
-                <LayoutGrid size={20} />
-              </button>
-              <button 
-                onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-                className={`p-2 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Feed View"
-              >
-                <Smartphone size={20} />
-              </button>
-              {/* Little triangle arrow pointing down */}
-              <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
-           </div>
-        )}
 
         {/* 1. Parser */}
-        <button 
-          onClick={() => handleMobileNavClick('parser')} 
+        <button
+          onClick={() => handleMobileNavClick('parser')}
           className={`flex flex-col items-center gap-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
         >
           <Search size={24}/>
         </button>
-        
-        {/* 2. Library */}
-        <button 
-          onClick={handleMobileLibraryClick} 
-          className={`flex flex-col items-center gap-1 transition-colors relative ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-        >
-          <Library size={24}/>
-          {/* Active Indicator dot */}
-          {view === 'library' && isMobileMenuOpen && (
-             <span className="absolute -top-1 right-0 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+
+        {/* 2. Library with popup menu */}
+        <div className="relative">
+          <button
+            onClick={handleMobileLibraryClick}
+            className={`flex flex-col items-center gap-1 transition-colors relative ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <Library size={24}/>
+            {/* Active Indicator dot */}
+            {view === 'library' && isMobileMenuOpen && (
+               <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+            )}
+          </button>
+
+          {/* Mobile Popup Menu for View Selection - positioned above Library button */}
+          {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
+             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                <button
+                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                  title="Table View"
+                >
+                  <LayoutList size={20} />
+                </button>
+                <button
+                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                  title="Grid View"
+                >
+                  <LayoutGrid size={20} />
+                </button>
+                <button
+                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                  title="Feed View"
+                >
+                  <Smartphone size={20} />
+                </button>
+                {/* Little triangle arrow pointing down */}
+                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
+             </div>
           )}
-        </button>
+        </div>
         
         {/* 3. Dashboard */}
         <button 
