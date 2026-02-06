@@ -242,6 +242,11 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
             src={getCoverUrl(item) || "https://picsum.photos/400/600"}
             alt="Preview"
             className="w-full h-full object-cover"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.style.display = 'none';
+              target.parentElement?.classList.add('bg-zinc-700');
+            }}
           />
           <div className="absolute inset-0 flex items-center justify-center">
             {isVideoType(item.aweme_type) ? (
@@ -395,6 +400,11 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                       src={getCoverUrl(item) || "https://picsum.photos/400/600"}
                       alt="Preview"
                       className="w-full h-full object-cover opacity-80 group-hover:opacity-60 transition-all"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        target.parentElement?.classList.add('bg-zinc-700');
+                      }}
                      />
                      <div className="absolute inset-0 flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
                         {isVideoType(item.aweme_type) ? (
@@ -661,6 +671,10 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                      maxWidth: '90vw',
                      maxHeight: '90vh',
                      objectFit: 'contain',
+                   }}
+                   onError={(e) => {
+                     const target = e.target as HTMLImageElement;
+                     target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 24 24" fill="none" stroke="%23666" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
                    }}
                  />
                )}

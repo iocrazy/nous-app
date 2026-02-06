@@ -30,6 +30,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
+  const [imageError, setImageError] = useState(false);
   
   const isVideo = isVideoType(data.aweme_type);
   const images = data.image_download_urls || [];
@@ -63,6 +64,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   const handleSlide = (e: React.MouseEvent, direction: 'left' | 'right') => {
     e.stopPropagation();
+    setImageError(false); // Reset error state when switching images
     if (direction === 'left') {
         setCurrentImageIndex(prev => (prev === 0 ? images.length - 1 : prev - 1));
     } else {
@@ -94,11 +96,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             />
         ) : (
             <>
-                <img 
-                  src={coverUrl} 
-                  alt={data.video_title} 
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block"
-                />
+                {imageError ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800">
+                    <ImageIcon size={32} className="text-zinc-600 mb-2" />
+                    <span className="text-xs text-zinc-500">Image unavailable</span>
+                  </div>
+                ) : (
+                  <img
+                    src={coverUrl}
+                    alt={data.video_title}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block"
+                    onError={() => setImageError(true)}
+                  />
+                )}
                 
                 {/* Carousel Controls for Albums */}
                 {isAlbum && (

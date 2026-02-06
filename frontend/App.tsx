@@ -1452,6 +1452,15 @@ export default function App() {
         if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.aweme_id)) {
           return false;
         }
+        // Mobile search filter - simple text matching
+        if (searchQuery.trim()) {
+          const query = searchQuery.toLowerCase().trim();
+          const title = (item.video_title || '').toLowerCase();
+          const author = (item.author_nickname || '').toLowerCase();
+          const desc = (item.video_desc || '').toLowerCase();
+          const tags = (item.video_tag || []).join(' ').toLowerCase();
+          return title.includes(query) || author.includes(query) || desc.includes(query) || tags.includes(query);
+        }
         return true;
       })
       .sort((a, b) => {
@@ -1460,7 +1469,7 @@ export default function App() {
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
         return bTime - aTime;
       });
-  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds]);
+  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds, searchQuery]);
 
   // Calculate main content classes based on view to handle mobile padding
   // Added md:pt-20 to account for the fixed header on desktop
@@ -2323,42 +2332,6 @@ export default function App() {
                 </header>
                 )}
 
-                {/* Mobile Header - Overlay style */}
-                {(activeLibraryTab === 'my-library' || activeCollectionId) && (
-                <div className="md:hidden fixed top-0 left-0 right-0 z-30 p-4 flex justify-end items-start pointer-events-none bg-gradient-to-b from-black/60 to-transparent">
-                   <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
-                      {isMobileSearchOpen ? (
-                         <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
-                            <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0"/>
-                            <input
-                              autoFocus
-                              className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
-                              placeholder="Search collection..."
-                              value={searchQuery}
-                              onChange={(e) => setSearchQuery(e.target.value)}
-                            />
-                            <button
-                              onClick={() => {
-                                setIsMobileSearchOpen(false);
-                                setSearchQuery('');
-                              }}
-                              className="ml-2 text-zinc-400 hover:text-white"
-                            >
-                               <X size={16} />
-                            </button>
-                         </div>
-                      ) : (
-                         <button
-                            onClick={() => setIsMobileSearchOpen(true)}
-                            className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
-                         >
-                            <Search size={22} className="drop-shadow-md" />
-                         </button>
-                      )}
-                   </div>
-                </div>
-                )}
-
                 {/* Library Content - Show when in My Library or inside a collection */}
                 {(activeLibraryTab === 'my-library' || activeCollectionId) && (
                 <div className="h-full relative flex-1 min-h-0">
@@ -2523,6 +2496,42 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Mobile Library Search - Fixed outside main to avoid transform issues */}
+      {view === 'library' && !selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (
+        <div className="md:hidden fixed top-0 left-0 right-0 z-30 p-4 flex justify-end items-start pointer-events-none bg-gradient-to-b from-black/60 to-transparent">
+          <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
+            {isMobileSearchOpen ? (
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0"/>
+                <input
+                  autoFocus
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                  placeholder="Search collection..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    setSearchQuery('');
+                  }}
+                  className="ml-2 text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsMobileSearchOpen(true)}
+                className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+              >
+                <Search size={22} className="drop-shadow-md" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
