@@ -87,11 +87,11 @@
     "creating": "创建中..."
   },
   "parser": {
-    "title": "抖音媒体解析",
-    "subtitle": "粘贴分享链接，解析并下载无水印内容",
+    "title": "媒体解析",
+    "subtitle": "粘贴链接，解析并下载来自各平台的媒体内容",
     "singleLink": "单个链接",
     "batchDownload": "批量下载",
-    "placeholder": "粘贴抖音链接（如 https://v.douyin.com/...）",
+    "placeholder": "粘贴媒体链接（支持 YouTube、抖音、B站、Twitter/X...）",
     "analyze": "解析",
     "processBatch": "批量处理",
     "downloadVideo": "下载视频/图片",

@@ -365,7 +365,7 @@ export default function App() {
   });
 
   const [userSettings, setUserSettings] = useState<UserSettings>({
-    downloadPath: '/home/user/downloads/douyin',
+    downloadPath: '/home/user/downloads/mediahub',
     supabaseUrl: '',
     supabaseAnonKey: ''
   });
@@ -1973,7 +1973,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col">
                     <textarea 
-                      placeholder={`Paste multiple Douyin links here (one per line)...\nExample:\nhttps://v.douyin.com/...\nhttps://v.douyin.com/...`}
+                      placeholder={`Paste media links here (one per line)...\nSupported: YouTube, Douyin, Bilibili, Twitter/X, TikTok & more\nhttps://www.youtube.com/watch?v=...\nhttps://v.douyin.com/...`}
                       rows={5}
                       className="w-full bg-transparent border-none outline-none text-zinc-200 placeholder-zinc-600 px-4 py-3 resize-none font-mono text-sm"
                       value={batchInput}

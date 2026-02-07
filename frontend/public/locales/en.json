@@ -87,11 +87,11 @@
     "creating": "Creating..."
   },
   "parser": {
-    "title": "Douyin Media Parser",
-    "subtitle": "Paste shared links to analyze and download content watermark-free",
+    "title": "Media Parser",
+    "subtitle": "Paste links to analyze and download media from any supported platform",
     "singleLink": "Single Link",
     "batchDownload": "Batch Download",
-    "placeholder": "Paste Douyin link (e.g., https://v.douyin.com/...)",
+    "placeholder": "Paste media link (YouTube, Douyin, Bilibili, Twitter/X...)",
     "analyze": "Analyze",
     "processBatch": "Process Batch",
     "downloadVideo": "Download Video/Img",
