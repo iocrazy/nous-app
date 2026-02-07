@@ -65,7 +65,7 @@ class CleanupService:
             for video in data.get("suggestions", []):
                 suggestions.append(CleanupSuggestion(
                     video_id=video["video_id"],
-                    title=video.get("video_title", ""),
+                    title=video.get("title", ""),
                     cover_url=video.get("cover_url"),
                     author=video.get("author"),
                     reason=video.get("reason", "unknown"),
@@ -89,7 +89,7 @@ class CleanupService:
                         if dup["video_id"] not in existing_ids:
                             suggestions.append(CleanupSuggestion(
                                 video_id=dup["video_id"],
-                                title=dup.get("video_title", ""),
+                                title=dup.get("title", ""),
                                 cover_url=dup.get("cover_url"),
                                 author=dup.get("author"),
                                 reason="duplicate_content",
@@ -160,7 +160,7 @@ class CleanupService:
                 reason = video.get("reason", "unknown")
                 suggestions.append(CleanupSuggestion(
                     video_id=video["video_id"],
-                    title=video.get("video_title", ""),
+                    title=video.get("title", ""),
                     cover_url=video.get("cover_url"),
                     author=video.get("author"),
                     reason=reason,
@@ -185,7 +185,7 @@ class CleanupService:
                     if dup["video_id"] not in existing_ids:
                         suggestions.append(CleanupSuggestion(
                             video_id=dup["video_id"],
-                            title=dup.get("video_title", ""),
+                            title=dup.get("title", ""),
                             cover_url=dup.get("cover_url"),
                             author=dup.get("author"),
                             reason="duplicate_content",
@@ -293,16 +293,16 @@ class CleanupService:
     async def _query_never_viewed(self, user_id: str, cutoff: str) -> List[dict]:
         """Query never viewed videos."""
         client = await self._get_client()
-        result = await client.table("douyin_videos").select(
-            "id, video_title, cover_url, author, storage_size, created_at, view_count"
+        result = await client.table("videos").select(
+            "id, title, cover_url, author, storage_size, created_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).eq("view_count", 0).lt("created_at", cutoff).limit(50).execute()
         return result.data
 
     async def _query_old_unused(self, user_id: str, cutoff: str) -> List[dict]:
         """Query old unused videos."""
         client = await self._get_client()
-        result = await client.table("douyin_videos").select(
-            "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+        result = await client.table("videos").select(
+            "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).gt("view_count", 0).lt("last_viewed_at", cutoff).limit(50).execute()
         return result.data
 
@@ -311,7 +311,7 @@ class CleanupService:
         client = await self._get_client()
 
         # Get total count
-        count_result = await client.table("douyin_videos").select("id", count="exact").eq("user_id", user_id).execute()
+        count_result = await client.table("videos").select("id", count="exact").eq("user_id", user_id).execute()
         total = count_result.count or 0
 
         if total == 0:
@@ -320,8 +320,8 @@ class CleanupService:
         # Get top N by size
         top_n = max(int(total * 0.1), 5)
 
-        result = await client.table("douyin_videos").select(
-            "id, video_title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+        result = await client.table("videos").select(
+            "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
         ).eq("user_id", user_id).eq("keep_forever", False).not_.is_("storage_size", "null").order("storage_size", desc=True).limit(top_n).execute()
 
         return result.data
@@ -349,7 +349,7 @@ class CleanupService:
             reason = video.get("reason", "unknown")
             suggestions.append(CleanupSuggestion(
                 video_id=video["video_id"],
-                title=video.get("video_title", ""),
+                title=video.get("title", ""),
                 cover_url=video.get("cover_url"),
                 author=video.get("author"),
                 reason=reason,
@@ -410,7 +410,7 @@ class CleanupService:
     async def _get_cleanup_stats_fallback(self, user_id: str) -> dict:
         """Fallback stats calculation."""
         client = await self._get_client()
-        total_result = await client.table("douyin_videos").select(
+        total_result = await client.table("videos").select(
             "id, storage_size, view_count, last_viewed_at, keep_forever"
         ).eq("user_id", user_id).execute()
 
@@ -449,7 +449,7 @@ class CleanupService:
     async def mark_keep_forever(self, video_id: int, user_id: str) -> bool:
         """Mark a video to keep forever (exclude from suggestions)."""
         client = await self._get_client()
-        result = await client.table("douyin_videos").update({
+        result = await client.table("videos").update({
             "keep_forever": True
         }).eq("id", video_id).eq("user_id", user_id).execute()
 
@@ -458,7 +458,7 @@ class CleanupService:
     async def unmark_keep_forever(self, video_id: int, user_id: str) -> bool:
         """Remove keep forever mark from a video."""
         client = await self._get_client()
-        result = await client.table("douyin_videos").update({
+        result = await client.table("videos").update({
             "keep_forever": False
         }).eq("id", video_id).eq("user_id", user_id).execute()
 

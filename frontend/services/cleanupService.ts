@@ -82,7 +82,7 @@ export interface StorageBreakdown {
   largest_videos: Array<{
     id: number;
     storage_size: number;
-    aweme_type: number;
+    media_type: number;
     created_at: string;
   }>;
   total_bytes: number;

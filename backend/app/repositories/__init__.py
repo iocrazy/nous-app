@@ -6,8 +6,8 @@
 使用 Supabase 作为数据存储后端。
 """
 
-from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
+from app.repositories.video_repository import VideoRepository
 
 __all__ = [
-    "SupabaseDouyinRepository",
+    "VideoRepository",
 ]

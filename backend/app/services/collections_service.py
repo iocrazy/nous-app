@@ -85,7 +85,7 @@ class CollectionsService:
 
         if not conditions:
             # No conditions = all user videos
-            result = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+            result = await client.table("videos").select("id").eq("user_id", user_id).execute()
             return [r["id"] for r in result.data]
 
         # Start with base query
@@ -132,16 +132,16 @@ class CollectionsService:
         if field == "date":
             return await self._match_date_condition(operator, value, user_id)
 
-        # Direct field conditions on douyin_videos
-        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
+        # Direct field conditions on videos
+        query = client.table("videos").select("id").eq("user_id", user_id)
 
         field_mapping = {
             "author": "author",
             "title": "title",
-            "description": "desc",
+            "description": "description",
             "keep_forever": "keep_forever",
             "view_count": "view_count",
-            "aweme_type": "aweme_type"
+            "media_type": "media_type"
         }
 
         db_field = field_mapping.get(field, field)
@@ -172,7 +172,7 @@ class CollectionsService:
         client = await self._get_client()
 
         # Get user's videos first
-        user_videos = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+        user_videos = await client.table("videos").select("id").eq("user_id", user_id).execute()
         user_video_ids = [v["id"] for v in user_videos.data]
 
         if not user_video_ids:
@@ -204,7 +204,7 @@ class CollectionsService:
     async def _match_date_condition(self, operator: str, value: Any, user_id: str) -> List[int]:
         """Match videos by date conditions."""
         client = await self._get_client()
-        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
+        query = client.table("videos").select("id").eq("user_id", user_id)
 
         # Handle relative date values
         if isinstance(value, str):
@@ -239,8 +239,8 @@ class CollectionsService:
         sort_by = collection.get("sort_by", "created_at")
         sort_order = collection.get("sort_order", "desc")
 
-        result = await client.table("douyin_videos").select(
-            "id, title, desc, author, cover_url, duration, aweme_type, created_at, view_count, keep_forever"
+        result = await client.table("videos").select(
+            "id, title, description, author, cover_url, duration, media_type, created_at, view_count, keep_forever"
         ).in_("id", video_ids).order(sort_by, desc=(sort_order == "desc")).execute()
 
         return result.data

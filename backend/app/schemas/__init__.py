@@ -1,13 +1,13 @@
 # app/schemas/__init__.py
 
 """
-Pydantic Schema 模块
+Pydantic Schema module
 """
 
-from app.schemas.douyin import *
+from app.schemas.video import *
 from app.schemas.tags import *
 
 __all__ = [
-    # douyin schemas
+    # video schemas
     # tags schemas
 ]

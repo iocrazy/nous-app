@@ -26,7 +26,7 @@ class HybridSearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     """A single search result item."""
     video_id: int
-    aweme_id: str  # Required for frontend filtering
+    platform_id: str  # Required for frontend filtering
     title: str
     description: Optional[str] = None
     cover_url: Optional[str] = None

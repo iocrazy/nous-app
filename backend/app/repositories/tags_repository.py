@@ -182,10 +182,10 @@ class TagsRepository:
         """Get all videos with a specific tag."""
         video_tags_table = await self._get_video_tags_table()
         result = await video_tags_table.select(
-            "video_id, douyin_videos(*)"
+            "video_id, videos(*)"
         ).eq("tag_id", tag_id).range(offset, offset + limit - 1).execute()
 
-        return [r["douyin_videos"] for r in result.data if r.get("douyin_videos")]
+        return [r["videos"] for r in result.data if r.get("videos")]
 
     async def bulk_add_tags_to_video(
         self,
@@ -215,7 +215,7 @@ class TagsRepository:
         """
         client = await self._get_client()
 
-        # Query video_tags joined with tags and douyin_videos to filter by user
+        # Query video_tags joined with tags and videos to filter by user
         # We need to count how many videos each tag is associated with for this user
         result = await client.rpc(
             'get_user_tag_counts',
@@ -234,7 +234,7 @@ class TagsRepository:
         client = await self._get_client()
 
         # Get all video IDs for this user
-        videos_result = await client.table('douyin_videos').select('id').eq('user_id', user_id).execute()
+        videos_result = await client.table('videos').select('id').eq('user_id', user_id).execute()
         if not videos_result.data:
             return []
 

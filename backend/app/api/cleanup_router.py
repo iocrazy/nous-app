@@ -171,7 +171,7 @@ async def take_cleanup_action(
         from app.db.supabase_client import get_async_supabase_admin
         supabase = await get_async_supabase_admin()
 
-        result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+        result = await supabase.table("videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
 
         if result.data:
             logger.info(f"Deleted video {video_id} via cleanup")
@@ -206,7 +206,7 @@ async def batch_cleanup_action(
             elif action.action == "delete":
                 from app.db.supabase_client import get_async_supabase_admin
                 supabase = await get_async_supabase_admin()
-                result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+                result = await supabase.table("videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
                 success = len(result.data) > 0
             else:  # dismiss
                 success = True
@@ -271,8 +271,8 @@ async def get_storage_breakdown(auth: AuthDep = None):
     supabase = await get_async_supabase_admin()
 
     # Get all videos with storage info
-    result = await supabase.table("douyin_videos").select(
-        "id, storage_size, aweme_type, created_at"
+    result = await supabase.table("videos").select(
+        "id, storage_size, media_type, created_at"
     ).eq("user_id", auth.user_id).execute()
 
     videos = result.data
@@ -280,11 +280,11 @@ async def get_storage_breakdown(auth: AuthDep = None):
     # By type
     by_type = {"video": 0, "image": 0, "other": 0}
     for v in videos:
-        aweme_type = v.get("aweme_type", 0)
+        media_type = v.get("media_type", "video")
         size = v.get("storage_size", 0) or 0
-        if aweme_type in [0, 4, 61]:
+        if media_type in ["video", "special"]:
             by_type["video"] += size
-        elif aweme_type in [2, 68]:
+        elif media_type in ["carousel", "image_text"]:
             by_type["image"] += size
         else:
             by_type["other"] += size

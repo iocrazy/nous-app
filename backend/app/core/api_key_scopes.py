@@ -1,9 +1,9 @@
 # backend/app/core/api_key_scopes.py
 
 """
-API 密钥权限范围定义
+API Key Scope Definitions
 
-定义可用的权限范围和端点映射关系。
+Defines available permission scopes and endpoint mapping relationships.
 """
 
 from enum import Enum
@@ -11,77 +11,128 @@ from typing import Dict, List, Tuple
 
 
 class ApiKeyScope(str, Enum):
-    """API 密钥权限范围枚举"""
+    """API Key permission scope enum"""
 
-    # 抖音视频相关
-    DOUYIN_FETCH = "douyin:fetch"
-    DOUYIN_FETCH_BATCH = "douyin:fetch:batch"
-    DOUYIN_VIDEOS_READ = "douyin:videos:read"
-    DOUYIN_VIDEOS_WRITE = "douyin:videos:write"
-    DOUYIN_SEARCH = "douyin:search"
-    DOUYIN_STATISTICS = "douyin:statistics"
-    DOUYIN_RETRY = "douyin:retry"
+    # Video related
+    VIDEOS_FETCH = "videos:fetch"
+    VIDEOS_FETCH_BATCH = "videos:fetch:batch"
+    VIDEOS_VIDEOS_READ = "videos:videos:read"
+    VIDEOS_VIDEOS_WRITE = "videos:videos:write"
+    VIDEOS_SEARCH = "videos:search"
+    VIDEOS_STATISTICS = "videos:statistics"
+    VIDEOS_RETRY = "videos:retry"
 
-    # 全部抖音权限（通配符）
-    DOUYIN_ALL = "douyin:*"
+    # All video permissions (wildcard)
+    VIDEOS_ALL = "videos:*"
 
-    # 用户相关
+    # User related
     USER_PROFILE_READ = "user:profile:read"
     USER_PROFILE_WRITE = "user:profile:write"
 
 
-# 端点与权限范围映射
-# 格式: (method, path_pattern): [allowed_scopes]
-# 请求只需要匹配其中一个 scope 即可访问
+# Legacy scope aliases for backward compatibility
+LEGACY_SCOPE_MAP = {
+    "douyin:fetch": "videos:fetch",
+    "douyin:fetch:batch": "videos:fetch:batch",
+    "douyin:videos:read": "videos:videos:read",
+    "douyin:videos:write": "videos:videos:write",
+    "douyin:search": "videos:search",
+    "douyin:statistics": "videos:statistics",
+    "douyin:retry": "videos:retry",
+    "douyin:*": "videos:*",
+}
+
+
+# Endpoint to scope mapping
+# Format: (method, path_pattern): [allowed_scopes]
+# Request only needs to match one scope for access
 ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
-    # 抖音视频获取
+    # Video fetch
+    ("POST", "/videos/fetch"): [
+        ApiKeyScope.VIDEOS_FETCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+    ("POST", "/videos/fetch/batch"): [
+        ApiKeyScope.VIDEOS_FETCH_BATCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Video read
+    ("GET", "/videos/videos"): [
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+    ("GET", "/videos/videos/{platform_id}"): [
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Video write
+    ("DELETE", "/videos/videos/{platform_id}"): [
+        ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Search
+    ("POST", "/videos/videos/search"): [
+        ApiKeyScope.VIDEOS_SEARCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Statistics
+    ("GET", "/videos/statistics"): [
+        ApiKeyScope.VIDEOS_STATISTICS.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Pending downloads list
+    ("GET", "/videos/pending"): [
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Retry download
+    ("POST", "/videos/retry/{platform_id}"): [
+        ApiKeyScope.VIDEOS_RETRY.value,
+        ApiKeyScope.VIDEOS_ALL.value
+    ],
+
+    # Legacy /douyin/ paths (backward compatibility)
     ("POST", "/douyin/fetch"): [
-        ApiKeyScope.DOUYIN_FETCH.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_FETCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
     ("POST", "/douyin/fetch/batch"): [
-        ApiKeyScope.DOUYIN_FETCH_BATCH.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_FETCH_BATCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 抖音视频读取
     ("GET", "/douyin/videos"): [
-        ApiKeyScope.DOUYIN_VIDEOS_READ.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-    ("GET", "/douyin/videos/{aweme_id}"): [
-        ApiKeyScope.DOUYIN_VIDEOS_READ.value,
-        ApiKeyScope.DOUYIN_ALL.value
+    ("GET", "/douyin/videos/{platform_id}"): [
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 抖音视频写入
-    ("DELETE", "/douyin/videos/{aweme_id}"): [
-        ApiKeyScope.DOUYIN_VIDEOS_WRITE.value,
-        ApiKeyScope.DOUYIN_ALL.value
+    ("DELETE", "/douyin/videos/{platform_id}"): [
+        ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 搜索
     ("POST", "/douyin/videos/search"): [
-        ApiKeyScope.DOUYIN_SEARCH.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_SEARCH.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 统计
     ("GET", "/douyin/statistics"): [
-        ApiKeyScope.DOUYIN_STATISTICS.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_STATISTICS.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 待下载列表
     ("GET", "/douyin/pending"): [
-        ApiKeyScope.DOUYIN_VIDEOS_READ.value,
-        ApiKeyScope.DOUYIN_ALL.value
+        ApiKeyScope.VIDEOS_VIDEOS_READ.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
-
-    # 重试下载
-    ("POST", "/douyin/retry/{aweme_id}"): [
-        ApiKeyScope.DOUYIN_RETRY.value,
-        ApiKeyScope.DOUYIN_ALL.value
+    ("POST", "/douyin/retry/{platform_id}"): [
+        ApiKeyScope.VIDEOS_RETRY.value,
+        ApiKeyScope.VIDEOS_ALL.value
     ],
 }
 
@@ -89,49 +140,49 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
 # Available scopes list (for frontend selection)
 AVAILABLE_SCOPES = [
     {
-        "scope": ApiKeyScope.DOUYIN_FETCH.value,
+        "scope": ApiKeyScope.VIDEOS_FETCH.value,
         "name": "Fetch Video",
         "description": "Fetch single video info via URL",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_FETCH_BATCH.value,
+        "scope": ApiKeyScope.VIDEOS_FETCH_BATCH.value,
         "name": "Batch Fetch",
         "description": "Fetch multiple videos info in batch",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_VIDEOS_READ.value,
+        "scope": ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         "name": "Read Videos",
         "description": "View video list and details",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_VIDEOS_WRITE.value,
+        "scope": ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
         "name": "Manage Videos",
         "description": "Delete video records",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_SEARCH.value,
+        "scope": ApiKeyScope.VIDEOS_SEARCH.value,
         "name": "Search Videos",
         "description": "Search videos",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_STATISTICS.value,
+        "scope": ApiKeyScope.VIDEOS_STATISTICS.value,
         "name": "View Statistics",
         "description": "View statistics data",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_RETRY.value,
+        "scope": ApiKeyScope.VIDEOS_RETRY.value,
         "name": "Retry Download",
         "description": "Retry failed video downloads",
         "category": "Video"
     },
     {
-        "scope": ApiKeyScope.DOUYIN_ALL.value,
+        "scope": ApiKeyScope.VIDEOS_ALL.value,
         "name": "Full Access",
         "description": "All video-related permissions",
         "category": "Video"
@@ -140,16 +191,24 @@ AVAILABLE_SCOPES = [
 
 
 def get_valid_scopes() -> set:
-    """获取所有有效的权限范围集合"""
-    return {s["scope"] for s in AVAILABLE_SCOPES}
+    """Get all valid permission scope set"""
+    valid = {s["scope"] for s in AVAILABLE_SCOPES}
+    # Also accept legacy scope values
+    valid.update(LEGACY_SCOPE_MAP.keys())
+    return valid
+
+
+def normalize_scope(scope: str) -> str:
+    """Normalize a scope value, mapping legacy scopes to new ones."""
+    return LEGACY_SCOPE_MAP.get(scope, scope)
 
 
 def validate_scopes(scopes: List[str]) -> Tuple[bool, List[str]]:
     """
-    验证权限范围列表
+    Validate permission scope list
 
     Args:
-        scopes: 待验证的权限范围列表
+        scopes: List of scopes to validate
 
     Returns:
         (is_valid, invalid_scopes)
@@ -161,16 +220,16 @@ def validate_scopes(scopes: List[str]) -> Tuple[bool, List[str]]:
 
 def match_path_pattern(pattern: str, path: str) -> bool:
     """
-    匹配路径模式
+    Match path pattern
 
-    支持 {param} 形式的路径参数
+    Supports {param} style path parameters
 
     Args:
-        pattern: 路径模式，如 /douyin/videos/{aweme_id}
-        path: 实际路径，如 /douyin/videos/123456
+        pattern: Path pattern, e.g. /videos/videos/{platform_id}
+        path: Actual path, e.g. /videos/videos/123456
 
     Returns:
-        是否匹配
+        Whether it matches
     """
     pattern_parts = pattern.split("/")
     path_parts = path.split("/")
@@ -180,7 +239,7 @@ def match_path_pattern(pattern: str, path: str) -> bool:
 
     for p, pp in zip(pattern_parts, path_parts):
         if p.startswith("{") and p.endswith("}"):
-            continue  # 路径参数，匹配任意值
+            continue  # Path parameter, matches any value
         if p != pp:
             return False
 
@@ -189,14 +248,14 @@ def match_path_pattern(pattern: str, path: str) -> bool:
 
 def get_required_scopes(method: str, path: str) -> List[str]:
     """
-    获取端点所需的权限范围
+    Get required permission scopes for an endpoint
 
     Args:
-        method: HTTP 方法
-        path: 请求路径
+        method: HTTP method
+        path: Request path
 
     Returns:
-        所需权限范围列表（任一即可）
+        Required permission scope list (any one is sufficient)
     """
     for (m, pattern), scopes in ENDPOINT_SCOPE_MAP.items():
         if m == method and match_path_pattern(pattern, path):
@@ -206,30 +265,33 @@ def get_required_scopes(method: str, path: str) -> List[str]:
 
 def check_scope_permission(required_scopes: List[str], user_scopes: List[str]) -> bool:
     """
-    检查用户是否拥有所需权限
+    Check if user has required permissions
 
     Args:
-        required_scopes: 所需权限列表（任一即可）
-        user_scopes: 用户拥有的权限列表
+        required_scopes: Required scope list (any one is sufficient)
+        user_scopes: User's scope list
 
     Returns:
-        是否有权限
+        Whether user has permission
     """
     if not required_scopes:
-        return True  # 无权限要求
+        return True  # No permission required
 
-    # 检查是否拥有通配符权限
-    if "*" in user_scopes:
+    # Normalize user scopes (map legacy to new)
+    normalized_user_scopes = [normalize_scope(s) for s in user_scopes]
+
+    # Check for wildcard permission
+    if "*" in user_scopes or "*" in normalized_user_scopes:
         return True
 
-    # 检查是否匹配任一所需权限
+    # Check if any required scope matches
     for scope in required_scopes:
-        if scope in user_scopes:
+        if scope in normalized_user_scopes:
             return True
 
-        # 检查分类通配符（如 douyin:* 匹配 douyin:fetch）
+        # Check category wildcard (e.g. videos:* matches videos:fetch)
         scope_category = scope.split(":")[0] if ":" in scope else scope
-        if f"{scope_category}:*" in user_scopes:
+        if f"{scope_category}:*" in normalized_user_scopes:
             return True
 
     return False

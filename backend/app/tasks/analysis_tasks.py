@@ -269,8 +269,8 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
 
         for video_id in video_ids[:batch_size]:
             # Get video info
-            result = await supabase.table("douyin_videos").select(
-                "id, title, desc, cover_url"
+            result = await supabase.table("videos").select(
+                "id, title, description, cover_url"
             ).eq("id", video_id).maybe_single().execute()
 
             if result.data:
@@ -281,7 +281,7 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
                         video_id=video["id"],
                         cover_url=cover_url,
                         title=video.get("title", ""),
-                        description=video.get("desc", "")
+                        description=video.get("description", "")
                     )
                     dispatched += 1
                     logger.info(f"Dispatched L1 analysis for video {video_id}")

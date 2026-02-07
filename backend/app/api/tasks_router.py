@@ -200,18 +200,18 @@ async def retry_task(
         from app.tasks.download_tasks import download_media_task
 
         # Get video info from database
-        from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
-        repo = SupabaseDouyinRepository()
-        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+        from app.repositories.video_repository import VideoRepository
+        repo = VideoRepository()
+        video = await repo.get_by_platform_id(aweme_id, user_id=auth.user_id)
 
         if video:
             download_media_task.delay(
-                aweme_id=aweme_id,
+                platform_id=aweme_id,
                 user_id=auth.user_id,
                 download_video=True,
                 download_cover=True,
-                aweme_type=video.get("aweme_type", 0),
-                video_title=video.get("video_title", "Unknown"),
+                media_type=video.get("media_type", 0),
+                video_title=video.get("title", "Unknown"),
             )
             return RetryResponse(
                 success=True,
@@ -257,8 +257,8 @@ async def retry_all_failed(
     failed_ids = []
 
     from app.tasks.download_tasks import download_media_task
-    from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
-    repo = SupabaseDouyinRepository()
+    from app.repositories.video_repository import VideoRepository
+    repo = VideoRepository()
 
     for task in failed_tasks:
         aweme_id = task["aweme_id"]
@@ -275,15 +275,15 @@ async def retry_all_failed(
             task_manager.reset_for_retry(aweme_id)
 
         try:
-            video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+            video = await repo.get_by_platform_id(aweme_id, user_id=auth.user_id)
             if video:
                 download_media_task.delay(
-                    aweme_id=aweme_id,
+                    platform_id=aweme_id,
                     user_id=auth.user_id,
                     download_video=True,
                     download_cover=True,
-                    aweme_type=video.get("aweme_type", 0),
-                    video_title=video.get("video_title", "Unknown"),
+                    media_type=video.get("media_type", 0),
+                    video_title=video.get("title", "Unknown"),
                 )
                 retried.append(aweme_id)
             else:

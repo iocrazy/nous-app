@@ -1,4 +1,4 @@
-"""Semantic search service using vector embeddings (异步优化版)."""
+"""Semantic search service using vector embeddings (async optimized)."""
 import asyncio
 from typing import Optional, List
 from dataclasses import dataclass, field
@@ -14,7 +14,7 @@ from app.db.supabase_client import get_async_supabase_admin
 class SearchResult:
     """A single search result."""
     video_id: int
-    aweme_id: str
+    platform_id: str
     title: str
     description: Optional[str]
     cover_url: Optional[str]
@@ -35,7 +35,7 @@ class SearchResponse:
 
 
 class SearchService:
-    """Service for semantic and hybrid video search (异步优化版)."""
+    """Service for semantic and hybrid video search (async optimized)."""
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
@@ -43,7 +43,7 @@ class SearchService:
         self._client = None
 
     async def _get_client(self):
-        """获取异步客户端"""
+        """Get async client"""
         if self._client is None:
             self._client = await get_async_supabase_admin()
         return self._client
@@ -92,7 +92,7 @@ class SearchService:
         for r in raw_results:
             results.append(SearchResult(
                 video_id=r["video_id"],
-                aweme_id=r.get("aweme_id", ""),
+                platform_id=r.get("platform_id", ""),
                 title=r.get("title", ""),
                 description=r.get("description"),
                 cover_url=r.get("cover_url"),
@@ -122,7 +122,7 @@ class SearchService:
     ) -> SearchResponse:
         """
         Hybrid search combining semantic similarity with metadata filters.
-        优化版：直接在数据库层做文本搜索，减少数据传输。
+        Optimized: does text search at database level to reduce data transfer.
         """
         client = await self._get_client()
 
@@ -137,9 +137,9 @@ class SearchService:
             search_pattern = f"%{query_normalized}%"
 
             # Build the search query with OR conditions using Supabase's or_ filter
-            # We search in: video_title, video_desc, author, video_hashtag_name
-            base_query = client.table("douyin_videos").select(
-                "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at, video_hashtag_name"
+            # We search in: title, description, author, hashtags
+            base_query = client.table("videos").select(
+                "id, platform_id, title, description, cover_url, author, view_count, created_at, hashtags"
             )
 
             # Apply user filter first (required)
@@ -157,10 +157,10 @@ class SearchService:
             # Use or_ filter for text search across multiple columns
             # Supabase supports: or_(filter1,filter2,...)
             base_query = base_query.or_(
-                f"video_title.ilike.{search_pattern},"
-                f"video_desc.ilike.{search_pattern},"
+                f"title.ilike.{search_pattern},"
+                f"description.ilike.{search_pattern},"
                 f"author.ilike.{search_pattern},"
-                f"video_hashtag_name.ilike.{search_pattern}"
+                f"hashtags.ilike.{search_pattern}"
             )
 
             # Execute the search query
@@ -175,10 +175,10 @@ class SearchService:
 
                 # First get all user's video IDs
                 if user_id:
-                    user_videos = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+                    user_videos = await client.table("videos").select("id").eq("user_id", user_id).execute()
                     user_video_ids = [v["id"] for v in user_videos.data]
                 else:
-                    user_videos = await client.table("douyin_videos").select("id").limit(500).execute()
+                    user_videos = await client.table("videos").select("id").limit(500).execute()
                     user_video_ids = [v["id"] for v in user_videos.data]
 
                 if user_video_ids:
@@ -193,8 +193,8 @@ class SearchService:
                     if analysis_search.data:
                         matched_video_ids = [a["video_id"] for a in analysis_search.data]
                         # Fetch the full video data for matched IDs
-                        video_result = await client.table("douyin_videos").select(
-                            "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at"
+                        video_result = await client.table("videos").select(
+                            "id, platform_id, title, description, cover_url, author, view_count, created_at"
                         ).in_("id", matched_video_ids).execute()
                         filtered_videos = video_result.data
                         logger.info(f"Found {len(filtered_videos)} results in video_analysis")
@@ -214,9 +214,9 @@ class SearchService:
             for video in filtered_videos:
                 results.append(SearchResult(
                     video_id=video["id"],
-                    aweme_id=video.get("aweme_id", ""),
-                    title=video.get("video_title", ""),
-                    description=video.get("video_desc"),
+                    platform_id=video.get("platform_id", ""),
+                    title=video.get("title", ""),
+                    description=video.get("description"),
                     cover_url=video.get("cover_url"),
                     similarity=0.5,  # Default score for text matches
                     author=video.get("author"),
@@ -232,8 +232,8 @@ class SearchService:
             )
 
         # No query, just return filtered results
-        base_query = client.table("douyin_videos").select(
-            "id, aweme_id, video_title, video_desc, cover_url, author, view_count, created_at"
+        base_query = client.table("videos").select(
+            "id, platform_id, title, description, cover_url, author, view_count, created_at"
         )
 
         if user_id:
@@ -270,9 +270,9 @@ class SearchService:
         for video in filtered_videos:
             results.append(SearchResult(
                 video_id=video["id"],
-                aweme_id=video.get("aweme_id", ""),
-                title=video.get("video_title", ""),
-                description=video.get("video_desc"),
+                platform_id=video.get("platform_id", ""),
+                title=video.get("title", ""),
+                description=video.get("description"),
                 cover_url=video.get("cover_url"),
                 similarity=1.0,  # No semantic ranking
                 author=video.get("author"),
@@ -334,7 +334,7 @@ class SearchService:
             if r["video_id"] != video_id:
                 results.append(SearchResult(
                     video_id=r["video_id"],
-                    aweme_id=r.get("aweme_id", ""),
+                    platform_id=r.get("platform_id", ""),
                     title=r.get("title", ""),
                     description=r.get("description"),
                     cover_url=r.get("cover_url"),

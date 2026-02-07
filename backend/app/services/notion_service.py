@@ -109,16 +109,16 @@ class NotionService:
             },
             # 映射字段 - 按照指定的映射关系
             "Likes": {
-                "number": video_info.get("video_digg", 0)
+                "number": video_info.get("like_count", 0)
             },
             "Comment": {
-                "number": video_info.get("video_comment", 0)
+                "number": video_info.get("comment_count", 0)
             },
             "Aweme_ID": {
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("aweme_id", "")
+                            "content": video_info.get("platform_id", "")
                         }
                     }
                 ]
@@ -127,7 +127,7 @@ class NotionService:
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("video_duration", "")
+                            "content": video_info.get("duration", "")
                         }
                     }
                 ]
@@ -136,7 +136,7 @@ class NotionService:
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("video_resolution", "")
+                            "content": video_info.get("resolution", "")
                         }
                     }
                 ]
@@ -145,7 +145,7 @@ class NotionService:
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("file_size") or video_info.get("video_datasize") or "待下载后更新"
+                            "content": video_info.get("file_size") or video_info.get("datasize") or "待下载后更新"
                         }
                     }
                 ]
@@ -286,12 +286,12 @@ class NotionService:
             }
 
         # 更新文件大小信息
-        if "file_size" in video_info or "video_datasize" in video_info:
+        if "file_size" in video_info or "datasize" in video_info:
             properties["Datasize"] = {
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("file_size") or video_info.get("video_datasize") or "待下载后更新"
+                            "content": video_info.get("file_size") or video_info.get("datasize") or "待下载后更新"
                         }
                     }
                 ]
@@ -341,12 +341,12 @@ class NotionService:
             }
 
     @classmethod
-    async def check_video_exists(cls, aweme_id: str) -> dict:
+    async def check_video_exists(cls, platform_id: str) -> dict:
         """
         检查Notion数据库中是否已存在相同的视频
 
         Args:
-            aweme_id: 抖音视频ID
+            platform_id: 视频平台ID
 
         Returns:
             dict: 检查结果，包含是否存在及视频页面信息
@@ -365,7 +365,7 @@ class NotionService:
                 "filter": {
                     "property": "Aweme_ID",
                     "rich_text": {
-                        "equals": aweme_id
+                        "equals": platform_id
                     }
                 }
             }
@@ -395,7 +395,7 @@ class NotionService:
                     if title_items and "text" in title_items[0]:
                         title = title_items[0]["text"].get("content", "")
 
-                logger.info(f"在Notion中找到重复视频: aweme_id={aweme_id}, title={title}")
+                logger.info(f"在Notion中找到重复视频: platform_id={platform_id}, title={title}")
 
                 return {
                     "exists": True,
@@ -455,8 +455,8 @@ async def push_to_notion_service(video_data, update_existing=False, notion_page_
             logger.info("创建新的Notion页面")
             # 确保包含视频分辨率信息
             if hasattr(video_data, 'video_width') and hasattr(video_data,
-                                                              'video_height') and video_data.video_width and video_data.video_height and not video_data.video_resolution:
-                video_data.video_resolution = f"{video_data.video_width}x{video_data.video_height}"
+                                                              'video_height') and video_data.video_width and video_data.video_height and not video_data.resolution:
+                video_data.resolution = f"{video_data.video_width}x{video_data.video_height}"
 
             # 如果是Pydantic模型，使用model_dump()
             if hasattr(video_data, 'model_dump'):
@@ -493,7 +493,7 @@ async def check_video_exists_service(video_id, log_info=True):
     """
     try:
         if log_info:
-            logger.info(f"检查视频是否已存在: aweme_id={video_id}")
+            logger.info(f"检查视频是否已存在: platform_id={video_id}")
         check_result = await NotionService.check_video_exists(video_id)
         return check_result
     except Exception as e:

@@ -60,9 +60,9 @@ export const TasksPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const handleRetry = async (awemeId: string, force: boolean = false) => {
+  const handleRetry = async (platformId: string, force: boolean = false) => {
     try {
-      await retryFailedTask(awemeId, force);
+      await retryFailedTask(platformId, force);
       fetchData();
     } catch (err) {
       console.error('Failed to retry task:', err);
@@ -79,10 +79,10 @@ export const TasksPanel: React.FC = () => {
     }
   };
 
-  const handleDelete = async (awemeId: string) => {
+  const handleDelete = async (platformId: string) => {
     if (!confirm('Delete this task?')) return;
     try {
-      await deleteTaskManagerTask(awemeId);
+      await deleteTaskManagerTask(platformId);
       fetchData();
     } catch (err) {
       console.error('Failed to delete task:', err);
@@ -279,7 +279,7 @@ export const TasksPanel: React.FC = () => {
                 </tr>
               ) : (
                 tasks.map((task) => (
-                  <tr key={task.aweme_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                  <tr key={task.platform_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {getStatusIcon(task.status)}
@@ -289,10 +289,10 @@ export const TasksPanel: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="max-w-[200px] truncate text-sm text-white" title={task.video_title}>
-                        {task.video_title}
+                      <div className="max-w-[200px] truncate text-sm text-white" title={task.title}>
+                        {task.title}
                       </div>
-                      <div className="text-xs text-zinc-500">{task.aweme_id}</div>
+                      <div className="text-xs text-zinc-500">{task.platform_id}</div>
                     </td>
                     <td className="px-4 py-3">
                       {task.status === 'downloading' ? (
@@ -327,7 +327,7 @@ export const TasksPanel: React.FC = () => {
                       <div className="flex items-center gap-1">
                         {task.status === 'failed' && (
                           <button
-                            onClick={() => handleRetry(task.aweme_id, task.retry_count >= task.max_retries)}
+                            onClick={() => handleRetry(task.platform_id, task.retry_count >= task.max_retries)}
                             className="p-1.5 hover:bg-zinc-700 rounded transition-colors"
                             title="Retry"
                           >
@@ -335,7 +335,7 @@ export const TasksPanel: React.FC = () => {
                           </button>
                         )}
                         <button
-                          onClick={() => handleDelete(task.aweme_id)}
+                          onClick={() => handleDelete(task.platform_id)}
                           className="p-1.5 hover:bg-zinc-700 rounded transition-colors"
                           title="Delete"
                         >
@@ -359,8 +359,8 @@ export const TasksPanel: React.FC = () => {
             .filter((t) => t.status === 'failed' && t.error)
             .slice(0, 5)
             .map((task) => (
-              <div key={task.aweme_id} className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-                <div className="text-sm text-white truncate">{task.video_title}</div>
+              <div key={task.platform_id} className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                <div className="text-sm text-white truncate">{task.title}</div>
                 <div className="text-xs text-red-400 mt-1">{task.error}</div>
               </div>
             ))}

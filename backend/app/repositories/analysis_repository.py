@@ -102,7 +102,7 @@ class AnalysisRepository:
         analyzed_ids = [r["video_id"] for r in analyzed.data]
 
         # Get videos not in that list
-        query = client.table("douyin_videos").select("id, title, desc, cover_url").limit(limit)
+        query = client.table("videos").select("id, title, description, cover_url").limit(limit)
 
         if analyzed_ids:
             query = query.not_.in_("id", analyzed_ids)
@@ -114,7 +114,7 @@ class AnalysisRepository:
         """Get videos with a specific analysis level."""
         table = await self._get_table()
         result = await table.select(
-            "*, douyin_videos(id, title, desc, cover_url)"
+            "*, videos(id, title, description, cover_url)"
         ).eq("analysis_level", level).limit(limit).execute()
 
         return result.data

@@ -18,11 +18,11 @@ import { semanticSearch, hybridSearch, localSearch, SearchResultItem, SearchResp
 
 interface VideoItem {
   id?: number;
-  aweme_id: string;
-  video_title?: string;
-  video_desc?: string;
+  platform_id: string;
+  title?: string;
+  description?: string;
   author?: string;
-  video_hashtag_name?: string;
+  hashtags?: string;
   cover_url?: string;
   view_count?: number;
   created_at?: string;
@@ -105,11 +105,11 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
           try {
             const backendResults = await hybridSearch(q, {}, 20, 0);
             // 合并结果，去重
-            const existingIds = new Set(results.map(r => r.aweme_id));
+            const existingIds = new Set(results.map(r => r.platform_id));
             for (const item of backendResults.results) {
-              if (!existingIds.has(item.aweme_id)) {
+              if (!existingIds.has(item.platform_id)) {
                 results.push(item);
-                existingIds.add(item.aweme_id);
+                existingIds.add(item.platform_id);
               }
             }
             console.log(`Combined: ${results.length} total results`);

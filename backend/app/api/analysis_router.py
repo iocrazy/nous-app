@@ -70,7 +70,7 @@ async def get_analysis_stats(auth: AuthDep = None):
     supabase = await get_async_supabase_admin()
 
     # Total videos
-    total_result = await supabase.table("douyin_videos").select("id", count="exact").execute()
+    total_result = await supabase.table("videos").select("id", count="exact").execute()
     total_videos = total_result.count or 0
 
     # Analyzed videos
@@ -169,8 +169,8 @@ async def trigger_analysis(
     supabase = await get_async_supabase_admin()
 
     # Get video info
-    result = await supabase.table("douyin_videos").select(
-        "id, title, desc, cover_url, download_path"
+    result = await supabase.table("videos").select(
+        "id, title, description, cover_url, download_path"
     ).eq("id", video_id).maybe_single().execute()
 
     if not result.data:
@@ -192,7 +192,7 @@ async def trigger_analysis(
             video_id=video_id,
             cover_url=video["cover_url"],
             title=video.get("title", ""),
-            description=video.get("desc", "")
+            description=video.get("description", "")
         )
 
         return TaskStatusResponse(
@@ -223,7 +223,7 @@ async def trigger_analysis(
             cover_url=video.get("cover_url", ""),
             video_path=video_path,
             title=video.get("title", ""),
-            description=video.get("desc", "")
+            description=video.get("description", "")
         )
 
         return TaskStatusResponse(
