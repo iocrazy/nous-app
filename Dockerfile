@@ -4,7 +4,7 @@
 # ============================================
 # Stage 1: Build Rust mediahub-core module
 # ============================================
-FROM rust:1.77-slim AS rust-builder
+FROM rust:1.84-slim AS rust-builder
 
 RUN apt-get update && apt-get install -y \
     python3-dev \
