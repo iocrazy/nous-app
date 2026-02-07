@@ -350,8 +350,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   };
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col">
-      <div className="flex flex-col md:flex-row">
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
+      <div className="flex flex-col md:flex-row min-w-0">
         {/* Media Preview Section - Left Side */}
         <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
           {/* Show download progress when downloading */}
@@ -437,11 +437,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         </div>
 
         {/* Info Section - Right Side */}
-        <div className="flex-1 p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
+        <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
           
           {/* Header Metadata */}
-          <div className="flex justify-between items-start mb-2">
-            <div className="flex gap-2">
+          <div className="flex justify-between items-start gap-2 mb-2 min-w-0">
+            <div className="flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
                 {getAwemeTypeLabel(data.aweme_type)}
                 </span>
@@ -451,7 +451,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 </span>
                 )}
             </div>
-            <span className="text-xs text-zinc-500 font-mono">ID: {data.aweme_id}</span>
+            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.aweme_id}</span>
           </div>
 
           {/* Title */}
@@ -472,16 +472,16 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Heart className="w-5 h-5 text-rose-500 mb-1" />
-              <span className="text-sm font-bold text-white">{formatNumber(data.video_digg_count)}</span>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
+          <div className="grid grid-cols-4 gap-2 sm:gap-4 mb-6">
+            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+              <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_digg_count)}</span>
+              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
             </div>
-            <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <MessageCircle className="w-5 h-5 text-sky-500 mb-1" />
-              <span className="text-sm font-bold text-white">{formatNumber(data.video_comment_count)}</span>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
+            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+              <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_comment_count)}</span>
+              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
             </div>
             <button
               onClick={() => {
@@ -491,21 +491,21 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
               }}
-              className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
+              className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
               title="Click to copy link"
             >
               {copiedShare ? (
-                <Check className="w-5 h-5 text-emerald-400 mb-1" />
+                <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 mb-1" />
               ) : (
-                <Share2 className="w-5 h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
+                <Share2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
+              <span className="text-xs sm:text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
+              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
             </button>
-            <div className="flex flex-col items-center justify-center p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Bookmark className="w-5 h-5 text-amber-500 mb-1" />
-              <span className="text-sm font-bold text-white">{formatNumber(data.video_collect_count)}</span>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
+            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+              <Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_collect_count)}</span>
+              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
             </div>
           </div>
 
@@ -529,43 +529,43 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           </div>
 
           {/* Action Buttons Row */}
-          <div className="grid grid-cols-4 gap-2 mb-5">
-             <button 
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
+             <button
                onClick={(e) => handleAction(e, 'copy')}
-               className="flex items-center justify-center gap-2 p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600"
+               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors border border-zinc-700 hover:border-zinc-600"
              >
-               {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
-               <span className="text-xs font-medium">{copied ? 'Copied' : 'Copy'}</span>
+               {copied ? <Check size={16} className="text-green-500 shrink-0" /> : <Copy size={16} className="shrink-0" />}
+               <span className="text-[10px] sm:text-xs font-medium truncate">{copied ? 'Copied' : 'Copy'}</span>
              </button>
-             
+
              {/* AI Extract Button */}
              <button
                onClick={(e) => handleAction(e, 'extract')}
                disabled={loadingAction === 'extract'}
-               className="ai-btn ai-btn-extract flex items-center justify-center gap-2 p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
+               className="ai-btn ai-btn-extract flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
              >
-               {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <FileText size={16} className="relative z-10" />}
-               <span className="ai-text text-xs relative z-10">AI Extract</span>
+               {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <FileText size={16} className="relative z-10 shrink-0" />}
+               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Extract</span>
              </button>
 
              {/* AI Rewrite Button */}
              <button
                onClick={(e) => handleAction(e, 'rewrite')}
                disabled={loadingAction === 'rewrite'}
-               className="ai-btn ai-btn-rewrite flex items-center justify-center gap-2 p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
+               className="ai-btn ai-btn-rewrite flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
              >
-               {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <PenTool size={16} className="relative z-10" />}
-               <span className="ai-text text-xs relative z-10">AI Rewrite</span>
+               {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <PenTool size={16} className="relative z-10 shrink-0" />}
+               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Rewrite</span>
              </button>
 
              {/* AI Analyze Button */}
              <button
                onClick={(e) => handleAction(e, 'analyze')}
                disabled={loadingAction === 'analyze'}
-               className="ai-btn ai-btn-analyze flex items-center justify-center gap-2 p-2.5 rounded-lg text-indigo-300 hover:text-indigo-100"
+               className="ai-btn ai-btn-analyze flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-indigo-300 hover:text-indigo-100"
              >
-               {loadingAction === 'analyze' ? <Loader2 size={16} className="animate-spin relative z-10" /> : <Wand2 size={16} className="relative z-10" />}
-               <span className="ai-text text-xs relative z-10">AI Analyze</span>
+               {loadingAction === 'analyze' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <Wand2 size={16} className="relative z-10 shrink-0" />}
+               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Analyze</span>
              </button>
           </div>
 

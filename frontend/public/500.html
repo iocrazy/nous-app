@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>500 - Server Error | MediaHub</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a0a0a 0%, #1f0c0c 40%, #0f172a 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+    .particles { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+    .particle {
+      position: absolute; border-radius: 50%;
+      animation: drift linear infinite;
+    }
+    @keyframes drift {
+      0% { transform: translateY(100vh) scale(0); opacity: 0; }
+      10% { opacity: 1; } 90% { opacity: 1; }
+      100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+    }
+    .subtitle {
+      font-size: 0.85rem; font-weight: 600; letter-spacing: 0.3em;
+      text-transform: uppercase; color: #f87171; margin-bottom: 2rem;
+    }
+    .hero { position: relative; margin-bottom: 2.5rem; user-select: none; }
+    .big-number {
+      font-size: clamp(10rem, 28vw, 18rem);
+      font-weight: 900; line-height: 0.9; letter-spacing: -0.02em;
+      background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.03) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .robot-wrapper {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -55%);
+      animation: robotShake 4s ease-in-out infinite;
+    }
+    @keyframes robotShake {
+      0%, 100% { transform: translate(-50%, -55%) rotate(0deg); }
+      20% { transform: translate(-50%, -55%) rotate(-2deg); }
+      40% { transform: translate(-50%, -55%) rotate(2deg); }
+      60% { transform: translate(-50%, -55%) rotate(-1deg); }
+      80% { transform: translate(-50%, -55%) rotate(1deg); }
+    }
+    .title { font-size: 1.6rem; font-weight: 700; color: #e4e4e7; margin-bottom: 0.75rem; }
+    .message { font-size: 1rem; color: #71717a; line-height: 1.7; margin-bottom: 2.5rem; max-width: 440px; text-align: center; }
+    .actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.6rem;
+      padding: 0.9rem 2rem; border: none; border-radius: 14px;
+      font-size: 1rem; font-weight: 600; cursor: pointer;
+      text-decoration: none; transition: all 0.3s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: #fff; box-shadow: 0 8px 30px rgba(239, 68, 68, 0.35);
+    }
+    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 12px 40px rgba(239, 68, 68, 0.5); }
+    .btn-secondary { background: #1e1e22; color: #a1a1aa; border: 1px solid #3f3f46; }
+    .btn-secondary:hover { background: #27272a; color: #fff; transform: translateY(-3px); }
+    .footer { position: fixed; bottom: 2rem; font-size: 0.8rem; color: #3f3f46; }
+    .glow { position: fixed; border-radius: 50%; filter: blur(120px); pointer-events: none; }
+    .glow-1 { width: 500px; height: 500px; background: #ef4444; top: -200px; left: -150px; opacity: 0.06; }
+    .glow-2 { width: 400px; height: 400px; background: #f97316; bottom: -150px; right: -100px; opacity: 0.08; }
+    .glow-3 { width: 300px; height: 300px; background: #eab308; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.03; }
+    .float-obj { position: fixed; pointer-events: none; z-index: 0; }
+    .drift-1 { animation: d1 18s ease-in-out infinite; }
+    .drift-2 { animation: d2 22s ease-in-out infinite; }
+    .drift-3 { animation: d3 15s ease-in-out infinite; }
+    @keyframes d1 { 0%,100%{transform:translate(0,0) rotate(0)} 50%{transform:translate(15px,-20px) rotate(15deg)} }
+    @keyframes d2 { 0%,100%{transform:translate(0,0) rotate(0)} 50%{transform:translate(-20px,15px) rotate(-10deg)} }
+    @keyframes d3 { 0%,100%{transform:translate(0,0) rotate(0)} 50%{transform:translate(10px,10px) rotate(25deg)} }
+    .warn-pulse { animation: wPulse 2s ease-in-out infinite alternate; }
+    @keyframes wPulse { 0%{opacity:0.15} 100%{opacity:0.4} }
+  </style>
+</head>
+<body>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+  <div class="glow glow-3"></div>
+
+  <div class="particles">
+    <div class="particle" style="width:3px;height:3px;background:#ef4444;left:10%;animation-duration:8s;animation-delay:0s"></div>
+    <div class="particle" style="width:2px;height:2px;background:#f97316;left:30%;animation-duration:12s;animation-delay:2s"></div>
+    <div class="particle" style="width:4px;height:4px;background:#eab308;left:50%;animation-duration:10s;animation-delay:1s"></div>
+    <div class="particle" style="width:2px;height:2px;background:#ef4444;left:70%;animation-duration:9s;animation-delay:3s"></div>
+    <div class="particle" style="width:3px;height:3px;background:#f97316;left:85%;animation-duration:11s;animation-delay:0.5s"></div>
+  </div>
+
+  <!-- Floating mechanical elements - randomly scattered -->
+  <div class="float-obj drift-1" style="top:4%;right:18%">
+    <svg width="60" height="60" viewBox="0 0 60 60" opacity="0.12"><path d="M30 5l4 8h8l-2 8 6 5-5 6 2 8h-8l-4 8-4-8h-8l2-8-6-5 5-6-2-8h8z" fill="none" stroke="#f97316" stroke-width="2"/><circle cx="30" cy="30" r="8" fill="none" stroke="#f97316" stroke-width="2"/></svg>
+  </div>
+  <div class="float-obj drift-2" style="top:42%;left:3%">
+    <svg width="35" height="35" viewBox="0 0 60 60" opacity="0.1"><path d="M30 5l4 8h8l-2 8 6 5-5 6 2 8h-8l-4 8-4-8h-8l2-8-6-5 5-6-2-8h8z" fill="none" stroke="#ef4444" stroke-width="2.5"/><circle cx="30" cy="30" r="8" fill="none" stroke="#ef4444" stroke-width="2.5"/></svg>
+  </div>
+  <div class="float-obj warn-pulse" style="bottom:11%;left:6%">
+    <svg width="40" height="36" viewBox="0 0 40 36"><path d="M20 2L2 34h36L20 2z" fill="none" stroke="#eab308" stroke-width="2" stroke-linejoin="round"/><line x1="20" y1="14" x2="20" y2="24" stroke="#eab308" stroke-width="2.5" stroke-linecap="round"/><circle cx="20" cy="29" r="1.5" fill="#eab308"/></svg>
+  </div>
+  <div class="float-obj drift-3" style="top:68%;right:4%">
+    <svg width="40" height="40" viewBox="0 0 40 40" opacity="0.12"><path d="M28 8a8 8 0 00-11.3 0l-1.4 1.4L8 16.7a2 2 0 000 2.8l12.5 12.5a2 2 0 002.8 0l7.3-7.3 1.4-1.4A8 8 0 0028 8z" fill="none" stroke="#f97316" stroke-width="2"/></svg>
+  </div>
+  <div class="float-obj drift-2" style="top:9%;left:7%">
+    <svg width="20" height="20" viewBox="0 0 20 20" opacity="0.15"><circle cx="10" cy="10" r="8" fill="none" stroke="#ef4444" stroke-width="2"/><circle cx="10" cy="10" r="3" fill="none" stroke="#ef4444" stroke-width="2"/></svg>
+  </div>
+  <div class="float-obj warn-pulse" style="top:26%;left:85%;animation-delay:1s">
+    <svg width="20" height="18" viewBox="0 0 40 36" opacity="0.8"><path d="M20 2L2 34h36L20 2z" fill="none" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/><line x1="20" y1="14" x2="20" y2="24" stroke="#f97316" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="29" r="2" fill="#f97316"/></svg>
+  </div>
+  <div class="float-obj" style="bottom:7%;right:6%">
+    <svg width="60" height="40" viewBox="0 0 60 40" opacity="0.08"><path d="M0 20h15l5-10h10l5 10h25" stroke="#ef4444" stroke-width="1.5" fill="none"/><circle cx="20" cy="10" r="2" fill="#ef4444"/><circle cx="35" cy="10" r="2" fill="#ef4444"/></svg>
+  </div>
+  <div class="float-obj drift-1" style="top:82%;left:14%">
+    <svg width="25" height="25" viewBox="0 0 60 60" opacity="0.08"><path d="M30 5l4 8h8l-2 8 6 5-5 6 2 8h-8l-4 8-4-8h-8l2-8-6-5 5-6-2-8h8z" fill="none" stroke="#eab308" stroke-width="2.5"/><circle cx="30" cy="30" r="8" fill="none" stroke="#eab308" stroke-width="2.5"/></svg>
+  </div>
+  <div class="float-obj" style="top:51%;left:88%">
+    <svg width="50" height="30" viewBox="0 0 60 40" opacity="0.06"><path d="M0 20h15l5-10h10l5 10h25" stroke="#f97316" stroke-width="1.5" fill="none"/><circle cx="20" cy="10" r="2" fill="#f97316"/><circle cx="35" cy="10" r="2" fill="#f97316"/></svg>
+  </div>
+  <div class="float-obj drift-3" style="top:17%;right:42%">
+    <svg width="16" height="16" viewBox="0 0 20 20" opacity="0.12"><circle cx="10" cy="10" r="8" fill="none" stroke="#f97316" stroke-width="2"/><circle cx="10" cy="10" r="3" fill="none" stroke="#f97316" stroke-width="2"/></svg>
+  </div>
+  <div class="float-obj warn-pulse" style="top:73%;right:28%;animation-delay:2s">
+    <svg width="16" height="14" viewBox="0 0 40 36" opacity="0.6"><path d="M20 2L2 34h36L20 2z" fill="none" stroke="#eab308" stroke-width="2.5" stroke-linejoin="round"/><line x1="20" y1="14" x2="20" y2="24" stroke="#eab308" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="29" r="2" fill="#eab308"/></svg>
+  </div>
+
+  <p class="subtitle">Server Error</p>
+
+  <div class="hero">
+    <div class="big-number">500</div>
+    <div class="robot-wrapper">
+      <svg width="130" height="160" viewBox="0 0 130 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Smoke puffs -->
+        <circle cx="50" cy="15" r="6" fill="#3f3f46" opacity="0.3">
+          <animate attributeName="cy" values="15;-5" dur="3s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.4;0" dur="3s" repeatCount="indefinite"/>
+          <animate attributeName="r" values="6;12" dur="3s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="70" cy="10" r="5" fill="#3f3f46" opacity="0.25">
+          <animate attributeName="cy" values="10;-8" dur="2.5s" repeatCount="indefinite" begin="0.8s"/>
+          <animate attributeName="opacity" values="0.35;0" dur="2.5s" repeatCount="indefinite" begin="0.8s"/>
+          <animate attributeName="r" values="5;10" dur="2.5s" repeatCount="indefinite" begin="0.8s"/>
+        </circle>
+        <!-- Head -->
+        <rect x="35" y="25" width="50" height="38" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="2"/>
+        <!-- Antenna -->
+        <line x1="60" y1="25" x2="60" y2="12" stroke="#52525b" stroke-width="2"/>
+        <circle cx="60" cy="10" r="5" fill="#ef4444">
+          <animate attributeName="fill" values="#ef4444;#f97316;#ef4444" dur="1s" repeatCount="indefinite"/>
+        </circle>
+        <!-- X eyes -->
+        <g stroke="#ef4444" stroke-width="2.5" stroke-linecap="round">
+          <line x1="46" y1="37" x2="52" y2="43"/><line x1="52" y1="37" x2="46" y2="43"/>
+          <line x1="66" y1="37" x2="72" y2="43"/><line x1="72" y1="37" x2="66" y2="43"/>
+        </g>
+        <!-- Zigzag mouth -->
+        <polyline points="46,55 50,51 54,55 58,51 62,55 66,51 70,55" stroke="#f97316" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <!-- Body -->
+        <rect x="30" y="68" width="60" height="55" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="2"/>
+        <!-- Chest panel -->
+        <rect x="42" y="78" width="36" height="22" rx="5" fill="#18181b"/>
+        <!-- Blinking lights -->
+        <circle cx="50" cy="85" r="3" fill="#ef4444"><animate attributeName="opacity" values="1;0.2;1" dur="0.8s" repeatCount="indefinite"/></circle>
+        <circle cx="60" cy="85" r="3" fill="#f97316"><animate attributeName="opacity" values="0.2;1;0.2" dur="0.8s" repeatCount="indefinite"/></circle>
+        <circle cx="70" cy="85" r="3" fill="#ef4444"><animate attributeName="opacity" values="1;0.2;1" dur="1s" repeatCount="indefinite"/></circle>
+        <!-- Error bar -->
+        <rect x="45" y="93" width="30" height="4" rx="2" fill="#ef4444" opacity="0.5">
+          <animate attributeName="width" values="30;10;25;5;30" dur="2s" repeatCount="indefinite"/>
+        </rect>
+        <!-- Arms (dangling) -->
+        <path d="M30 75 Q18 80 15 95" stroke="#27272a" stroke-width="8" fill="none" stroke-linecap="round"/>
+        <path d="M90 75 Q102 80 105 95" stroke="#27272a" stroke-width="8" fill="none" stroke-linecap="round"/>
+        <!-- Legs -->
+        <rect x="40" y="123" width="14" height="22" rx="6" fill="#27272a" stroke="#3f3f46" stroke-width="1.5"/>
+        <rect x="66" y="123" width="14" height="22" rx="6" fill="#27272a" stroke="#3f3f46" stroke-width="1.5"/>
+        <!-- Sparks -->
+        <g opacity="0.8">
+          <line x1="18" y1="70" x2="24" y2="64" stroke="#f97316" stroke-width="2" stroke-linecap="round">
+            <animate attributeName="opacity" values="0;1;0" dur="1.5s" repeatCount="indefinite"/>
+          </line>
+          <line x1="100" y1="68" x2="106" y2="62" stroke="#eab308" stroke-width="2" stroke-linecap="round">
+            <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" begin="0.5s"/>
+          </line>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <h1 class="title">System Malfunction</h1>
+  <p class="message">Our servers hit a snag. We've been notified and are working on it. Please try again in a moment.</p>
+  <div class="actions">
+    <a href="javascript:location.reload()" class="btn btn-primary">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Retry
+    </a>
+    <a href="/" class="btn btn-secondary">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Back to Home
+    </a>
+  </div>
+  <div class="footer">MediaHub</div>
+</body>
+</html>
