@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>404 - Page Not Found | MediaHub</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0c0c1a 0%, #1a1025 40%, #0f172a 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+    /* Animated background particles */
+    .particles {
+      position: fixed; inset: 0; pointer-events: none; overflow: hidden;
+    }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      animation: drift linear infinite;
+    }
+    @keyframes drift {
+      0% { transform: translateY(100vh) scale(0); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+    }
+    .subtitle {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: #a78bfa;
+      margin-bottom: 2rem;
+    }
+    /* Giant 404 with integrated illustration */
+    .hero {
+      position: relative;
+      margin-bottom: 2.5rem;
+      user-select: none;
+    }
+    .big-number {
+      font-size: clamp(10rem, 28vw, 18rem);
+      font-weight: 900;
+      line-height: 0.9;
+      letter-spacing: -0.02em;
+      background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.03) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      position: relative;
+    }
+    /* Astronaut floating in the 0 */
+    .astronaut-wrapper {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -55%);
+      animation: astroFloat 5s ease-in-out infinite;
+    }
+    @keyframes astroFloat {
+      0%, 100% { transform: translate(-50%, -55%) rotate(-3deg); }
+      50% { transform: translate(-50%, -65%) rotate(3deg); }
+    }
+    .title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #e4e4e7;
+      margin-bottom: 0.75rem;
+    }
+    .message {
+      font-size: 1rem;
+      color: #71717a;
+      line-height: 1.7;
+      margin-bottom: 2.5rem;
+      max-width: 440px;
+      text-align: center;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.9rem 2rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s;
+      box-shadow: 0 8px 30px rgba(99, 102, 241, 0.35);
+    }
+    .btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(99, 102, 241, 0.5);
+    }
+    .footer {
+      position: fixed;
+      bottom: 2rem;
+      font-size: 0.8rem;
+      color: #3f3f46;
+    }
+    /* Ambient glows */
+    .glow {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+    }
+    .glow-1 { width: 500px; height: 500px; background: #6366f1; top: -200px; left: -150px; opacity: 0.08; }
+    .glow-2 { width: 400px; height: 400px; background: #a855f7; bottom: -150px; right: -100px; opacity: 0.1; }
+    .glow-3 { width: 300px; height: 300px; background: #ec4899; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.04; }
+    /* Floating space objects */
+    .space-obj {
+      position: fixed;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .orbit-1 { animation: orbit1 25s linear infinite; }
+    .orbit-2 { animation: orbit2 35s linear infinite; }
+    .orbit-3 { animation: orbit3 20s linear infinite; }
+    @keyframes orbit1 {
+      0% { transform: translate(0, 0); }
+      25% { transform: translate(30px, -20px); }
+      50% { transform: translate(0, -35px); }
+      75% { transform: translate(-30px, -15px); }
+      100% { transform: translate(0, 0); }
+    }
+    @keyframes orbit2 {
+      0% { transform: translate(0, 0); }
+      25% { transform: translate(-20px, 25px); }
+      50% { transform: translate(15px, 40px); }
+      75% { transform: translate(25px, 10px); }
+      100% { transform: translate(0, 0); }
+    }
+    @keyframes orbit3 {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      50% { transform: translate(-15px, -20px) rotate(180deg); }
+      100% { transform: translate(0, 0) rotate(360deg); }
+    }
+    .twinkle-star {
+      position: fixed;
+      pointer-events: none;
+      animation: starTwinkle 3s ease-in-out infinite alternate;
+    }
+    @keyframes starTwinkle {
+      0% { opacity: 0.2; transform: scale(0.8); }
+      100% { opacity: 1; transform: scale(1.2); }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+  <div class="glow glow-3"></div>
+
+  <!-- Floating particles -->
+  <div class="particles">
+    <div class="particle" style="width:3px;height:3px;background:#6366f1;left:10%;animation-duration:8s;animation-delay:0s"></div>
+    <div class="particle" style="width:2px;height:2px;background:#a855f7;left:25%;animation-duration:12s;animation-delay:2s"></div>
+    <div class="particle" style="width:4px;height:4px;background:#ec4899;left:45%;animation-duration:10s;animation-delay:1s"></div>
+    <div class="particle" style="width:2px;height:2px;background:#818cf8;left:65%;animation-duration:9s;animation-delay:3s"></div>
+    <div class="particle" style="width:3px;height:3px;background:#c084fc;left:80%;animation-duration:11s;animation-delay:0.5s"></div>
+    <div class="particle" style="width:2px;height:2px;background:#6366f1;left:90%;animation-duration:7s;animation-delay:4s"></div>
+  </div>
+
+  <!-- Floating planets & space objects -->
+  <div class="space-obj orbit-1" style="top:7%;right:14%">
+    <svg width="70" height="70" viewBox="0 0 70 70"><circle cx="35" cy="35" r="30" fill="url(#p1)"/><circle cx="25" cy="28" r="5" fill="rgba(255,255,255,0.08)"/><circle cx="40" cy="45" r="3" fill="rgba(0,0,0,0.15)"/><defs><radialGradient id="p1" cx="40%" cy="35%"><stop offset="0%" stop-color="#818cf8"/><stop offset="100%" stop-color="#4338ca"/></radialGradient></defs></svg>
+  </div>
+  <div class="space-obj orbit-2" style="top:3%;right:4%">
+    <svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#3f3f46"/><circle cx="7" cy="8" r="2" fill="#52525b"/><circle cx="13" cy="12" r="1.5" fill="#52525b"/></svg>
+  </div>
+  <div class="space-obj orbit-2" style="bottom:9%;left:4%">
+    <svg width="80" height="50" viewBox="0 0 80 50"><ellipse cx="40" cy="25" rx="38" ry="6" stroke="#6366f1" stroke-width="1.5" fill="none" opacity="0.3" transform="rotate(-15,40,25)"/><circle cx="40" cy="25" r="16" fill="url(#p2)"/><ellipse cx="40" cy="25" rx="38" ry="6" stroke="#6366f1" stroke-width="1.5" fill="none" opacity="0.15" transform="rotate(-15,40,25)" stroke-dasharray="3 5"/><defs><radialGradient id="p2" cx="35%" cy="30%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#5b21b6"/></radialGradient></defs></svg>
+  </div>
+  <div class="space-obj orbit-3" style="top:33%;left:3%">
+    <svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="url(#p3)"/><circle cx="8" cy="9" r="2" fill="rgba(255,255,255,0.1)"/><defs><radialGradient id="p3" cx="40%" cy="35%"><stop offset="0%" stop-color="#f472b6"/><stop offset="100%" stop-color="#be185d"/></radialGradient></defs></svg>
+  </div>
+  <div class="space-obj orbit-1" style="top:62%;right:3%">
+    <svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="url(#p4)"/><circle cx="14" cy="15" r="3" fill="rgba(255,255,255,0.07)"/><circle cx="24" cy="26" r="2" fill="rgba(0,0,0,0.12)"/><defs><radialGradient id="p4" cx="38%" cy="32%"><stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#1e40af"/></radialGradient></defs></svg>
+  </div>
+  <div class="space-obj orbit-3" style="bottom:31%;right:19%">
+    <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#52525b"/><circle cx="5" cy="5" r="1.5" fill="#3f3f46"/></svg>
+  </div>
+  <div class="space-obj orbit-1" style="top:22%;left:12%">
+    <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="url(#p5)"/><defs><radialGradient id="p5" cx="40%" cy="35%"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#b45309"/></radialGradient></defs></svg>
+  </div>
+  <div class="space-obj orbit-2" style="bottom:5%;right:38%">
+    <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#3f3f46"/><circle cx="4" cy="4" r="1" fill="#52525b"/></svg>
+  </div>
+  <div class="space-obj orbit-3" style="top:78%;left:7%">
+    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="url(#p6)"/><circle cx="10" cy="11" r="2.5" fill="rgba(255,255,255,0.06)"/><defs><radialGradient id="p6" cx="38%" cy="33%"><stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#065f46"/></radialGradient></defs></svg>
+  </div>
+
+  <!-- Twinkling stars - scattered randomly -->
+  <div class="twinkle-star" style="top:2%;left:47%;animation-delay:0s"><svg width="5" height="5"><circle cx="2.5" cy="2.5" r="1.5" fill="#c4b5fd"/></svg></div>
+  <div class="twinkle-star" style="top:14%;left:72%;animation-delay:0.8s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#e9d5ff"/></svg></div>
+  <div class="twinkle-star" style="top:28%;right:32%;animation-delay:1.5s"><svg width="4" height="4"><circle cx="2" cy="2" r="1.2" fill="#818cf8"/></svg></div>
+  <div class="twinkle-star" style="top:71%;left:23%;animation-delay:0.3s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#f9a8d4"/></svg></div>
+  <div class="twinkle-star" style="top:82%;right:9%;animation-delay:2s"><svg width="5" height="5"><circle cx="2.5" cy="2.5" r="1.5" fill="#a78bfa"/></svg></div>
+  <div class="twinkle-star" style="top:91%;left:56%;animation-delay:1s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#c084fc"/></svg></div>
+  <div class="twinkle-star" style="top:6%;right:52%;animation-delay:2.5s"><svg width="4" height="4"><circle cx="2" cy="2" r="1.2" fill="#fbbf24"/></svg></div>
+  <div class="twinkle-star" style="top:46%;left:91%;animation-delay:1.8s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#818cf8"/></svg></div>
+  <div class="twinkle-star" style="bottom:6%;left:17%;animation-delay:0.5s"><svg width="4" height="4"><circle cx="2" cy="2" r="1" fill="#e9d5ff"/></svg></div>
+  <div class="twinkle-star" style="top:19%;left:4%;animation-delay:3s"><svg width="5" height="5"><circle cx="2.5" cy="2.5" r="1.2" fill="#fbbf24"/></svg></div>
+  <div class="twinkle-star" style="top:55%;left:6%;animation-delay:0.7s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#c4b5fd"/></svg></div>
+  <div class="twinkle-star" style="top:38%;right:7%;animation-delay:1.3s"><svg width="4" height="4"><circle cx="2" cy="2" r="1" fill="#fbbf24"/></svg></div>
+  <div class="twinkle-star" style="top:87%;left:82%;animation-delay:2.2s"><svg width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="#a78bfa"/></svg></div>
+  <div class="twinkle-star" style="top:42%;left:15%;animation-delay:0.2s"><svg width="4" height="4"><circle cx="2" cy="2" r="1.2" fill="#f9a8d4"/></svg></div>
+  <div class="twinkle-star" style="top:11%;left:88%;animation-delay:1.7s"><svg width="5" height="5"><circle cx="2.5" cy="2.5" r="1.5" fill="#818cf8"/></svg></div>
+
+  <p class="subtitle">Page Not Found</p>
+
+  <div class="hero">
+    <div class="big-number">404</div>
+    <!-- Astronaut SVG floating over the numbers -->
+    <div class="astronaut-wrapper">
+      <svg width="120" height="150" viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Tether line -->
+        <path d="M60 130 Q45 110 55 90 Q65 70 50 55" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.5"/>
+        <!-- Body -->
+        <rect x="38" y="50" width="34" height="40" rx="14" fill="#d4d4d8"/>
+        <!-- Backpack -->
+        <rect x="32" y="55" width="8" height="25" rx="3" fill="#a1a1aa"/>
+        <!-- Helmet -->
+        <circle cx="55" cy="40" r="20" fill="#e4e4e7" stroke="#a1a1aa" stroke-width="1.5"/>
+        <!-- Visor -->
+        <path d="M42 36 Q55 26 68 36 Q65 48 55 50 Q45 48 42 36Z" fill="url(#v404)" opacity="0.9"/>
+        <!-- Visor shine -->
+        <path d="M48 32 Q53 28 58 32" stroke="rgba(255,255,255,0.5)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+        <!-- Arms -->
+        <path d="M38 60 Q25 55 18 68" stroke="#d4d4d8" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <path d="M72 60 Q85 55 92 48" stroke="#d4d4d8" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <!-- Legs -->
+        <path d="M47 88 Q44 105 38 112" stroke="#d4d4d8" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <path d="M60 88 Q63 105 70 112" stroke="#d4d4d8" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <!-- Waving hand -->
+        <circle cx="92" cy="45" r="4" fill="#e4e4e7"/>
+        <!-- Stars around -->
+        <g opacity="0.7">
+          <path d="M15 30 L17 25 L19 30 L17 28Z" fill="#a78bfa"/>
+          <path d="M95 25 L97 20 L99 25 L97 23Z" fill="#ec4899"/>
+          <path d="M25 95 L27 90 L29 95 L27 93Z" fill="#818cf8"/>
+        </g>
+        <defs>
+          <linearGradient id="v404" x1="42" y1="30" x2="68" y2="48">
+            <stop offset="0%" stop-color="#6366f1"/>
+            <stop offset="50%" stop-color="#a855f7"/>
+            <stop offset="100%" stop-color="#312e81"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  </div>
+
+  <h1 class="title">Lost in Space</h1>
+  <p class="message">The page you're looking for has drifted beyond the stars. Don't worry, we'll guide you back home.</p>
+  <a href="/" class="btn">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    Back to Home
+  </a>
+  <div class="footer">MediaHub</div>
+</body>
+</html>

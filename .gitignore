@@ -216,8 +216,14 @@ dist
 # Gatsby files
 .cache/
 public
+!frontend/public/
+frontend/public/*
 !frontend/public/locales/
 !frontend/public/favicon.svg
+!frontend/public/_redirects
+!frontend/public/404.html
+!frontend/public/500.html
+!frontend/public/offline.html
 
 # Storybook build outputs
 .out
