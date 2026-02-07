@@ -1,5 +1,5 @@
 {
-  "name": "DouyinMediaHub",
-  "description": "A modern media management dashboard for parsing, downloading, and analyzing Douyin content with Supabase integration.",
+  "name": "MediaHub",
+  "description": "A modern media management dashboard for parsing, downloading, and analyzing content from multiple platforms with Supabase integration.",
   "requestFramePermissions": []
 }

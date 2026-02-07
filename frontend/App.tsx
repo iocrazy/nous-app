@@ -1973,7 +1973,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col">
                     <textarea 
-                      placeholder={`Paste media links here (one per line)...\nSupported: YouTube, Douyin, Bilibili, Twitter/X, TikTok & more\nhttps://www.youtube.com/watch?v=...\nhttps://v.douyin.com/...`}
+                      placeholder={t('parser.batchPlaceholder')}
                       rows={5}
                       className="w-full bg-transparent border-none outline-none text-zinc-200 placeholder-zinc-600 px-4 py-3 resize-none font-mono text-sm"
                       value={batchInput}

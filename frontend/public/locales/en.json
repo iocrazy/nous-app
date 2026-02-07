@@ -92,6 +92,7 @@
     "singleLink": "Single Link",
     "batchDownload": "Batch Download",
     "placeholder": "Paste media link (YouTube, Douyin, Bilibili, Twitter/X...)",
+    "batchPlaceholder": "Paste media links here (one per line)...\nSupported: YouTube, Douyin, Bilibili, Twitter/X, TikTok & more\nhttps://www.youtube.com/watch?v=...\nhttps://v.douyin.com/...",
     "analyze": "Analyze",
     "processBatch": "Process Batch",
     "downloadVideo": "Download Video/Img",

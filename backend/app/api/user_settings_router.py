@@ -60,7 +60,7 @@ async def get_user_settings(auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get("download_path", "/home/user/downloads/douyin"),
+                download_path=settings.get("download_path", "/home/user/downloads/mediahub"),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
                 updated_at=settings.get("updated_at")
@@ -69,7 +69,7 @@ async def get_user_settings(auth: AuthDep):
         # 返回默认设置
         return UserSettingsResponse(
             user_id=auth.user_id,
-            download_path="/home/user/downloads/douyin",
+            download_path="/home/user/downloads/mediahub",
             settings_json={}
         )
 
@@ -109,7 +109,7 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get("download_path", "/home/user/downloads/douyin"),
+                download_path=settings.get("download_path", "/home/user/downloads/mediahub"),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
                 updated_at=settings.get("updated_at")

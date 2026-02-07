@@ -92,6 +92,7 @@
     "singleLink": "单个链接",
     "batchDownload": "批量下载",
     "placeholder": "粘贴媒体链接（支持 YouTube、抖音、B站、Twitter/X...）",
+    "batchPlaceholder": "在此粘贴媒体链接（每行一个）...\n支持：YouTube、抖音、B站、Twitter/X、TikTok 等\nhttps://www.youtube.com/watch?v=...\nhttps://v.douyin.com/...",
     "analyze": "解析",
     "processBatch": "批量处理",
     "downloadVideo": "下载视频/图片",
