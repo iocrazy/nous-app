@@ -3,16 +3,20 @@
 
 # ============================================
 # Stage 1: Build Rust mediahub-core module
+# Use python:3.12 as base so maturin builds cp312 wheels
 # ============================================
-FROM rust:1.84-slim AS rust-builder
+FROM python:3.12-slim AS rust-builder
 
 RUN apt-get update && apt-get install -y \
-    python3-dev \
-    python3-pip \
+    curl \
+    build-essential \
     --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
 
-RUN pip3 install --break-system-packages maturin
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN pip install maturin
 
 WORKDIR /rust
 COPY mediahub-core/ .
