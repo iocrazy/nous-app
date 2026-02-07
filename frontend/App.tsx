@@ -5,14 +5,14 @@ import {
   Link as LinkIcon, AlertCircle, Loader2, Sparkles, User, Database,
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
-  ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video, Image as ImageIcon, Tag,
+  ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
   Layers, Download, Users, Trash2, ScrollText, ListTodo
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { DouyinBase, ViewState, UserProfile, UserSettings, Team, Collection } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
-import { fetchLibrary, fetchLibraryPaginated, fetchVideoByAwemeId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
+import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
 import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
@@ -44,6 +44,7 @@ import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
 import { TeamLibraryView } from './components/TeamLibraryView';
 import { SettingsModal } from './components/SettingsModal';
+import { VideoDetailPanel } from './components/VideoDetailPanel';
 import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
 
 // --- Types for Monitor ---
@@ -209,7 +210,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -306,17 +307,17 @@ export default function App() {
   const [socketLogs, setSocketLogs] = useState<LogEntry[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
 
-  const [currentResult, setCurrentResult] = useState<DouyinBase | null>(null);
-  const [batchResults, setBatchResults] = useState<DouyinBase[]>([]);
+  const [currentResult, setCurrentResult] = useState<Video | null>(null);
+  const [batchResults, setBatchResults] = useState<Video[]>([]);
 
   // Progressive download state
   const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
 
   // Library State
-  const [library, setLibrary] = useState<DouyinBase[]>([]);
+  const [library, setLibrary] = useState<Video[]>([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [selectedLibraryItem, setSelectedLibraryItem] = useState<DouyinBase | null>(null); // For detail view
+  const [selectedLibraryItem, setSelectedLibraryItem] = useState<Video | null>(null); // For detail view
 
   // Infinite scroll pagination state
   const [currentPage, setCurrentPage] = useState(0);
@@ -364,9 +365,22 @@ export default function App() {
   });
 
   const [userSettings, setUserSettings] = useState<UserSettings>({
-    downloadPath: '/home/user/downloads/douyin',
+    downloadPath: '/home/user/downloads/mediahub',
     supabaseUrl: '',
     supabaseAnonKey: ''
+  });
+
+  const [aiSettings, setAISettings] = useState<AISettingsType>({
+    ai_enabled: false,
+    auto_transcribe: false,
+    auto_summarize: false,
+    preferred_language: 'auto',
+    providers: {},
+    task_assignment: {
+      transcription: '',
+      summarization: '',
+      visual_analysis: '',
+    },
   });
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -550,14 +564,14 @@ export default function App() {
           .eq('collection_id', parseInt(collectionId));
 
         if (data) {
-          // Get aweme_ids from video_ids
+          // Get platform_ids from video_ids
           const videoIds = data.map(v => v.video_id);
           if (videoIds.length > 0) {
             const { data: videos } = await supabase
-              .from('douyin_videos')
-              .select('aweme_id')
+              .from('videos')
+              .select('platform_id')
               .in('id', videoIds);
-            setCollectionVideoIds(videos?.map(v => v.aweme_id) || []);
+            setCollectionVideoIds(videos?.map(v => v.platform_id) || []);
           } else {
             setCollectionVideoIds([]);
           }
@@ -597,11 +611,11 @@ export default function App() {
           if (data && data.length > 0) {
             const videoIds = [...new Set(data.map(v => v.video_id))];
             const { data: videos } = await supabase
-              .from('douyin_videos')
-              .select('aweme_id')
+              .from('videos')
+              .select('platform_id')
               .in('id', videoIds);
 
-            setTeamLibraryVideoIds(videos?.map(v => v.aweme_id) || []);
+            setTeamLibraryVideoIds(videos?.map(v => v.platform_id) || []);
           } else {
             setTeamLibraryVideoIds([]);
           }
@@ -637,11 +651,11 @@ export default function App() {
     if (data && data.length > 0) {
       const videoIds = [...new Set(data.map(v => v.video_id))];
       const { data: videos } = await supabase
-        .from('douyin_videos')
-        .select('aweme_id')
+        .from('videos')
+        .select('platform_id')
         .in('id', videoIds);
 
-      setSharedVideoIds(videos?.map(v => v.aweme_id) || []);
+      setSharedVideoIds(videos?.map(v => v.platform_id) || []);
     } else {
       setSharedVideoIds([]);
     }
@@ -660,13 +674,13 @@ export default function App() {
     }
 
     const channel = supabase
-      .channel('douyin_videos_realtime')
+      .channel('videos_realtime')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'douyin_videos',
+          table: 'videos',
         },
         async (payload) => {
           console.log('Realtime update:', payload.eventType, payload);
@@ -675,14 +689,14 @@ export default function App() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
-          const newRecord = payload.new as DouyinBase;
-          const oldRecord = payload.old as DouyinBase;
+          const newRecord = payload.new as Video;
+          const oldRecord = payload.old as Video;
 
           // 只处理当前用户的数据
           if (payload.eventType === 'INSERT' && newRecord.user_id === user.id) {
             setLibrary(prev => {
               // 避免重复添加
-              if (prev.find(item => item.aweme_id === newRecord.aweme_id)) {
+              if (prev.find(item => item.platform_id === newRecord.platform_id)) {
                 return prev;
               }
               return [newRecord, ...prev];
@@ -690,20 +704,20 @@ export default function App() {
           } else if (payload.eventType === 'UPDATE' && newRecord.user_id === user.id) {
             setLibrary(prev =>
               prev.map(item =>
-                item.aweme_id === newRecord.aweme_id ? newRecord : item
+                item.platform_id === newRecord.platform_id ? newRecord : item
               )
             );
             // 如果当前选中的项被更新，也更新它
             setSelectedLibraryItem(prev =>
-              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
+              prev?.platform_id === newRecord.platform_id ? newRecord : prev
             );
             // 如果当前解析结果被更新，也更新它
             setCurrentResult(prev =>
-              prev?.aweme_id === newRecord.aweme_id ? newRecord : prev
+              prev?.platform_id === newRecord.platform_id ? newRecord : prev
             );
           } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === user.id) {
             setLibrary(prev =>
-              prev.filter(item => item.aweme_id !== oldRecord.aweme_id)
+              prev.filter(item => item.platform_id !== oldRecord.platform_id)
             );
           }
         }
@@ -750,8 +764,8 @@ export default function App() {
           }
 
           // 如果正在查看的视频的集合关系变化，重新加载选中视频的集合列表
-          if (selectedLibraryItem?.aweme_id) {
-            fetchVideoCollections(selectedLibraryItem.aweme_id)
+          if (selectedLibraryItem?.platform_id) {
+            fetchVideoCollections(selectedLibraryItem.platform_id)
               .then(setSelectedVideoCollectionIds)
               .catch(console.error);
           }
@@ -772,7 +786,7 @@ export default function App() {
       console.log('Unsubscribing from collection videos realtime channel');
       supabase.removeChannel(collectionChannel);
     };
-  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.aweme_id]);
+  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.platform_id]);
 
   // Supabase Realtime for video_tags - 标签实时同步
   useEffect(() => {
@@ -836,12 +850,12 @@ export default function App() {
 
   // Load collections for selected video
   useEffect(() => {
-    if (selectedLibraryItem?.aweme_id) {
-      loadSelectedVideoCollections(selectedLibraryItem.aweme_id);
+    if (selectedLibraryItem?.platform_id) {
+      loadSelectedVideoCollections(selectedLibraryItem.platform_id);
     } else {
       setSelectedVideoCollectionIds([]);
     }
-  }, [selectedLibraryItem?.aweme_id]);
+  }, [selectedLibraryItem?.platform_id]);
 
   const handleLogin = (user: { email: string; id: string }) => {
     setUserProfile(prev => ({
@@ -953,9 +967,9 @@ export default function App() {
 
   // Toggle video in collection
   const handleToggleVideoCollection = async (collectionId: string) => {
-    if (!selectedLibraryItem?.aweme_id) return;
+    if (!selectedLibraryItem?.platform_id) return;
 
-    const awemeId = selectedLibraryItem.aweme_id;
+    const awemeId = selectedLibraryItem.platform_id;
     const isInCollection = selectedVideoCollectionIds.includes(collectionId);
 
     try {
@@ -1018,7 +1032,7 @@ export default function App() {
     setCurrentPage(0);
     setHasMoreData(true);
     try {
-      let data: DouyinBase[];
+      let data: Video[];
       if (isSupabaseConfigured()) {
         // Load first page with pagination
         const result = await fetchLibraryPaginated(0);
@@ -1027,7 +1041,7 @@ export default function App() {
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
         if (data.length === 0) {
-           console.log("Supabase connected but returned no data. You may need to create the 'douyin_videos' table.");
+           console.log("Supabase connected but returned no data. You may need to create the 'videos' table.");
         }
       } else {
         // Fallback to mock if not configured
@@ -1119,8 +1133,8 @@ export default function App() {
       // Refresh library to get the updated item with download paths
       loadLibraryData();
       // Also refresh currentResult to update video player with download_path
-      if (currentResult?.aweme_id) {
-        const updatedVideo = await fetchVideoByAwemeId(currentResult.aweme_id);
+      if (currentResult?.platform_id) {
+        const updatedVideo = await fetchVideoByPlatformId(currentResult.platform_id);
         if (updatedVideo) {
           setCurrentResult(updatedVideo);
         }
@@ -1172,7 +1186,7 @@ export default function App() {
       setTaskProgress(50);
 
       if (response.success) {
-        addLog(`Video parsed: ${response.video_title || response.aweme_id}`, 'success');
+        addLog(`Video parsed: ${response.title || response.platform_id}`, 'success');
         if (response.fallback_used) {
           addLog(`LightHTTP failed, used fallback: ${response.parse_method_name}`, 'warning');
         } else {
@@ -1181,27 +1195,27 @@ export default function App() {
         addLog(`Author: ${response.author || 'Unknown'}`, 'info');
 
         // Create result from response data immediately (progressive: show metadata first)
-        const parsedResult: DouyinBase = {
+        const parsedResult: Video = {
           id: response.id,  // Database ID for tag operations
-          aweme_id: response.aweme_id,
-          video_title: response.video_title,
+          platform_id: response.platform_id,
+          title: response.title,
           author: response.author,
-          aweme_type: response.aweme_type,
-          video_original_url: response.video_original_url || urlInput,
+          media_type: response.media_type,
+          original_url: response.original_url || urlInput,
           // URLs
           video_download_urls: response.video_download_urls || [],
           cover_urls: response.cover_urls || [],
           image_download_urls: response.image_download_urls || [],
           // Stats
-          video_digg_count: response.video_digg_count || 0,
-          video_comment_count: response.video_comment_count || 0,
-          video_share_count: response.video_share_count || 0,
-          video_collect_count: response.video_collect_count || 0,
+          like_count: response.like_count || 0,
+          comment_count: response.comment_count || 0,
+          share_count: response.share_count || 0,
+          favorite_count: response.favorite_count || 0,
           // Video info
-          video_duration: response.video_duration || "0",
-          video_created_time: response.video_created_time,
-          video_desc: response.video_desc,
-          video_resolution: response.video_resolution,
+          duration: response.duration || "0",
+          published_at: response.published_at,
+          description: response.description,
+          resolution: response.resolution,
           video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
         };
 
@@ -1290,11 +1304,11 @@ export default function App() {
       }
 
       // 直接从响应中提取完整数据
-      const batchData: DouyinBase[] = [];
+      const batchData: Video[] = [];
       response.results.forEach((result: any) => {
-        addLog(`  ✓ ${result.aweme_id}: ${result.status}`, 'success');
+        addLog(`  ✓ ${result.platform_id}: ${result.status}`, 'success');
         if (result.data) {
-          batchData.push(result.data as DouyinBase);
+          batchData.push(result.data as Video);
         }
       });
 
@@ -1319,7 +1333,7 @@ export default function App() {
     }
   };
 
-  const handleSaveToLibrary = async (item: DouyinBase, silent = false, tagIds?: string[]) => {
+  const handleSaveToLibrary = async (item: Video, silent = false, tagIds?: string[]) => {
     // Preserve existing notes/tags if they exist, otherwise init as empty
     const newItem = {
       ...item,
@@ -1331,7 +1345,7 @@ export default function App() {
       // Optimistic update
       setLibrary(prev => {
         // Check if exists
-        if (prev.find(i => i.aweme_id === item.aweme_id)) return prev;
+        if (prev.find(i => i.platform_id === item.platform_id)) return prev;
         return [newItem, ...prev];
       });
 
@@ -1372,10 +1386,10 @@ export default function App() {
     alert(`Successfully saved ${savedCount} items to your library!`);
   };
 
-  const handleUpdateLibraryItem = async (id: string, updates: Partial<DouyinBase>) => {
+  const handleUpdateLibraryItem = async (id: string, updates: Partial<Video>) => {
     // Optimistic update
     setLibrary(prev => prev.map(item =>
-      item.aweme_id === id ? { ...item, ...updates } : item
+      item.platform_id === id ? { ...item, ...updates } : item
     ));
 
     try {
@@ -1392,9 +1406,9 @@ export default function App() {
       if (isSupabaseConfigured()) {
         await deleteItem(id, deleteFiles);
         // Remove from library state
-        setLibrary(prev => prev.filter(item => item.aweme_id !== id));
+        setLibrary(prev => prev.filter(item => item.platform_id !== id));
         // Clear selection if this item was selected
-        if (selectedLibraryItem?.aweme_id === id) {
+        if (selectedLibraryItem?.platform_id === id) {
           setSelectedLibraryItem(null);
         }
       }
@@ -1431,13 +1445,13 @@ export default function App() {
       if (searchResults.length === 0) {
         return [];
       }
-      const searchAwemeIds = new Set(searchResults.map(r => r.aweme_id));
+      const searchAwemeIds = new Set(searchResults.map(r => r.platform_id));
       return library
-        .filter(item => searchAwemeIds.has(item.aweme_id))
+        .filter(item => searchAwemeIds.has(item.platform_id))
         .sort((a, b) => {
           // Sort by search relevance (similarity score)
-          const aScore = searchResults.find(r => r.aweme_id === a.aweme_id)?.similarity_score || 0;
-          const bScore = searchResults.find(r => r.aweme_id === b.aweme_id)?.similarity_score || 0;
+          const aScore = searchResults.find(r => r.platform_id === a.platform_id)?.similarity_score || 0;
+          const bScore = searchResults.find(r => r.platform_id === b.platform_id)?.similarity_score || 0;
           return bScore - aScore;
         });
     }
@@ -1445,19 +1459,19 @@ export default function App() {
     return library
       .filter(item => {
         // Filter by specific collection if selected
-        if (activeCollectionId && !collectionVideoIds.includes(item.aweme_id)) {
+        if (activeCollectionId && !collectionVideoIds.includes(item.platform_id)) {
           return false;
         }
         // Filter by team library (all team collections) if active but no specific collection
-        if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.aweme_id)) {
+        if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.platform_id)) {
           return false;
         }
         // Mobile search filter - simple text matching
         if (searchQuery.trim()) {
           const query = searchQuery.toLowerCase().trim();
-          const title = (item.video_title || '').toLowerCase();
+          const title = (item.title || '').toLowerCase();
           const author = (item.author_nickname || '').toLowerCase();
-          const desc = (item.video_desc || '').toLowerCase();
+          const desc = (item.description || '').toLowerCase();
           const tags = (item.video_tag || []).join(' ').toLowerCase();
           return title.includes(query) || author.includes(query) || desc.includes(query) || tags.includes(query);
         }
@@ -1866,6 +1880,19 @@ export default function App() {
                     <span>Tags</span>
                   </div>
                 </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('ai'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'ai'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={14} />
+                    <span>AI</span>
+                  </div>
+                </button>
               </div>
             )}
           </div>
@@ -1946,7 +1973,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col">
                     <textarea 
-                      placeholder={`Paste multiple Douyin links here (one per line)...\nExample:\nhttps://v.douyin.com/...\nhttps://v.douyin.com/...`}
+                      placeholder={t('parser.batchPlaceholder')}
                       rows={5}
                       className="w-full bg-transparent border-none outline-none text-zinc-200 placeholder-zinc-600 px-4 py-3 resize-none font-mono text-sm"
                       value={batchInput}
@@ -1986,7 +2013,7 @@ export default function App() {
                   {downloadOptions.video && <Check size={14} className="text-white" />}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Video size={16} />
+                  <VideoIcon size={16} />
                   <span className="text-sm font-medium">{t('parser.downloadVideo')}</span>
                 </div>
               </button>
@@ -2114,14 +2141,14 @@ export default function App() {
                   <div className="columns-2 md:columns-3 gap-3 mx-auto space-y-3">
                       {batchResults.map((item, idx) => (
                         <CompactMediaCard
-                          key={`${item.aweme_id}-${idx}`}
+                          key={`${item.platform_id}-${idx}`}
                           data={item}
                           onClick={() => {
                              // Switch to library detail view mock-up if needed,
                              // for now just log since we are in parser mode
-                             console.log("Clicked batch item:", item.video_title);
+                             console.log("Clicked batch item:", item.title);
                           }}
-                          isShared={sharedVideoIds.includes(item.aweme_id)}
+                          isShared={sharedVideoIds.includes(item.platform_id)}
                         />
                       ))}
                   </div>
@@ -2182,10 +2209,10 @@ export default function App() {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
             
             {selectedLibraryItem ? (
-              // DETAIL VIEW
+              // DETAIL VIEW - VideoDetailPanel with tabs
               <div className="flex flex-col h-full p-4 md:p-0">
                  <div className="flex items-center gap-3 mb-4 shrink-0">
-                    <button 
+                    <button
                       onClick={() => setSelectedLibraryItem(null)}
                       className="p-2 -ml-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
                     >
@@ -2194,8 +2221,9 @@ export default function App() {
                     <h2 className="text-xl font-bold text-white">Media Details</h2>
                  </div>
                  <div className="flex-1 min-h-0">
-                    <MediaCard
-                      data={selectedLibraryItem}
+                    <VideoDetailPanel
+                      video={selectedLibraryItem}
+                      onClose={() => setSelectedLibraryItem(null)}
                       onUpdate={handleUpdateLibraryItem}
                       onDelete={handleDeleteLibraryItem}
                       collections={collections}
@@ -2266,7 +2294,7 @@ export default function App() {
                         {activeCollectionId && (
                           <span className="flex items-center gap-1 text-sm font-normal px-2 py-0.5 bg-zinc-800 rounded text-zinc-400">
                             <span>{collectionVideoIds.length}</span>
-                            <Video size={14} className="text-indigo-400" />
+                            <VideoIcon size={14} className="text-indigo-400" />
                           </span>
                         )}
                       </h1>
@@ -2357,10 +2385,10 @@ export default function App() {
                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 w-full">
                                   {filteredLibrary.map((item, idx) => (
                                     <CompactMediaCard
-                                      key={`${item.aweme_id}-${idx}`}
+                                      key={`${item.platform_id}-${idx}`}
                                       data={item}
                                       onClick={() => setSelectedLibraryItem(item)}
-                                      isShared={sharedVideoIds.includes(item.aweme_id)}
+                                      isShared={sharedVideoIds.includes(item.platform_id)}
                                     />
                                   ))}
                                </div>
@@ -2481,6 +2509,8 @@ export default function App() {
              settings={userSettings}
              onUpdateSettings={handleUpdateSettings}
              activeTab={settingsTab}
+             aiSettings={aiSettings}
+             onSaveAISettings={setAISettings}
            />
         )}
 

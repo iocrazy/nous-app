@@ -1,7 +1,7 @@
 
-import { DouyinBase, DownloadStatus } from '../types';
+import { Video, DownloadStatus } from '../types';
 
-// API 配置 - 空字符串表示使用相对路径（通过 Vite 代理）
+// API config
 const getApiUrl = (): string => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
@@ -11,28 +11,25 @@ const getApiUrl = (): string => {
   return 'http://localhost:8080';
 };
 
-// 获取存储的 API Key
+// Get stored API Key
 const getApiKey = (): string | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem('douyin_api_key');
+      return window.localStorage.getItem('mediahub_api_key') ||
+             window.localStorage.getItem('douyin_api_key'); // legacy fallback
     }
   } catch (e) {}
   return null;
 };
 
-// 获取认证 token（从 Supabase session）
-// 动态查找 localStorage 中的 Supabase auth token，支持自托管和云端
+// Get auth token from Supabase session
 const getAuthToken = (): string | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      // 查找所有匹配 sb-*-auth-token 模式的 key
       const keys = Object.keys(window.localStorage).filter(k =>
         k.startsWith('sb-') && k.endsWith('-auth-token')
       );
 
-      // 优先使用自托管 Supabase 的 token（非 zesczfidxsikvohrxson）
-      // 因为自托管使用 HS256，云端使用 ES256
       const selfHostedKey = keys.find(k => !k.includes('zesczfidxsikvohrxson'));
       const keyToUse = selfHostedKey || keys[0];
 
@@ -50,7 +47,7 @@ const getAuthToken = (): string | null => {
   return null;
 };
 
-// 构建请求头
+// Build request headers
 const buildHeaders = (): HeadersInit => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -80,34 +77,34 @@ export interface FetchOptions {
 export interface FetchResponse {
   success: boolean;
   message: string;
-  id?: number;  // Database ID for tag operations
-  aweme_id: string;
-  video_title?: string;
+  id?: string;  // UUID database ID for tag operations
+  platform_id: string;
+  title?: string;
   author?: string;
-  aweme_type?: string;
-  // 视频/封面 URL
+  media_type?: string;
+  // Video/cover URLs
   video_download_urls?: string[];
   cover_urls?: string[];
   image_download_urls?: string[][];
-  // 统计数据
-  video_digg_count?: number;
-  video_comment_count?: number;
-  video_share_count?: number;
-  video_collect_count?: number;
-  // 视频信息
-  video_duration?: string;
-  video_created_time?: string;
-  video_desc?: string;
-  video_original_url?: string;
-  video_resolution?: string;
-  // 下载状态
+  // Stats
+  like_count?: number;
+  comment_count?: number;
+  share_count?: number;
+  favorite_count?: number;
+  // Video info
+  duration?: string;
+  published_at?: string;
+  description?: string;
+  original_url?: string;
+  resolution?: string;
+  // Download status
   video_download_status?: string;
   // Progressive download task ID (for polling progress)
   download_task_id?: string;
 }
 
 /**
- * 调用后端 API 解析抖音链接
+ * Parse a video link via backend API
  */
 export const parseShareLink = async (
   url: string,
@@ -115,7 +112,7 @@ export const parseShareLink = async (
 ): Promise<FetchResponse> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/douyin/fetch`, {
+  const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
@@ -127,7 +124,7 @@ export const parseShareLink = async (
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }));
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
@@ -135,7 +132,7 @@ export const parseShareLink = async (
 };
 
 /**
- * 批量解析抖音链接
+ * Batch parse video links
  */
 export const parseBatchLinks = async (
   urls: string[],
@@ -145,12 +142,12 @@ export const parseBatchLinks = async (
   total: number;
   submitted: number;
   failed: number;
-  results: Array<{ url: string; aweme_id: string; status: string; data?: DouyinBase }>;
+  results: Array<{ url: string; platform_id: string; status: string; data?: Video }>;
   errors: Array<{ url: string; error: string }>;
 }> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/douyin/fetch/batch`, {
+  const response = await fetch(`${apiUrl}/api/v1/videos/fetch/batch`, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({
@@ -162,7 +159,7 @@ export const parseBatchLinks = async (
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }));
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
@@ -170,7 +167,7 @@ export const parseBatchLinks = async (
 };
 
 /**
- * 获取视频列表（从后端 API）
+ * Fetch video list from backend API
  */
 export const fetchVideosFromApi = async (
   skip: number = 0,
@@ -178,12 +175,12 @@ export const fetchVideosFromApi = async (
 ): Promise<{
   success: boolean;
   count: number;
-  videos: DouyinBase[];
+  videos: Video[];
 }> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(
-    `${apiUrl}/api/v1/douyin/videos?skip=${skip}&limit=${limit}`,
+    `${apiUrl}/api/v1/videos?skip=${skip}&limit=${limit}`,
     {
       method: 'GET',
       headers: buildHeaders(),
@@ -191,7 +188,7 @@ export const fetchVideosFromApi = async (
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }));
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
@@ -199,7 +196,7 @@ export const fetchVideosFromApi = async (
 };
 
 /**
- * 获取统计信息
+ * Fetch statistics
  */
 export const fetchStatistics = async (): Promise<{
   success: boolean;
@@ -215,13 +212,13 @@ export const fetchStatistics = async (): Promise<{
 }> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
+  const response = await fetch(`${apiUrl}/api/v1/videos/statistics`, {
     method: 'GET',
     headers: buildHeaders(),
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }));
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
@@ -229,21 +226,21 @@ export const fetchStatistics = async (): Promise<{
 };
 
 /**
- * 重试下载
+ * Retry download
  */
-export const retryDownload = async (awemeId: string): Promise<{
+export const retryDownload = async (platformId: string): Promise<{
   success: boolean;
   message: string;
 }> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/douyin/retry/${awemeId}`, {
+  const response = await fetch(`${apiUrl}/api/v1/videos/retry/${platformId}`, {
     method: 'POST',
     headers: buildHeaders(),
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }));
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 

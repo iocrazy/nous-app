@@ -6,13 +6,14 @@ Task Management API Router
 Provides endpoints for monitoring and managing download tasks.
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException
-from pydantic import BaseModel
+from typing import List, Optional
+
+from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
-from app.services.task_manager import get_task_manager, TaskStatus
+from app.services.task_manager import TaskStatus, get_task_manager
 
 router = APIRouter(prefix="/download-tasks")
 
@@ -20,6 +21,7 @@ TAGS = ["Tasks"]
 
 
 # ========== Response Models ==========
+
 
 class TaskItem(BaseModel):
     aweme_id: str
@@ -66,10 +68,13 @@ class RetryAllResponse(BaseModel):
 
 # ========== Endpoints ==========
 
+
 @router.get("", tags=TAGS, response_model=TaskListResponse)
 async def get_tasks(
     auth: AuthDep,
-    status: Optional[str] = Query(None, description="Filter by status: pending, downloading, completed, failed"),
+    status: Optional[str] = Query(
+        None, description="Filter by status: pending, downloading, completed, failed"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -88,7 +93,7 @@ async def get_tasks(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status: {status}. Valid values: pending, downloading, completed, failed"
+                detail=f"Invalid status: {status}. Valid values: pending, downloading, completed, failed",
             )
 
     tasks = task_manager.get_tasks(status=status_filter, limit=limit, offset=offset)
@@ -117,6 +122,7 @@ async def get_task_stats(auth: AuthDep):
     worker_online = False
     try:
         from app.celery_app import celery_app
+
         inspect = celery_app.control.inspect(timeout=0.5)  # Reduced timeout
         ping = inspect.ping()
         worker_online = bool(ping)
@@ -124,8 +130,11 @@ async def get_task_stats(auth: AuthDep):
         logger.debug(f"Worker check skipped: {e}")
         # Fallback: check if any celery process is running
         import subprocess
+
         try:
-            result = subprocess.run(['pgrep', '-f', 'celery'], capture_output=True, timeout=1)
+            result = subprocess.run(
+                ["pgrep", "-f", "celery"], capture_output=True, timeout=1
+            )
             worker_online = result.returncode == 0
         except Exception:
             pass
@@ -135,11 +144,12 @@ async def get_task_stats(auth: AuthDep):
     storage_used_percent = 0.0
     try:
         import shutil
+
         from app.core.config import settings
 
         if settings.DOWNLOAD_PATH:
             usage = shutil.disk_usage(settings.DOWNLOAD_PATH)
-            free_gb = usage.free / (1024 ** 3)
+            free_gb = usage.free / (1024**3)
             if free_gb >= 1024:
                 storage_free = f"{free_gb / 1024:.1f} TB"
             else:
@@ -197,21 +207,21 @@ async def retry_task(
 
     # Trigger download task
     try:
+        # Get video info from database
+        from app.repositories.video_repository import VideoRepository
         from app.tasks.download_tasks import download_media_task
 
-        # Get video info from database
-        from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
-        repo = SupabaseDouyinRepository()
-        video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+        repo = VideoRepository()
+        video = await repo.get_by_platform_id(aweme_id, user_id=auth.user_id)
 
         if video:
             download_media_task.delay(
-                aweme_id=aweme_id,
+                platform_id=aweme_id,
                 user_id=auth.user_id,
                 download_video=True,
                 download_cover=True,
-                aweme_type=video.get("aweme_type", 0),
-                video_title=video.get("video_title", "Unknown"),
+                media_type=video.get("media_type", 0),
+                video_title=video.get("title", "Unknown"),
             )
             return RetryResponse(
                 success=True,
@@ -256,9 +266,10 @@ async def retry_all_failed(
     retried = []
     failed_ids = []
 
+    from app.repositories.video_repository import VideoRepository
     from app.tasks.download_tasks import download_media_task
-    from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
-    repo = SupabaseDouyinRepository()
+
+    repo = VideoRepository()
 
     for task in failed_tasks:
         aweme_id = task["aweme_id"]
@@ -275,15 +286,15 @@ async def retry_all_failed(
             task_manager.reset_for_retry(aweme_id)
 
         try:
-            video = await repo.get_by_aweme_id(aweme_id, user_id=auth.user_id)
+            video = await repo.get_by_platform_id(aweme_id, user_id=auth.user_id)
             if video:
                 download_media_task.delay(
-                    aweme_id=aweme_id,
+                    platform_id=aweme_id,
                     user_id=auth.user_id,
                     download_video=True,
                     download_cover=True,
-                    aweme_type=video.get("aweme_type", 0),
-                    video_title=video.get("video_title", "Unknown"),
+                    media_type=video.get("media_type", 0),
+                    video_title=video.get("title", "Unknown"),
                 )
                 retried.append(aweme_id)
             else:

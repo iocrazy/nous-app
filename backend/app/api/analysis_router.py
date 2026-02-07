@@ -1,19 +1,18 @@
 """API routes for Video Analysis."""
-from typing import Optional, List
+
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
-from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.analysis_repository import AnalysisRepository
 from app.tasks.analysis_tasks import (
+    analyze_pending_videos_task,
     analyze_video_l1_task,
     analyze_video_l2_task,
     batch_analyze_l1_task,
-    analyze_pending_videos_task,
 )
-
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
@@ -21,6 +20,7 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 # Request/Response schemas
 class AnalysisResponse(BaseModel):
     """Response schema for video analysis."""
+
     video_id: int
     analysis_level: str
     visual_description: Optional[str] = None
@@ -35,6 +35,7 @@ class AnalysisResponse(BaseModel):
 
 class AnalysisStatsResponse(BaseModel):
     """Response schema for analysis statistics."""
+
     total_videos: int
     analyzed_videos: int
     by_level: dict
@@ -43,17 +44,20 @@ class AnalysisStatsResponse(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     """Request schema for triggering analysis."""
+
     level: str = "L1"  # L1, L2, or L3
 
 
 class BatchAnalyzeRequest(BaseModel):
     """Request schema for batch analysis."""
+
     video_ids: List[int]
     level: str = "L1"
 
 
 class TaskStatusResponse(BaseModel):
     """Response schema for async task status."""
+
     message: str
     task_id: str
     video_id: Optional[int] = None
@@ -70,13 +74,15 @@ async def get_analysis_stats(auth: AuthDep = None):
     supabase = await get_async_supabase_admin()
 
     # Total videos
-    total_result = await supabase.table("douyin_videos").select("id", count="exact").execute()
+    total_result = await supabase.table("videos").select("id", count="exact").execute()
     total_videos = total_result.count or 0
 
     # Analyzed videos
-    analysis_result = await supabase.table("video_analysis").select(
-        "analysis_level, analysis_cost"
-    ).execute()
+    analysis_result = (
+        await supabase.table("video_analysis")
+        .select("analysis_level, analysis_cost")
+        .execute()
+    )
 
     analyzed_videos = len(analysis_result.data)
 
@@ -95,13 +101,15 @@ async def get_analysis_stats(auth: AuthDep = None):
         total_videos=total_videos,
         analyzed_videos=analyzed_videos,
         by_level=by_level,
-        total_cost=round(total_cost, 4)
+        total_cost=round(total_cost, 4),
     )
 
 
 @router.get("/queue")
 async def get_analysis_queue(
-    limit: int = Query(50, le=100, description="Maximum number of pending videos to return"),
+    limit: int = Query(
+        50, le=100, description="Maximum number of pending videos to return"
+    ),
     auth: AuthDep = None,
 ):
     """
@@ -111,10 +119,7 @@ async def get_analysis_queue(
     repo = AnalysisRepository()
     videos = await repo.get_videos_without_analysis(limit=limit)
 
-    return {
-        "pending_count": len(videos),
-        "videos": videos
-    }
+    return {"pending_count": len(videos), "videos": videos}
 
 
 @router.get("/{video_id}", response_model=AnalysisResponse)
@@ -132,7 +137,7 @@ async def get_video_analysis(
     if not analysis:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found for this video"
+            detail="Analysis not found for this video",
         )
 
     return AnalysisResponse(
@@ -145,11 +150,15 @@ async def get_video_analysis(
         detected_text=analysis.get("detected_text"),
         analysis_model=analysis.get("analysis_model"),
         analysis_cost=analysis.get("analysis_cost", 0),
-        analyzed_at=analysis.get("analyzed_at")
+        analyzed_at=analysis.get("analyzed_at"),
     )
 
 
-@router.post("/{video_id}/analyze", response_model=TaskStatusResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/{video_id}/analyze",
+    response_model=TaskStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def trigger_analysis(
     video_id: int,
     request: AnalyzeRequest,
@@ -163,20 +172,23 @@ async def trigger_analysis(
     - **L2**: Cover + keyframes analysis (requires downloaded video, ~$0.005)
     - **L3**: Full video analysis (manual, ~$0.05) - not yet implemented
     """
-    from app.db.supabase_client import get_async_supabase_admin
     from app.core.utils import Utils
+    from app.db.supabase_client import get_async_supabase_admin
 
     supabase = await get_async_supabase_admin()
 
     # Get video info
-    result = await supabase.table("douyin_videos").select(
-        "id, title, desc, cover_url, download_path"
-    ).eq("id", video_id).maybe_single().execute()
+    result = (
+        await supabase.table("videos")
+        .select("id, title, description, cover_url, download_path")
+        .eq("id", video_id)
+        .maybe_single()
+        .execute()
+    )
 
     if not result.data:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Video not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
         )
 
     video = result.data
@@ -184,28 +196,25 @@ async def trigger_analysis(
     if request.level == "L1":
         if not video.get("cover_url"):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Video has no cover URL"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Video has no cover URL"
             )
 
         task = analyze_video_l1_task.delay(
             video_id=video_id,
             cover_url=video["cover_url"],
             title=video.get("title", ""),
-            description=video.get("desc", "")
+            description=video.get("description", ""),
         )
 
         return TaskStatusResponse(
-            message="L1 analysis started",
-            task_id=task.id,
-            video_id=video_id
+            message="L1 analysis started", task_id=task.id, video_id=video_id
         )
 
     elif request.level == "L2":
         if not video.get("download_path"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Video file not downloaded yet. Download the video first, then run L2 analysis."
+                detail="Video file not downloaded yet. Download the video first, then run L2 analysis.",
             )
 
         # Get full path
@@ -215,7 +224,7 @@ async def trigger_analysis(
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Download path not configured: {e}"
+                detail=f"Download path not configured: {e}",
             )
 
         task = analyze_video_l2_task.delay(
@@ -223,25 +232,23 @@ async def trigger_analysis(
             cover_url=video.get("cover_url", ""),
             video_path=video_path,
             title=video.get("title", ""),
-            description=video.get("desc", "")
+            description=video.get("description", ""),
         )
 
         return TaskStatusResponse(
-            message="L2 analysis started",
-            task_id=task.id,
-            video_id=video_id
+            message="L2 analysis started", task_id=task.id, video_id=video_id
         )
 
     elif request.level == "L3":
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="L3 analysis (full video) is not yet implemented"
+            detail="L3 analysis (full video) is not yet implemented",
         )
 
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid analysis level: {request.level}. Use L1, L2, or L3."
+            detail=f"Invalid analysis level: {request.level}. Use L1, L2, or L3.",
         )
 
 
@@ -257,24 +264,23 @@ async def trigger_batch_analysis(
     if len(request.video_ids) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum 100 videos per batch"
+            detail="Maximum 100 videos per batch",
         )
 
     if request.level != "L1":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Batch analysis currently only supports L1 level"
+            detail="Batch analysis currently only supports L1 level",
         )
 
     task = batch_analyze_l1_task.delay(
-        video_ids=request.video_ids,
-        batch_size=len(request.video_ids)
+        video_ids=request.video_ids, batch_size=len(request.video_ids)
     )
 
     return {
         "message": f"Batch {request.level} analysis started for {len(request.video_ids)} videos",
         "task_id": task.id,
-        "video_count": len(request.video_ids)
+        "video_count": len(request.video_ids),
     }
 
 
@@ -291,7 +297,7 @@ async def analyze_pending_videos(
 
     return {
         "message": f"Started analyzing pending videos (up to {limit})",
-        "task_id": task.id
+        "task_id": task.id,
     }
 
 
@@ -310,5 +316,5 @@ async def delete_video_analysis(
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found for this video"
+            detail="Analysis not found for this video",
         )

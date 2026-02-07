@@ -1,46 +1,46 @@
-from pathlib import Path
-import re
 import datetime
 import os
 import random
+import re
 import sys
+from pathlib import Path
 
-from loguru import logger
 import yaml
+from loguru import logger
 
 from app.core.config import settings
-
 
 # 服务器配置文件路径
 SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"
 
+
 class SingletonMeta(type):
     _instances = {}
+
     def __call__(cls, *args, **kwargs):
         if cls not in cls._instances:
             cls._instances[cls] = super().__call__(*args, **kwargs)
         return cls._instances[cls]
 
 
-
 class Utils:
     """URL处理工具类"""
-    
+
     @classmethod
     def extract_valid_url(cls, text: str) -> list[str]:
         """从文本中提取并验证URL"""
-        urls = re.findall(r'(https?://[^\s]+)', text)
+        urls = re.findall(r"(https?://[^\s]+)", text)
         if not urls:
             raise ValueError("未找到有效的URL")
-        
+
         valid_urls = []
         for url in urls:
-            if url.startswith('http://') or url.startswith('https://'):
+            if url.startswith("http://") or url.startswith("https://"):
                 valid_urls.append(url)
-        
+
         if not valid_urls:
             raise ValueError("未找到有效的HTTP或HTTPS URL")
-        
+
         return valid_urls
 
     @classmethod
@@ -53,20 +53,25 @@ class Utils:
         # 创建logs目录
         log_dir = Path(settings.ROOT_DIR) / "logs"
         os.makedirs(log_dir, exist_ok=True)
-        
+
         # 日志文件路径
         log_file = log_dir / "app.log"
-        
+
         # 移除默认的处理器
         logger.remove()
-        
+
         # 添加控制台处理器
         logger.add(
             sys.stderr,
             level="INFO",
-            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+                "<level>{level: <8}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:"
+                "<cyan>{line}</cyan> - <level>{message}</level>"
+            ),
         )
-        
+
         # 添加文件处理器
         logger.add(
             log_file,
@@ -75,20 +80,25 @@ class Utils:
             compression="zip",  # 压缩旧日志
             level="INFO",
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-            encoding="utf-8"
+            encoding="utf-8",
         )
-        
+
         logger.info(f"日志系统初始化完成，日志文件: {log_file}")
 
     """文件处理工具类"""
+
     @classmethod
-    def safe_filename(cls, video_title:str, lenth:int) -> str:
+    def safe_filename(cls, video_title: str, lenth: int) -> str:
         """生成文件名"""
 
         # 视频标题过滤特殊字符
 
-        safe_title = "".join(c for c in video_title if c.isalnum() or c in " ._-/").strip()
-        short_safe_title = safe_title[:lenth] + "…" if len(safe_title) > (lenth + 1) else safe_title
+        safe_title = "".join(
+            c for c in video_title if c.isalnum() or c in " ._-/"
+        ).strip()
+        short_safe_title = (
+            safe_title[:lenth] + "…" if len(safe_title) > (lenth + 1) else safe_title
+        )
 
         return short_safe_title
 
@@ -99,7 +109,6 @@ class Utils:
         output_filename = f"{aweme_id}_{video_title}"
 
         return output_filename
-
 
     @classmethod
     def get_download_base_path(cls) -> str:
@@ -117,7 +126,7 @@ class Utils:
         # 1. 优先从 frontend_config.yml 读取
         if SERVER_CONFIG_FILE.exists():
             try:
-                with open(SERVER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                with open(SERVER_CONFIG_FILE, "r", encoding="utf-8") as f:
                     config = yaml.safe_load(f) or {}
                     download_path = config.get("default_download_path")
                     if download_path and download_path.strip():
@@ -174,19 +183,19 @@ class Utils:
         except Exception as e:
             raise ValueError(f"创建下载文件夹失败: {e}") from e
 
-
-
     @classmethod
     def concat_hashtag_name(cls, aweme_detail) -> str:
         """拼接标签名称"""
         text_extra = aweme_detail.get("text_extra", [])
-        hashtag_names = [item.get("hashtag_name", "") for item in text_extra if item.get("hashtag_name")]
-        return ' '.join(f"#{name}" for name in hashtag_names)
-
-
+        hashtag_names = [
+            item.get("hashtag_name", "")
+            for item in text_extra
+            if item.get("hashtag_name")
+        ]
+        return " ".join(f"#{name}" for name in hashtag_names)
 
     @classmethod
-    def format_duration(cls, milliseconds:int) -> str:
+    def format_duration(cls, milliseconds: int) -> str:
         """
         将毫秒数格式化为易读的时间格式
 
@@ -200,7 +209,7 @@ class Utils:
             return "00:00"
 
         # 转换为整数秒
-        total_seconds = milliseconds/1000
+        total_seconds = milliseconds / 1000
 
         # 计算小时、分钟和秒，并转换为整数
         hours = int(total_seconds // 3600)
@@ -217,10 +226,9 @@ class Utils:
     def get_headers(cls) -> dict:
         user_agent = random.choice(settings.USER_AGENTS)
 
-
         headers = {
-            'Referer': 'https://www.douyin.com/',
-            'User-Agent': user_agent,
+            "Referer": "https://www.douyin.com/",
+            "User-Agent": user_agent,
         }
         return headers
 
@@ -258,7 +266,6 @@ class Utils:
         else:  # 小于100的值保留2位小数
             return f"{size:.2f} {units[unit_index]}"
 
-
     @classmethod
     def shorten_item(cls, item, length: int) -> str:
         """
@@ -293,14 +300,14 @@ class Utils:
 
         # 截断字符串
         if len(string) > length:
-            return string[:length - 3] + "..."
+            return string[: length - 3] + "..."
         return string
 
     @classmethod
     def match_aweme_id(cls, redirected_url: str) -> str:
         try:
             # 提取aweme_id
-            pattern = r'/((video|note))/(\d+)'
+            pattern = r"/((video|note))/(\d+)"
 
             match = re.search(pattern, redirected_url)
 
@@ -313,7 +320,6 @@ class Utils:
         except Exception as e:
             logger.error(f"提取aweme_id失败: {e}")
             raise ValueError("提取aweme_id失败") from e
-
 
     @classmethod
     def is_nested_list(cls, obj):

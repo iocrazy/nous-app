@@ -9,10 +9,10 @@
 import os
 import shutil
 import time
-from typing import Optional
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.deps import AuthDep
@@ -24,6 +24,7 @@ TAGS = ["系统监控"]
 
 class QueueStatus(BaseModel):
     """队列状态"""
+
     active: int = 0
     pending: int = 0
     scheduled: int = 0
@@ -32,6 +33,7 @@ class QueueStatus(BaseModel):
 
 class StorageStatus(BaseModel):
     """存储状态"""
+
     total_bytes: int = 0
     used_bytes: int = 0
     free_bytes: int = 0
@@ -42,12 +44,14 @@ class StorageStatus(BaseModel):
 
 class NetworkStatus(BaseModel):
     """网络状态"""
+
     speed: str = "0 B/s"
     status: str = "idle"  # idle, active, error
 
 
 class SystemStatusResponse(BaseModel):
     """系统状态响应"""
+
     queue: QueueStatus
     storage: StorageStatus
     network: NetworkStatus
@@ -64,7 +68,6 @@ _network_tracker = {
 
 def update_network_speed(bytes_transferred: int):
     """更新网络速度（由下载任务调用）"""
-    global _network_tracker
     current_time = time.time()
 
     if _network_tracker["last_time"] > 0:
@@ -129,10 +132,14 @@ _queue_cache = {
 async def _get_queue_status() -> QueueStatus:
     """获取 Celery 队列状态（带缓存）"""
     import time
+
     current_time = time.time()
 
     # Return cached data if still valid
-    if _queue_cache["data"] and (current_time - _queue_cache["timestamp"]) < _queue_cache["ttl"]:
+    if (
+        _queue_cache["data"]
+        and (current_time - _queue_cache["timestamp"]) < _queue_cache["ttl"]
+    ):
         return _queue_cache["data"]
 
     try:
@@ -216,8 +223,9 @@ def _get_storage_status() -> StorageStatus:
 async def _get_network_status() -> NetworkStatus:
     """获取网络/下载状态"""
     try:
-        from app.celery_app import celery_app
         import json
+
+        from app.celery_app import celery_app
 
         redis_client = celery_app.backend.client
 

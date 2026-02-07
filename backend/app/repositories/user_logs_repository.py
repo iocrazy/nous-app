@@ -7,7 +7,8 @@
 使用异步 Supabase 客户端。
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
@@ -39,7 +40,7 @@ class UserLogsRepository:
         message: str,
         status: str = "info",
         aweme_id: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict]:
         """
         创建日志记录
@@ -81,10 +82,7 @@ class UserLogsRepository:
             return None
 
     async def get_recent(
-        self,
-        user_id: str,
-        limit: int = 20,
-        action: Optional[str] = None
+        self, user_id: str, limit: int = 20, action: Optional[str] = None
     ) -> List[Dict]:
         """
         获取最近的日志记录
@@ -100,8 +98,7 @@ class UserLogsRepository:
         try:
             table = await self._get_table()
             query = (
-                table
-                .select("*")
+                table.select("*")
                 .eq("user_id", user_id)
                 .order("created_at", desc=True)
                 .limit(limit)
@@ -118,10 +115,7 @@ class UserLogsRepository:
             return []
 
     async def get_by_aweme_id(
-        self,
-        user_id: str,
-        aweme_id: str,
-        limit: int = 10
+        self, user_id: str, aweme_id: str, limit: int = 10
     ) -> List[Dict]:
         """
         获取特定视频的日志记录
@@ -137,8 +131,7 @@ class UserLogsRepository:
         try:
             table = await self._get_table()
             result = await (
-                table
-                .select("*")
+                table.select("*")
                 .eq("user_id", user_id)
                 .eq("aweme_id", aweme_id)
                 .order("created_at", desc=True)
@@ -159,7 +152,7 @@ async def log_user_action(
     message: str,
     status: str = "info",
     aweme_id: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None
+    details: Optional[Dict[str, Any]] = None,
 ) -> None:
     """便捷的日志记录函数"""
     repo = UserLogsRepository()
@@ -169,5 +162,5 @@ async def log_user_action(
         message=message,
         status=status,
         aweme_id=aweme_id,
-        details=details
+        details=details,
     )

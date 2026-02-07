@@ -1,6 +1,7 @@
 """Smart Collections service with rule engine (异步)."""
-from typing import Optional, List, Any
+
 from datetime import datetime, timedelta
+from typing import Any, List
 
 from loguru import logger
 
@@ -27,7 +28,7 @@ class CollectionsService:
         user_id: str,
         page: int = 1,
         page_size: int = 20,
-        use_cache: bool = True
+        use_cache: bool = True,
     ) -> tuple[List[dict], int]:
         """
         Get videos matching a collection's rules.
@@ -43,7 +44,9 @@ class CollectionsService:
         # Check if cache is valid (less than 5 minutes old)
         cached_at = collection.get("cached_at")
         if use_cache and cached_at:
-            cache_age = datetime.utcnow() - datetime.fromisoformat(cached_at.replace("Z", "+00:00").replace("+00:00", ""))
+            cache_age = datetime.utcnow() - datetime.fromisoformat(
+                cached_at.replace("Z", "+00:00").replace("+00:00", "")
+            )
             if cache_age < timedelta(minutes=5) and collection.get("cached_video_ids"):
                 # Use cached video IDs
                 video_ids = collection["cached_video_ids"]
@@ -63,7 +66,9 @@ class CollectionsService:
         total = len(video_ids)
 
         # Update cache
-        await self.repo.update_cache(collection_id, video_ids[:1000], total)  # Cache up to 1000 IDs
+        await self.repo.update_cache(
+            collection_id, video_ids[:1000], total
+        )  # Cache up to 1000 IDs
 
         # Paginate
         start = (page - 1) * page_size
@@ -85,7 +90,12 @@ class CollectionsService:
 
         if not conditions:
             # No conditions = all user videos
-            result = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+            result = (
+                await client.table("videos")
+                .select("id")
+                .eq("user_id", user_id)
+                .execute()
+            )
             return [r["id"] for r in result.data]
 
         # Start with base query
@@ -96,7 +106,9 @@ class CollectionsService:
             operator = condition.get("operator")
             value = condition.get("value")
 
-            matching_ids = await self._evaluate_condition(field, operator, value, user_id)
+            matching_ids = await self._evaluate_condition(
+                field, operator, value, user_id
+            )
             video_sets.append(set(matching_ids))
 
         if not video_sets:
@@ -115,11 +127,7 @@ class CollectionsService:
         return list(result_set)
 
     async def _evaluate_condition(
-        self,
-        field: str,
-        operator: str,
-        value: Any,
-        user_id: str
+        self, field: str, operator: str, value: Any, user_id: str
     ) -> List[int]:
         """Evaluate a single condition and return matching video IDs."""
         client = await self._get_client()
@@ -132,16 +140,16 @@ class CollectionsService:
         if field == "date":
             return await self._match_date_condition(operator, value, user_id)
 
-        # Direct field conditions on douyin_videos
-        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
+        # Direct field conditions on videos
+        query = client.table("videos").select("id").eq("user_id", user_id)
 
         field_mapping = {
             "author": "author",
             "title": "title",
-            "description": "desc",
+            "description": "description",
             "keep_forever": "keep_forever",
             "view_count": "view_count",
-            "aweme_type": "aweme_type"
+            "media_type": "media_type",
         }
 
         db_field = field_mapping.get(field, field)
@@ -167,12 +175,16 @@ class CollectionsService:
         result = await query.execute()
         return [r["id"] for r in result.data]
 
-    async def _match_tag_condition(self, operator: str, value: Any, user_id: str) -> List[int]:
+    async def _match_tag_condition(
+        self, operator: str, value: Any, user_id: str
+    ) -> List[int]:
         """Match videos by tag conditions."""
         client = await self._get_client()
 
         # Get user's videos first
-        user_videos = await client.table("douyin_videos").select("id").eq("user_id", user_id).execute()
+        user_videos = (
+            await client.table("videos").select("id").eq("user_id", user_id).execute()
+        )
         user_video_ids = [v["id"] for v in user_videos.data]
 
         if not user_video_ids:
@@ -180,31 +192,55 @@ class CollectionsService:
 
         if operator == "has":
             # Videos that have a specific tag
-            result = await client.table("video_tags").select("video_id").eq("tag_id", value).in_("video_id", user_video_ids).execute()
+            result = (
+                await client.table("video_tags")
+                .select("video_id")
+                .eq("tag_id", value)
+                .in_("video_id", user_video_ids)
+                .execute()
+            )
             return list(set(r["video_id"] for r in result.data))
 
         elif operator == "has_any":
             # Videos that have any of the specified tags
             if isinstance(value, list):
-                result = await client.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
+                result = (
+                    await client.table("video_tags")
+                    .select("video_id")
+                    .in_("tag_id", value)
+                    .in_("video_id", user_video_ids)
+                    .execute()
+                )
                 return list(set(r["video_id"] for r in result.data))
 
         elif operator == "has_all":
             # Videos that have all of the specified tags
             if isinstance(value, list):
                 video_tag_counts = {}
-                result = await client.table("video_tags").select("video_id").in_("tag_id", value).in_("video_id", user_video_ids).execute()
+                result = (
+                    await client.table("video_tags")
+                    .select("video_id")
+                    .in_("tag_id", value)
+                    .in_("video_id", user_video_ids)
+                    .execute()
+                )
                 for r in result.data:
                     vid = r["video_id"]
                     video_tag_counts[vid] = video_tag_counts.get(vid, 0) + 1
-                return [vid for vid, count in video_tag_counts.items() if count == len(value)]
+                return [
+                    vid
+                    for vid, count in video_tag_counts.items()
+                    if count == len(value)
+                ]
 
         return []
 
-    async def _match_date_condition(self, operator: str, value: Any, user_id: str) -> List[int]:
+    async def _match_date_condition(
+        self, operator: str, value: Any, user_id: str
+    ) -> List[int]:
         """Match videos by date conditions."""
         client = await self._get_client()
-        query = client.table("douyin_videos").select("id").eq("user_id", user_id)
+        query = client.table("videos").select("id").eq("user_id", user_id)
 
         # Handle relative date values
         if isinstance(value, str):
@@ -230,7 +266,9 @@ class CollectionsService:
         result = await query.execute()
         return [r["id"] for r in result.data]
 
-    async def _fetch_videos_by_ids(self, video_ids: List[int], collection: dict) -> List[dict]:
+    async def _fetch_videos_by_ids(
+        self, video_ids: List[int], collection: dict
+    ) -> List[dict]:
         """Fetch full video details for given IDs."""
         if not video_ids:
             return []
@@ -239,9 +277,15 @@ class CollectionsService:
         sort_by = collection.get("sort_by", "created_at")
         sort_order = collection.get("sort_order", "desc")
 
-        result = await client.table("douyin_videos").select(
-            "id, title, desc, author, cover_url, duration, aweme_type, created_at, view_count, keep_forever"
-        ).in_("id", video_ids).order(sort_by, desc=(sort_order == "desc")).execute()
+        result = (
+            await client.table("videos")
+            .select(
+                "id, title, description, author, cover_url, duration, media_type, created_at, view_count, keep_forever"
+            )
+            .in_("id", video_ids)
+            .order(sort_by, desc=(sort_order == "desc"))
+            .execute()
+        )
 
         return result.data
 

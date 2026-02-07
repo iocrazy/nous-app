@@ -46,7 +46,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
       if (firstVideo) {
         // Get video's cover URL
         const { data: video } = await supabase
-          .from('douyin_videos')
+          .from('videos')
           .select('cover_download_path, dynamic_cover_url')
           .eq('id', firstVideo.video_id)
           .maybeSingle();
@@ -109,11 +109,11 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Get video_id from aweme_id
+  // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('douyin_videos')
+    .from('videos')
     .select('id')
-    .eq('aweme_id', videoAwemeId)
+    .eq('platform_id', videoAwemeId)
     .maybeSingle();
 
   if (!video) throw new Error('Video not found');
@@ -133,11 +133,11 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  // Get video_id from aweme_id
+  // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('douyin_videos')
+    .from('videos')
     .select('id')
-    .eq('aweme_id', videoAwemeId)
+    .eq('platform_id', videoAwemeId)
     .maybeSingle();
 
   if (!video) throw new Error('Video not found');
@@ -155,11 +155,11 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  // Get video_id from aweme_id
+  // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('douyin_videos')
+    .from('videos')
     .select('id')
-    .eq('aweme_id', videoAwemeId)
+    .eq('platform_id', videoAwemeId)
     .maybeSingle();
 
   if (!video) return [];

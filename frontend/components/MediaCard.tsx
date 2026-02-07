@@ -1,9 +1,11 @@
 
-import React, { useState } from 'react';
-import { DouyinBase, DownloadStatus, Collection } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import Hls from 'hls.js';
+import { Video, DownloadStatus, Collection } from '../types';
 import {
-  Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus
+  Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus,
+  Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
@@ -13,9 +15,9 @@ import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType }
 import { TagSelector } from './TagSelector';
 
 interface MediaCardProps {
-  data: DouyinBase;
-  onSave?: (data: DouyinBase) => void;
-  onUpdate?: (id: string, updates: Partial<DouyinBase>) => void;
+  data: Video;
+  onSave?: (data: Video) => void;
+  onUpdate?: (id: string, updates: Partial<Video>) => void;
   onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
   collections?: Collection[];
   videoCollectionIds?: string[];
@@ -46,12 +48,26 @@ const getTagStyle = (tag: string) => {
     'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
     'bg-pink-500/10 text-pink-400 border-pink-500/20',
   ];
-  
+
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
     hash = tag.charCodeAt(i) + ((hash << 5) - hash);
   }
   return styles[Math.abs(hash) % styles.length];
+};
+
+// Helper to get AI status icon styling
+const getAIStatusClass = (status?: string): string => {
+  switch (status) {
+    case 'processing':
+      return 'animate-spin text-indigo-400';
+    case 'completed':
+      return 'text-emerald-400';
+    case 'failed':
+      return 'text-red-400';
+    default:
+      return 'text-zinc-600';
+  }
 };
 
 export const MediaCard: React.FC<MediaCardProps> = ({
@@ -78,6 +94,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [showRetryMenu, setShowRetryMenu] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
 
+  // HLS video ref
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteWithFiles, setDeleteWithFiles] = useState(false);
@@ -89,12 +109,41 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
+  // Setup HLS.js for .m3u8 video playback
+  useEffect(() => {
+    if (!isPlaying || !videoRef.current || !videoUrl) return;
+
+    const isHls = videoUrl.endsWith('.m3u8');
+    if (!isHls) return;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(videoUrl);
+      hls.attachMedia(videoRef.current);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        videoRef.current?.play();
+      });
+      hlsRef.current = hls;
+    } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
+      videoRef.current.src = videoUrl;
+      videoRef.current.play();
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [isPlaying, videoUrl]);
+
   // 执行删除
   const handleDelete = async () => {
-    if (!onDelete || !data.aweme_id) return;
+    if (!onDelete || !data.platform_id) return;
     setIsDeleting(true);
     try {
-      await onDelete(data.aweme_id, deleteWithFiles);
+      await onDelete(data.platform_id, deleteWithFiles);
       setShowDeleteDialog(false);
     } catch (error) {
       console.error('Delete failed:', error);
@@ -103,7 +152,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   };
 
-  const isVideo = isVideoType(data.aweme_type);
+  const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
   const isAlbum = !isVideo && images.length > 1;
 
@@ -119,7 +168,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         setCurrentImageIndex(prev => (prev === images.length - 1 ? 0 : prev + 1));
     }
   };
-  
+
   // Format numbers (e.g., 12500 -> 12.5k)
   const formatNumber = (num?: number) => {
     if (!num) return '0';
@@ -149,7 +198,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         if (!response.ok) throw new Error('Network response was not ok');
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
-        
+
         const link = document.createElement('a');
         link.href = blobUrl;
         link.download = filename;
@@ -173,7 +222,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   };
 
   const onDownloadVideo = async () => {
-    if (!data.aweme_id) return;
+    if (!data.platform_id) return;
     setIsDownloading(true);
 
     try {
@@ -185,13 +234,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         console.error('No auth token available');
         // 回退到静态文件下载
         if (videoUrl) {
-          handleDownload(videoUrl, `${data.aweme_id}.mp4`);
+          handleDownload(videoUrl, `${data.platform_id}.mp4`);
         }
         return;
       }
 
       // 使用 API 下载端点（带认证）
-      const downloadUrl = getDownloadUrl(data.aweme_id);
+      const downloadUrl = getDownloadUrl(data.platform_id);
       const response = await fetch(downloadUrl, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -204,7 +253,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
       // 从 Content-Disposition 获取文件名
       const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${data.aweme_id}.mp4`;
+      let filename = `${data.platform_id}.mp4`;
       if (contentDisposition) {
         const match = contentDisposition.match(/filename="(.+)"/);
         if (match) {
@@ -239,7 +288,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     data.image_download_urls.forEach((url, idx) => {
         // Stagger downloads slightly
         setTimeout(() => {
-            handleDownload(url, `${data.aweme_id || 'image'}_${idx + 1}.jpg`);
+            handleDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
         }, idx * 500);
     });
   };
@@ -247,12 +296,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const onDownloadAudio = () => {
     const url = data.music_download_urls?.[0];
     if (!url || url === '#') return;
-    handleDownload(url, `${data.aweme_id || 'music'}.mp3`);
+    handleDownload(url, `${data.platform_id || 'music'}.mp3`);
   };
 
   // 重新获取/下载
   const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
-    if (!data.aweme_id || !data.video_original_url) return;
+    if (!data.platform_id || !data.original_url) return;
     setIsRetrying(true);
     setRetrySuccess(false);
     setShowRetryMenu(false);
@@ -269,14 +318,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
       // 调用后端 fetch API 重新获取
       const apiUrl = import.meta.env?.VITE_API_URL || 'http://localhost:8080';
-      const response = await fetch(`${apiUrl}/api/v1/douyin/fetch`, {
+      const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          url: data.video_original_url,
+          url: data.original_url,
           video_bool: options.video ?? false,
           music_bool: options.music ?? false,
           cover_bool: options.cover ?? false
@@ -300,19 +349,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // 保存 AI 内容到数据库
   const saveAIContent = (field: string, content: string) => {
-    if (onUpdate && data.aweme_id) {
-      const updates: Partial<DouyinBase> = {
+    if (onUpdate && data.platform_id) {
+      const updates: Partial<Video> = {
         [field]: content,
         ai_generated_at: new Date().toISOString()
       };
-      onUpdate(data.aweme_id, updates);
+      onUpdate(data.platform_id, updates);
     }
   };
 
   const handleAction = (e: React.MouseEvent, action: string) => {
     e.stopPropagation();
     if (action === 'copy') {
-      const textToCopy = data.video_desc || data.video_title || "";
+      const textToCopy = data.description || data.title || "";
       if (textToCopy) {
         navigator.clipboard.writeText(textToCopy).then(() => {
             setCopied(true);
@@ -323,7 +372,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         setLoadingAction('rewrite');
         // Mock API latency for demo - TODO: 接入真实 AI API
         setTimeout(() => {
-            const generatedText = "✨ Here's a catchy version: Check out this mind-blowing #coding feature we just shipped! 🚀 React & Gemini are changing the game. Don't miss this! 🔥";
+            const generatedText = "Here's a catchy version: Check out this mind-blowing #coding feature we just shipped! React & Gemini are changing the game. Don't miss this!";
             setRewrittenText(generatedText);
             saveAIContent('ai_rewrite_text', generatedText);
             setLoadingAction(null);
@@ -331,7 +380,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     } else if (action === 'extract') {
         setLoadingAction('extract');
         setTimeout(() => {
-            const generatedText = "📝 Extracted Summary:\n- Topic: React & Gemini Integration\n- Key Feature: UI Generation\n- Target Audience: Developers\n- Tone: Exciting, Tech-focused";
+            const generatedText = "Extracted Summary:\n- Topic: React & Gemini Integration\n- Key Feature: UI Generation\n- Target Audience: Developers\n- Tone: Exciting, Tech-focused";
             setExtractText(generatedText);
             saveAIContent('ai_extract_text', generatedText);
             setLoadingAction(null);
@@ -339,7 +388,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     } else if (action === 'analyze') {
         setLoadingAction('analyze');
         setTimeout(() => {
-            const generatedText = "📊 Analysis: This content targets tech enthusiasts. Key engagement drivers are the 'React' and 'Gemini' keywords. The visual hook appears at 0:05. Sentiment is highly positive.";
+            const generatedText = "Analysis: This content targets tech enthusiasts. Key engagement drivers are the 'React' and 'Gemini' keywords. The visual hook appears at 0:05. Sentiment is highly positive.";
             setAnalysisText(generatedText);
             saveAIContent('ai_analyze_text', generatedText);
             setLoadingAction(null);
@@ -372,7 +421,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             >
                {isPlaying ? (
                  <video
-                   src={videoUrl}
+                   ref={videoRef}
+                   src={videoUrl?.endsWith('.m3u8') ? undefined : videoUrl}
                    className="w-full h-full object-contain bg-black"
                    controls
                    autoPlay
@@ -438,36 +488,36 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
         {/* Info Section - Right Side */}
         <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
-          
+
           {/* Header Metadata */}
           <div className="flex justify-between items-start gap-2 mb-2 min-w-0">
             <div className="flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
-                {getAwemeTypeLabel(data.aweme_type)}
+                {getAwemeTypeLabel(data.media_type)}
                 </span>
-                {data.video_resolution && (
+                {data.resolution && (
                 <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
-                {data.video_resolution}
+                {data.resolution}
                 </span>
                 )}
             </div>
-            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.aweme_id}</span>
+            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.platform_id}</span>
           </div>
 
           {/* Title */}
           <h2 className="text-2xl font-bold text-zinc-100 mb-3 leading-tight">
-            {data.video_title || 'No Title'}
+            {data.title || 'No Title'}
           </h2>
 
           {/* Time & Duration Row */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
              <div className="flex items-center gap-2">
                 <Clock size={14} className="text-zinc-500"/>
-                <span>Video Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.video_created_time)}</span></span>
+                <span>Video Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
              </div>
              <div className="flex items-center gap-2">
                 <Timer size={14} className="text-zinc-500"/>
-                <span>Video Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.video_duration)}</span></span>
+                <span>Video Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
              </div>
           </div>
 
@@ -475,18 +525,18 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="grid grid-cols-4 gap-2 sm:gap-4 mb-6">
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_digg_count)}</span>
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.like_count)}</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
             </div>
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_comment_count)}</span>
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.comment_count)}</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
             </div>
             <button
               onClick={() => {
-                if (data.video_original_url) {
-                  navigator.clipboard.writeText(data.video_original_url);
+                if (data.original_url) {
+                  navigator.clipboard.writeText(data.original_url);
                   setCopiedShare(true);
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
@@ -499,12 +549,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               ) : (
                 <Share2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-xs sm:text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
+              <span className="text-xs sm:text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
             </button>
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.video_collect_count)}</span>
+              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.favorite_count)}</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
             </div>
           </div>
@@ -525,6 +575,24 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   ))}
                 </div>
               )
+            )}
+          </div>
+
+          {/* AI Status Icons */}
+          <div className="mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1" title={`Transcript: ${data.transcript_status || 'pending'}`}>
+                <FileText size={14} className={getAIStatusClass(data.transcript_status)} />
+              </div>
+              <div className="flex items-center gap-1" title={`Summary: ${data.summary_status || 'pending'}`}>
+                <Sparkles size={14} className={getAIStatusClass(data.summary_status)} />
+              </div>
+              <div className="flex items-center gap-1" title={`Visual Analysis: ${data.visual_analysis_status || 'pending'}`}>
+                <Eye size={14} className={getAIStatusClass(data.visual_analysis_status)} />
+              </div>
+            </div>
+            {data.summary_text && (
+              <p className="text-xs text-zinc-400 italic truncate mt-1">{data.summary_text}</p>
             )}
           </div>
 
@@ -572,13 +640,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Description - No Background - Adaptive */}
           <div className="mb-4">
              <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed">
-               {data.video_desc || <span className="text-zinc-500 italic">No description available.</span>}
+               {data.description || <span className="text-zinc-500 italic">No description available.</span>}
              </p>
           </div>
 
           {/* AI Content Area - Adaptive */}
           <div className="space-y-4 mb-6 flex-grow">
-            
+
             {/* Extract Result - Placed at top of AI results */}
             {extractText && (
                 <div className="animate-in fade-in slide-in-from-top-2">
@@ -691,7 +759,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                             onClick={() => onRefetch({ video: true })}
                             className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                           >
-                            <Video size={16} className="text-indigo-400" />
+                            <VideoIcon size={16} className="text-indigo-400" />
                             Download Video
                           </button>
                           <button
@@ -769,11 +837,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   </button>
                 )}
              </div>
-             
+
              {data.need_download_music && (
-               <button 
+               <button
                  onClick={onDownloadAudio}
-                 className="w-full flex items-center justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
+                 className="w-full flex items-between justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
                >
                  <div className="flex items-center gap-3">
                    <div className="p-1.5 bg-indigo-500/10 rounded-md">
@@ -830,7 +898,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white font-medium truncate">
-                    {data.video_title || 'Untitled'}
+                    {data.title || 'Untitled'}
                   </p>
                   <p className="text-xs text-zinc-500">@{data.author}</p>
                 </div>

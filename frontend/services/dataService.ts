@@ -1,11 +1,10 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
-import { DouyinBase } from '../types';
+import { Video } from '../types';
 import { getAuthHeaders } from './parserService';
 
-const TABLE_NAME = 'douyin_videos';
+const TABLE_NAME = 'videos';
 const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
 
-// 获取 API URL - 空字符串表示使用相对路径（通过 Vite 代理）
 const getApiUrl = (): string => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
@@ -16,7 +15,7 @@ const getApiUrl = (): string => {
 };
 
 /**
- * 前端配置接口（用于 Supabase URL 和 Anon Key）
+ * Frontend config interface (for Supabase URL and Anon Key)
  */
 export interface FrontendConfig {
   supabase_url: string | null;
@@ -25,8 +24,7 @@ export interface FrontendConfig {
 }
 
 /**
- * 从后端 YAML 配置文件获取前端配置
- * 优先级: YAML 配置 > .env 环境变量
+ * Fetch frontend config from backend YAML
  */
 export const fetchFrontendConfig = async (): Promise<FrontendConfig | null> => {
   try {
@@ -43,7 +41,7 @@ export const fetchFrontendConfig = async (): Promise<FrontendConfig | null> => {
 };
 
 /**
- * 保存前端配置到后端 YAML 文件
+ * Save frontend config to backend YAML
  */
 export const saveFrontendConfig = async (config: {
   supabase_url?: string;
@@ -60,8 +58,8 @@ export const saveFrontendConfig = async (config: {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: '保存配置失败' }));
-      throw new Error(error.detail || '保存配置失败');
+      const error = await response.json().catch(() => ({ detail: 'Failed to save config' }));
+      throw new Error(error.detail || 'Failed to save config');
     }
 
     return await response.json();
@@ -72,23 +70,23 @@ export const saveFrontendConfig = async (config: {
 };
 
 /**
- * 获取视频下载 URL（通过后端 API 下载，设置正确的 Content-Disposition 头）
+ * Get video download URL via backend API
  */
-export const getDownloadUrl = (awemeId: string): string => {
-  return `${getApiUrl()}/api/v1/douyin/download/${awemeId}`;
+export const getDownloadUrl = (platformId: string): string => {
+  return `${getApiUrl()}/api/v1/videos/download/${platformId}`;
 };
 
 /**
- * 获取封面下载 URL
+ * Get cover download URL
  */
-export const getCoverDownloadUrl = (awemeId: string): string => {
-  return `${getApiUrl()}/api/v1/douyin/download/${awemeId}/cover`;
+export const getCoverDownloadUrl = (platformId: string): string => {
+  return `${getApiUrl()}/api/v1/videos/download/${platformId}/cover`;
 };
 
 /**
- * 通过 aweme_id 获取单个视频
+ * Fetch a single video by platform_id
  */
-export const fetchVideoByAwemeId = async (awemeId: string): Promise<DouyinBase | null> => {
+export const fetchVideoByPlatformId = async (platformId: string): Promise<Video | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return null;
@@ -101,7 +99,7 @@ export const fetchVideoByAwemeId = async (awemeId: string): Promise<DouyinBase |
     const { data, error } = await supabase
       .from(VIEW_NAME)
       .select('*')
-      .eq('aweme_id', awemeId)
+      .eq('platform_id', platformId)
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -110,16 +108,19 @@ export const fetchVideoByAwemeId = async (awemeId: string): Promise<DouyinBase |
       return null;
     }
 
-    return data as DouyinBase | null;
+    return data as Video | null;
   } catch (e) {
-    console.error('Error fetching video by aweme_id:', e);
+    console.error('Error fetching video by platform_id:', e);
     return null;
   }
 };
 
-/** 分页配置 */
-const PAGE_SIZE = 100;  // 每页加载数量
-const LOCAL_CACHE_SIZE = 500;  // 本地缓存用于快速搜索
+// Keep old name as alias
+export const fetchVideoByAwemeId = fetchVideoByPlatformId;
+
+/** Pagination config */
+const PAGE_SIZE = 100;
+const LOCAL_CACHE_SIZE = 500;
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -129,14 +130,12 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * 获取视频库（分页版本，适合大数据量）
- * @param page 页码（从 0 开始）
- * @param pageSize 每页数量
+ * Fetch video library (paginated)
  */
 export const fetchLibraryPaginated = async (
   page: number = 0,
   pageSize: number = PAGE_SIZE
-): Promise<PaginatedResult<DouyinBase>> => {
+): Promise<PaginatedResult<Video>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -151,7 +150,6 @@ export const fetchLibraryPaginated = async (
     const from = page * pageSize;
     const to = from + pageSize - 1;
 
-    // 使用 count: 'exact' 获取总数，从 videos_with_tags 视图读取以包含 tags 数组
     const { data, error, count } = await supabase
       .from(VIEW_NAME)
       .select('*', { count: 'exact' })
@@ -165,7 +163,7 @@ export const fetchLibraryPaginated = async (
     const hasMore = (page + 1) * pageSize < totalCount;
 
     return {
-      data: (data as DouyinBase[]) || [],
+      data: (data as Video[]) || [],
       totalCount,
       hasMore,
       page,
@@ -176,9 +174,9 @@ export const fetchLibraryPaginated = async (
 };
 
 /**
- * 获取视频库（兼容旧版本，加载前 LOCAL_CACHE_SIZE 条用于本地搜索）
+ * Fetch video library (loads first LOCAL_CACHE_SIZE for local search)
  */
-export const fetchLibrary = async (): Promise<DouyinBase[]> => {
+export const fetchLibrary = async (): Promise<Video[]> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -190,7 +188,6 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
       throw new Error("User not authenticated");
     }
 
-    // 只加载最近 500 条用于本地缓存和快速搜索，从 videos_with_tags 视图读取以包含 tags 数组
     const { data, error } = await supabase
       .from(VIEW_NAME)
       .select('*')
@@ -199,14 +196,14 @@ export const fetchLibrary = async (): Promise<DouyinBase[]> => {
       .limit(LOCAL_CACHE_SIZE);
 
     if (error) throw error;
-    return (data as DouyinBase[]) || [];
+    return (data as Video[]) || [];
   } catch (err: any) {
     throw err;
   }
 };
 
 /**
- * 获取视频总数
+ * Fetch total video count
  */
 export const fetchLibraryCount = async (): Promise<number> => {
   const supabase = getSupabaseClient();
@@ -232,19 +229,15 @@ export const fetchLibraryCount = async (): Promise<number> => {
   }
 };
 
-export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
+export const saveItem = async (item: Video): Promise<Video> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
 
-  // Clean the object to ensure compatibility with JSON columns if necessary
-  // and remove any UI-specific temporary flags if they exist
   const payload = {
     ...item,
-    // Ensure dates are ISO strings if they are Date objects
-    video_created_time: item.video_created_time || new Date().toISOString(),
-    // Default to empty arrays for arrays if undefined
+    published_at: item.published_at || new Date().toISOString(),
     tags: item.tags || [],
     video_download_urls: item.video_download_urls || [],
     image_download_urls: item.image_download_urls || [],
@@ -252,21 +245,20 @@ export const saveItem = async (item: DouyinBase): Promise<DouyinBase> => {
 
   const { data, error } = await supabase
     .from(TABLE_NAME)
-    .upsert(payload, { onConflict: 'aweme_id' })
+    .upsert(payload, { onConflict: 'platform_id,source_platform' })
     .select()
     .single();
 
   if (error) throw error;
-  return data as DouyinBase;
+  return data as Video;
 };
 
-export const updateItem = async (id: string, updates: Partial<DouyinBase>): Promise<DouyinBase> => {
+export const updateItem = async (id: string, updates: Partial<Video>): Promise<Video> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
   }
 
-  // 获取当前用户 ID
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("User not authenticated");
@@ -275,13 +267,13 @@ export const updateItem = async (id: string, updates: Partial<DouyinBase>): Prom
   const { data, error } = await supabase
     .from(TABLE_NAME)
     .update(updates)
-    .eq('aweme_id', id)
-    .eq('user_id', user.id)  // 只能更新自己的数据
+    .eq('platform_id', id)
+    .eq('user_id', user.id)
     .select()
     .single();
 
   if (error) throw error;
-  return data as DouyinBase;
+  return data as Video;
 };
 
 export interface DeleteResult {
@@ -296,15 +288,13 @@ export const deleteItem = async (id: string, deleteFiles: boolean = false): Prom
     throw new Error("Supabase is not configured");
   }
 
-  // 获取认证 token
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
     throw new Error("User not authenticated");
   }
 
-  // 调用后端 API 删除（支持删除本地文件）
   const response = await fetch(
-    `${getApiUrl()}/api/v1/douyin/videos/${id}?delete_files=${deleteFiles}`,
+    `${getApiUrl()}/api/v1/videos/${id}?delete_files=${deleteFiles}`,
     {
       method: 'DELETE',
       headers: {
@@ -314,15 +304,15 @@ export const deleteItem = async (id: string, deleteFiles: boolean = false): Prom
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '删除失败' }));
-    throw new Error(error.detail || '删除失败');
+    const error = await response.json().catch(() => ({ detail: 'Delete failed' }));
+    throw new Error(error.detail || 'Delete failed');
   }
 
   return await response.json();
 };
 
 /**
- * 用户日志接口
+ * User log interface
  */
 export interface UserLog {
   id: string;
@@ -330,13 +320,13 @@ export interface UserLog {
   action: string;
   message: string;
   status: 'success' | 'error' | 'warning' | 'info' | 'pending';
-  aweme_id?: string;
+  platform_id?: string;
   details?: Record<string, unknown>;
   created_at: string;
 }
 
 /**
- * 获取用户操作日志
+ * Fetch user operation logs
  */
 export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
   const supabase = getSupabaseClient();
@@ -345,13 +335,12 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
   }
 
   try {
-    // 获取认证 token
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
       return [];
     }
 
-    const response = await fetch(`${getApiUrl()}/api/v1/douyin/logs?limit=${limit}`, {
+    const response = await fetch(`${getApiUrl()}/api/v1/videos/logs?limit=${limit}`, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`
       }
@@ -371,7 +360,7 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
 };
 
 /**
- * Dashboard 统计数据接口
+ * Dashboard statistics interface
  */
 export interface DashboardStats {
   totalVideos: number;
@@ -387,12 +376,9 @@ export interface DashboardStats {
 }
 
 /**
- * 获取 Dashboard 统计数据
- * Uses backend API for accurate total counts (across all videos, not just current page)
- * Uses local library data for distribution/activity stats (works with loaded data)
+ * Fetch dashboard statistics
  */
-export const fetchDashboardStats = async (library: DouyinBase[]): Promise<DashboardStats> => {
-  // Fetch accurate stats from backend API (calculates across ALL user videos)
+export const fetchDashboardStats = async (library: Video[]): Promise<DashboardStats> => {
   let backendStats = {
     total: library.length,
     completed: 0,
@@ -405,7 +391,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
   try {
     const apiUrl = getApiUrl();
 
-    const response = await fetch(`${apiUrl}/api/v1/douyin/statistics`, {
+    const response = await fetch(`${apiUrl}/api/v1/videos/statistics`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
@@ -427,16 +413,23 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     console.warn('Failed to fetch backend statistics, using local calculation:', e);
   }
 
-  // Use backend stats for accurate counts across all videos
   const completedDownloads = backendStats.completed;
   const pendingDownloads = backendStats.pending;
   const failedDownloads = backendStats.failed;
   const totalStorageBytes = backendStats.total_storage_bytes;
   const uniqueAuthors = backendStats.unique_authors;
 
-  // 媒体类型分布
-  const videoCount = library.filter(v => ['0', '4', '61', 0, 4, 61].includes(v.aweme_type as any)).length;
-  const albumCount = library.filter(v => ['2', '68', 2, 68].includes(v.aweme_type as any)).length;
+  // Media type distribution (supports both new string types and legacy numeric)
+  const videoCount = library.filter(v => {
+    const t = v.media_type;
+    return t === 'video' || t === 'special' || t === 'short' || t === 'live_clip' ||
+           ['0', '4', '61', 0, 4, 61].includes(t as any);
+  }).length;
+  const albumCount = library.filter(v => {
+    const t = v.media_type;
+    return t === 'carousel' || t === 'image_text' ||
+           ['2', '68', 2, 68].includes(t as any);
+  }).length;
   const audioCount = library.filter(v => v.need_download_music).length;
 
   const mediaDistribution = [
@@ -445,7 +438,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     { name: 'Audio', value: audioCount },
   ];
 
-  // 按周统计（最近7天）
+  // Weekly activity (last 7 days)
   const now = new Date();
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const weeklyActivity: { name: string; downloads: number; shares: number }[] = [];
@@ -465,11 +458,11 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     weeklyActivity.push({
       name: dayNames[dayStart.getDay()],
       downloads: dayVideos.length,
-      shares: 0, // TODO: 分享功能待实现，统计生成短链接的分享次数
+      shares: 0,
     });
   }
 
-  // 统计标签（从 video_tags 表获取）
+  // Tag statistics
   let topTags: { name: string; count: number }[] = [];
   try {
     const { fetchTagStatistics } = await import('./tagsService');
@@ -481,7 +474,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     console.warn('Failed to fetch tag statistics:', e);
   }
 
-  // 最近日志（从 API 获取真实日志，如果失败则使用视频数据作为备用）
+  // Recent logs
   let recentLogs: { message: string; time: string; status: 'success' | 'pending' | 'error' }[] = [];
 
   try {
@@ -489,7 +482,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     if (userLogs.length > 0) {
       recentLogs = userLogs.map(log => ({
         message: log.message,
-        time: log.created_at ? new Date(log.created_at).toLocaleTimeString('zh-CN', {
+        time: log.created_at ? new Date(log.created_at).toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
           hour12: false
@@ -501,17 +494,17 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
     console.error('Failed to fetch user logs:', e);
   }
 
-  // 如果没有日志，使用视频数据作为备用
+  // Fallback to video data if no logs
   if (recentLogs.length === 0) {
     recentLogs = library.slice(0, 5).map(v => ({
-      message: `${v.video_download_status === 'COMPLETED' ? '下载完成' : v.video_download_status === 'FAILED' ? '下载失败' : '处理中'}: ${v.video_title?.substring(0, 20) || v.aweme_id?.substring(0, 10)}...`,
-      time: v.created_at ? new Date(v.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
+      message: `${v.video_download_status === 'COMPLETED' ? 'Download completed' : v.video_download_status === 'FAILED' ? 'Download failed' : 'Processing'}: ${v.title?.substring(0, 20) || v.platform_id?.substring(0, 10)}...`,
+      time: v.created_at ? new Date(v.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
       status: (v.video_download_status === 'COMPLETED' ? 'success' : v.video_download_status === 'FAILED' ? 'error' : 'pending') as 'success' | 'pending' | 'error',
     }));
   }
 
   return {
-    totalVideos: backendStats.total,  // Use backend count for accurate total across all videos
+    totalVideos: backendStats.total,
     completedDownloads,
     pendingDownloads,
     failedDownloads,
@@ -525,7 +518,7 @@ export const fetchDashboardStats = async (library: DouyinBase[]): Promise<Dashbo
 };
 
 /**
- * 用户设置接口
+ * User settings interface
  */
 export interface UserSettingsData {
   id?: string;
@@ -537,7 +530,7 @@ export interface UserSettingsData {
 }
 
 /**
- * 获取用户设置
+ * Fetch user settings
  */
 export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
   const supabase = getSupabaseClient();
@@ -570,7 +563,7 @@ export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
 };
 
 /**
- * 保存用户设置
+ * Save user settings
  */
 export const saveUserSettings = async (settings: {
   download_path?: string;
@@ -596,8 +589,8 @@ export const saveUserSettings = async (settings: {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '保存设置失败' }));
-    throw new Error(error.detail || '保存设置失败');
+    const error = await response.json().catch(() => ({ detail: 'Failed to save settings' }));
+    throw new Error(error.detail || 'Failed to save settings');
   }
 
   return await response.json();

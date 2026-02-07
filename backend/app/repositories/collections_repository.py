@@ -1,9 +1,11 @@
 """Repository for Smart Collections data access (异步)."""
-from typing import Optional, List
+
 from datetime import datetime
+from typing import List, Optional
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from loguru import logger
 
 
 class CollectionsRepository:
@@ -28,13 +30,26 @@ class CollectionsRepository:
     async def get_all_collections(self, user_id: str) -> List[dict]:
         """Get all collections for a user."""
         table = await self._get_table()
-        result = await table.select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        result = (
+            await table.select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
         return result.data
 
-    async def get_collection_by_id(self, collection_id: str, user_id: str) -> Optional[dict]:
+    async def get_collection_by_id(
+        self, collection_id: str, user_id: str
+    ) -> Optional[dict]:
         """Get a single collection by ID."""
         table = await self._get_table()
-        result = await table.select("*").eq("id", collection_id).eq("user_id", user_id).maybe_single().execute()
+        result = (
+            await table.select("*")
+            .eq("id", collection_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
         return result.data
 
     async def create_collection(
@@ -45,7 +60,7 @@ class CollectionsRepository:
         icon: str = "📁",
         description: Optional[str] = None,
         sort_by: str = "created_at",
-        sort_order: str = "desc"
+        sort_order: str = "desc",
     ) -> dict:
         """Create a new smart collection."""
         data = {
@@ -57,7 +72,7 @@ class CollectionsRepository:
             "sort_by": sort_by,
             "sort_order": sort_order,
             "cached_count": 0,
-            "is_preset": False
+            "is_preset": False,
         }
 
         table = await self._get_table()
@@ -65,7 +80,9 @@ class CollectionsRepository:
         logger.info(f"Created collection: {name} for user: {user_id}")
         return result.data[0]
 
-    async def update_collection(self, collection_id: str, user_id: str, **kwargs) -> Optional[dict]:
+    async def update_collection(
+        self, collection_id: str, user_id: str, **kwargs
+    ) -> Optional[dict]:
         """Update a collection."""
         # Filter out None values
         update_data = {k: v for k, v in kwargs.items() if v is not None}
@@ -76,30 +93,54 @@ class CollectionsRepository:
         update_data["updated_at"] = datetime.utcnow().isoformat()
 
         table = await self._get_table()
-        result = await table.update(update_data).eq("id", collection_id).eq("user_id", user_id).execute()
+        result = (
+            await table.update(update_data)
+            .eq("id", collection_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         return result.data[0] if result.data else None
 
     async def delete_collection(self, collection_id: str, user_id: str) -> bool:
         """Delete a collection (non-preset only)."""
         table = await self._get_table()
-        result = await table.delete().eq("id", collection_id).eq("user_id", user_id).eq("is_preset", False).execute()
+        result = (
+            await table.delete()
+            .eq("id", collection_id)
+            .eq("user_id", user_id)
+            .eq("is_preset", False)
+            .execute()
+        )
         return len(result.data) > 0
 
-    async def update_cache(self, collection_id: str, video_ids: List[int], count: int) -> dict:
+    async def update_cache(
+        self, collection_id: str, video_ids: List[int], count: int
+    ) -> dict:
         """Update the cached video IDs and count for a collection."""
         table = await self._get_table()
-        result = await table.update({
-            "cached_video_ids": video_ids,
-            "cached_count": count,
-            "cached_at": datetime.utcnow().isoformat()
-        }).eq("id", collection_id).execute()
+        result = (
+            await table.update(
+                {
+                    "cached_video_ids": video_ids,
+                    "cached_count": count,
+                    "cached_at": datetime.utcnow().isoformat(),
+                }
+            )
+            .eq("id", collection_id)
+            .execute()
+        )
 
         return result.data[0] if result.data else None
 
     async def get_preset_collections(self, user_id: str) -> List[dict]:
         """Get preset collections for a user."""
         table = await self._get_table()
-        result = await table.select("*").eq("user_id", user_id).eq("is_preset", True).execute()
+        result = (
+            await table.select("*")
+            .eq("user_id", user_id)
+            .eq("is_preset", True)
+            .execute()
+        )
         return result.data
 
     async def create_default_presets(self, user_id: str) -> List[dict]:
@@ -113,11 +154,11 @@ class CollectionsRepository:
                     "match": "all",
                     "conditions": [
                         {"field": "date", "operator": "gte", "value": "7_days_ago"}
-                    ]
+                    ],
                 },
                 "is_preset": True,
                 "sort_by": "created_at",
-                "sort_order": "desc"
+                "sort_order": "desc",
             },
             {
                 "name": "Favorites",
@@ -127,11 +168,11 @@ class CollectionsRepository:
                     "match": "all",
                     "conditions": [
                         {"field": "keep_forever", "operator": "equals", "value": True}
-                    ]
+                    ],
                 },
                 "is_preset": True,
                 "sort_by": "created_at",
-                "sort_order": "desc"
+                "sort_order": "desc",
             },
             {
                 "name": "Most Viewed",
@@ -141,11 +182,11 @@ class CollectionsRepository:
                     "match": "all",
                     "conditions": [
                         {"field": "view_count", "operator": "gte", "value": 3}
-                    ]
+                    ],
                 },
                 "is_preset": True,
                 "sort_by": "view_count",
-                "sort_order": "desc"
+                "sort_order": "desc",
             },
             {
                 "name": "Untagged",
@@ -155,22 +196,18 @@ class CollectionsRepository:
                     "match": "all",
                     "conditions": [
                         {"field": "tag_count", "operator": "equals", "value": 0}
-                    ]
+                    ],
                 },
                 "is_preset": True,
                 "sort_by": "created_at",
-                "sort_order": "desc"
-            }
+                "sort_order": "desc",
+            },
         ]
 
         table = await self._get_table()
         created = []
         for preset in presets:
-            data = {
-                "user_id": user_id,
-                **preset,
-                "cached_count": 0
-            }
+            data = {"user_id": user_id, **preset, "cached_count": 0}
             result = await table.insert(data).execute()
             if result.data:
                 created.append(result.data[0])

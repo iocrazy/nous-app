@@ -1,6 +1,26 @@
 # MediaHub Backend Dockerfile
 # Frontend is deployed separately to Vercel
 
+# ============================================
+# Stage 1: Build Rust mediahub-core module
+# ============================================
+FROM rust:1.77-slim AS rust-builder
+
+RUN apt-get update && apt-get install -y \
+    python3-dev \
+    python3-pip \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages maturin
+
+WORKDIR /rust
+COPY mediahub-core/ .
+RUN maturin build --release
+
+# ============================================
+# Stage 2: Final Python application
+# ============================================
 FROM python:3.12-slim
 
 # Install Chrome, ffmpeg, build tools and dependencies
@@ -23,6 +43,13 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 # Install uv package manager
 RUN pip install uv
+
+# Install mediahub-core Rust module from build stage
+COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
+RUN pip install /tmp/mediahub_core*.whl && rm -f /tmp/mediahub_core*.whl
+
+# Install yt-dlp and faster-whisper
+RUN pip install yt-dlp==2024.12.23 faster-whisper==1.1.0
 
 # Set working directory
 WORKDIR /app

@@ -1,13 +1,14 @@
 # app/tasks/parse_tasks.py
 
 """
-解析任务模块
+Parse Tasks Module
 
-包含链接解析相关的 Celery 任务。
+Contains link parsing related Celery tasks.
 """
 
 import asyncio
-from celery import shared_task, group
+
+from celery import group, shared_task
 from loguru import logger
 
 from app.core.utils import Utils
@@ -15,11 +16,12 @@ from app.services.classification_service import ClassificationService
 
 
 def run_async(coro):
-    """在同步环境中运行异步协程"""
+    """Run async coroutine in synchronous environment"""
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -29,17 +31,20 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
-async def log_user_action(user_id: str, action: str, message: str, status: str, aweme_id: str = None):
+async def log_user_action(
+    user_id: str, action: str, message: str, status: str, aweme_id: str = None
+):
     """Log user action helper."""
     try:
         from app.repositories.user_action_log_repository import UserActionLogRepository
+
         repo = UserActionLogRepository()
         await repo.log_action(
             user_id=user_id,
             action=action,
             message=message,
             status=status,
-            aweme_id=aweme_id
+            aweme_id=aweme_id,
         )
     except Exception as e:
         logger.warning(f"Failed to log user action: {e}")
@@ -53,16 +58,16 @@ def parse_single_link_task(
     video_bool: bool = True,
     music_bool: bool = False,
     cover_bool: bool = True,
-    categories: str = None
+    categories: str = None,
 ):
     """
-    Parse metadata for a Douyin link (Phase 1).
+    Parse metadata for a video link (Phase 1).
 
     This task quickly parses video metadata and returns it immediately.
     Downloads are handled by a separate download_media_task (Phase 2).
 
     Args:
-        url: Douyin URL
+        url: Video URL
         user_id: User ID
         video_bool: Whether to download video
         music_bool: Whether to download music
@@ -86,19 +91,19 @@ def parse_single_link_task(
                 "error": f"Invalid URL: {str(e)}",
             }
 
+        from app.repositories.video_repository import VideoRepository
         from app.services.douyin_analysis import DouyinAnalysis
         from app.services.douyin_parser import DouyinParser
-        from app.repositories.supabase_douyin_repository import SupabaseDouyinRepository
         from app.tasks.download_tasks import download_media_task
 
-        # Fetch video data from Douyin
+        # Fetch video data
         aweme_detail = run_async(DouyinAnalysis.fetch_one_video(valid_url))
 
         if not aweme_detail:
             logger.warning(f"[Celery] Cannot fetch video info: {valid_url}")
             raise self.retry(
                 exc=Exception("Cannot fetch video info"),
-                countdown=30 * (2 ** self.request.retries)
+                countdown=30 * (2**self.request.retries),
             )
 
         # Parse metadata (without downloading files)
@@ -109,35 +114,34 @@ def parse_single_link_task(
                 download_video=video_bool,
                 download_music=music_bool,
                 download_cover=cover_bool,
-                categories=categories
+                categories=categories,
             )
         )
 
         if not parsed_data:
             logger.warning(f"[Celery] Parse failed: {valid_url}")
             raise self.retry(
-                exc=Exception("Parse failed"),
-                countdown=30 * (2 ** self.request.retries)
+                exc=Exception("Parse failed"), countdown=30 * (2**self.request.retries)
             )
 
-        aweme_id = parsed_data.get("aweme_id")
-        aweme_type = parsed_data.get("aweme_type", 0)
-        video_title = parsed_data.get("video_title", "undefined")
+        platform_id = parsed_data.get("platform_id")
+        media_type = parsed_data.get("media_type", 0)
+        video_title = parsed_data.get("title", "undefined")
         parsed_data["user_id"] = user_id
 
         # Save metadata to database (without downloading)
-        from app.schemas.douyin import DouyinCreate
         from app.core.enums import DownloadStatus
+        from app.schemas.video import VideoCreate
 
-        repo = SupabaseDouyinRepository()
+        repo = VideoRepository()
 
         # Check if exists
-        existing = run_async(repo.get_by_aweme_id(aweme_id, user_id=user_id))
+        existing = run_async(repo.get_by_platform_id(platform_id, user_id=user_id))
 
         # Prepare data
         try:
-            douyin_data = DouyinCreate(**parsed_data)
-            data_dict = douyin_data.model_dump()
+            video_data = VideoCreate(**parsed_data)
+            data_dict = video_data.model_dump()
         except Exception as e:
             logger.error(f"Data validation failed: {str(e)}")
             return {
@@ -160,15 +164,15 @@ def parse_single_link_task(
         # Save or update
         saved_video = None
         if existing:
-            saved_video = run_async(repo.update(aweme_id, data_dict))
-            logger.info(f"[Celery] Updated metadata: {aweme_id}")
+            saved_video = run_async(repo.update(platform_id, data_dict))
+            logger.info(f"[Celery] Updated metadata: {platform_id}")
         else:
             saved_video = run_async(repo.create(data_dict))
-            logger.info(f"[Celery] Created metadata: {aweme_id}")
+            logger.info(f"[Celery] Created metadata: {platform_id}")
 
         # Auto-tag the video after saving metadata
         try:
-            # Get the video's database ID (BIGINT primary key, not aweme_id)
+            # Get the video's database ID (primary key, not platform_id)
             video_db_id = saved_video.get("id") if saved_video else None
             if video_db_id:
                 # Extract original hashtags from aweme_detail's text_extra
@@ -181,19 +185,25 @@ def parse_single_link_task(
                         if tag.get("hashtag_name")
                     ]
 
-                added_tags = run_async(ClassificationService.auto_tag_video(
-                    video_id=video_db_id,
-                    title=video_title or "",
-                    description=parsed_data.get("video_desc", ""),
-                    original_tags=original_tags
-                ))
+                added_tags = run_async(
+                    ClassificationService.auto_tag_video(
+                        video_id=video_db_id,
+                        title=video_title or "",
+                        description=parsed_data.get("description", ""),
+                        original_tags=original_tags,
+                    )
+                )
                 if added_tags:
-                    logger.info(f"[Celery] Auto-tagged video {aweme_id} with {len(added_tags)} tags")
+                    logger.info(
+                        f"[Celery] Auto-tagged video {platform_id} with {len(added_tags)} tags"
+                    )
             else:
-                logger.warning(f"[Celery] Cannot auto-tag video {aweme_id}: no database ID returned")
+                logger.warning(
+                    f"[Celery] Cannot auto-tag video {platform_id}: no database ID returned"
+                )
         except Exception as e:
             # Auto-tagging is non-blocking - failures should not affect the main flow
-            logger.warning(f"[Celery] Auto-tagging failed for {aweme_id}: {e}")
+            logger.warning(f"[Celery] Auto-tagging failed for {platform_id}: {e}")
 
         # Determine what needs downloading
         need_download = video_bool or music_bool or cover_bool
@@ -202,12 +212,12 @@ def parse_single_link_task(
         if need_download:
             # Trigger download task (Phase 2)
             download_task = download_media_task.delay(
-                aweme_id=aweme_id,
+                platform_id=platform_id,
                 user_id=user_id,
                 download_video=video_bool,
                 download_music=music_bool,
                 download_cover=cover_bool,
-                aweme_type=aweme_type,
+                media_type=media_type,
                 video_title=video_title,
             )
             download_task_id = download_task.id
@@ -215,37 +225,46 @@ def parse_single_link_task(
 
         # Trigger L1 analysis automatically (non-blocking)
         try:
-            cover_url = parsed_data.get("cover_urls", [None])[0] if parsed_data.get("cover_urls") else None
+            cover_url = (
+                parsed_data.get("cover_urls", [None])[0]
+                if parsed_data.get("cover_urls")
+                else None
+            )
             if video_db_id and cover_url:
                 from app.tasks.analysis_tasks import analyze_video_l1_task
+
                 analyze_video_l1_task.delay(
                     video_id=video_db_id,
                     cover_url=cover_url,
                     title=video_title or "",
-                    description=parsed_data.get("video_desc", "")
+                    description=parsed_data.get("description", ""),
                 )
-                logger.info(f"[Celery] Triggered L1 analysis for video {aweme_id}")
+                logger.info(f"[Celery] Triggered L1 analysis for video {platform_id}")
         except Exception as e:
             # L1 analysis is non-blocking - failures should not affect the main flow
-            logger.warning(f"[Celery] Failed to trigger L1 analysis for {aweme_id}: {e}")
+            logger.warning(
+                f"[Celery] Failed to trigger L1 analysis for {platform_id}: {e}"
+            )
 
         # Log user action
-        run_async(log_user_action(
-            user_id=user_id,
-            action="fetch",
-            message=f"{video_title[:20]}...: Metadata parsed",
-            status="success",
-            aweme_id=aweme_id
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"{video_title[:20]}...: Metadata parsed",
+                status="success",
+                aweme_id=platform_id,
+            )
+        )
 
         # Build metadata response
         metadata = {
-            "aweme_id": aweme_id,
-            "video_title": parsed_data.get("video_title"),
+            "platform_id": platform_id,
+            "title": parsed_data.get("title"),
             "author": parsed_data.get("author"),
             "author_avatar": parsed_data.get("author_avatar"),
             "duration": parsed_data.get("duration"),
-            "aweme_type": aweme_type,
+            "media_type": media_type,
             "create_time": parsed_data.get("create_time"),
             "statistics": {
                 "likes": parsed_data.get("likes", 0),
@@ -257,12 +276,12 @@ def parse_single_link_task(
             "description": parsed_data.get("description"),
         }
 
-        logger.success(f"[Celery] Metadata parse complete: {aweme_id}")
+        logger.success(f"[Celery] Metadata parse complete: {platform_id}")
 
         return {
             "status": "success",
             "url": valid_url,
-            "aweme_id": aweme_id,
+            "platform_id": platform_id,
             "download_task_id": download_task_id,
             "metadata": metadata,
         }
@@ -270,7 +289,7 @@ def parse_single_link_task(
     except Exception as e:
         logger.error(f"[Celery] Parse task error: {url}, error: {str(e)}")
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
         return {
             "status": "failed",
             "url": url,
@@ -286,27 +305,27 @@ def parse_batch_links_task(
     video_bool: bool = True,
     music_bool: bool = False,
     cover_bool: bool = True,
-    categories: str = None
+    categories: str = None,
 ):
     """
-    批量解析抖音链接的 Celery 任务
+    Celery task for batch parsing video links.
 
-    将批量任务拆分为多个单独的子任务并行执行。
+    Splits batch task into multiple individual sub-tasks for parallel execution.
 
     Args:
-        urls: 抖音链接列表
-        user_id: 用户 ID
-        video_bool: 是否下载视频
-        music_bool: 是否下载音乐
-        cover_bool: 是否下载封面
-        categories: 视频分类
+        urls: List of video links
+        user_id: User ID
+        video_bool: Whether to download video
+        music_bool: Whether to download music
+        cover_bool: Whether to download cover
+        categories: Video categories
 
     Returns:
-        dict: 批量任务结果
+        dict: Batch task result
     """
-    logger.info(f"[Celery] 开始批量解析任务: {len(urls)} 个链接")
+    logger.info(f"[Celery] Starting batch parse task: {len(urls)} links")
 
-    # 创建子任务组
+    # Create sub-task group
     tasks = group(
         parse_single_link_task.s(
             url=url,
@@ -314,18 +333,18 @@ def parse_batch_links_task(
             video_bool=video_bool,
             music_bool=music_bool,
             cover_bool=cover_bool,
-            categories=categories
+            categories=categories,
         )
         for url in urls
     )
 
-    # 执行任务组并等待结果
+    # Execute task group and wait for results
     result = tasks.apply_async()
 
-    # 返回任务组 ID，让调用者可以追踪
+    # Return task group ID for caller tracking
     return {
         "status": "submitted",
         "total": len(urls),
         "group_id": result.id,
-        "message": f"已提交 {len(urls)} 个解析任务",
+        "message": f"Submitted {len(urls)} parse tasks",
     }

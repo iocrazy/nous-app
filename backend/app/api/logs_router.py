@@ -4,16 +4,15 @@ import csv
 import io
 import json
 from datetime import date, datetime, timedelta
-from typing import Optional, List
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel
 
-from app.repositories.logs_repository import LogsRepository
 from app.core.deps import get_current_user
-from loguru import logger
-
+from app.repositories.logs_repository import LogsRepository
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
 
@@ -25,8 +24,10 @@ logs_repo = LogsRepository()
 # Response Models
 # ============================================
 
+
 class LogEntry(BaseModel):
     """Log entry model."""
+
     id: str
     action: str
     message: str
@@ -38,6 +39,7 @@ class LogEntry(BaseModel):
 
 class LogsResponse(BaseModel):
     """Response for logs list."""
+
     success: bool = True
     logs: List[LogEntry]
     total: int
@@ -50,11 +52,12 @@ class LogsResponse(BaseModel):
 # Helper Functions
 # ============================================
 
+
 def parse_levels(level_str: Optional[str]) -> Optional[List[str]]:
     """Parse comma-separated level string into list."""
     if not level_str:
         return None
-    levels = [l.strip().lower() for l in level_str.split(",") if l.strip()]
+    levels = [entry.strip().lower() for entry in level_str.split(",") if entry.strip()]
     # Map display levels to database status values
     level_mapping = {
         "info": ["info", "success"],
@@ -62,7 +65,7 @@ def parse_levels(level_str: Optional[str]) -> Optional[List[str]]:
         "warning": ["warning"],
         "error": ["error"],
         "pending": ["pending"],
-        "success": ["success"]
+        "success": ["success"],
     }
     result = []
     for level in levels:
@@ -73,7 +76,9 @@ def parse_levels(level_str: Optional[str]) -> Optional[List[str]]:
     return list(set(result)) if result else None
 
 
-def parse_date_range(date_range: Optional[str]) -> tuple[Optional[date], Optional[date]]:
+def parse_date_range(
+    date_range: Optional[str],
+) -> tuple[Optional[date], Optional[date]]:
     """Parse date range string into start and end dates."""
     if not date_range:
         return None, None
@@ -94,16 +99,23 @@ def parse_date_range(date_range: Optional[str]) -> tuple[Optional[date], Optiona
 # API Endpoints
 # ============================================
 
+
 @router.get("", response_model=LogsResponse)
 async def get_logs(
     current_user: dict = Depends(get_current_user),
-    level: Optional[str] = Query(None, description="Filter by levels (comma-separated: info,warn,error,pending)"),
-    date_range: Optional[str] = Query(None, description="Date range: today, 7days, 30days"),
-    start_date: Optional[date] = Query(None, description="Custom start date (YYYY-MM-DD)"),
+    level: Optional[str] = Query(
+        None, description="Filter by levels (comma-separated: info,warn,error,pending)"
+    ),
+    date_range: Optional[str] = Query(
+        None, description="Date range: today, 7days, 30days"
+    ),
+    start_date: Optional[date] = Query(
+        None, description="Custom start date (YYYY-MM-DD)"
+    ),
     end_date: Optional[date] = Query(None, description="Custom end date (YYYY-MM-DD)"),
     search: Optional[str] = Query(None, description="Search in log messages"),
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, description="Items per page (50, 100, 200)")
+    page_size: int = Query(50, description="Items per page (50, 100, 200)"),
 ):
     """
     Get user activity logs with filtering and pagination.
@@ -117,7 +129,11 @@ async def get_logs(
     """
     try:
         # current_user can be User object or dict
-        user_id = getattr(current_user, 'id', None) if hasattr(current_user, 'id') else current_user.get("id")
+        user_id = (
+            getattr(current_user, "id", None)
+            if hasattr(current_user, "id")
+            else current_user.get("id")
+        )
         if not user_id:
             raise HTTPException(status_code=401, detail="User ID not found")
 
@@ -140,7 +156,7 @@ async def get_logs(
             end_date=end_date,
             search=search,
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
 
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -151,7 +167,7 @@ async def get_logs(
             total=total,
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            total_pages=total_pages,
         )
 
     except HTTPException:
@@ -166,10 +182,12 @@ async def export_logs(
     current_user: dict = Depends(get_current_user),
     format: str = Query("json", description="Export format: json or csv"),
     level: Optional[str] = Query(None, description="Filter by levels"),
-    date_range: Optional[str] = Query(None, description="Date range: today, 7days, 30days"),
+    date_range: Optional[str] = Query(
+        None, description="Date range: today, 7days, 30days"
+    ),
     start_date: Optional[date] = Query(None, description="Custom start date"),
     end_date: Optional[date] = Query(None, description="Custom end date"),
-    search: Optional[str] = Query(None, description="Search in log messages")
+    search: Optional[str] = Query(None, description="Search in log messages"),
 ):
     """
     Export user logs as JSON or CSV file.
@@ -179,7 +197,11 @@ async def export_logs(
     """
     try:
         # current_user can be User object or dict
-        user_id = getattr(current_user, 'id', None) if hasattr(current_user, 'id') else current_user.get("id")
+        user_id = (
+            getattr(current_user, "id", None)
+            if hasattr(current_user, "id")
+            else current_user.get("id")
+        )
         if not user_id:
             raise HTTPException(status_code=401, detail="User ID not found")
 
@@ -199,7 +221,7 @@ async def export_logs(
             levels=levels,
             start_date=start_date,
             end_date=end_date,
-            search=search
+            search=search,
         )
 
         # Generate filename
@@ -212,14 +234,23 @@ async def export_logs(
             return StreamingResponse(
                 io.BytesIO(content.encode("utf-8")),
                 media_type="application/json",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
         else:
             # Export as CSV
             output = io.StringIO()
             if logs:
-                fieldnames = ["id", "action", "message", "status", "aweme_id", "created_at"]
-                writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+                fieldnames = [
+                    "id",
+                    "action",
+                    "message",
+                    "status",
+                    "aweme_id",
+                    "created_at",
+                ]
+                writer = csv.DictWriter(
+                    output, fieldnames=fieldnames, extrasaction="ignore"
+                )
                 writer.writeheader()
                 for log in logs:
                     # Convert datetime to string
@@ -231,7 +262,7 @@ async def export_logs(
             return StreamingResponse(
                 io.BytesIO(content.encode("utf-8")),
                 media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
 
     except HTTPException:

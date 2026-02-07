@@ -27,7 +27,7 @@ interface LogEntry {
   action: string;
   message: string;
   status: string;
-  aweme_id?: string;
+  platform_id?: string;
   details?: Record<string, unknown>;
   created_at: string;
 }
@@ -358,9 +358,9 @@ export const LogsPanel: React.FC = () => {
                   {/* Message */}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-zinc-300 break-words">{log.message}</p>
-                    {log.aweme_id && (
+                    {log.platform_id && (
                       <p className="text-xs text-zinc-600 mt-0.5 font-mono">
-                        Video: {log.aweme_id}
+                        Video: {log.platform_id}
                       </p>
                     )}
                   </div>

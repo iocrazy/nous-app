@@ -17,7 +17,7 @@ const getApiUrl = (): string => {
 // Types
 export interface SearchResultItem {
   video_id: number;
-  aweme_id: string;
+  platform_id: string;
   title: string;
   cover_url: string | null;
   author: string | null;
@@ -45,7 +45,7 @@ export interface HybridSearchFilters {
   date_from?: string;
   date_to?: string;
   min_views?: number;
-  aweme_type?: number;
+  media_type?: number;
 }
 
 export interface QuickSearchSuggestion {
@@ -181,11 +181,11 @@ export const localSearch = (
   query: string,
   library: Array<{
     id?: number;
-    aweme_id: string;
-    video_title?: string;
-    video_desc?: string;
+    platform_id: string;
+    title?: string;
+    description?: string;
     author?: string;
-    video_hashtag_name?: string;
+    hashtags?: string;
     cover_url?: string;
     view_count?: number;
     created_at?: string;
@@ -213,10 +213,10 @@ export const localSearch = (
 
   for (const video of library) {
     // Get searchable fields
-    const title = (video.video_title || '').toLowerCase();
-    const desc = (video.video_desc || '').toLowerCase();
+    const title = (video.title || '').toLowerCase();
+    const desc = (video.description || '').toLowerCase();
     const author = (video.author || '').toLowerCase();
-    const hashtags = (video.video_hashtag_name || '').toLowerCase();
+    const hashtags = (video.hashtags || '').toLowerCase();
     // Also search through user-added tags
     const tags = (video.tags || []).join(' ').toLowerCase();
 
@@ -239,9 +239,9 @@ export const localSearch = (
     if (match) {
       results.push({
         video_id: video.id || 0,
-        aweme_id: video.aweme_id,
-        title: video.video_title || '',
-        description: video.video_desc || null,
+        platform_id: video.platform_id,
+        title: video.title || '',
+        description: video.description || null,
         cover_url: video.cover_url || null,
         author: video.author || null,
         similarity_score: 0.5,

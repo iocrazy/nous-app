@@ -11,19 +11,18 @@
 """
 
 from dataclasses import dataclass
-from typing import Annotated, Optional, List
+from typing import Annotated, List, Optional
+
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 from supabase import Client
 from supabase._async.client import AsyncClient
 
-from app.db.supabase_client import (
-    get_supabase as _get_supabase,
-    get_supabase_admin as _get_supabase_admin,
-    get_async_supabase as _get_async_supabase,
-    get_async_supabase_admin as _get_async_supabase_admin,
-)
-from app.core.api_key_scopes import get_required_scopes, check_scope_permission
+from app.core.api_key_scopes import check_scope_permission, get_required_scopes
+from app.db.supabase_client import get_async_supabase as _get_async_supabase
+from app.db.supabase_client import get_async_supabase_admin as _get_async_supabase_admin
+from app.db.supabase_client import get_supabase as _get_supabase
+from app.db.supabase_client import get_supabase_admin as _get_supabase_admin
 
 
 # 同步客户端 (for backward compatibility and Celery)
@@ -58,6 +57,7 @@ AsyncSupabaseAdminDep = Annotated[AsyncClient, Depends(get_async_supabase_admin)
 @dataclass
 class AuthContext:
     """认证上下文"""
+
     user_id: str
     auth_type: str  # "jwt" or "api_key"
     scopes: Optional[List[str]] = None  # API Key 的权限范围
@@ -79,23 +79,21 @@ async def get_current_user(authorization: str = Header(...)):
 
         if not user_response or not user_response.user:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的认证令牌"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌"
             )
 
         return user_response.user
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"认证失败: {str(e)}"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"认证失败: {str(e)}"
         )
 
 
 async def get_auth(
     request: Request,
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> AuthContext:
     """
     获取认证上下文
@@ -129,14 +127,14 @@ async def get_auth(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="未提供认证凭据",
-        headers={"WWW-Authenticate": "Bearer"}
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
 async def get_optional_auth(
     request: Request,
     authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> Optional[AuthContext]:
     """
     获取可选的认证上下文
@@ -179,8 +177,7 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
     if not key_data:
         logger.warning(f"无效的 API Key: {api_key[:10]}...")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的 API Key"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 API Key"
         )
 
     # 检查权限范围
@@ -195,12 +192,10 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
     required_scopes = get_required_scopes(method, path)
 
     if required_scopes and not check_scope_permission(required_scopes, user_scopes):
-        logger.warning(
-            f"API Key 权限不足: 需要 {required_scopes}, 拥有 {user_scopes}"
-        )
+        logger.warning(f"API Key 权限不足: 需要 {required_scopes}, 拥有 {user_scopes}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"权限不足，该操作需要以下权限之一: {', '.join(required_scopes)}"
+            detail=f"权限不足，该操作需要以下权限之一: {', '.join(required_scopes)}",
         )
 
     # 更新使用统计（异步，不阻塞请求）
@@ -213,7 +208,7 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
         user_id=key_data["user_id"],
         auth_type="api_key",
         scopes=user_scopes,
-        api_key_id=key_data["key_id"]
+        api_key_id=key_data["key_id"],
     )
 
 
@@ -234,7 +229,7 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的认证格式，需要 Bearer token",
-            headers={"WWW-Authenticate": "Bearer"}
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     token = authorization[7:]  # 移除 "Bearer " 前缀
@@ -245,14 +240,13 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
 
         if not user_response or not user_response.user:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的认证令牌"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌"
             )
 
         return AuthContext(
             user_id=str(user_response.user.id),
             auth_type="jwt",
-            scopes=None  # JWT 用户拥有完整权限
+            scopes=None,  # JWT 用户拥有完整权限
         )
 
     except HTTPException:
@@ -260,8 +254,7 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
     except Exception as e:
         logger.error(f"JWT 验证失败: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"认证失败: {str(e)}"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"认证失败: {str(e)}"
         )
 
 

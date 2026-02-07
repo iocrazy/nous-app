@@ -29,8 +29,8 @@ async def migrate_storage_sizes():
     base_path = settings.DOWNLOAD_PATH
 
     # 获取所有有 download_path 但没有 storage_size 的视频
-    result = await client.table("douyin_videos").select(
-        "id, aweme_id, download_path, storage_size"
+    result = await client.table("videos").select(
+        "id, platform_id, download_path, storage_size"
     ).not_.is_("download_path", "null").execute()
 
     videos = result.data
@@ -42,7 +42,7 @@ async def migrate_storage_sizes():
 
     for video in videos:
         video_id = video["id"]
-        aweme_id = video["aweme_id"]
+        platform_id = video["platform_id"]
         download_path = video["download_path"]
         current_size = video.get("storage_size") or 0
 
@@ -63,14 +63,14 @@ async def migrate_storage_sizes():
 
             # 更新数据库
             try:
-                await client.table("douyin_videos").update({
+                await client.table("videos").update({
                     "storage_size": file_size
                 }).eq("id", video_id).execute()
 
                 updated += 1
-                logger.debug(f"更新 {aweme_id}: {file_size / 1024 / 1024:.2f} MB")
+                logger.debug(f"更新 {platform_id}: {file_size / 1024 / 1024:.2f} MB")
             except Exception as e:
-                logger.error(f"更新 {aweme_id} 失败: {e}")
+                logger.error(f"更新 {platform_id} 失败: {e}")
         else:
             not_found += 1
             logger.warning(f"文件不存在: {full_path}")

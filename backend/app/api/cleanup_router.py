@@ -1,20 +1,20 @@
 """API routes for Cleanup Suggestions."""
-from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.cleanup_service import CleanupService
 from app.schemas.cleanup import (
-    CleanupSuggestion as CleanupSuggestionSchema,
-    CleanupSuggestionsResponse,
     CleanupAction,
     CleanupBatchAction,
-    CleanupStats,
     CleanupDataResponse,
+    CleanupStats,
 )
-
+from app.schemas.cleanup import CleanupSuggestion as CleanupSuggestionSchema
+from app.schemas.cleanup import (
+    CleanupSuggestionsResponse,
+)
+from app.services.cleanup_service import CleanupService
 
 router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
 
@@ -22,7 +22,9 @@ router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
 @router.get("/data", response_model=CleanupDataResponse)
 async def get_cleanup_data(
     limit: int = Query(50, ge=1, le=200),
-    include_duplicates: bool = Query(True, description="Include potential duplicate detection"),
+    include_duplicates: bool = Query(
+        True, description="Include potential duplicate detection"
+    ),
     auth: AuthDep = None,
 ):
     """
@@ -34,9 +36,7 @@ async def get_cleanup_data(
     service = CleanupService()
 
     data = await service.get_cleanup_data(
-        user_id=auth.user_id,
-        limit=limit,
-        include_duplicates=include_duplicates
+        user_id=auth.user_id, limit=limit, include_duplicates=include_duplicates
     )
 
     suggestions = data["suggestions"]
@@ -59,7 +59,7 @@ async def get_cleanup_data(
                 last_viewed_at=s.last_viewed_at,
                 view_count=s.view_count,
                 similarity_to=s.similarity_to,
-                similarity_score=s.similarity_score
+                similarity_score=s.similarity_score,
             )
             for s in suggestions
         ],
@@ -73,15 +73,17 @@ async def get_cleanup_data(
             videos_not_viewed_30_days=stats.get("videos_not_viewed_30_days", 0),
             potential_duplicates=categories.get("duplicate_content", 0),
             videos_marked_keep=stats.get("videos_marked_keep", 0),
-            reclaimable_bytes=stats.get("reclaimable_bytes", 0)
-        )
+            reclaimable_bytes=stats.get("reclaimable_bytes", 0),
+        ),
     )
 
 
 @router.get("/suggestions", response_model=CleanupSuggestionsResponse)
 async def get_cleanup_suggestions(
     limit: int = Query(50, ge=1, le=200),
-    include_duplicates: bool = Query(True, description="Include potential duplicate detection"),
+    include_duplicates: bool = Query(
+        True, description="Include potential duplicate detection"
+    ),
     auth: AuthDep = None,
 ):
     """
@@ -96,9 +98,7 @@ async def get_cleanup_suggestions(
     service = CleanupService()
 
     suggestions, categories = await service.get_suggestions(
-        user_id=auth.user_id,
-        limit=limit,
-        include_duplicates=include_duplicates
+        user_id=auth.user_id, limit=limit, include_duplicates=include_duplicates
     )
 
     total_reclaimable = sum(s.storage_size for s in suggestions)
@@ -117,13 +117,13 @@ async def get_cleanup_suggestions(
                 last_viewed_at=s.last_viewed_at,
                 view_count=s.view_count,
                 similarity_to=s.similarity_to,
-                similarity_score=s.similarity_score
+                similarity_score=s.similarity_score,
             )
             for s in suggestions
         ],
         total_count=len(suggestions),
         total_reclaimable_bytes=total_reclaimable,
-        categories=categories
+        categories=categories,
     )
 
 
@@ -169,9 +169,16 @@ async def take_cleanup_action(
     elif action.action == "delete":
         # Delete video
         from app.db.supabase_client import get_async_supabase_admin
+
         supabase = await get_async_supabase_admin()
 
-        result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+        result = (
+            await supabase.table("videos")
+            .delete()
+            .eq("id", video_id)
+            .eq("user_id", auth.user_id)
+            .execute()
+        )
 
         if result.data:
             logger.info(f"Deleted video {video_id} via cleanup")
@@ -191,10 +198,7 @@ async def batch_cleanup_action(
     Maximum 100 videos per batch.
     """
     if len(action.video_ids) > 100:
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum 100 videos per batch"
-        )
+        raise HTTPException(status_code=400, detail="Maximum 100 videos per batch")
 
     service = CleanupService()
     results = {"success": [], "failed": []}
@@ -205,8 +209,15 @@ async def batch_cleanup_action(
                 success = await service.mark_keep_forever(video_id, auth.user_id)
             elif action.action == "delete":
                 from app.db.supabase_client import get_async_supabase_admin
+
                 supabase = await get_async_supabase_admin()
-                result = await supabase.table("douyin_videos").delete().eq("id", video_id).eq("user_id", auth.user_id).execute()
+                result = (
+                    await supabase.table("videos")
+                    .delete()
+                    .eq("id", video_id)
+                    .eq("user_id", auth.user_id)
+                    .execute()
+                )
                 success = len(result.data) > 0
             else:  # dismiss
                 success = True
@@ -225,7 +236,7 @@ async def batch_cleanup_action(
         "action": action.action,
         "success_count": len(results["success"]),
         "failed_count": len(results["failed"]),
-        "failed_ids": results["failed"]
+        "failed_ids": results["failed"],
     }
 
 
@@ -271,26 +282,30 @@ async def get_storage_breakdown(auth: AuthDep = None):
     supabase = await get_async_supabase_admin()
 
     # Get all videos with storage info
-    result = await supabase.table("douyin_videos").select(
-        "id, storage_size, aweme_type, created_at"
-    ).eq("user_id", auth.user_id).execute()
+    result = (
+        await supabase.table("videos")
+        .select("id, storage_size, media_type, created_at")
+        .eq("user_id", auth.user_id)
+        .execute()
+    )
 
     videos = result.data
 
     # By type
     by_type = {"video": 0, "image": 0, "other": 0}
     for v in videos:
-        aweme_type = v.get("aweme_type", 0)
+        media_type = v.get("media_type", "video")
         size = v.get("storage_size", 0) or 0
-        if aweme_type in [0, 4, 61]:
+        if media_type in ["video", "special"]:
             by_type["video"] += size
-        elif aweme_type in [2, 68]:
+        elif media_type in ["carousel", "image_text"]:
             by_type["image"] += size
         else:
             by_type["other"] += size
 
     # By month
     from collections import defaultdict
+
     by_month = defaultdict(lambda: {"count": 0, "bytes": 0})
     for v in videos:
         if v.get("created_at"):
@@ -299,15 +314,16 @@ async def get_storage_breakdown(auth: AuthDep = None):
             by_month[month]["bytes"] += v.get("storage_size", 0) or 0
 
     by_month_list = [
-        {"month": k, **v}
-        for k, v in sorted(by_month.items(), reverse=True)
-    ][:12]  # Last 12 months
+        {"month": k, **v} for k, v in sorted(by_month.items(), reverse=True)
+    ][
+        :12
+    ]  # Last 12 months
 
     # Largest videos
     largest = sorted(
         [v for v in videos if v.get("storage_size")],
         key=lambda x: x.get("storage_size", 0),
-        reverse=True
+        reverse=True,
     )[:10]
 
     return {
@@ -315,5 +331,5 @@ async def get_storage_breakdown(auth: AuthDep = None):
         "by_month": by_month_list,
         "largest_videos": largest,
         "total_bytes": sum(v.get("storage_size", 0) or 0 for v in videos),
-        "total_videos": len(videos)
+        "total_videos": len(videos),
     }

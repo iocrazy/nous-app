@@ -10,7 +10,8 @@ API 密钥数据仓储
 import hashlib
 import secrets
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
@@ -74,7 +75,7 @@ class ApiKeyRepository:
         scopes: List[str],
         description: Optional[str] = None,
         expires_at: Optional[datetime] = None,
-        rate_limit: Optional[int] = None
+        rate_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         创建 API 密钥
@@ -103,7 +104,7 @@ class ApiKeyRepository:
             "status": "active",
             "expires_at": expires_at.isoformat() if expires_at else None,
             "rate_limit": rate_limit,
-            "usage_count": 0
+            "usage_count": 0,
         }
 
         try:
@@ -159,9 +160,7 @@ class ApiKeyRepository:
             return None
 
     async def get_user_keys(
-        self,
-        user_id: str,
-        include_revoked: bool = False
+        self, user_id: str, include_revoked: bool = False
     ) -> List[Dict[str, Any]]:
         """
         获取用户的所有 API 密钥
@@ -189,10 +188,7 @@ class ApiKeyRepository:
             return []
 
     async def update(
-        self,
-        key_id: str,
-        user_id: str,
-        data: Dict[str, Any]
+        self, key_id: str, user_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
         更新 API 密钥
@@ -209,11 +205,12 @@ class ApiKeyRepository:
             table = await self._get_table()
             data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-            result = await table.update(data).eq(
-                "key_id", key_id
-            ).eq(
-                "user_id", user_id
-            ).execute()
+            result = (
+                await table.update(data)
+                .eq("key_id", key_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
 
             if result.data:
                 logger.info(f"更新 API 密钥成功: {key_id}")
@@ -237,11 +234,7 @@ class ApiKeyRepository:
         """
         try:
             table = await self._get_table()
-            await table.delete().eq(
-                "key_id", key_id
-            ).eq(
-                "user_id", user_id
-            ).execute()
+            await table.delete().eq("key_id", key_id).eq("user_id", user_id).execute()
 
             logger.info(f"删除 API 密钥成功: {key_id}")
             return True
@@ -273,10 +266,7 @@ class ApiKeyRepository:
         try:
             client = await self._get_client()
             # 使用 RPC 调用原子更新
-            await client.rpc(
-                "increment_api_key_usage",
-                {"p_key_id": key_id}
-            ).execute()
+            await client.rpc("increment_api_key_usage", {"p_key_id": key_id}).execute()
         except Exception as e:
             # 使用统计失败不应影响请求
             logger.warning(f"更新 API 密钥使用统计失败: {e}")
@@ -342,14 +332,12 @@ class ApiKeyRepository:
         """
         try:
             table = await self._get_table()
-            result = await table.select(
-                "*",
-                count="exact"
-            ).eq(
-                "user_id", user_id
-            ).eq(
-                "status", "active"
-            ).execute()
+            result = (
+                await table.select("*", count="exact")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
 
             return result.count or 0
 

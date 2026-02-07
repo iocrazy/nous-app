@@ -29,8 +29,9 @@ docker-compose logs -f mediahub
 | Service | Port | Description |
 |---------|------|-------------|
 | mediahub | 8080 | Main API server |
-| celery-worker | - | Background task executor |
+| celery-worker | - | Background task executor (downloads, parsing, transcription, analysis) |
 | celery-beat | - | Scheduled task scheduler |
+| nginx | 8081 | HLS video streaming server |
 | flower | 5555 | Task monitoring UI |
 | redis | 6379 | Message queue |
 
@@ -42,6 +43,7 @@ docker/
 ├── .env                # Your configuration (not in git)
 ├── config.yml          # Business configuration
 ├── docker-compose.yml  # Main compose file
+├── nginx-hls.conf      # Nginx HLS streaming config
 ├── downloads/          # Downloaded media files
 └── README.md           # This file
 ```

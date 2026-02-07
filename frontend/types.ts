@@ -7,30 +7,38 @@ export enum DownloadStatus {
   SKIPPED = 'SKIPPED'
 }
 
-export interface DouyinBase {
+// AI processing status for transcript/summary/visual analysis
+export type AIStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
+
+export interface Video {
   // Video Identity
-  id?: number;  // Database auto-generated ID (bigint)
-  aweme_id: string;
+  id?: string;  // UUID primary key
+  platform_id: string;
   user_id?: string;
 
+  // Platform info
+  source_platform?: string;  // 'douyin', 'youtube', 'bilibili', 'twitter', 'other'
+  source_url?: string;       // Original user input URL
+  external_id?: string;      // Platform's original ID
+
   // Interaction Data
-  video_digg_count?: number;
-  video_comment_count?: number;
-  video_share_count?: number;
-  video_collect_count?: number;
+  like_count?: number;
+  comment_count?: number;
+  share_count?: number;
+  favorite_count?: number;
 
   // Metadata
-  video_original_url: string;
-  video_duration?: string; // seconds
-  video_resolution?: string;
-  video_datasize?: string; // formatted size string (e.g., "3.15 MB")
-  video_datasize_bytes?: number; // raw size in bytes
-  video_hashtag_name?: string;
-  video_created_time?: string; // datetime string
+  original_url: string;
+  duration?: string; // seconds
+  resolution?: string;
+  datasize?: string; // formatted size string (e.g., "3.15 MB")
+  datasize_bytes?: number; // raw size in bytes
+  hashtags?: string;
+  published_at?: string; // datetime string
   author?: string;
-  video_title?: string;
-  aweme_type?: string;
-  video_desc?: string;
+  title?: string;
+  media_type?: string;
+  description?: string;
 
   // Download Info
   need_download_video?: boolean;
@@ -42,7 +50,7 @@ export interface DouyinBase {
   music_name?: string;
   need_download_music?: boolean;
 
-  // Cover Info (added to match backend schema)
+  // Cover Info
   cover_urls?: string[];
   dynamic_cover_url?: string;
   need_download_cover?: boolean;
@@ -61,16 +69,55 @@ export interface DouyinBase {
   notes?: string;
   tags?: string[];
 
-  // AI Generated Content
+  // AI Generated Content (legacy)
   ai_extract_text?: string;
   ai_rewrite_text?: string;
   ai_analyze_text?: string;
   ai_generated_at?: string;
 
+  // AI Processing Status (new)
+  transcript_status?: AIStatus;
+  summary_status?: AIStatus;
+  visual_analysis_status?: AIStatus;
+  transcript_bool?: boolean;
+  summary_bool?: boolean;
+
+  // HLS Streaming
+  hls_path?: string;
+  media_format?: 'mp4' | 'hls';
+
+  // Summary preview (joined from video_summaries)
+  summary_text?: string;
+
   // Timestamps
   created_at?: string;
   updated_at?: string;
 }
+
+// AI Transcript/Summary Data
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptData {
+  text: string;
+  segments: TranscriptSegment[];
+  language: string;
+  duration: number;
+  created_at: string;
+}
+
+export interface SummaryData {
+  summary: string;
+  key_points: string[];
+  topics: string[];
+  created_at: string;
+}
+
+// Keep backward compatibility alias
+export type DouyinBase = Video;
 
 export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup';
 
@@ -116,7 +163,7 @@ export interface ApiResponse<T = unknown> {
 export interface VideoListResponse {
   success: boolean;
   count: number;
-  videos: DouyinBase[];
+  videos: Video[];
 }
 
 export interface StatisticsResponse {
@@ -221,7 +268,7 @@ export interface SmartCollection {
 }
 
 export interface CollectionCondition {
-  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'aweme_type' | 'view_count';
+  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'media_type' | 'view_count';
   operator: 'equals' | 'contains' | 'starts_with' | 'in' | 'gt' | 'lt' | 'gte' | 'lte';
   value: string | number | string[];
 }
@@ -252,7 +299,7 @@ export interface CleanupSuggestion {
 // Search
 export interface SearchResult {
   video_id: number;
-  aweme_id: string;
+  platform_id: string;
   title: string;
   cover_url: string | null;
   author: string | null;
@@ -266,11 +313,41 @@ export interface SearchResult {
 // Analysis
 export interface VideoAnalysis {
   video_id: number;
-  aweme_id: string;
+  platform_id: string;
   visual_analysis: string | null;
   content_categories: string[];
   detected_objects: string[];
   scene_description: string | null;
   suggested_tags: string[];
   analyzed_at: string | null;
+}
+
+// AI Provider settings
+export interface AIProviderConfig {
+  enabled: boolean;
+  api_key?: string;
+  base_url?: string;
+  models?: string[];
+  selected_model?: string;
+  summary_model?: string;
+  analysis_model?: string;
+}
+
+export interface AISettings {
+  ai_enabled: boolean;
+  auto_transcribe: boolean;
+  auto_summarize: boolean;
+  preferred_language: string;
+  providers: {
+    openai?: AIProviderConfig;
+    deepseek?: AIProviderConfig;
+    doubao?: AIProviderConfig;
+    ollama?: AIProviderConfig;
+    lmstudio?: AIProviderConfig;
+  };
+  task_assignment: {
+    transcription: string;  // provider key
+    summarization: string;
+    visual_analysis: string;
+  };
 }

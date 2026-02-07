@@ -1,9 +1,10 @@
 """Embedding generation service using OpenAI."""
-import os
-from typing import Optional, List
 
-from openai import AsyncOpenAI
+import os
+from typing import List, Optional
+
 from loguru import logger
+from openai import AsyncOpenAI
 
 
 class EmbeddingService:
@@ -12,7 +13,9 @@ class EmbeddingService:
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            logger.warning("OPENAI_API_KEY not set, embedding generation will be disabled")
+            logger.warning(
+                "OPENAI_API_KEY not set, embedding generation will be disabled"
+            )
             self.client = None
         else:
             self.client = AsyncOpenAI(api_key=api_key)
@@ -27,7 +30,9 @@ class EmbeddingService:
         Cost: ~$0.00002 per 1000 tokens
         """
         if not self.client:
-            logger.warning("OpenAI client not initialized, skipping embedding generation")
+            logger.warning(
+                "OpenAI client not initialized, skipping embedding generation"
+            )
             return None
 
         if not text or not text.strip():
@@ -43,9 +48,7 @@ class EmbeddingService:
                 logger.info(f"Truncated text to {max_chars} characters for embedding")
 
             response = await self.client.embeddings.create(
-                model=self.model,
-                input=text,
-                encoding_format="float"
+                model=self.model, input=text, encoding_format="float"
             )
 
             embedding = response.data[0].embedding
@@ -65,7 +68,7 @@ class EmbeddingService:
         visual_description: str = "",
         detected_objects: List[str] = None,
         detected_scenes: List[str] = None,
-        detected_text: str = ""
+        detected_text: str = "",
     ) -> str:
         """
         Build the text content for embedding generation.

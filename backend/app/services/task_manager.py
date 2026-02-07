@@ -11,8 +11,9 @@ Manages download task status in Redis with support for:
 
 import json
 from datetime import datetime
-from typing import Optional, List, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
 
@@ -44,10 +45,7 @@ class TaskManager:
     # ========== Task CRUD ==========
 
     def create_task(
-        self,
-        aweme_id: str,
-        video_title: str,
-        total_size: int = 0
+        self, aweme_id: str, video_title: str, total_size: int = 0
     ) -> Dict[str, Any]:
         """Create a new task with pending status."""
         task = {
@@ -85,7 +83,9 @@ class TaskManager:
             return json.loads(data)
         return None
 
-    def update_task(self, aweme_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_task(
+        self, aweme_id: str, updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Update task fields."""
         task = self.get_task(aweme_id)
         if not task:
@@ -118,38 +118,45 @@ class TaskManager:
 
     # ========== Status Transitions ==========
 
-    def start_download(self, aweme_id: str, total_size: int = 0) -> Optional[Dict[str, Any]]:
+    def start_download(
+        self, aweme_id: str, total_size: int = 0
+    ) -> Optional[Dict[str, Any]]:
         """Transition task to downloading status."""
-        return self.update_task(aweme_id, {
-            "status": TaskStatus.DOWNLOADING.value,
-            "total": total_size,
-            "percent": 0,
-            "downloaded": 0,
-        })
+        return self.update_task(
+            aweme_id,
+            {
+                "status": TaskStatus.DOWNLOADING.value,
+                "total": total_size,
+                "percent": 0,
+                "downloaded": 0,
+            },
+        )
 
     def update_progress(
-        self,
-        aweme_id: str,
-        downloaded: int,
-        total: int,
-        speed: str = "0 B/s"
+        self, aweme_id: str, downloaded: int, total: int, speed: str = "0 B/s"
     ) -> Optional[Dict[str, Any]]:
         """Update download progress."""
         percent = int((downloaded / total) * 100) if total > 0 else 0
-        return self.update_task(aweme_id, {
-            "downloaded": downloaded,
-            "total": total,
-            "percent": percent,
-            "speed": speed,
-        })
+        return self.update_task(
+            aweme_id,
+            {
+                "downloaded": downloaded,
+                "total": total,
+                "percent": percent,
+                "speed": speed,
+            },
+        )
 
     def complete_task(self, aweme_id: str) -> Optional[Dict[str, Any]]:
         """Mark task as completed."""
-        return self.update_task(aweme_id, {
-            "status": TaskStatus.COMPLETED.value,
-            "percent": 100,
-            "error": None,
-        })
+        return self.update_task(
+            aweme_id,
+            {
+                "status": TaskStatus.COMPLETED.value,
+                "percent": 100,
+                "error": None,
+            },
+        )
 
     def fail_task(self, aweme_id: str, error: str) -> Optional[Dict[str, Any]]:
         """Mark task as failed and handle retry logic."""
@@ -161,18 +168,24 @@ class TaskManager:
 
         if retry_count < self.MAX_RETRIES:
             # Will be retried
-            return self.update_task(aweme_id, {
-                "status": TaskStatus.FAILED.value,
-                "retry_count": retry_count,
-                "error": error,
-            })
+            return self.update_task(
+                aweme_id,
+                {
+                    "status": TaskStatus.FAILED.value,
+                    "retry_count": retry_count,
+                    "error": error,
+                },
+            )
         else:
             # Max retries reached, permanent failure
-            return self.update_task(aweme_id, {
-                "status": TaskStatus.FAILED.value,
-                "retry_count": retry_count,
-                "error": f"Max retries reached. Last error: {error}",
-            })
+            return self.update_task(
+                aweme_id,
+                {
+                    "status": TaskStatus.FAILED.value,
+                    "retry_count": retry_count,
+                    "error": f"Max retries reached. Last error: {error}",
+                },
+            )
 
     def can_retry(self, aweme_id: str) -> bool:
         """Check if task can be retried."""
@@ -183,22 +196,28 @@ class TaskManager:
 
     def reset_for_retry(self, aweme_id: str) -> Optional[Dict[str, Any]]:
         """Reset task for manual retry (keeps retry_count)."""
-        return self.update_task(aweme_id, {
-            "status": TaskStatus.PENDING.value,
-            "percent": 0,
-            "downloaded": 0,
-            "error": None,
-        })
+        return self.update_task(
+            aweme_id,
+            {
+                "status": TaskStatus.PENDING.value,
+                "percent": 0,
+                "downloaded": 0,
+                "error": None,
+            },
+        )
 
     def force_retry(self, aweme_id: str) -> Optional[Dict[str, Any]]:
         """Force retry task (resets retry_count)."""
-        return self.update_task(aweme_id, {
-            "status": TaskStatus.PENDING.value,
-            "percent": 0,
-            "downloaded": 0,
-            "retry_count": 0,
-            "error": None,
-        })
+        return self.update_task(
+            aweme_id,
+            {
+                "status": TaskStatus.PENDING.value,
+                "percent": 0,
+                "downloaded": 0,
+                "retry_count": 0,
+                "error": None,
+            },
+        )
 
     # ========== Statistics ==========
 
@@ -248,14 +267,13 @@ class TaskManager:
 
     def get_all_task_ids(self) -> List[str]:
         """Get all task IDs."""
-        return [id.decode() if isinstance(id, bytes) else id
-                for id in self.redis.smembers(self.TASK_LIST_KEY)]
+        return [
+            id.decode() if isinstance(id, bytes) else id
+            for id in self.redis.smembers(self.TASK_LIST_KEY)
+        ]
 
     def get_tasks(
-        self,
-        status: Optional[TaskStatus] = None,
-        limit: int = 50,
-        offset: int = 0
+        self, status: Optional[TaskStatus] = None, limit: int = 50, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get tasks with optional status filter."""
         all_ids = self.get_all_task_ids()
@@ -270,7 +288,7 @@ class TaskManager:
         # Sort by updated_at descending
         tasks.sort(key=lambda t: t.get("updated_at", ""), reverse=True)
 
-        return tasks[offset:offset + limit]
+        return tasks[offset : offset + limit]
 
     def get_failed_tasks(self) -> List[Dict[str, Any]]:
         """Get all failed tasks."""
@@ -317,5 +335,6 @@ def get_task_manager() -> TaskManager:
     global _task_manager
     if _task_manager is None:
         from app.celery_app import celery_app
+
         _task_manager = TaskManager(celery_app.backend.client)
     return _task_manager
