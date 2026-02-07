@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.tasks.download_tasks",
         "app.tasks.parse_tasks",
         "app.tasks.scheduled_tasks",
+        "app.tasks.ai_tasks",
     ]
 )
 
@@ -43,6 +44,13 @@ celery_app.conf.update(
 
     # 结果配置
     result_expires=3600,  # 结果保留 1 小时
+
+    # AI task queue routing
+    task_routes={
+        "app.tasks.ai_tasks.extract_audio_task": {"queue": "transcription"},
+        "app.tasks.ai_tasks.transcribe_audio_task": {"queue": "transcription"},
+        "app.tasks.ai_tasks.generate_summary_task": {"queue": "analysis"},
+    },
 
     # 定时任务调度（Celery Beat）
     beat_schedule={

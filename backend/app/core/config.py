@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = Field(default="gpt-4o", description="OpenAI model for visual analysis")
     OPENAI_EMBEDDING_MODEL: str = Field(default="text-embedding-3-small", description="OpenAI embedding model")
 
+    # ============================================
+    # AI Provider Configuration
+    # ============================================
+    DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")
+    DOUBAO_API_KEY: str = Field(default="", description="Doubao API Key")
+    WHISPER_PROVIDER: str = Field(default="openai_api", description="Whisper provider: openai_api or local")
+    AI_DEFAULT_SUMMARY_MODEL: str = Field(default="gpt-4o-mini", description="Default LLM model for summaries")
+    AI_DEFAULT_ANALYSIS_MODEL: str = Field(default="gpt-4o", description="Default LLM model for visual analysis")
+
     model_config = SettingsConfigDict(
         env_file=str(ROOT_DIR / '.env'),
         env_file_encoding='utf-8',

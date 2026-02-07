@@ -19,8 +19,10 @@ import {
   Sparkles,
   FileText,
   Search,
+  AlertCircle,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig } from '../types';
+import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
 
 interface AISettingsProps {
   settings: AISettingsType;
@@ -142,6 +144,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [connectionError, setConnectionError] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Toggle AI globally
   const toggleAIEnabled = () => {
@@ -222,37 +225,62 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }));
   };
 
-  // Test connection for local providers
+  // Test connection - uses backend API for cloud providers, direct for local
   const testConnection = useCallback(async (providerKey: string) => {
     const provider = localSettings.providers[providerKey as keyof typeof localSettings.providers];
-    if (!provider?.base_url) return;
+    if (!provider) return;
+
+    const meta = PROVIDER_META[providerKey];
+    const isLocal = meta?.isLocal || false;
 
     setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'testing' }));
     setConnectionError((prev) => ({ ...prev, [providerKey]: '' }));
 
     try {
-      const url = `${provider.base_url.replace(/\/+$/, '')}/v1/models`;
-      const response = await fetch(url, {
-        method: 'GET',
-        signal: AbortSignal.timeout(10000),
-      });
+      if (isLocal) {
+        // Direct connection test for local providers
+        if (!provider.base_url) return;
+        const url = `${provider.base_url.replace(/\/+$/, '')}/v1/models`;
+        const response = await fetch(url, {
+          method: 'GET',
+          signal: AbortSignal.timeout(10000),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        // Attempt to extract model names from the response
-        if (data?.data && Array.isArray(data.data)) {
-          const modelIds = data.data.map((m: { id: string }) => m.id);
-          if (modelIds.length > 0) {
-            updateProviderField(providerKey, 'models', modelIds);
-            if (!provider.selected_model || !modelIds.includes(provider.selected_model)) {
-              updateProviderField(providerKey, 'selected_model', modelIds[0]);
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.data && Array.isArray(data.data)) {
+            const modelIds = data.data.map((m: { id: string }) => m.id);
+            if (modelIds.length > 0) {
+              updateProviderField(providerKey, 'models', modelIds);
+              if (!provider.selected_model || !modelIds.includes(provider.selected_model)) {
+                updateProviderField(providerKey, 'selected_model', modelIds[0]);
+              }
             }
           }
+          setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
+        } else {
+          setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
+          setConnectionError((prev) => ({ ...prev, [providerKey]: `Server responded with status ${response.status}` }));
         }
-        setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
       } else {
-        setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-        setConnectionError((prev) => ({ ...prev, [providerKey]: `Server responded with status ${response.status}` }));
+        // Use backend API for cloud providers
+        const result = await testAIConnectionApi(providerKey, {
+          base_url: provider.base_url,
+          api_key: provider.api_key,
+        });
+
+        if (result.success) {
+          if (result.models && result.models.length > 0) {
+            updateProviderField(providerKey, 'models', result.models);
+            if (!provider.selected_model || !result.models.includes(provider.selected_model)) {
+              updateProviderField(providerKey, 'selected_model', result.models[0]);
+            }
+          }
+          setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
+        } else {
+          setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
+          setConnectionError((prev) => ({ ...prev, [providerKey]: result.error || 'Connection failed' }));
+        }
       }
     } catch (err) {
       setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
@@ -263,14 +291,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }
   }, [localSettings.providers]);
 
-  // Save handler
-  const handleSave = () => {
+  // Save handler - persists to API then updates local state
+  const handleSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(null);
     try {
+      await saveAISettingsApi(localSettings);
       onSave(localSettings);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
       setIsSaving(false);
     }
@@ -593,8 +625,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       </div>
                     )}
 
-                    {/* Test Connection button for local providers */}
-                    {isLocal && (
+                    {/* Test Connection button */}
+                    {(isLocal || config.api_key) && (
                       <div className="pt-1">
                         <button
                           onClick={() => testConnection(providerKey)}
@@ -715,7 +747,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       </section>
 
       {/* Save Button */}
-      <div className="flex justify-end pt-2 pb-4">
+      <div className="flex flex-col items-end gap-2 pt-2 pb-4">
+        {saveError && (
+          <div className="flex items-center gap-2 text-sm text-red-400">
+            <AlertCircle size={14} />
+            {saveError}
+          </div>
+        )}
         <button
           onClick={handleSave}
           disabled={isSaving}

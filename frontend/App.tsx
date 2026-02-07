@@ -44,6 +44,7 @@ import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
 import { TeamLibraryView } from './components/TeamLibraryView';
 import { SettingsModal } from './components/SettingsModal';
+import { VideoDetailPanel } from './components/VideoDetailPanel';
 import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
 
 // --- Types for Monitor ---
@@ -2208,10 +2209,10 @@ export default function App() {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
             
             {selectedLibraryItem ? (
-              // DETAIL VIEW
+              // DETAIL VIEW - VideoDetailPanel with tabs
               <div className="flex flex-col h-full p-4 md:p-0">
                  <div className="flex items-center gap-3 mb-4 shrink-0">
-                    <button 
+                    <button
                       onClick={() => setSelectedLibraryItem(null)}
                       className="p-2 -ml-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
                     >
@@ -2220,8 +2221,9 @@ export default function App() {
                     <h2 className="text-xl font-bold text-white">Media Details</h2>
                  </div>
                  <div className="flex-1 min-h-0">
-                    <MediaCard
-                      data={selectedLibraryItem}
+                    <VideoDetailPanel
+                      video={selectedLibraryItem}
+                      onClose={() => setSelectedLibraryItem(null)}
                       onUpdate={handleUpdateLibraryItem}
                       onDelete={handleDeleteLibraryItem}
                       collections={collections}

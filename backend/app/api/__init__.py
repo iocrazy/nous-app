@@ -22,6 +22,8 @@ from app.api.cleanup_router import router as cleanup_router
 from app.api.logs_router import router as logs_router
 from app.api.system_router import router as system_router
 from app.api.tasks_router import router as tasks_management_router
+from app.api.ai_settings_router import router as ai_settings_router
+from app.api.ai_router import router as ai_pipeline_router
 
 api_router = APIRouter()
 
@@ -98,4 +100,14 @@ api_router.include_router(
 api_router.include_router(
     router=tasks_management_router,
     tags=["Tasks"]
+)
+
+api_router.include_router(
+    router=ai_settings_router,
+    tags=["AI"]
+)
+
+api_router.include_router(
+    router=ai_pipeline_router,
+    tags=["AI"]
 )

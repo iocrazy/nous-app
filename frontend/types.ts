@@ -94,6 +94,28 @@ export interface Video {
   updated_at?: string;
 }
 
+// AI Transcript/Summary Data
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptData {
+  text: string;
+  segments: TranscriptSegment[];
+  language: string;
+  duration: number;
+  created_at: string;
+}
+
+export interface SummaryData {
+  summary: string;
+  key_points: string[];
+  topics: string[];
+  created_at: string;
+}
+
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 

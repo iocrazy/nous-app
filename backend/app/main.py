@@ -91,6 +91,10 @@ tags_metadata = [
         "name": "Cleanup",
         "description": "Storage cleanup suggestions based on viewing patterns and duplicates.",
     },
+    {
+        "name": "AI",
+        "description": "AI provider settings, connection testing, and model management.",
+    },
 ]
 
 app = FastAPI(

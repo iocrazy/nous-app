@@ -13,6 +13,7 @@ from loguru import logger
 
 from app.services.downloader import DownloaderService
 from app.core.enums import DownloadStatus
+from app.core.utils import Utils
 
 
 def run_async(coro):
@@ -30,6 +31,38 @@ def run_async(coro):
     except RuntimeError:
         # No event loop, create new one
         return asyncio.run(coro)
+
+
+def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
+    """Chain AI tasks after download if user has auto-transcribe/summarize enabled."""
+    try:
+        from app.repositories.user_settings_repository import UserSettingsRepository
+
+        repo = UserSettingsRepository()
+        settings = run_async(repo.get_by_user_id(user_id))
+
+        ai_settings = {}
+        if settings and settings.get("settings_json"):
+            ai_settings = settings["settings_json"].get("ai_settings", {})
+
+        transcript_bool = ai_settings.get("auto_transcribe", False)
+        summary_bool = ai_settings.get("auto_summarize", False)
+
+        if not transcript_bool and not summary_bool:
+            logger.info(f"[AI] Auto-transcribe/summarize disabled for user {user_id}, skipping AI pipeline")
+            return
+
+        from app.tasks.ai_tasks import chain_ai_pipeline
+        chain_ai_pipeline(
+            platform_id=platform_id,
+            user_id=user_id,
+            transcript_bool=transcript_bool,
+            summary_bool=summary_bool,
+        )
+        logger.info(f"[AI] Pipeline chained after download: {platform_id} (transcribe={transcript_bool}, summarize={summary_bool})")
+
+    except Exception as e:
+        logger.warning(f"[AI] Failed to chain AI pipeline for {platform_id}: {e}")
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
@@ -154,6 +187,10 @@ def download_media_task(
                 task_manager.complete_task(platform_id)
                 tracker.complete()
                 logger.success(f"[Celery] Download task completed: {platform_id}")
+
+                # Chain AI pipeline if user has auto-transcribe enabled
+                _maybe_chain_ai_pipeline(platform_id, user_id)
+
                 return {
                     "status": "success",
                     "platform_id": platform_id,
@@ -266,6 +303,128 @@ class DownloadProgressTrackerWithTaskManager:
             3600,
             json.dumps(progress_data)
         )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def download_ytdlp_task(
+    self,
+    url: str,
+    platform_id: str,
+    user_id: str,
+    download_video: bool = True,
+    download_music: bool = False,
+    download_cover: bool = True,
+    video_title: str = "undefined",
+):
+    """
+    Celery task for downloading media via yt-dlp (non-Douyin platforms).
+
+    Args:
+        url: Original video URL
+        platform_id: Video platform ID
+        user_id: User ID
+        download_video: Whether to download video
+        download_music: Whether to download audio
+        download_cover: Whether to download cover (thumbnail)
+        video_title: Video title for logging
+
+    Returns:
+        dict: Download result
+    """
+    task_id = self.request.id
+    logger.info(f"[Celery/yt-dlp] Starting download task {task_id} for {platform_id}")
+
+    # Initialize TaskManager
+    from app.services.task_manager import get_task_manager
+    task_manager = get_task_manager()
+
+    task = task_manager.get_task(platform_id)
+    if not task:
+        task = task_manager.create_task(platform_id, video_title)
+
+    task_manager.start_download(platform_id)
+
+    try:
+        from app.services.ytdlp_service import YtdlpService
+        from app.repositories.video_repository import VideoRepository
+
+        results = {"video": None, "music": None, "cover": None}
+
+        storage_dir, relative_month = Utils.create_download_folder()
+
+        repo_class = VideoRepository
+
+        if download_video:
+            logger.info(f"[Celery/yt-dlp] Downloading video: {platform_id}")
+            result = run_async(
+                YtdlpService.download_video(url, str(storage_dir), platform_id)
+            )
+            if result.get("file_path"):
+                import os
+                file_name = os.path.basename(result["file_path"])
+                relative_path = f"{relative_month}/{file_name}"
+                repo = repo_class()
+                run_async(repo.mark_video_as_downloaded(
+                    platform_id=platform_id,
+                    download_path=relative_path,
+                    duration=0,
+                    storage_size=result.get("file_size", 0),
+                ))
+                # Optimize for streaming
+                run_async(DownloaderService.optimize_video_for_streaming(result["file_path"]))
+                results["video"] = DownloadStatus.COMPLETED.value
+            else:
+                results["video"] = DownloadStatus.FAILED.value
+
+        if download_music:
+            logger.info(f"[Celery/yt-dlp] Extracting audio: {platform_id}")
+            result = run_async(
+                YtdlpService.download_audio(url, str(storage_dir), platform_id)
+            )
+            if result.get("file_path"):
+                repo = repo_class()
+                run_async(repo.mark_music_as_downloaded(platform_id))
+                results["music"] = DownloadStatus.COMPLETED.value
+            else:
+                results["music"] = DownloadStatus.FAILED.value
+
+        # For cover: download thumbnail from metadata
+        if download_cover:
+            logger.info(f"[Celery/yt-dlp] Downloading cover: {platform_id}")
+            repo = repo_class()
+            run_async(
+                DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id)
+            )
+            results["cover"] = "attempted"
+
+        task_manager.complete_task(platform_id)
+        logger.success(f"[Celery/yt-dlp] Download task completed: {platform_id}")
+
+        # Chain AI pipeline if user has auto-transcribe enabled
+        _maybe_chain_ai_pipeline(platform_id, user_id)
+
+        return {
+            "status": "success",
+            "platform_id": platform_id,
+            "results": results,
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[Celery/yt-dlp] Download task failed: {platform_id}, error: {error_msg}")
+
+        task_manager.fail_task(platform_id, error_msg)
+
+        if self.request.retries < self.max_retries:
+            countdown = 30 * (2 ** self.request.retries)
+            logger.info(f"[Celery/yt-dlp] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s")
+            raise self.retry(exc=e, countdown=countdown)
+
+        return {
+            "status": "failed",
+            "platform_id": platform_id,
+            "error": error_msg,
+        }
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)

@@ -26,6 +26,8 @@ from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
 from app.services.video_service import VideoService
+from app.services.url_router import URLRouter
+from app.services.ytdlp_service import YtdlpService
 
 
 router = APIRouter(prefix="/videos")
@@ -98,6 +100,26 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             raise HTTPException(status_code=400, detail="Cannot extract a valid link from input")
 
         logger.info(f"User {auth.user_id} starting video fetch: {url}")
+
+        # Detect platform and handler type
+        platform, handler_type = URLRouter.detect_platform(url)
+        logger.info(f"[URLRouter] Platform: {platform}, Handler: {handler_type}")
+
+        # ==========================================
+        # Non-Douyin path: use yt-dlp
+        # ==========================================
+        if handler_type == "ytdlp":
+            return await _handle_ytdlp_fetch(
+                url=url,
+                platform=platform,
+                request=request,
+                background_tasks=background_tasks,
+                auth=auth,
+            )
+
+        # ==========================================
+        # Douyin path: existing flow
+        # ==========================================
 
         # If using Celery async tasks
         if request.use_celery:
@@ -927,6 +949,170 @@ async def get_user_logs(
     except Exception as e:
         logger.error(f"Failed to get user logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user logs")
+
+
+async def _handle_ytdlp_fetch(
+    url: str,
+    platform: str,
+    request: VideoFetchRequest,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
+) -> dict:
+    """
+    Handle video fetch for non-Douyin platforms via yt-dlp.
+
+    Fetches metadata, saves to database, and dispatches download tasks.
+    """
+    # Step 1: Fetch metadata via yt-dlp
+    try:
+        ytdlp_info = await YtdlpService.fetch_metadata(url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Step 2: Map yt-dlp metadata to our Video schema
+    parsed_data = YtdlpService._map_metadata_to_video(ytdlp_info, url)
+
+    platform_id = parsed_data["platform_id"]
+    video_title = parsed_data.get("title", "")
+
+    # Add user-specific fields
+    parsed_data["user_id"] = auth.user_id
+    parsed_data["need_download_video"] = request.video_bool
+    parsed_data["need_download_music"] = request.music_bool
+    parsed_data["need_download_cover"] = request.cover_bool
+
+    # Step 3: Save metadata to database
+    save_result = await VideoService.save_metadata_only(platform_id, parsed_data)
+    if not save_result.get("success"):
+        logger.error(f"Failed to save metadata: {save_result.get('message')}")
+        raise HTTPException(status_code=500, detail=save_result.get("message", "Failed to save metadata"))
+
+    # Step 4: Dispatch download tasks
+    download_task_id = None
+    need_download = request.video_bool or request.music_bool or request.cover_bool
+
+    if need_download:
+        # Try Celery first, fallback to FastAPI background tasks
+        try:
+            from app.tasks.download_tasks import download_ytdlp_task
+            from app.celery_app import celery_app
+
+            workers = celery_app.control.ping(timeout=1)
+            if not workers:
+                raise RuntimeError("No Celery workers available")
+
+            download_task = download_ytdlp_task.delay(
+                url=url,
+                platform_id=platform_id,
+                user_id=auth.user_id,
+                download_video=request.video_bool,
+                download_music=request.music_bool,
+                download_cover=request.cover_bool,
+                video_title=video_title[:50] if video_title else "undefined",
+            )
+            download_task_id = download_task.id
+            logger.info(f"[yt-dlp] Celery download task submitted: {download_task_id}")
+
+        except Exception as celery_err:
+            logger.warning(f"Celery unavailable for yt-dlp download, using background tasks: {celery_err}")
+
+            async def _ytdlp_background_download(
+                url: str,
+                platform_id: str,
+                user_id: str,
+                download_video: bool,
+                download_music: bool,
+            ):
+                """Background task for yt-dlp download"""
+                from app.core.utils import Utils
+                from app.repositories.video_repository import VideoRepository
+                from app.core.enums import DownloadStatus
+                from app.services.downloader import DownloaderService
+
+                repo = VideoRepository()
+                storage_dir, relative_month = Utils.create_download_folder()
+
+                try:
+                    if download_video:
+                        result = await YtdlpService.download_video(
+                            url, str(storage_dir), platform_id
+                        )
+                        if result.get("file_path"):
+                            file_name = os.path.basename(result["file_path"])
+                            relative_path = f"{relative_month}/{file_name}"
+                            await repo.mark_video_as_downloaded(
+                                platform_id=platform_id,
+                                download_path=relative_path,
+                                duration=0,
+                                storage_size=result.get("file_size", 0),
+                            )
+                            # Optimize for streaming
+                            await DownloaderService.optimize_video_for_streaming(result["file_path"])
+
+                    if download_music:
+                        result = await YtdlpService.download_audio(
+                            url, str(storage_dir), platform_id
+                        )
+                        if result.get("file_path"):
+                            await repo.mark_music_as_downloaded(platform_id)
+
+                except Exception as e:
+                    logger.error(f"[yt-dlp] Background download failed: {e}")
+                    await repo.update(platform_id, {
+                        "video_download_status": DownloadStatus.FAILED.value,
+                        "error_message": str(e)[:500],
+                    }, user_id=user_id)
+
+            import os
+            background_tasks.add_task(
+                _ytdlp_background_download,
+                url, platform_id, auth.user_id,
+                request.video_bool, request.music_bool,
+            )
+            logger.info(f"[yt-dlp] FastAPI background download tasks added: {platform_id}")
+
+    # Log action
+    background_tasks.add_task(
+        log_user_action,
+        user_id=auth.user_id,
+        action="fetch",
+        message=f"Video parsed via yt-dlp ({platform}): {video_title[:30]}...",
+        status="success",
+        aweme_id=platform_id,
+    )
+
+    # Handle datetime objects to string
+    published_at = parsed_data.get("published_at")
+    if published_at and hasattr(published_at, "isoformat"):
+        published_at = published_at.isoformat()
+
+    return {
+        "success": True,
+        "message": "Video processing task submitted",
+        "parse_method": "ytdlp",
+        "parse_method_name": f"yt-dlp ({platform})",
+        "fallback_used": False,
+        "fallback_reason": None,
+        "id": save_result.get("id"),
+        "platform_id": platform_id,
+        "title": parsed_data.get("title"),
+        "author": parsed_data.get("author"),
+        "media_type": parsed_data.get("media_type"),
+        "video_download_urls": parsed_data.get("video_download_urls", []),
+        "cover_urls": parsed_data.get("cover_urls", []),
+        "image_download_urls": [],
+        "like_count": parsed_data.get("like_count", 0),
+        "comment_count": parsed_data.get("comment_count", 0),
+        "share_count": parsed_data.get("share_count", 0),
+        "favorite_count": parsed_data.get("favorite_count", 0),
+        "duration": parsed_data.get("duration", "0"),
+        "published_at": published_at,
+        "description": parsed_data.get("description"),
+        "original_url": parsed_data.get("original_url"),
+        "resolution": parsed_data.get("resolution"),
+        "video_download_status": "PENDING",
+        "download_task_id": download_task_id,
+    }
 
 
 # ============================================
