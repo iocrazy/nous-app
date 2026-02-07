@@ -1,0 +1,89 @@
+# CI - Pull Request Quality Checks
+# Runs on every PR to master: frontend build, backend lint, Rust check
+
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (includes TypeScript check)
+        run: npm run build
+
+  backend:
+    name: Backend Lint & Deps
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Check code formatting (black)
+        run: uv run black --check app/
+
+      - name: Check import ordering (isort)
+        run: uv run isort --check-only app/
+
+      - name: Lint (flake8)
+        run: uv run flake8 app/ --max-line-length 120 --exclude __pycache__
+
+  rust:
+    name: Rust Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mediahub-core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mediahub-core
+
+      - name: Check compilation
+        run: cargo check
+
+      - name: Clippy lint
+        run: cargo clippy -- -D warnings
