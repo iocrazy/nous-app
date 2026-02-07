@@ -10,14 +10,14 @@ Celery 任务模块
 """
 
 from app.tasks.download_tasks import (
-    download_video_task,
+    download_cover_task,
     download_images_task,
     download_music_task,
-    download_cover_task,
+    download_video_task,
 )
 from app.tasks.parse_tasks import (
-    parse_single_link_task,
     parse_batch_links_task,
+    parse_single_link_task,
 )
 from app.tasks.scheduled_tasks import (
     cleanup_temp_files,

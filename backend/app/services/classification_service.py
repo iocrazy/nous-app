@@ -1,6 +1,7 @@
 """Content classification service using keyword matching and AI."""
-from typing import Optional, List, Tuple
+
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 from loguru import logger
 
@@ -10,6 +11,7 @@ from app.repositories.tags_repository import TagsRepository
 @dataclass
 class ClassificationResult:
     """Result of content classification."""
+
     primary_tag: str
     confidence: float
     secondary_tag: Optional[str] = None
@@ -19,11 +21,32 @@ class ClassificationResult:
 # Keyword mapping for auto-classification
 KEYWORD_MAPPING = {
     "Food": {
-        "keywords_cn": ["美食", "做饭", "菜谱", "厨房", "吃", "烹饪", "料理", "食材", "炒菜", "烘焙"],
+        "keywords_cn": [
+            "美食",
+            "做饭",
+            "菜谱",
+            "厨房",
+            "吃",
+            "烹饪",
+            "料理",
+            "食材",
+            "炒菜",
+            "烘焙",
+        ],
         "keywords_en": ["food", "cook", "recipe", "kitchen", "eat", "dish", "meal"],
     },
     "Tutorial": {
-        "keywords_cn": ["教程", "教学", "学习", "怎么", "如何", "教你", "学会", "技巧", "方法"],
+        "keywords_cn": [
+            "教程",
+            "教学",
+            "学习",
+            "怎么",
+            "如何",
+            "教你",
+            "学会",
+            "技巧",
+            "方法",
+        ],
         "keywords_en": ["tutorial", "learn", "how to", "guide", "tips", "lesson"],
     },
     "Comedy": {
@@ -80,7 +103,7 @@ class ClassificationService:
     def classify_by_keywords(
         title: str,
         description: Optional[str] = None,
-        original_tags: Optional[List[str]] = None
+        original_tags: Optional[List[str]] = None,
     ) -> ClassificationResult:
         """
         Classify content using keyword matching.
@@ -116,9 +139,7 @@ class ClassificationService:
 
         if not scores:
             return ClassificationResult(
-                primary_tag="Other",
-                confidence=0.3,
-                source="auto"
+                primary_tag="Other", confidence=0.3, source="auto"
             )
 
         # Sort by score descending
@@ -139,7 +160,7 @@ class ClassificationService:
             primary_tag=primary[0],
             confidence=round(confidence, 2),
             secondary_tag=secondary[0] if secondary else None,
-            source="auto"
+            source="auto",
         )
 
     @staticmethod
@@ -148,16 +169,14 @@ class ClassificationService:
         title: str,
         description: Optional[str] = None,
         original_tags: Optional[List[str]] = None,
-        min_confidence: float = 0.3
+        min_confidence: float = 0.3,
     ) -> List[dict]:
         """
         Automatically tag a video based on its content.
         Returns list of tags added.
         """
         result = ClassificationService.classify_by_keywords(
-            title=title,
-            description=description,
-            original_tags=original_tags
+            title=title, description=description, original_tags=original_tags
         )
 
         added_tags = []
@@ -171,29 +190,31 @@ class ClassificationService:
                 video_id=video_id,
                 tag_id=primary_tag["id"],
                 confidence=result.confidence,
-                source=result.source
+                source=result.source,
             )
-            added_tags.append({
-                "tag": primary_tag,
-                "confidence": result.confidence
-            })
-            logger.info(f"Auto-tagged video {video_id} as '{result.primary_tag}' (confidence: {result.confidence})")
+            added_tags.append({"tag": primary_tag, "confidence": result.confidence})
+            logger.info(
+                f"Auto-tagged video {video_id} as '{result.primary_tag}' (confidence: {result.confidence})"
+            )
 
         # Add secondary tag if confidence is reasonable
         if result.secondary_tag and result.confidence >= 0.5:
             secondary_tag = await repo.get_tag_by_name(result.secondary_tag)
             if secondary_tag:
-                secondary_confidence = round(result.confidence * 0.7, 2)  # Lower confidence for secondary
+                secondary_confidence = round(
+                    result.confidence * 0.7, 2
+                )  # Lower confidence for secondary
                 await repo.add_tag_to_video(
                     video_id=video_id,
                     tag_id=secondary_tag["id"],
                     confidence=secondary_confidence,
-                    source=result.source
+                    source=result.source,
                 )
-                added_tags.append({
-                    "tag": secondary_tag,
-                    "confidence": secondary_confidence
-                })
-                logger.info(f"Auto-tagged video {video_id} with secondary tag '{result.secondary_tag}'")
+                added_tags.append(
+                    {"tag": secondary_tag, "confidence": secondary_confidence}
+                )
+                logger.info(
+                    f"Auto-tagged video {video_id} with secondary tag '{result.secondary_tag}'"
+                )
 
         return added_tags

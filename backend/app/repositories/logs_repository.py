@@ -1,10 +1,11 @@
 """Repository for User Logs data access."""
 
-from typing import Optional, List
-from datetime import datetime, date
+from datetime import date, datetime
+from typing import List, Optional
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from loguru import logger
 
 
 class LogsRepository:
@@ -34,7 +35,7 @@ class LogsRepository:
         end_date: Optional[date] = None,
         search: Optional[str] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
     ) -> tuple[List[dict], int]:
         """
         Get user logs with filtering and pagination.
@@ -89,7 +90,9 @@ class LogsRepository:
 
         # Apply pagination and ordering
         offset = (page - 1) * page_size
-        query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
+        query = query.order("created_at", desc=True).range(
+            offset, offset + page_size - 1
+        )
 
         result = await query.execute()
 
@@ -102,7 +105,7 @@ class LogsRepository:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         search: Optional[str] = None,
-        limit: int = 10000
+        limit: int = 10000,
     ) -> List[dict]:
         """
         Get all logs matching filters for export (no pagination).
@@ -144,7 +147,7 @@ class LogsRepository:
         message: str,
         status: str = "info",
         aweme_id: Optional[str] = None,
-        details: Optional[dict] = None
+        details: Optional[dict] = None,
     ) -> dict:
         """
         Create a new log entry.
@@ -166,7 +169,7 @@ class LogsRepository:
             "user_id": user_id,
             "action": action,
             "message": message,
-            "status": status
+            "status": status,
         }
 
         if aweme_id:
@@ -179,9 +182,7 @@ class LogsRepository:
         return result.data[0] if result.data else None
 
     async def delete_logs(
-        self,
-        user_id: str,
-        before_date: Optional[date] = None
+        self, user_id: str, before_date: Optional[date] = None
     ) -> int:
         """
         Delete logs for a user, optionally before a specific date.

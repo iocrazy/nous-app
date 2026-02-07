@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserSettings, ApiKey } from '../types';
+import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
+import AISettings from './AISettings';
 import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle, Eye, EyeOff
@@ -14,17 +15,19 @@ import * as apiKeyService from '../services/apiKeyService';
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai';
+  aiSettings?: AISettingsType;
+  onSaveAISettings?: (settings: AISettingsType) => void;
 }
 
 // Default scopes (will be overwritten by backend scopes if available)
 const DEFAULT_SCOPES = [
-  'douyin:fetch',
-  'douyin:fetch:batch',
-  'douyin:videos:read',
-  'douyin:videos:write',
-  'douyin:videos:delete',
-  'douyin:statistics:read',
+  'videos:fetch',
+  'videos:fetch:batch',
+  'videos:read',
+  'videos:write',
+  'videos:delete',
+  'videos:statistics:read',
   'tags:read',
   'tags:write',
   'tags:delete',
@@ -36,7 +39,7 @@ const DEFAULT_SCOPES = [
   'system:read',
 ];
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings }) => {
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -671,37 +674,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                  <div className="grid gap-2 text-sm">
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/fetch</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/fetch</code>
                        <span className="text-zinc-500 text-xs">Parse single video link</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/fetch/batch</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/fetch/batch</code>
                        <span className="text-zinc-500 text-xs">Batch parse multiple links</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/videos</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos</code>
                        <span className="text-zinc-500 text-xs">List all videos (paginated)</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/videos/{'{id}'}</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos/{'{id}'}</code>
                        <span className="text-zinc-500 text-xs">Get video details by ID</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs font-mono">DELETE</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/videos/{'{id}'}</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos/{'{id}'}</code>
                        <span className="text-zinc-500 text-xs">Delete a video</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/retry/{'{id}'}</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/retry/{'{id}'}</code>
                        <span className="text-zinc-500 text-xs">Retry failed download</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/douyin/statistics</code>
+                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/statistics</code>
                        <span className="text-zinc-500 text-xs">Get download statistics</span>
                     </div>
                  </div>
@@ -823,6 +826,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Tags Tab */}
       {activeTab === 'tags' && (
         <TagsSettings />
+      )}
+
+      {/* AI Tab */}
+      {activeTab === 'ai' && aiSettings && onSaveAISettings && (
+        <AISettings settings={aiSettings} onSave={onSaveAISettings} />
       )}
 
       {/* Wave animation keyframes */}

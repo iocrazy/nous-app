@@ -1,19 +1,18 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 import uvicorn
-from fastapi import FastAPI, Security
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
-
 
 from app.api import api_router
 from app.core.config import settings
-from app.services.douyin_analysis import DouyinAnalysis
 from app.core.utils import Utils
-
+from app.services.douyin_analysis import DouyinAnalysis
 
 # 在应用启动前设置日志
 Utils.setup_logging()
@@ -44,6 +43,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"关闭抖音解析下载服务时出错: {str(e)}")
 
     logger.info(f"{settings.APP_NAME}关闭成功")
+
 
 # API 分组标签元数据
 tags_metadata = [
@@ -91,6 +91,10 @@ tags_metadata = [
         "name": "Cleanup",
         "description": "Storage cleanup suggestions based on viewing patterns and duplicates.",
     },
+    {
+        "name": "AI",
+        "description": "AI provider settings, connection testing, and model management.",
+    },
 ]
 
 app = FastAPI(
@@ -134,14 +138,14 @@ def custom_openapi():
             "type": "apiKey",
             "in": "header",
             "name": "X-API-Key",
-            "description": "API 密钥认证。在前端「API 密钥」页面创建密钥后使用。"
+            "description": "API 密钥认证。在前端「API 密钥」页面创建密钥后使用。",
         },
         "BearerAuth": {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "JWT",
-            "description": "JWT Token 认证。通过 /auth/signin 登录获取。"
-        }
+            "description": "JWT Token 认证。通过 /auth/signin 登录获取。",
+        },
     }
 
     app.openapi_schema = openapi_schema
@@ -163,7 +167,6 @@ app.include_router(api_router, prefix="/api/v1")
 
 # 挂载静态文件服务 - 用于访问下载的视频和封面
 # 优先从 frontend_config.yml 读取路径
-from app.core.utils import Utils
 try:
     media_base_path = Utils.get_download_base_path()
     media_path = Path(media_base_path)
@@ -175,8 +178,10 @@ try:
         media_path.mkdir(parents=True, exist_ok=True)
         app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
         logger.info(f"已创建媒体目录并挂载: /media -> {media_path}")
-except ValueError as e:
-    logger.warning(f"未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。")
+except ValueError:
+    logger.warning(
+        "未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。"
+    )
 except Exception as e:
     logger.warning(f"静态文件服务挂载失败: {e}")
 
@@ -191,7 +196,11 @@ async def health_check():
 frontend_path = Path("/app/static")
 if frontend_path.exists():
     # 挂载静态资源（JS/CSS/图片等）
-    app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="frontend_assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(frontend_path / "assets")),
+        name="frontend_assets",
+    )
     logger.info(f"前端静态文件已挂载: /assets -> {frontend_path / 'assets'}")
 
     # SPA 路由：所有非 API 请求返回 index.html
@@ -204,6 +213,7 @@ if frontend_path.exists():
             return FileResponse(file_path)
         # 其他路由返回 index.html（SPA 前端路由）
         return FileResponse(frontend_path / "index.html")
+
 else:
     # 开发模式：前端独立运行
     @app.get("/")
@@ -211,11 +221,11 @@ else:
         return {"message": "MediaHub API", "docs": "/docs", "health": "/health"}
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # 使用配置文件中的主机设置，端口固定为8080（Docker标准）
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,
         port=settings.APP_PORT,  # 使用常量，Docker容器内部固定端口
-        reload=settings.RELOAD
+        reload=settings.RELOAD,
     )

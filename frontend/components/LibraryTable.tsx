@@ -1,20 +1,20 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { DouyinBase } from '../types';
+import { Video } from '../types';
 import {
-  Video, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
+  Video as VideoIcon, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
   Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play, Plus
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { TagSelector } from './TagSelector';
 
 interface LibraryTableProps {
-  data: DouyinBase[];
-  onUpdate: (id: string, updates: Partial<DouyinBase>) => void;
+  data: Video[];
+  onUpdate: (id: string, updates: Partial<Video>) => void;
 }
 
-type SortKey = keyof DouyinBase | 'video_created_time' | 'created_at';
+type SortKey = keyof Video | 'published_at' | 'created_at';
 
 // Helper to generate consistent colors from strings
 const getTagStyle = (tag: string) => {
@@ -80,8 +80,8 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     };
   }, [activeMedia, tagSelectorVideoId]);
 
-  const startEditing = (item: DouyinBase) => {
-    setEditingId(item.aweme_id);
+  const startEditing = (item: Video) => {
+    setEditingId(item.platform_id);
     setEditForm({
       notes: item.notes || ''
     });
@@ -100,7 +100,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
   };
 
   // Handle tag cell click to open TagSelector
-  const handleTagCellClick = (item: DouyinBase, event: React.MouseEvent<HTMLTableCellElement>) => {
+  const handleTagCellClick = (item: Video, event: React.MouseEvent<HTMLTableCellElement>) => {
     if (!item.id) return;
 
     const rect = event.currentTarget.getBoundingClientRect();
@@ -148,8 +148,8 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     setTimeout(() => setCopiedShareId(null), 2000);
   };
 
-  const handleMediaClick = (item: DouyinBase) => {
-    if (isVideoType(item.aweme_type)) {
+  const handleMediaClick = (item: Video) => {
+    if (isVideoType(item.media_type)) {
        const url = getVideoUrl(item);
        if (url && url !== '#') {
          setActiveMedia({ type: 'video', url });
@@ -168,16 +168,16 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
     let items = [...data];
     if (sortConfig !== null) {
       items.sort((a, b) => {
-        let aVal: any = a[sortConfig.key as keyof DouyinBase];
-        let bVal: any = b[sortConfig.key as keyof DouyinBase];
+        let aVal: any = a[sortConfig.key as keyof Video];
+        let bVal: any = b[sortConfig.key as keyof Video];
 
         // Handle undefined values
         if (aVal === undefined && bVal === undefined) return 0;
         if (aVal === undefined) return 1;
         if (bVal === undefined) return -1;
 
-        // Date comparison for both video_created_time and created_at
-        if (sortConfig.key === 'video_created_time' || sortConfig.key === 'created_at') {
+        // Date comparison for both published_at and created_at
+        if (sortConfig.key === 'published_at' || sortConfig.key === 'created_at') {
            aVal = new Date(aVal as string).getTime();
            bVal = new Date(bVal as string).getTime();
         }
@@ -230,7 +230,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
   }
 
   // Mobile Card Component
-  const MobileCard = ({ item }: { item: DouyinBase }) => (
+  const MobileCard = ({ item }: { item: Video }) => (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3">
       <div className="flex gap-3">
         {/* Thumbnail */}
@@ -249,7 +249,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
             }}
           />
           <div className="absolute inset-0 flex items-center justify-center">
-            {isVideoType(item.aweme_type) ? (
+            {isVideoType(item.media_type) ? (
               <div className="bg-black/40 p-1.5 rounded-full">
                 <Play size={16} className="text-white fill-white" />
               </div>
@@ -262,18 +262,18 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
         {/* Info */}
         <div className="flex-1 min-w-0 space-y-1">
           <h3 className="font-medium text-zinc-200 text-sm line-clamp-2 leading-tight">
-            {item.video_title || 'Untitled'}
+            {item.title || 'Untitled'}
           </h3>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span>@{item.author}</span>
             <span>•</span>
-            <span>{formatDate(item.video_created_time)}</span>
+            <span>{formatDate(item.published_at)}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">
-              {getAwemeTypeLabel(item.aweme_type)}
+              {getAwemeTypeLabel(item.media_type)}
             </span>
-            <a href={item.video_original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
+            <a href={item.original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
               <ExternalLink size={12} />
             </a>
           </div>
@@ -285,15 +285,15 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
         <div className="flex items-center gap-4 text-xs">
           <span className="flex items-center gap-1 text-zinc-400">
             <Heart size={12} className="text-rose-500" />
-            {formatNumber(item.video_digg_count)}
+            {formatNumber(item.like_count)}
           </span>
           <span className="flex items-center gap-1 text-zinc-400">
             <MessageCircle size={12} className="text-sky-500" />
-            {formatNumber(item.video_comment_count)}
+            {formatNumber(item.comment_count)}
           </span>
           <span className="flex items-center gap-1 text-zinc-400">
             <Share2 size={12} className="text-emerald-500" />
-            {formatNumber(item.video_share_count)}
+            {formatNumber(item.share_count)}
           </span>
         </div>
         <span className="text-[10px] text-zinc-600">
@@ -322,7 +322,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
       {/* Mobile View - Card List */}
       <div className="md:hidden space-y-3">
         {sortedData.map((item) => (
-          <MobileCard key={item.aweme_id} item={item} />
+          <MobileCard key={item.platform_id} item={item} />
         ))}
       </div>
 
@@ -354,32 +354,32 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
               {/* Split Stats Columns */}
               <th 
                 className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
-                onClick={() => handleSort('video_digg_count')}
+                onClick={() => handleSort('like_count')}
                 title="Sort by Likes"
               >
                 <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-rose-400 transition-colors">
                    <Heart size={14} className="text-rose-500" /> 
-                   {getSortIcon('video_digg_count')}
+                   {getSortIcon('like_count')}
                 </div>
               </th>
               <th 
                 className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
-                onClick={() => handleSort('video_comment_count')}
+                onClick={() => handleSort('comment_count')}
                 title="Sort by Comments"
               >
                  <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-sky-400 transition-colors">
                    <MessageCircle size={14} className="text-sky-500" /> 
-                   {getSortIcon('video_comment_count')}
+                   {getSortIcon('comment_count')}
                  </div>
               </th>
               <th 
                 className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
-                onClick={() => handleSort('video_share_count')}
+                onClick={() => handleSort('share_count')}
                 title="Sort by Shares"
               >
                  <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-emerald-400 transition-colors">
                    <Share2 size={14} className="text-emerald-500" /> 
-                   {getSortIcon('video_share_count')}
+                   {getSortIcon('share_count')}
                  </div>
               </th>
 
@@ -390,7 +390,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {sortedData.map((item) => (
-              <tr key={item.aweme_id} className="hover:bg-zinc-900/80 transition-colors">
+              <tr key={item.platform_id} className="hover:bg-zinc-900/80 transition-colors">
                 <td className="px-4 py-4">
                   <div 
                     onClick={() => handleMediaClick(item)}
@@ -407,7 +407,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                       }}
                      />
                      <div className="absolute inset-0 flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
-                        {isVideoType(item.aweme_type) ? (
+                        {isVideoType(item.media_type) ? (
                           <div className="bg-black/30 p-1.5 rounded-full backdrop-blur-sm shadow-md">
                              <Play size={20} className="text-white fill-white" />
                           </div>
@@ -419,19 +419,19 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                 </td>
                 <td className="px-4 py-4">
                    <div className="flex flex-col gap-1 max-w-xs">
-                      <span className="font-medium text-zinc-200 line-clamp-1" title={item.video_title}>{item.video_title || 'Untitled'}</span>
+                      <span className="font-medium text-zinc-200 line-clamp-1" title={item.title}>{item.title || 'Untitled'}</span>
 
                       <div className="flex flex-col gap-0.5">
                          <span className="text-xs text-zinc-400">@{item.author}</span>
                          <span className="text-[10px] text-zinc-500 flex items-center gap-1.5">
                             <Clock size={10} />
-                            {formatDate(item.video_created_time)}
+                            {formatDate(item.published_at)}
                          </span>
                       </div>
 
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">{getAwemeTypeLabel(item.aweme_type)}</span>
-                        <a href={item.video_original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">{getAwemeTypeLabel(item.media_type)}</span>
+                        <a href={item.original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
                           <ExternalLink size={12} />
                         </a>
                       </div>
@@ -446,9 +446,9 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                 </td>
 
                 {/* Content Column with Copy Interaction */}
-                <td className="px-4 py-4" onClick={() => handleCopy(item.aweme_id, item.video_desc)}>
+                <td className="px-4 py-4" onClick={() => handleCopy(item.platform_id, item.description)}>
                     <div className="group/text cursor-pointer hover:bg-zinc-800/80 p-2 rounded-lg -ml-2 transition-colors relative h-full">
-                      {copiedId === item.aweme_id ? (
+                      {copiedId === item.platform_id ? (
                         <div className="flex items-center gap-2 text-green-400 text-xs animate-in fade-in duration-200 h-8">
                           <Check size={14} />
                           <span className="font-medium">Copied!</span>
@@ -456,7 +456,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                       ) : (
                         <>
                           <p className="text-xs text-zinc-400 group-hover/text:text-zinc-200 line-clamp-2 leading-relaxed" title="Click to copy">
-                            {item.video_desc || <span className="italic opacity-40">No description</span>}
+                            {item.description || <span className="italic opacity-40">No description</span>}
                           </p>
                           <div className="absolute top-2 right-2 opacity-0 group-hover/text:opacity-100 transition-opacity pointer-events-none bg-zinc-900/80 p-1 rounded backdrop-blur-sm">
                              <Copy size={12} className="text-zinc-400" />
@@ -468,23 +468,23 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                 
                 {/* Stats Columns */}
                 <td className="px-4 py-4 text-center">
-                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.video_digg_count)}</span>
+                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.like_count)}</span>
                 </td>
                 <td className="px-4 py-4 text-center">
-                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.video_comment_count)}</span>
+                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.comment_count)}</span>
                 </td>
                 <td
                   className="px-4 py-4 text-center cursor-pointer hover:bg-emerald-500/5 transition-colors group/share"
-                  onClick={() => handleShareCopy(item.aweme_id, item.video_original_url)}
+                  onClick={() => handleShareCopy(item.platform_id, item.original_url)}
                   title="Click to copy link"
                 >
-                  {copiedShareId === item.aweme_id ? (
+                  {copiedShareId === item.platform_id ? (
                     <div className="flex items-center justify-center gap-1 text-emerald-400">
                       <Check size={12} />
                       <span className="text-xs font-medium">Copied!</span>
                     </div>
                   ) : (
-                    <span className="font-mono text-zinc-300 text-xs group-hover/share:text-emerald-400 transition-colors">{formatNumber(item.video_share_count)}</span>
+                    <span className="font-mono text-zinc-300 text-xs group-hover/share:text-emerald-400 transition-colors">{formatNumber(item.share_count)}</span>
                   )}
                 </td>
 
@@ -521,7 +521,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                   </div>
                 </td>
                 <td className="px-4 py-4">
-                  {editingId === item.aweme_id ? (
+                  {editingId === item.platform_id ? (
                     <textarea 
                       value={editForm.notes}
                       onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
@@ -536,10 +536,10 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                   )}
                 </td>
                 <td className="px-4 py-4 text-right">
-                  {editingId === item.aweme_id ? (
+                  {editingId === item.platform_id ? (
                     <div className="flex items-center justify-end gap-2">
                       <button 
-                        onClick={() => saveEditing(item.aweme_id)}
+                        onClick={() => saveEditing(item.platform_id)}
                         className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded hover:bg-indigo-600/30 transition-colors"
                         title="Save"
                       >

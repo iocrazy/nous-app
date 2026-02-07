@@ -1,18 +1,20 @@
 """Visual analysis service using OpenAI GPT-4o."""
-import os
+
 import base64
 import json
-from typing import Optional, List, Dict, Any
+import os
 from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 import httpx
-from openai import AsyncOpenAI
 from loguru import logger
+from openai import AsyncOpenAI
 
 
 @dataclass
 class VisualAnalysisResult:
     """Result of visual analysis."""
+
     category: str
     visual_description: str
     detected_objects: List[str] = field(default_factory=list)
@@ -26,7 +28,8 @@ class VisualAnalysisResult:
 # Prompts for different analysis levels
 L1_PROMPT = """Analyze this video cover image and provide:
 
-1. Main content category (choose ONE): Food, Tutorial, Comedy, Dance, Music, Beauty, Fashion, Gaming, Pets, Travel, Tech, Sports, Vlog, Other
+1. Main content category (choose ONE): Food, Tutorial, Comedy, Dance, Music, Beauty,
+   Fashion, Gaming, Pets, Travel, Tech, Sports, Vlog, Other
 2. Brief visual description (1-2 sentences)
 3. Key objects visible (list up to 5)
 4. Scene type (indoor/outdoor, specific location if identifiable)
@@ -128,14 +131,14 @@ class VisualAnalysisService:
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{image_data}",
-                                    "detail": "low"  # Low detail for cost efficiency
-                                }
-                            }
-                        ]
+                                    "detail": "low",  # Low detail for cost efficiency
+                                },
+                            },
+                        ],
                     }
                 ],
                 max_tokens=500,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             # Parse response
@@ -145,7 +148,9 @@ class VisualAnalysisService:
             # Calculate cost (approximate)
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
-            cost = (input_tokens * 0.0025 + output_tokens * 0.01) / 1000  # GPT-4o pricing
+            cost = (
+                input_tokens * 0.0025 + output_tokens * 0.01
+            ) / 1000  # GPT-4o pricing
 
             return VisualAnalysisResult(
                 category=data.get("category", "Other"),
@@ -155,7 +160,7 @@ class VisualAnalysisService:
                 detected_people=data.get("detected_people", []),
                 detected_text=data.get("detected_text", ""),
                 mood=data.get("mood", ""),
-                cost=cost
+                cost=cost,
             )
 
         except Exception as e:
@@ -163,9 +168,7 @@ class VisualAnalysisService:
             return None
 
     async def analyze_l2(
-        self,
-        cover_url: str,
-        keyframe_paths: List[str]
+        self, cover_url: str, keyframe_paths: List[str]
     ) -> Optional[VisualAnalysisResult]:
         """
         L2 Analysis: Cover + keyframes.
@@ -194,16 +197,15 @@ class VisualAnalysisService:
         try:
             content: List[Dict[str, Any]] = [{"type": "text", "text": L2_PROMPT}]
             for img in images:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": img, "detail": "low"}
-                })
+                content.append(
+                    {"type": "image_url", "image_url": {"url": img, "detail": "low"}}
+                )
 
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": content}],
                 max_tokens=800,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             data = json.loads(response.choices[0].message.content)
@@ -220,7 +222,7 @@ class VisualAnalysisService:
                 detected_people=data.get("detected_people", []),
                 detected_text=data.get("detected_text", ""),
                 mood=data.get("mood", ""),
-                cost=cost
+                cost=cost,
             )
 
         except Exception as e:

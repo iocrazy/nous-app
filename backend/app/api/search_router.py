@@ -1,19 +1,16 @@
 """API routes for Semantic Search."""
-from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.search_service import SearchService
 from app.schemas.search import (
-    SemanticSearchRequest,
     HybridSearchRequest,
-    SimilarVideosRequest,
     SearchResponse,
     SearchResultItem,
+    SemanticSearchRequest,
 )
-
+from app.services.search_service import SearchService
 
 router = APIRouter(prefix="/search", tags=["Search"])
 
@@ -40,7 +37,7 @@ async def semantic_search(
             query=request.query,
             limit=request.limit,
             threshold=request.threshold,
-            user_id=auth.user_id
+            user_id=auth.user_id,
         )
 
         return SearchResponse(
@@ -55,20 +52,20 @@ async def semantic_search(
                     tags=r.tags,
                     author=r.author,
                     view_count=r.view_count,
-                    created_at=r.created_at
+                    created_at=r.created_at,
                 )
                 for r in response.results
             ],
             total=response.total,
             query=response.query,
-            search_type=response.search_type
+            search_type=response.search_type,
         )
 
     except Exception as e:
         logger.error(f"Semantic search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}"
+            detail=f"Search failed: {str(e)}",
         )
 
 
@@ -98,7 +95,7 @@ async def hybrid_search(
             date_to=request.date_to,
             limit=request.limit,
             threshold=request.threshold,
-            user_id=auth.user_id
+            user_id=auth.user_id,
         )
 
         return SearchResponse(
@@ -113,20 +110,20 @@ async def hybrid_search(
                     tags=r.tags,
                     author=r.author,
                     view_count=r.view_count,
-                    created_at=r.created_at
+                    created_at=r.created_at,
                 )
                 for r in response.results
             ],
             total=response.total,
             query=response.query,
-            search_type=response.search_type
+            search_type=response.search_type,
         )
 
     except Exception as e:
         logger.error(f"Hybrid search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}"
+            detail=f"Search failed: {str(e)}",
         )
 
 
@@ -134,7 +131,9 @@ async def hybrid_search(
 async def find_similar_videos(
     video_id: int,
     limit: int = Query(10, ge=1, le=50, description="Maximum number of similar videos"),
-    threshold: float = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity threshold"),
+    threshold: float = Query(
+        0.6, ge=0.0, le=1.0, description="Minimum similarity threshold"
+    ),
     auth: AuthDep = None,
 ):
     """
@@ -147,27 +146,26 @@ async def find_similar_videos(
 
     try:
         response = await search_service.find_similar_videos(
-            video_id=video_id,
-            limit=limit,
-            threshold=threshold
+            video_id=video_id, limit=limit, threshold=threshold
         )
 
         if response.total == 0:
             # Check if video exists and has embedding
             from app.repositories.analysis_repository import AnalysisRepository
+
             analysis_repo = AnalysisRepository()
             analysis = await analysis_repo.get_analysis(video_id)
 
             if not analysis:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Video not found or not analyzed yet. Run L1 analysis first."
+                    detail="Video not found or not analyzed yet. Run L1 analysis first.",
                 )
 
             if not analysis.get("content_embedding"):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Video has no embedding. Analysis may be incomplete."
+                    detail="Video has no embedding. Analysis may be incomplete.",
                 )
 
         return SearchResponse(
@@ -182,13 +180,13 @@ async def find_similar_videos(
                     tags=r.tags,
                     author=r.author,
                     view_count=r.view_count,
-                    created_at=r.created_at
+                    created_at=r.created_at,
                 )
                 for r in response.results
             ],
             total=response.total,
             query=response.query,
-            search_type=response.search_type
+            search_type=response.search_type,
         )
 
     except HTTPException:
@@ -197,7 +195,7 @@ async def find_similar_videos(
         logger.error(f"Similar videos search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}"
+            detail=f"Search failed: {str(e)}",
         )
 
 
@@ -219,7 +217,7 @@ async def quick_search(
             query=q,
             limit=limit,
             threshold=0.4,  # Lower threshold for broader results
-            user_id=auth.user_id
+            user_id=auth.user_id,
         )
 
         # Return simplified format for quick display
@@ -229,11 +227,11 @@ async def quick_search(
                     "video_id": r.video_id,
                     "title": r.title,
                     "cover_url": r.cover_url,
-                    "similarity": round(r.similarity, 2)
+                    "similarity": round(r.similarity, 2),
                 }
                 for r in response.results
             ],
-            "total": response.total
+            "total": response.total,
         }
 
     except Exception as e:

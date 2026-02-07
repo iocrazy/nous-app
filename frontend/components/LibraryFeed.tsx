@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { DouyinBase } from '../types';
+import { Video } from '../types';
 import {
   Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
 interface LibraryFeedProps {
-  data: DouyinBase[];
+  data: Video[];
 }
 
 export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
@@ -69,11 +69,11 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
       >
         {data.map((item) => (
           <FeedItem 
-            key={item.aweme_id} 
+            key={item.platform_id} 
             item={item} 
-            isPlaying={playingId === item.aweme_id}
+            isPlaying={playingId === item.platform_id}
             isMuted={isMuted}
-            onTogglePlay={(e) => togglePlay(e, item.aweme_id)}
+            onTogglePlay={(e) => togglePlay(e, item.platform_id)}
             onToggleMute={toggleMute}
             formatNumber={formatNumber}
           />
@@ -97,7 +97,7 @@ const FeedItem = ({
   onToggleMute,
   formatNumber
 }: {
-  item: DouyinBase;
+  item: Video;
   isPlaying: boolean;
   isMuted: boolean;
   onTogglePlay: (e: React.MouseEvent) => void;
@@ -106,7 +106,7 @@ const FeedItem = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [copiedShare, setCopiedShare] = useState(false);
-  const isVideo = isVideoType(item.aweme_type);
+  const isVideo = isVideoType(item.media_type);
   // 视频 URL: 优先使用 download_path
   const videoUrl = getVideoUrl(item);
   // 封面 URL
@@ -131,7 +131,7 @@ const FeedItem = ({
 
   return (
     <div 
-      data-id={item.aweme_id}
+      data-id={item.platform_id}
       className="feed-item w-full h-full snap-center relative bg-black overflow-hidden shrink-0 group flex items-center justify-center"
       onClick={onTogglePlay}
     >
@@ -149,7 +149,7 @@ const FeedItem = ({
         />
       ) : (
         <div className="w-full h-full relative flex items-center justify-center bg-black">
-            <img src={imageUrl} alt={item.video_title} className="w-full h-full object-contain" />
+            <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" />
             <div className="absolute top-4 right-4 bg-black/50 px-3 py-1 rounded-full text-xs flex items-center gap-1 backdrop-blur-md">
                 <ImageIcon size={12} />
                 Image Mode
@@ -193,14 +193,14 @@ const FeedItem = ({
            <button className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors group-hover/btn:scale-110">
               <Heart className="w-8 h-8 text-white drop-shadow-md" />
            </button>
-           <span className="text-white text-xs font-semibold drop-shadow-md">{formatNumber(item.video_digg_count)}</span>
+           <span className="text-white text-xs font-semibold drop-shadow-md">{formatNumber(item.like_count)}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
            <button className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors">
               <MessageCircle className="w-8 h-8 text-white drop-shadow-md" />
            </button>
-           <span className="text-white text-xs font-semibold drop-shadow-md">{formatNumber(item.video_comment_count)}</span>
+           <span className="text-white text-xs font-semibold drop-shadow-md">{formatNumber(item.comment_count)}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
@@ -208,8 +208,8 @@ const FeedItem = ({
              className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors"
              onClick={(e) => {
                e.stopPropagation();
-               if (item.video_original_url) {
-                 navigator.clipboard.writeText(item.video_original_url);
+               if (item.original_url) {
+                 navigator.clipboard.writeText(item.original_url);
                  setCopiedShare(true);
                  setTimeout(() => setCopiedShare(false), 2000);
                }
@@ -222,7 +222,7 @@ const FeedItem = ({
                 <Share2 className="w-8 h-8 text-white drop-shadow-md" />
               )}
            </button>
-           <span className="text-white text-xs font-semibold drop-shadow-md">{copiedShare ? 'Copied!' : formatNumber(item.video_share_count)}</span>
+           <span className="text-white text-xs font-semibold drop-shadow-md">{copiedShare ? 'Copied!' : formatNumber(item.share_count)}</span>
         </div>
       </div>
 
@@ -231,7 +231,7 @@ const FeedItem = ({
         <div className="max-w-[80%]">
           <h3 className="text-white font-bold text-lg mb-1 drop-shadow-md cursor-pointer hover:underline">@{item.author || 'User'}</h3>
           <p className="text-zinc-100 text-sm mb-2 line-clamp-2 drop-shadow-md leading-relaxed">
-             {item.video_desc}
+             {item.description}
           </p>
           <div className="flex items-center gap-2 text-white/80 animate-pulse-slow">
              <Music size={14} />

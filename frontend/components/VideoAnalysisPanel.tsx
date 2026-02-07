@@ -28,14 +28,14 @@ import {
 
 interface VideoAnalysisPanelProps {
   videoId: number;
-  awemeId: string;
+  platformId: string;
   onTagsSuggested?: (tags: string[]) => void;
   compact?: boolean;
 }
 
 export const VideoAnalysisPanel: React.FC<VideoAnalysisPanelProps> = ({
   videoId,
-  awemeId,
+  platformId,
   onTagsSuggested,
   compact = false,
 }) => {

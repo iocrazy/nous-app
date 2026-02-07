@@ -7,12 +7,15 @@ Supabase 认证路由
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel, EmailStr
+
+from fastapi import APIRouter, Header, HTTPException
 from loguru import logger
+from pydantic import BaseModel, EmailStr
 
-from app.services.supabase_auth_service import SupabaseAuthService, SupabaseAdminAuthService
-
+from app.services.supabase_auth_service import (
+    SupabaseAdminAuthService,
+    SupabaseAuthService,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -21,8 +24,10 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 # 请求/响应模型
 # ============================================
 
+
 class SignUpRequest(BaseModel):
     """注册请求"""
+
     email: EmailStr
     password: str
     username: Optional[str] = None
@@ -30,22 +35,26 @@ class SignUpRequest(BaseModel):
 
 class SignInRequest(BaseModel):
     """登录请求"""
+
     email: EmailStr
     password: str
 
 
 class RefreshTokenRequest(BaseModel):
     """刷新令牌请求"""
+
     refresh_token: str
 
 
 class ResetPasswordRequest(BaseModel):
     """重置密码请求"""
+
     email: EmailStr
 
 
 class UpdateUserRequest(BaseModel):
     """更新用户请求"""
+
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     username: Optional[str] = None
@@ -53,6 +62,7 @@ class UpdateUserRequest(BaseModel):
 
 class UpdateRoleRequest(BaseModel):
     """更新角色请求"""
+
     user_id: str
     role: str
 
@@ -60,6 +70,7 @@ class UpdateRoleRequest(BaseModel):
 # ============================================
 # 路由端点
 # ============================================
+
 
 @router.post("/signup")
 async def sign_up(request: SignUpRequest):
@@ -79,7 +90,7 @@ async def sign_up(request: SignUpRequest):
     result = await auth_service.sign_up(
         email=request.email,
         password=request.password,
-        metadata=metadata if metadata else None
+        metadata=metadata if metadata else None,
     )
 
     if not result.get("success"):
@@ -98,10 +109,7 @@ async def sign_in(request: SignInRequest):
     """
     auth_service = SupabaseAuthService()
 
-    result = await auth_service.sign_in(
-        email=request.email,
-        password=request.password
-    )
+    result = await auth_service.sign_in(email=request.email, password=request.password)
 
     if not result.get("success"):
         raise HTTPException(status_code=401, detail=result.get("message", "登录失败"))
@@ -172,10 +180,7 @@ async def reset_password(request: ResetPasswordRequest):
 
 
 @router.put("/me")
-async def update_user(
-    request: UpdateUserRequest,
-    authorization: str = Header(...)
-):
+async def update_user(request: UpdateUserRequest, authorization: str = Header(...)):
     """
     更新用户信息
 
@@ -195,11 +200,13 @@ async def update_user(
             access_token=token,
             email=request.email,
             password=request.password,
-            metadata=metadata if metadata else None
+            metadata=metadata if metadata else None,
         )
 
         if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("message", "更新失败"))
+            raise HTTPException(
+                status_code=400, detail=result.get("message", "更新失败")
+            )
 
         return result
 
@@ -214,11 +221,10 @@ async def update_user(
 # 管理员端点
 # ============================================
 
+
 @router.get("/admin/users")
 async def list_users(
-    page: int = 1,
-    per_page: int = 50,
-    authorization: str = Header(...)
+    page: int = 1, per_page: int = 50, authorization: str = Header(...)
 ):
     """
     获取用户列表（管理员）
@@ -237,8 +243,7 @@ async def list_users(
 
 @router.put("/admin/role")
 async def update_user_role(
-    request: UpdateRoleRequest,
-    authorization: str = Header(...)
+    request: UpdateRoleRequest, authorization: str = Header(...)
 ):
     """
     更新用户角色（管理员）
@@ -249,8 +254,7 @@ async def update_user_role(
     # TODO: 验证管理员权限
     admin_service = SupabaseAdminAuthService()
     result = await admin_service.update_user_role(
-        user_id=request.user_id,
-        role=request.role
+        user_id=request.user_id, role=request.role
     )
 
     if not result.get("success"):
@@ -260,10 +264,7 @@ async def update_user_role(
 
 
 @router.delete("/admin/users/{user_id}")
-async def delete_user(
-    user_id: str,
-    authorization: str = Header(...)
-):
+async def delete_user(user_id: str, authorization: str = Header(...)):
     """
     删除用户（管理员）
 

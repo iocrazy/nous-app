@@ -1,14 +1,11 @@
+import asyncio
 import threading
 from typing import Optional
-import json
 
-import asyncio
-
+from DrissionPage import ChromiumOptions, ChromiumPage
 from loguru import logger
-from DrissionPage import ChromiumPage, ChromiumOptions
 
-from app.core.utils import SingletonMeta
-from app.core.utils import Utils
+from app.core.utils import SingletonMeta, Utils
 
 
 class DouyinAnalysis(metaclass=SingletonMeta):
@@ -27,7 +24,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
             # 检查浏览器是否仍然连接
             try:
                 # 尝试执行一个简单操作来检查连接
-                self._page.run_js('return true')
+                self._page.run_js("return true")
                 return  # 如果成功，浏览器仍然连接
             except Exception as e:
                 logger.warning(f"浏览器连接已断开，需要重新初始化: {str(e)}")
@@ -43,36 +40,47 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 options = ChromiumOptions()
                 # 基础必需配置
                 options.headless()  # 无头模式
-                options.set_argument('--no-sandbox')  # 禁用沙盒（Docker必需）
-                options.set_argument('--disable-dev-shm-usage')  # 禁用共享内存
-                options.set_argument('--disable-gpu')  # 禁用GPU
-                # options.set_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36')
-                options.set_argument('--window-size=2560,1440')
+                options.set_argument("--no-sandbox")  # 禁用沙盒（Docker必需）
+                options.set_argument("--disable-dev-shm-usage")  # 禁用共享内存
+                options.set_argument("--disable-gpu")  # 禁用GPU
+                # options.set_argument(
+                #     '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                #     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+                # )
+                options.set_argument("--window-size=2560,1440")
 
                 # 启动速度优化
-                options.set_argument('--no-first-run')  # 跳过首次运行
-                options.set_argument('--no-default-browser-check')  # 跳过默认浏览器检查
-                options.set_argument('--disable-extensions')  # 禁用扩展
-                options.set_argument('--disable-plugins')  # 禁用插件
-                options.set_argument('--disable-images')  # 禁用图片加载（加速）
-                options.set_argument('--disable-background-timer-throttling')  # 禁用后台定时器限制
-                options.set_argument('--disable-backgrounding-occluded-windows')  # 禁用后台窗口
-                options.set_argument('--disable-renderer-backgrounding')  # 禁用渲染器后台
-                options.set_argument('--disable-features=TranslateUI,VizDisplayCompositor')  # 禁用翻译UI
-                options.set_argument('--disable-background-networking')  # 禁用后台网络
-                options.set_argument('--disable-default-apps')  # 禁用默认应用
-                options.set_argument('--disable-sync')  # 禁用同步
+                options.set_argument("--no-first-run")  # 跳过首次运行
+                options.set_argument("--no-default-browser-check")  # 跳过默认浏览器检查
+                options.set_argument("--disable-extensions")  # 禁用扩展
+                options.set_argument("--disable-plugins")  # 禁用插件
+                options.set_argument("--disable-images")  # 禁用图片加载（加速）
+                options.set_argument(
+                    "--disable-background-timer-throttling"
+                )  # 禁用后台定时器限制
+                options.set_argument(
+                    "--disable-backgrounding-occluded-windows"
+                )  # 禁用后台窗口
+                options.set_argument(
+                    "--disable-renderer-backgrounding"
+                )  # 禁用渲染器后台
+                options.set_argument(
+                    "--disable-features=TranslateUI,VizDisplayCompositor"
+                )  # 禁用翻译UI
+                options.set_argument("--disable-background-networking")  # 禁用后台网络
+                options.set_argument("--disable-default-apps")  # 禁用默认应用
+                options.set_argument("--disable-sync")  # 禁用同步
 
                 # 网络优化
-                options.set_argument('--aggressive-cache-discard')  # 积极缓存丢弃
-                options.set_argument('--disable-background-downloads')  # 禁用后台下载
+                options.set_argument("--aggressive-cache-discard")  # 积极缓存丢弃
+                options.set_argument("--disable-background-downloads")  # 禁用后台下载
 
                 # 固定端口（避免端口扫描）
-                options.set_argument('--remote-debugging-port=9222')
+                options.set_argument("--remote-debugging-port=9222")
 
                 # 反检测配置
-                options.set_argument('--disable-blink-features=AutomationControlled')
-                options.set_argument('--exclude-switches=enable-automation')
+                options.set_argument("--disable-blink-features=AutomationControlled")
+                options.set_argument("--exclude-switches=enable-automation")
 
                 # 使用 ChromiumPage.by_options 方法创建页面
                 logger.debug("正在初始化浏览器...")
@@ -85,20 +93,21 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         Object.defineProperty(navigator, 'platform', {
                             get: () => 'MacIntel',
                         });
-                        
+
                         Object.defineProperty(navigator, 'userAgent', {
-                            get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                            get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
+                                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
                         });
-                        
+
                         // 硬件信息
                         Object.defineProperty(navigator, 'hardwareConcurrency', {
                             get: () => 12,
                         });
-                        
+
                         Object.defineProperty(navigator, 'deviceMemory', {
                             get: () => 8,
                         });
-                        
+
                         // 屏幕信息
                         Object.defineProperty(screen, 'width', {
                             get: () => 2560,
@@ -106,7 +115,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         Object.defineProperty(screen, 'height', {
                             get: () => 1440,
                         });
-                        
+
                         // 网络信息
                         Object.defineProperty(navigator, 'connection', {
                             get: () => ({
@@ -115,27 +124,27 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                                 rtt: 50
                             }),
                         });
-                        
+
                         // 语言设置
                         Object.defineProperty(navigator, 'languages', {
                             get: () => ['zh-CN', 'zh', 'en-US', 'en'],
                         });
-                        
+
                         // 隐藏自动化特征
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined,
                         });
-                        
+
                         // 时区设置
                         Date.prototype.getTimezoneOffset = function() {
                             return -480; // UTC+8
                         };
-                        
+
                         // 修复可能的检测点
                         window.chrome = {
                             runtime: {}
                         };
-                        
+
                         // 确保页面完全加载
                         if (document.readyState !== 'complete') {
                             window.addEventListener('load', function() {
@@ -149,9 +158,6 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 except Exception as e:
                     logger.warning(f"反检测脚本执行失败: {e}")
                     # 不影响主流程，继续执行
-
-
-
 
                 self._initialized = True
                 logger.debug("抖音服务浏览器初始化成功")
@@ -199,9 +205,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
 
-                api_patterns = [
-                    "aweme/post/", "aweme/detail/"
-                ]
+                api_patterns = ["aweme/post/", "aweme/detail/"]
                 instance.page.listen.start(api_patterns)
 
                 logger.debug("API请求监听已启动")
@@ -253,39 +257,42 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                             timeout_count += 1
                             logger.warning(f"第 {timeout_count} 次等待API响应超时")
                             if timeout_count >= max_timeout_retries:
-                                logger.error(f"已达到最大超时重试次数 {max_timeout_retries}，放弃获取")
+                                logger.error(
+                                    f"已达到最大超时重试次数 {max_timeout_retries}，放弃获取"
+                                )
                                 return None
                             continue  # 继续重试
 
                         logger.success(f"成功接收到API {response.url}响应")
-                        response_name = response.url[-15:] if len(response.url) >= 15 else response.url
 
                         # 检查响应体
-                        if hasattr(response, 'response') and response.response.body:
+                        if hasattr(response, "response") and response.response.body:
 
                             # 获取响应数据
                             json_data = response.response.body
                             logger.debug(f"响应数据类型: {type(json_data)}")
-                            # with open(fr"{settings.ROOT_DIR}\data\response{response_name}.json", "w", encoding="utf-8") as f:
-                            #     f.write(json.dumps(json_data, ensure_ascii=False, indent=2))
 
                             if "aweme_detail" in json_data:
                                 logger.debug("从响应中提取aweme_detail")
-                                aweme_response = json_data.get('aweme_detail', {})
+                                aweme_response = json_data.get("aweme_detail", {})
                             else:
                                 # 获取aweme_list
                                 logger.debug("从响应中提取aweme_list")
-                                aweme_list = json_data.get('aweme_list', [])
+                                aweme_list = json_data.get("aweme_list", [])
 
                                 # 查找匹配的item
                                 for item in aweme_list:
-                                    if item.get('aweme_id') == target_aweme_id:
-                                        logger.debug(f"找到匹配的aweme_id: {target_aweme_id}")
+                                    if item.get("aweme_id") == target_aweme_id:
+                                        logger.debug(
+                                            f"找到匹配的aweme_id: {target_aweme_id}"
+                                        )
                                         aweme_response = item
                                         break
                                 else:
                                     # 没有找到匹配的aweme_id，记录日志并继续等待下一个响应
-                                    logger.warning(f"在当前响应中没有找到匹配的aweme_id: {target_aweme_id}，继续等待下一个响应")
+                                    logger.warning(
+                                        f"在当前响应中没有找到匹配的aweme_id: {target_aweme_id}，继续等待下一个响应"
+                                    )
                                     continue  # 继续while循环，等待下一个响应
 
                             logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
@@ -309,13 +316,11 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 logger.error(f"获取抖音视频数据失败: {e}")
                 return None
 
-
         # 在单独的线程中执行同步操作
         logger.debug("开始在单独线程中执行同步操作")
         result = await asyncio.to_thread(_fetch_in_thread)
         logger.debug(f"线程执行完成，结果类型: {type(result)}")
         return result
-
 
     def close(self):
         """关闭浏览器资源"""
@@ -329,18 +334,14 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 self._initialized = False
                 logger.info("抖音服务浏览器已关闭")
 
-
     @classmethod
     def fetch_multi_video(cls, url):
         """
         获取多视频
         """
-        pass
-
 
     @classmethod
     def fetch_video_comments(cls, url):
         """
         获取视频评论
         """
-        pass

@@ -194,7 +194,7 @@ export const getVideosByTag = async (
   page: number = 1,
   pageSize: number = 20
 ): Promise<{
-  videos: Array<{ id: number; aweme_id: string; title: string }>;
+  videos: Array<{ id: number; platform_id: string; title: string }>;
   total: number;
   page: number;
   page_size: number;

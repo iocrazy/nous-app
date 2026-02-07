@@ -1,12 +1,14 @@
 """Pydantic schemas for Cleanup Suggestions API."""
-from datetime import datetime
-from typing import Optional, List, Literal
 
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel
 
 
 class CleanupSuggestion(BaseModel):
     """A single cleanup suggestion."""
+
     video_id: int
     title: str
     cover_url: Optional[str]
@@ -23,6 +25,7 @@ class CleanupSuggestion(BaseModel):
 
 class CleanupSuggestionsResponse(BaseModel):
     """Response schema for cleanup suggestions."""
+
     suggestions: List[CleanupSuggestion]
     total_count: int
     total_reclaimable_bytes: int
@@ -31,17 +34,20 @@ class CleanupSuggestionsResponse(BaseModel):
 
 class CleanupAction(BaseModel):
     """Action to take on a cleanup suggestion."""
+
     action: Literal["delete", "keep_forever", "dismiss"]
 
 
 class CleanupBatchAction(BaseModel):
     """Batch action on multiple suggestions."""
+
     video_ids: List[int]
     action: Literal["delete", "keep_forever", "dismiss"]
 
 
 class CleanupStats(BaseModel):
     """Overall cleanup statistics."""
+
     total_videos: int
     total_storage_bytes: int
     videos_never_viewed: int
@@ -53,6 +59,7 @@ class CleanupStats(BaseModel):
 
 class StorageBreakdown(BaseModel):
     """Storage usage breakdown."""
+
     by_type: dict  # video, image, audio
     by_month: List[dict]  # [{month, count, bytes}]
     by_tag: List[dict]  # [{tag, count, bytes}]
@@ -61,6 +68,7 @@ class StorageBreakdown(BaseModel):
 
 class CleanupDataResponse(BaseModel):
     """Combined response with suggestions, stats, and categories in one call."""
+
     suggestions: List[CleanupSuggestion]
     total_count: int
     total_reclaimable_bytes: int

@@ -347,8 +347,8 @@ export const pollDownloadProgress = (
 // ========== Task Manager Types ==========
 
 export interface TaskManagerItem {
-  aweme_id: string;
-  video_title: string;
+  platform_id: string;
+  title: string;
   status: 'pending' | 'downloading' | 'completed' | 'failed';
   percent: number;
   downloaded: number;
@@ -422,12 +422,12 @@ export const getTaskManagerStats = async (): Promise<TaskManagerStats> => {
 /**
  * Retry a failed task
  */
-export const retryFailedTask = async (awemeId: string, force: boolean = false): Promise<{
+export const retryFailedTask = async (platformId: string, force: boolean = false): Promise<{
   success: boolean;
   message: string;
-  aweme_id?: string;
+  platform_id?: string;
 }> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${awemeId}/retry?force=${force}`, {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}/retry?force=${force}`, {
     method: 'POST',
     headers: getAuthHeaders(),
   });
@@ -463,11 +463,11 @@ export const retryAllFailedTasks = async (force: boolean = false): Promise<{
 /**
  * Delete a task from TaskManager
  */
-export const deleteTaskManagerTask = async (awemeId: string): Promise<{
+export const deleteTaskManagerTask = async (platformId: string): Promise<{
   success: boolean;
   message: string;
 }> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${awemeId}`, {
+  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });

@@ -7,10 +7,11 @@
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+
 from celery.result import AsyncResult
+from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+from pydantic import BaseModel
 
 from app.celery_app import celery_app
 from app.core.deps import AuthDep
@@ -22,6 +23,7 @@ TAGS = ["任务管理"]
 
 class TaskStatusResponse(BaseModel):
     """任务状态响应"""
+
     task_id: str
     status: str
     result: Optional[dict] = None
@@ -31,6 +33,7 @@ class TaskStatusResponse(BaseModel):
 
 class TaskSubmitResponse(BaseModel):
     """任务提交响应"""
+
     success: bool
     task_id: str
     message: str
@@ -68,7 +71,9 @@ async def get_task_status(task_id: str, auth: AuthDep):
                 response.result = result.result
             else:
                 # 任务失败
-                response.error = str(result.result) if result.result else "Unknown error"
+                response.error = (
+                    str(result.result) if result.result else "Unknown error"
+                )
 
         # 如果任务包含进度信息
         if result.info and isinstance(result.info, dict):
@@ -193,37 +198,43 @@ async def list_active_tasks(
             for task in worker_tasks:
                 if queue and task.get("delivery_info", {}).get("routing_key") != queue:
                     continue
-                tasks.append({
-                    "task_id": task.get("id"),
-                    "name": task.get("name"),
-                    "status": "STARTED",
-                    "worker": worker,
-                    "args": task.get("args"),
-                })
+                tasks.append(
+                    {
+                        "task_id": task.get("id"),
+                        "name": task.get("name"),
+                        "status": "STARTED",
+                        "worker": worker,
+                        "args": task.get("args"),
+                    }
+                )
 
         # 处理预留任务
         for worker, worker_tasks in reserved.items():
             for task in worker_tasks:
                 if queue and task.get("delivery_info", {}).get("routing_key") != queue:
                     continue
-                tasks.append({
-                    "task_id": task.get("id"),
-                    "name": task.get("name"),
-                    "status": "PENDING",
-                    "worker": worker,
-                    "args": task.get("args"),
-                })
+                tasks.append(
+                    {
+                        "task_id": task.get("id"),
+                        "name": task.get("name"),
+                        "status": "PENDING",
+                        "worker": worker,
+                        "args": task.get("args"),
+                    }
+                )
 
         # 处理计划任务
         for worker, worker_tasks in scheduled.items():
             for task in worker_tasks:
-                tasks.append({
-                    "task_id": task.get("request", {}).get("id"),
-                    "name": task.get("request", {}).get("name"),
-                    "status": "SCHEDULED",
-                    "worker": worker,
-                    "eta": task.get("eta"),
-                })
+                tasks.append(
+                    {
+                        "task_id": task.get("request", {}).get("id"),
+                        "name": task.get("request", {}).get("name"),
+                        "status": "SCHEDULED",
+                        "worker": worker,
+                        "eta": task.get("eta"),
+                    }
+                )
 
         return {
             "success": True,
@@ -254,13 +265,15 @@ async def get_worker_stats(auth: AuthDep):
 
         workers = []
         for worker_name, worker_stats in stats.items():
-            workers.append({
-                "name": worker_name,
-                "status": "online" if worker_name in ping else "offline",
-                "concurrency": worker_stats.get("pool", {}).get("max-concurrency"),
-                "processes": worker_stats.get("pool", {}).get("processes", []),
-                "total_tasks": worker_stats.get("total", {}),
-            })
+            workers.append(
+                {
+                    "name": worker_name,
+                    "status": "online" if worker_name in ping else "offline",
+                    "concurrency": worker_stats.get("pool", {}).get("max-concurrency"),
+                    "processes": worker_stats.get("pool", {}).get("processes", []),
+                    "total_tasks": worker_stats.get("total", {}),
+                }
+            )
 
         return {
             "success": True,
@@ -285,6 +298,7 @@ async def get_queue_stats(auth: AuthDep):
     try:
         # 直接从 Redis 获取队列长度
         import redis
+
         from app.core.config import settings
 
         r = redis.from_url(settings.CELERY_BROKER_URL)

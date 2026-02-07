@@ -9,10 +9,11 @@
 参考：toolkit/douyin-creator-toolkit 的实现
 """
 
-import re
 import json
+import re
+from typing import Any, Dict, Optional
+
 import httpx
-from typing import Optional, Dict, Any
 from loguru import logger
 
 
@@ -62,7 +63,9 @@ class LightweightParser:
                 logger.warning("[LightweightParser] 无法从分享页面获取数据")
                 return None
 
-            logger.success(f"[LightweightParser] 解析成功: aweme_id={aweme_detail.get('aweme_id')}")
+            logger.success(
+                f"[LightweightParser] 解析成功: aweme_id={aweme_detail.get('aweme_id')}"
+            )
             return aweme_detail
 
         except Exception as e:
@@ -77,7 +80,9 @@ class LightweightParser:
         抖音分享链接会重定向到真实页面，从 URL 中提取视频 ID
         """
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=cls.TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=cls.TIMEOUT
+            ) as client:
                 response = await client.get(share_url, headers=cls.HEADERS)
                 final_url = str(response.url)
 
@@ -91,9 +96,9 @@ class LightweightParser:
 
                 # 提取数字 ID
                 patterns = [
-                    r'/video/(\d+)',
-                    r'/note/(\d+)',
-                    r'/share/video/(\d+)',
+                    r"/video/(\d+)",
+                    r"/note/(\d+)",
+                    r"/share/video/(\d+)",
                 ]
 
                 for pattern in patterns:
@@ -128,8 +133,7 @@ class LightweightParser:
 
                 # 解析 window._ROUTER_DATA
                 pattern = re.compile(
-                    r"window\._ROUTER_DATA\s*=\s*(.*?)</script>",
-                    flags=re.DOTALL
+                    r"window\._ROUTER_DATA\s*=\s*(.*?)</script>", flags=re.DOTALL
                 )
                 match = pattern.search(html_content)
 
@@ -148,11 +152,21 @@ class LightweightParser:
                 loader_data = router_data.get("loaderData", {})
 
                 if VIDEO_KEY in loader_data:
-                    item_list = loader_data[VIDEO_KEY].get("videoInfoRes", {}).get("item_list", [])
+                    item_list = (
+                        loader_data[VIDEO_KEY]
+                        .get("videoInfoRes", {})
+                        .get("item_list", [])
+                    )
                 elif NOTE_KEY in loader_data:
-                    item_list = loader_data[NOTE_KEY].get("videoInfoRes", {}).get("item_list", [])
+                    item_list = (
+                        loader_data[NOTE_KEY]
+                        .get("videoInfoRes", {})
+                        .get("item_list", [])
+                    )
                 else:
-                    logger.warning(f"[LightweightParser] 未知的路由键: {list(loader_data.keys())}")
+                    logger.warning(
+                        f"[LightweightParser] 未知的路由键: {list(loader_data.keys())}"
+                    )
                     return None
 
                 if not item_list:

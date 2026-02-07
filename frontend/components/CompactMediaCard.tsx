@@ -1,11 +1,11 @@
 
 import React, { useState } from 'react';
-import { DouyinBase } from '../types';
-import { Video, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check } from 'lucide-react';
+import { Video } from '../types';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
 interface CompactMediaCardProps {
-  data: DouyinBase;
+  data: Video;
   onClick: () => void;
   isShared?: boolean;
 }
@@ -32,7 +32,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   const [copiedShare, setCopiedShare] = useState(false);
   const [imageError, setImageError] = useState(false);
   
-  const isVideo = isVideoType(data.aweme_type);
+  const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
   const isAlbum = !isVideo && images.length > 1;
 
@@ -104,7 +104,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 ) : (
                   <img
                     src={coverUrl}
-                    alt={data.video_title}
+                    alt={data.title}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block"
                     onError={() => setImageError(true)}
                   />
@@ -140,7 +140,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                     </div>
                   )}
                   <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
-                    {isVideo ? <Video size={12} /> : <ImageIcon size={12} />}
+                    {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
                   </div>
                 </div>
 
@@ -159,7 +159,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 {/* Title Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 p-3 z-10 pointer-events-none">
                   <h3 className="text-[12px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
-                    {data.video_title || 'Untitled Media'}
+                    {data.title || 'Untitled Media'}
                   </h3>
                 </div>
             </>
@@ -193,19 +193,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
            {/* Like */}
            <div className="flex flex-col items-center justify-center py-2 bg-[#2A1818] rounded-lg border border-red-900/30">
               <Heart size={14} className="text-rose-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.video_digg_count)}</span>
+              <span className="text-[10px] text-white font-bold">{formatNumber(data.like_count)}</span>
            </div>
            {/* Comment */}
            <div className="flex flex-col items-center justify-center py-2 bg-[#10243E] rounded-lg border border-sky-900/30">
               <MessageCircle size={14} className="text-sky-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.video_comment_count)}</span>
+              <span className="text-[10px] text-white font-bold">{formatNumber(data.comment_count)}</span>
            </div>
            {/* Share - Click to copy link */}
            <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (data.video_original_url) {
-                  navigator.clipboard.writeText(data.video_original_url);
+                if (data.original_url) {
+                  navigator.clipboard.writeText(data.original_url);
                   setCopiedShare(true);
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
@@ -218,12 +218,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
               ) : (
                 <Share2 size={14} className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-[10px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.video_share_count)}</span>
+              <span className="text-[10px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
            </button>
            {/* Collect */}
            <div className="flex flex-col items-center justify-center py-2 bg-[#2E2005] rounded-lg border border-amber-900/30">
               <Bookmark size={14} className="text-amber-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.video_collect_count)}</span>
+              <span className="text-[10px] text-white font-bold">{formatNumber(data.favorite_count)}</span>
            </div>
         </div>
 
@@ -236,7 +236,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 <span className="text-[11px] text-zinc-400 font-medium truncate">@{data.author || 'User'}</span>
                 <span className="text-[11px] text-zinc-600 mx-1.5">·</span>
                 <span className="text-[10px] text-zinc-500 font-mono flex-shrink-0">
-                   {formatDate(data.video_created_time)}
+                   {formatDate(data.published_at)}
                 </span>
              </div>
         </div>

@@ -3,7 +3,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-import { DouyinBase } from '../types';
+import { Video } from '../types';
 
 // API configuration - empty string means use relative paths (via Vite proxy)
 const getApiUrl = (): string => {
@@ -17,7 +17,7 @@ const getApiUrl = (): string => {
 
 // Types
 export interface CollectionCondition {
-  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'aweme_type' | 'view_count';
+  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'media_type' | 'view_count';
   operator: 'equals' | 'contains' | 'starts_with' | 'in' | 'gt' | 'lt' | 'gte' | 'lte';
   value: string | number | string[];
 }
@@ -65,7 +65,7 @@ export interface SmartCollectionUpdate {
 }
 
 export interface SmartCollectionVideosResponse {
-  videos: DouyinBase[];
+  videos: Video[];
   total: number;
   page: number;
   page_size: number;

@@ -9,17 +9,17 @@ API 密钥管理路由
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
-from app.core.deps import AuthDep
 from app.core.api_key_scopes import AVAILABLE_SCOPES
+from app.core.deps import AuthDep
 from app.repositories.api_key_repository import ApiKeyRepository
 from app.schemas.api_key import (
     ApiKeyCreate,
-    ApiKeyUpdate,
-    ApiKeyResponse,
     ApiKeyCreateResponse,
     ApiKeyListResponse,
+    ApiKeyResponse,
+    ApiKeyScopeInfo,
     ApiKeyScopesResponse,
-    ApiKeyScopeInfo
+    ApiKeyUpdate,
 )
 
 router = APIRouter(prefix="/api-keys", tags=["API 密钥管理"])
@@ -40,7 +40,7 @@ async def get_available_scopes():
             scope=s["scope"],
             name=s["name"],
             description=s["description"],
-            category=s["category"]
+            category=s["category"],
         )
         for s in AVAILABLE_SCOPES
     ]
@@ -61,7 +61,7 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
     if current_count >= MAX_KEYS_PER_USER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"已达到密钥数量上限（{MAX_KEYS_PER_USER}个）"
+            detail=f"已达到密钥数量上限（{MAX_KEYS_PER_USER}个）",
         )
 
     try:
@@ -71,7 +71,7 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
             scopes=request.scopes,
             description=request.description,
             expires_at=request.expires_at,
-            rate_limit=request.rate_limit
+            rate_limit=request.rate_limit,
         )
 
         return ApiKeyCreateResponse(
@@ -86,14 +86,14 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
             rate_limit=result.get("rate_limit"),
             created_at=result["created_at"],
             updated_at=result["updated_at"],
-            secret_key=result["secret_key"]
+            secret_key=result["secret_key"],
         )
 
     except Exception as e:
         logger.error(f"创建 API 密钥失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建密钥失败: {str(e)}"
+            detail=f"创建密钥失败: {str(e)}",
         )
 
 
@@ -122,7 +122,7 @@ async def list_api_keys(auth: AuthDep, include_revoked: bool = False):
             usage_count=k.get("usage_count", 0),
             rate_limit=k.get("rate_limit"),
             created_at=k["created_at"],
-            updated_at=k["updated_at"]
+            updated_at=k["updated_at"],
         )
         for k in keys
     ]
@@ -139,16 +139,12 @@ async def get_api_key(key_id: str, auth: AuthDep):
     key_data = await repo.get_by_key_id(key_id)
 
     if not key_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="密钥不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在")
 
     # 验证所有权
     if key_data["user_id"] != auth.user_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权访问此密钥"
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此密钥"
         )
 
     return ApiKeyResponse(
@@ -164,7 +160,7 @@ async def get_api_key(key_id: str, auth: AuthDep):
         usage_count=key_data.get("usage_count", 0),
         rate_limit=key_data.get("rate_limit"),
         created_at=key_data["created_at"],
-        updated_at=key_data["updated_at"]
+        updated_at=key_data["updated_at"],
     )
 
 
@@ -180,8 +176,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
 
     if not update_data:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="没有提供要更新的数据"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="没有提供要更新的数据"
         )
 
     try:
@@ -189,8 +184,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
 
         if not result:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="密钥不存在或无权修改"
+                status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权修改"
             )
 
         return ApiKeyResponse(
@@ -206,7 +200,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
             usage_count=result.get("usage_count", 0),
             rate_limit=result.get("rate_limit"),
             created_at=result["created_at"],
-            updated_at=result["updated_at"]
+            updated_at=result["updated_at"],
         )
 
     except HTTPException:
@@ -215,7 +209,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
         logger.error(f"更新 API 密钥失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新密钥失败: {str(e)}"
+            detail=f"更新密钥失败: {str(e)}",
         )
 
 
@@ -229,8 +223,7 @@ async def delete_api_key(key_id: str, auth: AuthDep):
 
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="密钥不存在或无权删除"
+            status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权删除"
         )
 
     return {"success": True, "message": "密钥已删除"}
@@ -248,8 +241,7 @@ async def revoke_api_key(key_id: str, auth: AuthDep):
 
     if not result:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="密钥不存在或无权撤销"
+            status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权撤销"
         )
 
     return {"success": True, "message": "密钥已撤销"}

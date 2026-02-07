@@ -7,14 +7,14 @@
 需要认证才能访问。
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.repositories.user_settings_repository import UserSettingsRepository
-
 
 router = APIRouter(prefix="/settings", tags=["用户设置"])
 
@@ -23,14 +23,17 @@ router = APIRouter(prefix="/settings", tags=["用户设置"])
 # 请求/响应模型
 # ============================================
 
+
 class UserSettingsRequest(BaseModel):
     """用户设置请求"""
+
     download_path: Optional[str] = None
     settings_json: Optional[Dict[str, Any]] = None
 
 
 class UserSettingsResponse(BaseModel):
     """用户设置响应"""
+
     id: Optional[str] = None
     user_id: str
     download_path: str
@@ -42,6 +45,7 @@ class UserSettingsResponse(BaseModel):
 # ============================================
 # API 端点
 # ============================================
+
 
 @router.get("", response_model=UserSettingsResponse)
 async def get_user_settings(auth: AuthDep):
@@ -60,17 +64,19 @@ async def get_user_settings(auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get("download_path", "/home/user/downloads/douyin"),
+                download_path=settings.get(
+                    "download_path", "/home/user/downloads/mediahub"
+                ),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
-                updated_at=settings.get("updated_at")
+                updated_at=settings.get("updated_at"),
             )
 
         # 返回默认设置
         return UserSettingsResponse(
             user_id=auth.user_id,
-            download_path="/home/user/downloads/douyin",
-            settings_json={}
+            download_path="/home/user/downloads/mediahub",
+            settings_json={},
         )
 
     except Exception as e:
@@ -109,10 +115,12 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get("download_path", "/home/user/downloads/douyin"),
+                download_path=settings.get(
+                    "download_path", "/home/user/downloads/mediahub"
+                ),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
-                updated_at=settings.get("updated_at")
+                updated_at=settings.get("updated_at"),
             )
 
         raise HTTPException(status_code=500, detail="保存设置失败")
@@ -153,13 +161,16 @@ async def delete_user_settings(auth: AuthDep):
 # Parse Mode Settings
 # ============================================
 
+
 class ParseModeRequest(BaseModel):
     """解析模式请求"""
+
     mode: str  # 'lighthttp' or 'drissionpage'
 
 
 class ParseModeResponse(BaseModel):
     """解析模式响应"""
+
     mode: str
     description: str
 
@@ -185,12 +196,11 @@ async def get_parse_mode(auth: AuthDep):
 
         descriptions = {
             "lighthttp": "Fast HTTP parsing (recommended)",
-            "drissionpage": "Browser-based parsing (more stable)"
+            "drissionpage": "Browser-based parsing (more stable)",
         }
 
         return ParseModeResponse(
-            mode=mode,
-            description=descriptions.get(mode, "Unknown mode")
+            mode=mode, description=descriptions.get(mode, "Unknown mode")
         )
 
     except Exception as e:
@@ -213,7 +223,7 @@ async def set_parse_mode(request: ParseModeRequest, auth: AuthDep):
     if request.mode not in valid_modes:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid mode. Valid options: {', '.join(valid_modes)}"
+            detail=f"Invalid mode. Valid options: {', '.join(valid_modes)}",
         )
 
     try:
@@ -231,14 +241,14 @@ async def set_parse_mode(request: ParseModeRequest, auth: AuthDep):
 
         descriptions = {
             "lighthttp": "Fast HTTP parsing (recommended)",
-            "drissionpage": "Browser-based parsing (more stable)"
+            "drissionpage": "Browser-based parsing (more stable)",
         }
 
         logger.info(f"用户 {auth.user_id} 设置解析模式为: {request.mode}")
 
         return ParseModeResponse(
             mode=request.mode,
-            description=descriptions.get(request.mode, "Unknown mode")
+            description=descriptions.get(request.mode, "Unknown mode"),
         )
 
     except HTTPException:

@@ -1,13 +1,13 @@
 [project]
-name = "douyin-analysis-backend"
-version = "0.2.0"
-description = "抖音视频分析和下载工具后端 - 基于 FastAPI + Supabase"
+name = "mediahub-backend"
+version = "0.3.0"
+description = "MediaHub - Multi-source media analysis and download platform powered by FastAPI + Supabase"
 authors = [
     {name = "heygo", email = "8512939@qq.com"}
 ]
 license = {text = "MIT"}
 requires-python = ">=3.12"
-keywords = ["douyin", "tiktok", "video", "download", "analysis", "fastapi", "supabase"]
+keywords = ["mediahub", "video", "download", "whisper", "transcription", "yt-dlp", "fastapi", "supabase"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,6 +21,7 @@ dependencies = [
     "alembic>=1.16.2",
     "celery[redis]>=5.4.0",
     "drissionpage>=4.1.0.18",
+    "faster-whisper>=1.1.0",
     "fastapi>=0.115.12",
     "flower>=2.0.0",
     "greenlet>=3.2.3",
@@ -41,6 +42,7 @@ dependencies = [
     "supabase>=2.18.1",
     "tqdm>=4.67.1",
     "uvicorn>=0.34.3",
+    "yt-dlp>=2024.12.23",
 ]
 
 [project.optional-dependencies]
@@ -53,12 +55,12 @@ dev = [
 ]
 
 [project.scripts]
-douyin-analysis = "app.main:main"
+mediahub = "app.main:main"
 
 [project.urls]
-Homepage = "https://github.com/iocrazy/douyin_analysis"
-Repository = "https://github.com/iocrazy/douyin_analysis"
-Issues = "https://github.com/iocrazy/douyin_analysis/issues"
+Homepage = "https://github.com/iocrazy/mediahub"
+Repository = "https://github.com/iocrazy/mediahub"
+Issues = "https://github.com/iocrazy/mediahub/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -74,6 +76,7 @@ dev-dependencies = [
     "black>=23.0.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
+    "autoflake>=2.3.1",
 ]
 
 [tool.black]

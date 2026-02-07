@@ -17,7 +17,7 @@ const getApiUrl = (): string => {
 // Types
 export interface AnalysisStatus {
   video_id: number;
-  aweme_id: string;
+  platform_id: string;
   status: 'pending' | 'analyzing' | 'completed' | 'failed';
   has_analysis: boolean;
   has_tags: boolean;
@@ -27,7 +27,7 @@ export interface AnalysisStatus {
 
 export interface VideoAnalysisResult {
   video_id: number;
-  aweme_id: string;
+  platform_id: string;
   visual_analysis: string | null;
   content_categories: string[];
   detected_objects: string[];
