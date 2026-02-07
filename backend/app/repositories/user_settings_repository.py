@@ -7,7 +7,8 @@
 使用异步 Supabase 客户端。
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
@@ -50,7 +51,9 @@ class UserSettingsRepository:
             logger.error(f"获取用户设置失败: {e}")
             return None
 
-    async def upsert(self, user_id: str, settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def upsert(
+        self, user_id: str, settings: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """
         创建或更新用户设置
 
@@ -62,16 +65,10 @@ class UserSettingsRepository:
             更新后的设置数据
         """
         try:
-            data = {
-                "user_id": user_id,
-                **settings
-            }
+            data = {"user_id": user_id, **settings}
 
             table = await self._get_table()
-            result = await table.upsert(
-                data,
-                on_conflict="user_id"
-            ).execute()
+            result = await table.upsert(data, on_conflict="user_id").execute()
 
             if result.data and len(result.data) > 0:
                 logger.info(f"用户设置已保存: user_id={user_id}")

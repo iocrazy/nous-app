@@ -15,7 +15,6 @@ from typing import Optional
 
 from loguru import logger
 
-from app.core.config import settings
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
@@ -54,9 +53,7 @@ class YtdlpService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=120
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
         except asyncio.TimeoutError:
             logger.error(f"[yt-dlp] Metadata fetch timed out: {url}")
             raise RuntimeError(f"yt-dlp metadata fetch timed out for {url}")
@@ -95,11 +92,14 @@ class YtdlpService:
 
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "--merge-output-format", "mp4",
+            "-f",
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format",
+            "mp4",
             "--no-playlist",
             "--no-warnings",
-            "-o", output_template,
+            "-o",
+            output_template,
             url,
         ]
 
@@ -111,9 +111,7 @@ class YtdlpService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=600
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
         except asyncio.TimeoutError:
             logger.error(f"[yt-dlp] Download timed out: {platform_id}")
             raise RuntimeError(f"yt-dlp download timed out for {platform_id}")
@@ -157,11 +155,14 @@ class YtdlpService:
         cmd = [
             "yt-dlp",
             "-x",  # Extract audio
-            "--audio-format", "mp3",
-            "--audio-quality", "0",  # Best quality
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "0",  # Best quality
             "--no-playlist",
             "--no-warnings",
-            "-o", output_template,
+            "-o",
+            output_template,
             url,
         ]
 
@@ -173,9 +174,7 @@ class YtdlpService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=600
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
         except asyncio.TimeoutError:
             logger.error(f"[yt-dlp] Audio extraction timed out: {platform_id}")
             raise RuntimeError(f"yt-dlp audio extraction timed out for {platform_id}")
@@ -187,7 +186,9 @@ class YtdlpService:
             raise RuntimeError(f"yt-dlp audio extraction failed: {parsed_error}")
 
         # Find the downloaded audio file
-        file_path = YtdlpService._find_downloaded_file(output_dir, f"{platform_id}_audio")
+        file_path = YtdlpService._find_downloaded_file(
+            output_dir, f"{platform_id}_audio"
+        )
         if not file_path:
             raise RuntimeError(f"Downloaded audio file not found for {platform_id}")
 
@@ -215,7 +216,9 @@ class YtdlpService:
 
         # Build platform_id: {platform}_{yt-dlp id}
         video_id = ytdlp_info.get("id", "")
-        platform_id = f"{platform}_{video_id}" if video_id else f"{platform}_{hash(url)}"
+        platform_id = (
+            f"{platform}_{video_id}" if video_id else f"{platform}_{hash(url)}"
+        )
 
         # Resolution
         width = ytdlp_info.get("width")
@@ -330,7 +333,7 @@ class YtdlpService:
                 return message
 
         # Return last line of stderr (often the most informative)
-        lines = [l.strip() for l in stderr_output.split("\n") if l.strip()]
+        lines = [line.strip() for line in stderr_output.split("\n") if line.strip()]
         if lines:
             last_line = lines[-1]
             # Truncate very long error messages

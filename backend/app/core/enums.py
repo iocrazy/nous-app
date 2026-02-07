@@ -9,11 +9,13 @@ from enum import Enum
 
 class DownloadStatus(str, Enum):
     """下载状态枚举"""
-    PENDING = "pending"      # 待下载
+
+    PENDING = "pending"  # 待下载
     DOWNLOADING = "downloading"  # 下载中
     COMPLETED = "completed"  # 已完成
-    FAILED = "failed"        # 失败
-    SKIPPED = "skipped"      # 跳过
+    FAILED = "failed"  # 失败
+    SKIPPED = "skipped"  # 跳过
+
 
 class RoleType(str, Enum):
     ADMIN = "admin"

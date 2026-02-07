@@ -50,89 +50,82 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
     # Video fetch
     ("POST", "/videos/fetch"): [
         ApiKeyScope.VIDEOS_FETCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("POST", "/videos/fetch/batch"): [
         ApiKeyScope.VIDEOS_FETCH_BATCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Video read
     ("GET", "/videos/videos"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("GET", "/videos/videos/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Video write
     ("DELETE", "/videos/videos/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Search
     ("POST", "/videos/videos/search"): [
         ApiKeyScope.VIDEOS_SEARCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Statistics
     ("GET", "/videos/statistics"): [
         ApiKeyScope.VIDEOS_STATISTICS.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Pending downloads list
     ("GET", "/videos/pending"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Retry download
     ("POST", "/videos/retry/{platform_id}"): [
         ApiKeyScope.VIDEOS_RETRY.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
-
     # Legacy /douyin/ paths (backward compatibility)
     ("POST", "/douyin/fetch"): [
         ApiKeyScope.VIDEOS_FETCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("POST", "/douyin/fetch/batch"): [
         ApiKeyScope.VIDEOS_FETCH_BATCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("GET", "/douyin/videos"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("GET", "/douyin/videos/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("DELETE", "/douyin/videos/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("POST", "/douyin/videos/search"): [
         ApiKeyScope.VIDEOS_SEARCH.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("GET", "/douyin/statistics"): [
         ApiKeyScope.VIDEOS_STATISTICS.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("GET", "/douyin/pending"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
     ("POST", "/douyin/retry/{platform_id}"): [
         ApiKeyScope.VIDEOS_RETRY.value,
-        ApiKeyScope.VIDEOS_ALL.value
+        ApiKeyScope.VIDEOS_ALL.value,
     ],
 }
 
@@ -143,49 +136,49 @@ AVAILABLE_SCOPES = [
         "scope": ApiKeyScope.VIDEOS_FETCH.value,
         "name": "Fetch Video",
         "description": "Fetch single video info via URL",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_FETCH_BATCH.value,
         "name": "Batch Fetch",
         "description": "Fetch multiple videos info in batch",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         "name": "Read Videos",
         "description": "View video list and details",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
         "name": "Manage Videos",
         "description": "Delete video records",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_SEARCH.value,
         "name": "Search Videos",
         "description": "Search videos",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_STATISTICS.value,
         "name": "View Statistics",
         "description": "View statistics data",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_RETRY.value,
         "name": "Retry Download",
         "description": "Retry failed video downloads",
-        "category": "Video"
+        "category": "Video",
     },
     {
         "scope": ApiKeyScope.VIDEOS_ALL.value,
         "name": "Full Access",
         "description": "All video-related permissions",
-        "category": "Video"
+        "category": "Video",
     },
 ]
 

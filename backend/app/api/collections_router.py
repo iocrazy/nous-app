@@ -1,21 +1,18 @@
 """API routes for Smart Collections."""
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.collections_repository import CollectionsRepository
-from app.services.collections_service import CollectionsService
 from app.schemas.collections import (
     CollectionCreate,
-    CollectionUpdate,
-    CollectionResponse,
     CollectionListResponse,
-    CollectionVideosResponse,
+    CollectionResponse,
     CollectionRules,
+    CollectionUpdate,
+    CollectionVideosResponse,
 )
-
+from app.services.collections_service import CollectionsService
 
 router = APIRouter(prefix="/collections", tags=["Collections"])
 
@@ -45,7 +42,9 @@ async def list_collections(
                 icon=c.get("icon", "📁"),
                 color=c.get("color"),
                 description=c.get("description"),
-                rules=CollectionRules(**c.get("rules", {"match": "all", "conditions": []})),
+                rules=CollectionRules(
+                    **c.get("rules", {"match": "all", "conditions": []})
+                ),
                 video_count=c.get("cached_count", 0),
                 cached_at=c.get("cached_at"),
                 is_preset=c.get("is_preset", False),
@@ -53,11 +52,11 @@ async def list_collections(
                 sort_by=c.get("sort_by", "created_at"),
                 sort_order=c.get("sort_order", "desc"),
                 created_at=c["created_at"],
-                updated_at=c.get("updated_at", c["created_at"])
+                updated_at=c.get("updated_at", c["created_at"]),
             )
             for c in collections
         ],
-        total=len(collections)
+        total=len(collections),
     )
 
 
@@ -80,7 +79,7 @@ async def create_collection(
         description=collection.description,
         rules=collection.rules.model_dump(),
         sort_by=collection.sort_by,
-        sort_order=collection.sort_order
+        sort_order=collection.sort_order,
     )
 
     return CollectionResponse(
@@ -90,7 +89,9 @@ async def create_collection(
         icon=created.get("icon", "📁"),
         color=created.get("color"),
         description=created.get("description"),
-        rules=CollectionRules(**created.get("rules", {"match": "all", "conditions": []})),
+        rules=CollectionRules(
+            **created.get("rules", {"match": "all", "conditions": []})
+        ),
         video_count=created.get("cached_count", 0),
         cached_at=created.get("cached_at"),
         is_preset=created.get("is_preset", False),
@@ -98,7 +99,7 @@ async def create_collection(
         sort_by=created.get("sort_by", "created_at"),
         sort_order=created.get("sort_order", "desc"),
         created_at=created["created_at"],
-        updated_at=created.get("updated_at", created["created_at"])
+        updated_at=created.get("updated_at", created["created_at"]),
     )
 
 
@@ -113,8 +114,7 @@ async def get_collection(
 
     if not collection:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Collection not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
     return CollectionResponse(
@@ -124,7 +124,9 @@ async def get_collection(
         icon=collection.get("icon", "📁"),
         color=collection.get("color"),
         description=collection.get("description"),
-        rules=CollectionRules(**collection.get("rules", {"match": "all", "conditions": []})),
+        rules=CollectionRules(
+            **collection.get("rules", {"match": "all", "conditions": []})
+        ),
         video_count=collection.get("cached_count", 0),
         cached_at=collection.get("cached_at"),
         is_preset=collection.get("is_preset", False),
@@ -132,7 +134,7 @@ async def get_collection(
         sort_by=collection.get("sort_by", "created_at"),
         sort_order=collection.get("sort_order", "desc"),
         created_at=collection["created_at"],
-        updated_at=collection.get("updated_at", collection["created_at"])
+        updated_at=collection.get("updated_at", collection["created_at"]),
     )
 
 
@@ -152,8 +154,7 @@ async def update_collection(
     existing = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not existing:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Collection not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
     update_data = {}
@@ -175,7 +176,7 @@ async def update_collection(
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update collection"
+            detail="Failed to update collection",
         )
 
     return CollectionResponse(
@@ -185,7 +186,9 @@ async def update_collection(
         icon=updated.get("icon", "📁"),
         color=updated.get("color"),
         description=updated.get("description"),
-        rules=CollectionRules(**updated.get("rules", {"match": "all", "conditions": []})),
+        rules=CollectionRules(
+            **updated.get("rules", {"match": "all", "conditions": []})
+        ),
         video_count=updated.get("cached_count", 0),
         cached_at=updated.get("cached_at"),
         is_preset=updated.get("is_preset", False),
@@ -193,7 +196,7 @@ async def update_collection(
         sort_by=updated.get("sort_by", "created_at"),
         sort_order=updated.get("sort_order", "desc"),
         created_at=updated["created_at"],
-        updated_at=updated.get("updated_at", updated["created_at"])
+        updated_at=updated.get("updated_at", updated["created_at"]),
     )
 
 
@@ -212,21 +215,20 @@ async def delete_collection(
     existing = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not existing:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Collection not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
     if existing.get("is_preset"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Preset collections cannot be deleted"
+            detail="Preset collections cannot be deleted",
         )
 
     deleted = await repo.delete_collection(collection_id, auth.user_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete collection"
+            detail="Failed to delete collection",
         )
 
 
@@ -249,8 +251,7 @@ async def get_collection_videos(
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not collection:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Collection not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
     videos, total = await service.get_collection_videos(
@@ -258,7 +259,7 @@ async def get_collection_videos(
         user_id=auth.user_id,
         page=page,
         page_size=page_size,
-        use_cache=not refresh
+        use_cache=not refresh,
     )
 
     return CollectionVideosResponse(
@@ -267,7 +268,7 @@ async def get_collection_videos(
         videos=videos,
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
     )
 
 
@@ -283,8 +284,7 @@ async def refresh_collection(
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not collection:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Collection not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
     count = await service.refresh_collection_cache(collection_id, auth.user_id)
@@ -292,7 +292,7 @@ async def refresh_collection(
     return {
         "message": "Collection refreshed",
         "collection_id": collection_id,
-        "video_count": count
+        "video_count": count,
     }
 
 
@@ -309,7 +309,7 @@ async def initialize_preset_collections(auth: AuthDep = None):
     if existing_presets:
         return {
             "message": "Preset collections already exist",
-            "count": len(existing_presets)
+            "count": len(existing_presets),
         }
 
     created = await repo.create_default_presets(auth.user_id)
@@ -317,5 +317,5 @@ async def initialize_preset_collections(auth: AuthDep = None):
     return {
         "message": "Preset collections created",
         "count": len(created),
-        "presets": [{"id": c["id"], "name": c["name"]} for c in created]
+        "presets": [{"id": c["id"], "name": c["name"]} for c in created],
     }

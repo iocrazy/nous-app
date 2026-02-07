@@ -7,45 +7,46 @@ Video processing API endpoints based on Supabase.
 Requires authentication (JWT or API Key).
 """
 
-import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Header, Query, BackgroundTasks
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from loguru import logger
 
-from app.core.enums import DownloadStatus
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.responses import FileResponse
+from loguru import logger
+from pydantic import BaseModel
+
 from app.core.deps import AuthDep
+from app.core.enums import DownloadStatus
 from app.core.utils import Utils
-from app.repositories.video_repository import VideoRepository
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
+from app.repositories.video_repository import VideoRepository
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
-from app.services.video_service import VideoService
 from app.services.url_router import URLRouter
+from app.services.video_service import VideoService
 from app.services.ytdlp_service import YtdlpService
-
 
 router = APIRouter(prefix="/videos")
 
 # API group tags
-TAGS_FETCH = ["Video Fetch"]      # Fetch and parse videos
-TAGS_VIDEOS = ["Video Management"]     # CRUD for stored data
-TAGS_STATS = ["Statistics"]      # Statistics and analytics
-TAGS_DOWNLOAD = ["Download Management"]   # Download operations
-TAGS_LOGS = ["Logs"]           # User action logs
+TAGS_FETCH = ["Video Fetch"]  # Fetch and parse videos
+TAGS_VIDEOS = ["Video Management"]  # CRUD for stored data
+TAGS_STATS = ["Statistics"]  # Statistics and analytics
+TAGS_DOWNLOAD = ["Download Management"]  # Download operations
+TAGS_LOGS = ["Logs"]  # User action logs
 
 
 # ============================================
 # Request/Response models
 # ============================================
 
+
 class VideoFetchRequest(BaseModel):
     """Video fetch request"""
+
     url: str
     video_bool: bool = True
     music_bool: bool = False
@@ -55,6 +56,7 @@ class VideoFetchRequest(BaseModel):
 
 class VideoSearchRequest(BaseModel):
     """Video search request"""
+
     keyword: Optional[str] = None
     author: Optional[str] = None
     status: Optional[str] = None
@@ -66,6 +68,7 @@ class VideoSearchRequest(BaseModel):
 
 class BatchFetchRequest(BaseModel):
     """Batch fetch request"""
+
     urls: list[str]
     video_bool: bool = True
     music_bool: bool = False
@@ -77,8 +80,11 @@ class BatchFetchRequest(BaseModel):
 # Route endpoints
 # ============================================
 
+
 @router.post("/fetch", tags=TAGS_FETCH)
-async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep):
+async def fetch_video(
+    request: VideoFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
+):
     """
     Fetch a single video
 
@@ -97,7 +103,9 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             valid_urls = Utils.extract_valid_url(request.url)
             url = valid_urls[0]  # Take the first valid URL
         except ValueError:
-            raise HTTPException(status_code=400, detail="Cannot extract a valid link from input")
+            raise HTTPException(
+                status_code=400, detail="Cannot extract a valid link from input"
+            )
 
         logger.info(f"User {auth.user_id} starting video fetch: {url}")
 
@@ -130,7 +138,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 user_id=auth.user_id,
                 video_bool=request.video_bool,
                 music_bool=request.music_bool,
-                cover_bool=request.cover_bool
+                cover_bool=request.cover_bool,
             )
 
             # Log action
@@ -139,7 +147,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 user_id=auth.user_id,
                 action="fetch",
                 message=f"Submitted Celery task: {url[:30]}...",
-                status="pending"
+                status="pending",
             )
 
             return {
@@ -164,7 +172,9 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             settings_repo = UserSettingsRepository()
             user_settings = await settings_repo.get_by_user_id(auth.user_id)
             if user_settings and user_settings.get("settings_json"):
-                user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+                user_parse_mode = user_settings["settings_json"].get(
+                    "parse_mode", "lighthttp"
+                )
             logger.info(f"[Parse Mode] User {auth.user_id} setting: {user_parse_mode}")
         except Exception as e:
             logger.warning(f"Failed to read user parse mode, using default: {e}")
@@ -178,7 +188,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 if aweme_detail:
                     parse_method = "browser_auto"
                     parse_method_name = "BrowserAuto"
-                    logger.success(f"[BrowserAuto] Parse successful")
+                    logger.success("[BrowserAuto] Parse successful")
             except Exception as e:
                 logger.error(f"[BrowserAuto] Parse failed: {e}")
                 fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
@@ -191,7 +201,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 if aweme_detail:
                     parse_method = "light_http"
                     parse_method_name = "LightHTTP"
-                    logger.success(f"[LightHTTP] Parse successful")
+                    logger.success("[LightHTTP] Parse successful")
                 else:
                     fallback_reason = "LightHTTP returned empty result"
             except Exception as e:
@@ -207,12 +217,15 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                     if aweme_detail:
                         parse_method = "browser_auto"
                         parse_method_name = "BrowserAuto"
-                        logger.success(f"[BrowserAuto] Parse successful")
+                        logger.success("[BrowserAuto] Parse successful")
                 except Exception as e:
                     logger.error(f"[BrowserAuto] Parse failed: {e}")
 
         if not aweme_detail:
-            raise HTTPException(status_code=404, detail="Cannot fetch video info (both LightHTTP and BrowserAuto failed)")
+            raise HTTPException(
+                status_code=404,
+                detail="Cannot fetch video info (both LightHTTP and BrowserAuto failed)",
+            )
 
         logger.info(f"[Parse Complete] Method used: {parse_method_name}")
 
@@ -222,7 +235,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             valid_url=url,
             download_video=request.video_bool,
             download_music=request.music_bool,
-            download_cover=request.cover_bool
+            download_cover=request.cover_bool,
         )
 
         if not parsed_data:
@@ -239,7 +252,10 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         save_result = await VideoService.save_metadata_only(platform_id, parsed_data)
         if not save_result.get("success"):
             logger.error(f"Failed to save metadata: {save_result.get('message')}")
-            raise HTTPException(status_code=500, detail=save_result.get("message", "Failed to save metadata"))
+            raise HTTPException(
+                status_code=500,
+                detail=save_result.get("message", "Failed to save metadata"),
+            )
 
         # Download media files
         download_task_id = None
@@ -248,8 +264,8 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
         if need_download:
             # Try Celery, fallback to FastAPI background tasks if unavailable
             try:
-                from app.tasks.download_tasks import download_media_task
                 from app.celery_app import celery_app
+                from app.tasks.download_tasks import download_media_task
 
                 # Check if Celery is available - ping() returns empty list if no workers
                 workers = celery_app.control.ping(timeout=1)
@@ -269,7 +285,9 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                 logger.info(f"Celery download task submitted: {download_task_id}")
             except Exception as celery_err:
                 # Celery unavailable, use FastAPI background tasks
-                logger.warning(f"Celery unavailable, using FastAPI background tasks: {celery_err}")
+                logger.warning(
+                    f"Celery unavailable, using FastAPI background tasks: {celery_err}"
+                )
                 from app.services.downloader import DownloaderService
 
                 # Add download tasks based on type
@@ -278,28 +296,28 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
                         background_tasks.add_task(
                             DownloaderService.download_video_by_platform_id,
                             platform_id,
-                            user_id=auth.user_id
+                            user_id=auth.user_id,
                         )
                 elif int(media_type) in (2, 68):  # Image types
                     if request.video_bool:
                         background_tasks.add_task(
                             DownloaderService.download_images_by_platform_id,
                             platform_id,
-                            user_id=auth.user_id
+                            user_id=auth.user_id,
                         )
 
                 if request.music_bool:
                     background_tasks.add_task(
                         DownloaderService.download_music_by_platform_id,
                         platform_id=platform_id,
-                        user_id=auth.user_id
+                        user_id=auth.user_id,
                     )
 
                 if request.cover_bool:
                     background_tasks.add_task(
                         DownloaderService.download_cover_by_platform_id,
                         platform_id,
-                        user_id=auth.user_id
+                        user_id=auth.user_id,
                     )
                 logger.info(f"FastAPI background download tasks added: {platform_id}")
 
@@ -310,12 +328,12 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             action="fetch",
             message=f"Video parsed successfully: {video_title[:30]}...",
             status="success",
-            aweme_id=platform_id
+            aweme_id=platform_id,
         )
 
         # Handle datetime objects to string
         published_at = parsed_data.get("published_at")
-        if published_at and hasattr(published_at, 'isoformat'):
+        if published_at and hasattr(published_at, "isoformat"):
             published_at = published_at.isoformat()
 
         # Return complete parsed data for frontend display
@@ -347,7 +365,9 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             "original_url": parsed_data.get("original_url"),
             "resolution": parsed_data.get("resolution"),
             # Download status
-            "video_download_status": parsed_data.get("video_download_status", "PENDING"),
+            "video_download_status": parsed_data.get(
+                "video_download_status", "PENDING"
+            ),
             # Download task ID (for frontend progress polling)
             "download_task_id": download_task_id,
         }
@@ -359,7 +379,7 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             user_id=auth.user_id,
             action="fetch",
             message=f"Failed to fetch video: {request.url[:30]}...",
-            status="error"
+            status="error",
         )
         raise
     except Exception as e:
@@ -370,13 +390,15 @@ async def fetch_video(request: VideoFetchRequest, background_tasks: BackgroundTa
             user_id=auth.user_id,
             action="fetch",
             message=f"Failed to fetch video: {str(e)[:50]}",
-            status="error"
+            status="error",
         )
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {str(e)}")
 
 
 @router.post("/fetch/batch", tags=TAGS_FETCH)
-async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep):
+async def fetch_videos_batch(
+    request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
+):
     """
     Batch fetch videos
 
@@ -398,7 +420,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
             user_id=auth.user_id,
             video_bool=request.video_bool,
             music_bool=request.music_bool,
-            cover_bool=request.cover_bool
+            cover_bool=request.cover_bool,
         )
 
         # Log action
@@ -407,12 +429,12 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
             user_id=auth.user_id,
             action="fetch_batch",
             message=f"Submitted batch Celery task: {len(request.urls)} links",
-            status="pending"
+            status="pending",
         )
 
         return {
             "success": True,
-            "message": f"Batch task submitted to Celery queue",
+            "message": "Batch task submitted to Celery queue",
             "task_id": task.id,
             "total": len(request.urls),
             "use_celery": True,
@@ -428,7 +450,9 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
         settings_repo = UserSettingsRepository()
         user_settings = await settings_repo.get_by_user_id(auth.user_id)
         if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+            user_parse_mode = user_settings["settings_json"].get(
+                "parse_mode", "lighthttp"
+            )
         logger.info(f"[Batch Parse] User {auth.user_id} parse mode: {user_parse_mode}")
     except Exception as e:
         logger.warning(f"Failed to read user parse mode, using default: {e}")
@@ -472,7 +496,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                     valid_url=url,
                     download_video=request.video_bool,
                     download_music=request.music_bool,
-                    download_cover=request.cover_bool
+                    download_cover=request.cover_bool,
                 )
 
                 if parsed_data:
@@ -480,42 +504,44 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
                     # Add user ID
                     parsed_data["user_id"] = auth.user_id
                     background_tasks.add_task(
-                        VideoService.process_video,
-                        platform_id,
-                        parsed_data
+                        VideoService.process_video, platform_id, parsed_data
                     )
 
                     # Handle datetime objects to string
                     published_at = parsed_data.get("published_at")
-                    if published_at and hasattr(published_at, 'isoformat'):
+                    if published_at and hasattr(published_at, "isoformat"):
                         published_at = published_at.isoformat()
 
                     # Return complete data for frontend immediate display
-                    results.append({
-                        "url": url,
-                        "platform_id": platform_id,
-                        "status": "submitted",
-                        "data": {
+                    results.append(
+                        {
+                            "url": url,
                             "platform_id": platform_id,
-                            "title": parsed_data.get("title"),
-                            "description": parsed_data.get("description"),
-                            "author": parsed_data.get("author"),
-                            "media_type": parsed_data.get("media_type"),
-                            "video_download_urls": parsed_data.get("video_download_urls", []),
-                            "cover_urls": parsed_data.get("cover_urls", []),
-                            "like_count": parsed_data.get("like_count", 0),
-                            "comment_count": parsed_data.get("comment_count", 0),
-                            "share_count": parsed_data.get("share_count", 0),
-                            "favorite_count": parsed_data.get("favorite_count", 0),
-                            "duration": parsed_data.get("duration", "0"),
-                            "published_at": published_at,
-                            "image_urls": parsed_data.get("image_urls", []),
-                            "sec_uid": parsed_data.get("sec_uid"),
-                            "unique_id": parsed_data.get("unique_id"),
-                            "valid_url": url,
-                            "user_id": auth.user_id,
+                            "status": "submitted",
+                            "data": {
+                                "platform_id": platform_id,
+                                "title": parsed_data.get("title"),
+                                "description": parsed_data.get("description"),
+                                "author": parsed_data.get("author"),
+                                "media_type": parsed_data.get("media_type"),
+                                "video_download_urls": parsed_data.get(
+                                    "video_download_urls", []
+                                ),
+                                "cover_urls": parsed_data.get("cover_urls", []),
+                                "like_count": parsed_data.get("like_count", 0),
+                                "comment_count": parsed_data.get("comment_count", 0),
+                                "share_count": parsed_data.get("share_count", 0),
+                                "favorite_count": parsed_data.get("favorite_count", 0),
+                                "duration": parsed_data.get("duration", "0"),
+                                "published_at": published_at,
+                                "image_urls": parsed_data.get("image_urls", []),
+                                "sec_uid": parsed_data.get("sec_uid"),
+                                "unique_id": parsed_data.get("unique_id"),
+                                "valid_url": url,
+                                "user_id": auth.user_id,
+                            },
                         }
-                    })
+                    )
                 else:
                     errors.append({"url": url, "error": "Parse failed"})
             else:
@@ -530,7 +556,7 @@ async def fetch_videos_batch(request: BatchFetchRequest, background_tasks: Backg
         "submitted": len(results),
         "failed": len(errors),
         "results": results,
-        "errors": errors
+        "errors": errors,
     }
 
 
@@ -540,7 +566,7 @@ async def list_videos(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     order_by: str = Query("created_at"),
-    ascending: bool = Query(False)
+    ascending: bool = Query(False),
 ):
     """
     Get video list
@@ -561,7 +587,7 @@ async def list_videos(
             skip=skip,
             limit=limit,
             order_by=order_by,
-            ascending=ascending
+            ascending=ascending,
         )
         return {"success": True, "count": len(videos), "videos": videos}
     except Exception as e:
@@ -600,7 +626,9 @@ async def delete_video(
     platform_id: str,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
-    delete_files: bool = Query(False, description="Whether to also delete locally downloaded files")
+    delete_files: bool = Query(
+        False, description="Whether to also delete locally downloaded files"
+    ),
 ):
     """
     Delete video record
@@ -651,7 +679,9 @@ async def delete_video(
         result = await repo.delete(platform_id, user_id=auth.user_id)
 
         if not result:
-            raise HTTPException(status_code=404, detail="Failed to delete database record")
+            raise HTTPException(
+                status_code=404, detail="Failed to delete database record"
+            )
 
         # Build log message
         log_message = f"Deleted video: {video_title}..."
@@ -666,13 +696,13 @@ async def delete_video(
             message=log_message,
             status="success",
             aweme_id=platform_id,
-            details={"files_deleted": files_deleted} if files_deleted else None
+            details={"files_deleted": files_deleted} if files_deleted else None,
         )
 
         return {
             "success": True,
             "message": "Video deleted",
-            "files_deleted": files_deleted
+            "files_deleted": files_deleted,
         }
     except HTTPException:
         raise
@@ -686,7 +716,7 @@ async def search_videos(
     request: VideoSearchRequest,
     auth: AuthDep,
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
 ):
     """
     Search videos
@@ -722,7 +752,7 @@ async def search_videos(
             start_date=request.start_date,
             end_date=request.end_date,
             skip=skip,
-            limit=limit
+            limit=limit,
         )
 
         return {"success": True, "count": len(videos), "videos": videos}
@@ -763,18 +793,20 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
     try:
         repo = VideoRepository()
         videos = await repo.get_pending_downloads(
-            user_id=auth.user_id,
-            status=DownloadStatus.PENDING,
-            limit=limit
+            user_id=auth.user_id, status=DownloadStatus.PENDING, limit=limit
         )
         return {"success": True, "count": len(videos), "videos": videos}
     except Exception as e:
         logger.error(f"Failed to get pending downloads list: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get pending downloads list")
+        raise HTTPException(
+            status_code=500, detail="Failed to get pending downloads list"
+        )
 
 
 @router.post("/retry/{platform_id}", tags=TAGS_DOWNLOAD)
-async def retry_download(platform_id: str, background_tasks: BackgroundTasks, auth: AuthDep):
+async def retry_download(
+    platform_id: str, background_tasks: BackgroundTasks, auth: AuthDep
+):
     """
     Retry download
 
@@ -794,17 +826,22 @@ async def retry_download(platform_id: str, background_tasks: BackgroundTasks, au
         video_title = video.get("title", platform_id)[:30]
 
         # Reset download status
-        await repo.update(platform_id, {
-            "video_download_status": DownloadStatus.PENDING.value,
-            "error_message": None
-        }, user_id=auth.user_id)
+        await repo.update(
+            platform_id,
+            {
+                "video_download_status": DownloadStatus.PENDING.value,
+                "error_message": None,
+            },
+            user_id=auth.user_id,
+        )
 
         # Add background download task (pass user_id for data isolation)
         from app.services.downloader import DownloaderService
+
         background_tasks.add_task(
             DownloaderService.download_video_by_platform_id,
             platform_id,
-            user_id=auth.user_id
+            user_id=auth.user_id,
         )
 
         # Log retry action
@@ -814,7 +851,7 @@ async def retry_download(platform_id: str, background_tasks: BackgroundTasks, au
             action="retry",
             message=f"Retry download: {video_title}...",
             status="pending",
-            aweme_id=platform_id
+            aweme_id=platform_id,
         )
 
         return {"success": True, "message": "Download task resubmitted"}
@@ -854,7 +891,9 @@ async def download_video_file(platform_id: str, auth: AuthDep):
         # Generate download filename
         video_title = video.get("title", platform_id)
         # Clean illegal characters from filename
-        safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        safe_title = "".join(
+            c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip()
         if not safe_title:
             safe_title = platform_id
         filename = f"{safe_title}.mp4"
@@ -863,9 +902,7 @@ async def download_video_file(platform_id: str, auth: AuthDep):
             path=str(file_path),
             filename=filename,
             media_type="video/mp4",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except HTTPException:
         raise
@@ -902,7 +939,9 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
 
         # Generate download filename
         video_title = video.get("title", platform_id)
-        safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        safe_title = "".join(
+            c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip()
         if not safe_title:
             safe_title = platform_id
         filename = f"{safe_title}_cover.jpg"
@@ -911,9 +950,7 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
             path=str(file_path),
             filename=filename,
             media_type="image/jpeg",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except HTTPException:
         raise
@@ -926,7 +963,7 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
 async def get_user_logs(
     auth: AuthDep,
     limit: int = Query(20, ge=1, le=100),
-    action: Optional[str] = Query(None, description="Filter by action type")
+    action: Optional[str] = Query(None, description="Filter by action type"),
 ):
     """
     Get user action logs
@@ -940,11 +977,7 @@ async def get_user_logs(
     """
     try:
         repo = UserLogsRepository()
-        logs = await repo.get_recent(
-            user_id=auth.user_id,
-            limit=limit,
-            action=action
-        )
+        logs = await repo.get_recent(user_id=auth.user_id, limit=limit, action=action)
         return {"success": True, "count": len(logs), "logs": logs}
     except Exception as e:
         logger.error(f"Failed to get user logs: {e}")
@@ -985,7 +1018,10 @@ async def _handle_ytdlp_fetch(
     save_result = await VideoService.save_metadata_only(platform_id, parsed_data)
     if not save_result.get("success"):
         logger.error(f"Failed to save metadata: {save_result.get('message')}")
-        raise HTTPException(status_code=500, detail=save_result.get("message", "Failed to save metadata"))
+        raise HTTPException(
+            status_code=500,
+            detail=save_result.get("message", "Failed to save metadata"),
+        )
 
     # Step 4: Dispatch download tasks
     download_task_id = None
@@ -994,8 +1030,8 @@ async def _handle_ytdlp_fetch(
     if need_download:
         # Try Celery first, fallback to FastAPI background tasks
         try:
-            from app.tasks.download_tasks import download_ytdlp_task
             from app.celery_app import celery_app
+            from app.tasks.download_tasks import download_ytdlp_task
 
             workers = celery_app.control.ping(timeout=1)
             if not workers:
@@ -1014,7 +1050,9 @@ async def _handle_ytdlp_fetch(
             logger.info(f"[yt-dlp] Celery download task submitted: {download_task_id}")
 
         except Exception as celery_err:
-            logger.warning(f"Celery unavailable for yt-dlp download, using background tasks: {celery_err}")
+            logger.warning(
+                f"Celery unavailable for yt-dlp download, using background tasks: {celery_err}"
+            )
 
             async def _ytdlp_background_download(
                 url: str,
@@ -1024,9 +1062,9 @@ async def _handle_ytdlp_fetch(
                 download_music: bool,
             ):
                 """Background task for yt-dlp download"""
+                from app.core.enums import DownloadStatus
                 from app.core.utils import Utils
                 from app.repositories.video_repository import VideoRepository
-                from app.core.enums import DownloadStatus
                 from app.services.downloader import DownloaderService
 
                 repo = VideoRepository()
@@ -1047,7 +1085,9 @@ async def _handle_ytdlp_fetch(
                                 storage_size=result.get("file_size", 0),
                             )
                             # Optimize for streaming
-                            await DownloaderService.optimize_video_for_streaming(result["file_path"])
+                            await DownloaderService.optimize_video_for_streaming(
+                                result["file_path"]
+                            )
 
                     if download_music:
                         result = await YtdlpService.download_audio(
@@ -1058,18 +1098,28 @@ async def _handle_ytdlp_fetch(
 
                 except Exception as e:
                     logger.error(f"[yt-dlp] Background download failed: {e}")
-                    await repo.update(platform_id, {
-                        "video_download_status": DownloadStatus.FAILED.value,
-                        "error_message": str(e)[:500],
-                    }, user_id=user_id)
+                    await repo.update(
+                        platform_id,
+                        {
+                            "video_download_status": DownloadStatus.FAILED.value,
+                            "error_message": str(e)[:500],
+                        },
+                        user_id=user_id,
+                    )
 
             import os
+
             background_tasks.add_task(
                 _ytdlp_background_download,
-                url, platform_id, auth.user_id,
-                request.video_bool, request.music_bool,
+                url,
+                platform_id,
+                auth.user_id,
+                request.video_bool,
+                request.music_bool,
             )
-            logger.info(f"[yt-dlp] FastAPI background download tasks added: {platform_id}")
+            logger.info(
+                f"[yt-dlp] FastAPI background download tasks added: {platform_id}"
+            )
 
     # Log action
     background_tasks.add_task(
@@ -1118,12 +1168,15 @@ async def _handle_ytdlp_fetch(
 # ============================================
 # Legacy redirect: /douyin/* -> /videos/*
 # ============================================
-from fastapi import Request
-from fastapi.responses import RedirectResponse
+from fastapi import Request  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
 
 legacy_router = APIRouter(prefix="/douyin")
 
-@legacy_router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
+
+@legacy_router.api_route(
+    "/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False
+)
 async def legacy_douyin_redirect(path: str, request: Request):
     """Redirect legacy /douyin/ routes to /videos/"""
     new_url = str(request.url).replace("/douyin/", "/videos/", 1)

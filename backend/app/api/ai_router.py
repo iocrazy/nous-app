@@ -8,12 +8,11 @@ Endpoints for triggering and retrieving AI analysis results
 """
 
 from fastapi import APIRouter, HTTPException
-from loguru import logger
 
 from app.core.deps import AuthDep
-from app.repositories.video_repository import VideoRepository
 from app.repositories.ai_repository import AIRepository
-from app.schemas.ai import TranscriptResponse, SummaryResponse
+from app.repositories.video_repository import VideoRepository
+from app.schemas.ai import SummaryResponse, TranscriptResponse
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -31,15 +30,17 @@ async def _get_video_or_404(platform_id: str) -> dict:
 # Manual triggers
 # ------------------------------------------------------------------
 
+
 @router.post("/transcribe/{platform_id}")
 async def trigger_transcription(platform_id: str, auth: AuthDep):
     """Manually trigger transcription for a video.
 
     Queues the extract_audio → transcribe chain via Celery.
     """
-    video = await _get_video_or_404(platform_id)
+    await _get_video_or_404(platform_id)
 
     from app.tasks.ai_tasks import chain_ai_pipeline
+
     chain_ai_pipeline(
         platform_id=platform_id,
         user_id=auth.user_id,
@@ -66,18 +67,23 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     if transcript and transcript.get("full_text"):
         # Transcript exists, just run summary
         from app.tasks.ai_tasks import generate_summary_task
+
         generate_summary_task.delay(platform_id, auth.user_id)
         return {"message": "Summary generation queued", "platform_id": platform_id}
     else:
         # No transcript, run full pipeline
         from app.tasks.ai_tasks import chain_ai_pipeline
+
         chain_ai_pipeline(
             platform_id=platform_id,
             user_id=auth.user_id,
             transcript_bool=True,
             summary_bool=True,
         )
-        return {"message": "Full AI pipeline queued (transcribe + summarize)", "platform_id": platform_id}
+        return {
+            "message": "Full AI pipeline queued (transcribe + summarize)",
+            "platform_id": platform_id,
+        }
 
 
 @router.post("/analyze/{platform_id}")
@@ -98,6 +104,7 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 # ------------------------------------------------------------------
 # Data retrieval
 # ------------------------------------------------------------------
+
 
 @router.get("/transcript/{platform_id}", response_model=TranscriptResponse)
 async def get_transcript(platform_id: str, auth: AuthDep):

@@ -1,17 +1,17 @@
 """Celery tasks for video analysis."""
+
 import asyncio
+import os
 import subprocess
 import tempfile
-import os
-from typing import Optional
 
 from celery import shared_task
 from loguru import logger
 
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.tags_repository import TagsRepository
-from app.services.visual_analysis_service import VisualAnalysisService
 from app.services.embedding_service import EmbeddingService
+from app.services.visual_analysis_service import VisualAnalysisService
 
 
 def run_async(coro):
@@ -20,6 +20,7 @@ def run_async(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -31,11 +32,7 @@ def run_async(coro):
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def analyze_video_l1_task(
-    self,
-    video_id: int,
-    cover_url: str,
-    title: str = "",
-    description: str = ""
+    self, video_id: int, cover_url: str, title: str = "", description: str = ""
 ):
     """
     L1 Analysis: Analyze video cover image.
@@ -71,7 +68,7 @@ def analyze_video_l1_task(
             detected_people=result.detected_people,
             detected_text=result.detected_text,
             analysis_model="gpt-4o",
-            analysis_cost=result.cost
+            analysis_cost=result.cost,
         )
 
         # Add tag based on detected category
@@ -82,7 +79,7 @@ def analyze_video_l1_task(
                     video_id=video_id,
                     tag_id=tag["id"],
                     confidence=0.8,  # AI-based confidence
-                    source="ai"
+                    source="ai",
                 )
                 logger.info(f"Added AI tag '{result.category}' to video {video_id}")
 
@@ -98,7 +95,7 @@ def analyze_video_l1_task(
             visual_description=result.visual_description,
             detected_objects=result.detected_objects,
             detected_scenes=result.detected_scenes,
-            detected_text=result.detected_text
+            detected_text=result.detected_text,
         )
 
         embedding = await embedding_service.generate_embedding(embedding_text)
@@ -107,12 +104,10 @@ def analyze_video_l1_task(
             await analysis_repo.update_embedding(video_id, embedding, embedding_text)
             logger.info(f"Generated embedding for video {video_id}")
 
-        logger.info(f"Completed L1 analysis for video {video_id}, cost: ${result.cost:.4f}")
-        return {
-            "video_id": video_id,
-            "category": result.category,
-            "cost": result.cost
-        }
+        logger.info(
+            f"Completed L1 analysis for video {video_id}, cost: ${result.cost:.4f}"
+        )
+        return {"video_id": video_id, "category": result.category, "cost": result.cost}
 
     try:
         return run_async(_analyze())
@@ -128,7 +123,7 @@ def analyze_video_l2_task(
     cover_url: str,
     video_path: str,
     title: str = "",
-    description: str = ""
+    description: str = "",
 ):
     """
     L2 Analysis: Analyze cover + keyframes.
@@ -154,12 +149,18 @@ def analyze_video_l2_task(
             with tempfile.TemporaryDirectory() as tmpdir:
                 # Get video duration
                 probe_cmd = [
-                    "ffprobe", "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    video_path
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    video_path,
                 ]
-                duration_output = subprocess.check_output(probe_cmd, stderr=subprocess.DEVNULL)
+                duration_output = subprocess.check_output(
+                    probe_cmd, stderr=subprocess.DEVNULL
+                )
                 duration = float(duration_output.decode().strip())
 
                 # Extract frames at 25%, 50%, 75%
@@ -168,24 +169,34 @@ def analyze_video_l2_task(
                     output_path = os.path.join(tmpdir, f"frame_{i}.jpg")
 
                     extract_cmd = [
-                        "ffmpeg", "-y", "-ss", str(timestamp),
-                        "-i", video_path,
-                        "-vframes", "1",
-                        "-q:v", "2",
-                        output_path
+                        "ffmpeg",
+                        "-y",
+                        "-ss",
+                        str(timestamp),
+                        "-i",
+                        video_path,
+                        "-vframes",
+                        "1",
+                        "-q:v",
+                        "2",
+                        output_path,
                     ]
                     subprocess.run(extract_cmd, capture_output=True, check=True)
 
                     if os.path.exists(output_path):
                         keyframe_paths.append(output_path)
 
-                logger.info(f"Extracted {len(keyframe_paths)} keyframes for video {video_id}")
+                logger.info(
+                    f"Extracted {len(keyframe_paths)} keyframes for video {video_id}"
+                )
 
                 # Run L2 analysis
                 result = await analysis_service.analyze_l2(cover_url, keyframe_paths)
 
                 if not result:
-                    logger.warning(f"L2 analysis returned no result for video {video_id}")
+                    logger.warning(
+                        f"L2 analysis returned no result for video {video_id}"
+                    )
                     return None
 
                 # Update analysis results
@@ -198,7 +209,7 @@ def analyze_video_l2_task(
                     detected_people=result.detected_people,
                     detected_text=result.detected_text,
                     analysis_model="gpt-4o",
-                    analysis_cost=result.cost
+                    analysis_cost=result.cost,
                 )
 
                 # Update tag if category changed
@@ -209,7 +220,7 @@ def analyze_video_l2_task(
                             video_id=video_id,
                             tag_id=tag["id"],
                             confidence=0.9,  # Higher confidence for L2
-                            source="ai"
+                            source="ai",
                         )
 
                 # Regenerate embedding
@@ -223,19 +234,23 @@ def analyze_video_l2_task(
                     visual_description=result.visual_description,
                     detected_objects=result.detected_objects,
                     detected_scenes=result.detected_scenes,
-                    detected_text=result.detected_text
+                    detected_text=result.detected_text,
                 )
 
                 embedding = await embedding_service.generate_embedding(embedding_text)
 
                 if embedding:
-                    await analysis_repo.update_embedding(video_id, embedding, embedding_text)
+                    await analysis_repo.update_embedding(
+                        video_id, embedding, embedding_text
+                    )
 
-                logger.info(f"Completed L2 analysis for video {video_id}, cost: ${result.cost:.4f}")
+                logger.info(
+                    f"Completed L2 analysis for video {video_id}, cost: ${result.cost:.4f}"
+                )
                 return {
                     "video_id": video_id,
                     "category": result.category,
-                    "cost": result.cost
+                    "cost": result.cost,
                 }
 
         except subprocess.CalledProcessError as e:
@@ -261,6 +276,7 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
     Note: Uses run_async helper to work with async Supabase client.
     Celery workers run in separate processes and don't share event loops.
     """
+
     async def _batch_dispatch():
         from app.db.supabase_client import get_async_supabase_admin
 
@@ -269,9 +285,13 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
 
         for video_id in video_ids[:batch_size]:
             # Get video info
-            result = await supabase.table("videos").select(
-                "id, title, description, cover_url"
-            ).eq("id", video_id).maybe_single().execute()
+            result = (
+                await supabase.table("videos")
+                .select("id, title, description, cover_url")
+                .eq("id", video_id)
+                .maybe_single()
+                .execute()
+            )
 
             if result.data:
                 video = result.data
@@ -281,7 +301,7 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
                         video_id=video["id"],
                         cover_url=cover_url,
                         title=video.get("title", ""),
-                        description=video.get("description", "")
+                        description=video.get("description", ""),
                     )
                     dispatched += 1
                     logger.info(f"Dispatched L1 analysis for video {video_id}")
@@ -293,7 +313,7 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
         return {
             "dispatched": dispatched,
             "total_requested": len(video_ids),
-            "message": f"Dispatched {dispatched} L1 analysis tasks"
+            "message": f"Dispatched {dispatched} L1 analysis tasks",
         }
 
     return run_async(_batch_dispatch())
@@ -305,6 +325,7 @@ def analyze_pending_videos_task(limit: int = 50):
     Find videos without analysis and dispatch L1 tasks.
     Useful for backfilling analysis on existing videos.
     """
+
     async def _dispatch():
         analysis_repo = AnalysisRepository()
         videos = await analysis_repo.get_videos_without_analysis(limit=limit)
@@ -313,7 +334,9 @@ def analyze_pending_videos_task(limit: int = 50):
 
         if video_ids:
             batch_analyze_l1_task.delay(video_ids, batch_size=limit)
-            logger.info(f"Dispatched batch analysis for {len(video_ids)} pending videos")
+            logger.info(
+                f"Dispatched batch analysis for {len(video_ids)} pending videos"
+            )
             return {"dispatched": len(video_ids)}
 
         logger.info("No pending videos for analysis")

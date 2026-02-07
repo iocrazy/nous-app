@@ -9,8 +9,8 @@ share a common base class.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -60,7 +60,9 @@ class AIProvider(ABC):
 class OpenAIProvider(AIProvider):
     """OpenAI - GPT models + Whisper."""
 
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "gpt-4o", **kwargs):
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "gpt-4o", **kwargs
+    ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
         client_kwargs = {"api_key": api_key}
         if base_url:
@@ -89,9 +91,21 @@ class OpenAIProvider(AIProvider):
         for seg in getattr(response, "segments", []) or []:
             segments.append(
                 TranscriptSegment(
-                    start=seg.get("start", 0.0) if isinstance(seg, dict) else getattr(seg, "start", 0.0),
-                    end=seg.get("end", 0.0) if isinstance(seg, dict) else getattr(seg, "end", 0.0),
-                    text=seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", ""),
+                    start=(
+                        seg.get("start", 0.0)
+                        if isinstance(seg, dict)
+                        else getattr(seg, "start", 0.0)
+                    ),
+                    end=(
+                        seg.get("end", 0.0)
+                        if isinstance(seg, dict)
+                        else getattr(seg, "end", 0.0)
+                    ),
+                    text=(
+                        seg.get("text", "")
+                        if isinstance(seg, dict)
+                        else getattr(seg, "text", "")
+                    ),
                 )
             )
 
@@ -110,7 +124,9 @@ class OpenAIProvider(AIProvider):
 class OpenAICompatibleProvider(AIProvider):
     """Base for OpenAI-compatible providers (DeepSeek, Doubao, Ollama, LM Studio)."""
 
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "", **kwargs
+    ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -132,7 +148,13 @@ class OpenAICompatibleProvider(AIProvider):
 
 
 class DeepSeekProvider(OpenAICompatibleProvider):
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "deepseek-chat", **kwargs):
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "deepseek-chat",
+        **kwargs,
+    ):
         super().__init__(
             api_key=api_key,
             base_url=base_url or "https://api.deepseek.com/v1",
@@ -142,7 +164,9 @@ class DeepSeekProvider(OpenAICompatibleProvider):
 
 
 class DoubaoProvider(OpenAICompatibleProvider):
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "", **kwargs
+    ):
         super().__init__(
             api_key=api_key,
             base_url=base_url or "https://ark.cn-beijing.volces.com/api/v3",
@@ -152,7 +176,9 @@ class DoubaoProvider(OpenAICompatibleProvider):
 
 
 class OllamaProvider(OpenAICompatibleProvider):
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "", **kwargs
+    ):
         super().__init__(
             api_key=api_key or "ollama",
             base_url=base_url or "http://localhost:11434/v1",
@@ -162,7 +188,9 @@ class OllamaProvider(OpenAICompatibleProvider):
 
 
 class LMStudioProvider(OpenAICompatibleProvider):
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "", **kwargs
+    ):
         super().__init__(
             api_key=api_key or "lm-studio",
             base_url=base_url or "http://localhost:1234/v1",

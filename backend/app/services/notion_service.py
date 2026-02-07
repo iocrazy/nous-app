@@ -1,23 +1,31 @@
-import datetime
-import httpx
 import asyncio
-from notion_client import AsyncClient
-from notion_client.errors import APIResponseError, APIErrorCode
+import datetime
 import ssl
+from typing import Any, Dict, Optional
+
+import httpx
 from loguru import logger
-from typing import Dict, Any, Optional
+from notion_client import AsyncClient
+from notion_client.errors import APIResponseError
 
 from app.core.config import settings
 
+
+class NotionError(Exception):
+    """Custom exception for Notion-related errors."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 class NotionService:
     """Notion API服务 - 单例模式实现"""
 
-    _instance: Optional['NotionService'] = None
+    _instance: Optional["NotionService"] = None
     _client: Optional[AsyncClient] = None
     _initialized: bool = False
-    _lock = asyncio.Lock() # 为初始化过程添加一个异步锁
+    _lock = asyncio.Lock()  # 为初始化过程添加一个异步锁
 
     def __new__(cls):
         if cls._instance is None:
@@ -39,9 +47,13 @@ class NotionService:
                     http2=True,
                     verify=True,
                     timeout=settings.HTTP_TIMEOUT,
-                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
+                    limits=httpx.Limits(
+                        max_connections=10, max_keepalive_connections=5
+                    ),
                 )
-                self._client = AsyncClient(auth=settings.NOTION_API_KEY, client=http_client)
+                self._client = AsyncClient(
+                    auth=settings.NOTION_API_KEY, client=http_client
+                )
                 self._initialized = True
                 logger.info("Notion客户端初始化成功")
 
@@ -56,8 +68,6 @@ class NotionService:
         if not self._initialized or self._client is None:
             raise RuntimeError("NotionService 未初始化，请先调用 .initialize() 方法")
         return self._client
-
-
 
     @classmethod
     async def get_client(cls) -> AsyncClient:
@@ -79,8 +89,6 @@ class NotionService:
     # todo push_to_notion
     # todo update_notion_page
 
-
-
     @classmethod
     async def push_to_notion(cls, video_info: Dict[str, Any]) -> dict:
         """
@@ -99,108 +107,61 @@ class NotionService:
         # 构建Notion页面属性 - 使用指定的字段映射
         properties = {
             "Name": {  # 标题字段 - 使用视频标题
-                "title": [
-                    {
-                        "text": {
-                            "content": video_info.get("title", "未知标题")
-                        }
-                    }
-                ]
+                "title": [{"text": {"content": video_info.get("title", "未知标题")}}]
             },
             # 映射字段 - 按照指定的映射关系
-            "Likes": {
-                "number": video_info.get("like_count", 0)
-            },
-            "Comment": {
-                "number": video_info.get("comment_count", 0)
-            },
+            "Likes": {"number": video_info.get("like_count", 0)},
+            "Comment": {"number": video_info.get("comment_count", 0)},
             "Aweme_ID": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("platform_id", "")
-                        }
-                    }
-                ]
+                "rich_text": [{"text": {"content": video_info.get("platform_id", "")}}]
             },
             "Duration": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("duration", "")
-                        }
-                    }
-                ]
+                "rich_text": [{"text": {"content": video_info.get("duration", "")}}]
             },
             "Resolution": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("resolution", "")
-                        }
-                    }
-                ]
+                "rich_text": [{"text": {"content": video_info.get("resolution", "")}}]
             },
             "Datasize": {
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("file_size") or video_info.get("datasize") or "待下载后更新"
+                            "content": video_info.get("file_size")
+                            or video_info.get("datasize")
+                            or "待下载后更新"
                         }
                     }
                 ]
             },
-            "Download_URL": {
-                "url": video_info.get("video_download_url", "")
-            },
+            "Download_URL": {"url": video_info.get("video_download_url", "")},
             "Author": {
                 "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("author", "未知作者")
-                        }
-                    }
+                    {"text": {"content": video_info.get("author", "未知作者")}}
                 ]
             },
             "Share_Info": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("share_info", "")
-                        }
-                    }
-                ]
+                "rich_text": [{"text": {"content": video_info.get("share_info", "")}}]
             },
             "Download_Status": {
-                "status": {
-                    "name": video_info.get("download_status", "Pending")
-                }
+                "status": {"name": video_info.get("download_status", "Pending")}
             },
             "Download_Time": {
                 "date": {
-                    "start": video_info.get("download_time") or datetime.datetime.now().date().isoformat()
+                    "start": video_info.get("download_time")
+                    or datetime.datetime.now().date().isoformat()
                 }
             },
             "File_Path": {
                 "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("file_path") or "待下载"
-                        }
-                    }
+                    {"text": {"content": video_info.get("file_path") or "待下载"}}
                 ]
             },
-            "Original_URL": {
-                "url": video_info.get("original_url", "")
-            }
+            "Original_URL": {"url": video_info.get("original_url", "")},
         }
 
         # 准备请求数据
         new_page_data = {
-            "parent": {
-                "database_id": settings.NOTION_DATABASE_ID
-            },
-            "properties": properties
+            "parent": {"database_id": settings.NOTION_DATABASE_ID},
+            "properties": properties,
         }
 
         # 获取客户端并发送请求
@@ -217,7 +178,7 @@ class NotionService:
                 "success": True,
                 "notion_page_id": response.get("id"),
                 "notion_page_url": response.get("url"),
-                "response": response
+                "response": response,
             }
 
         except Exception as e:
@@ -237,7 +198,7 @@ class NotionService:
             return {
                 "success": False,
                 "error": f"{error_type}: {error_message}",
-                "detail": error_detail
+                "detail": error_detail,
             }
 
     @classmethod
@@ -262,26 +223,18 @@ class NotionService:
         # 只更新与下载相关的字段
         if "download_status" in video_info:
             properties["Download_Status"] = {
-                "status": {
-                    "name": video_info.get("download_status")
-                }
+                "status": {"name": video_info.get("download_status")}
             }
 
         if "download_time" in video_info:
             properties["Download_Time"] = {
-                "date": {
-                    "start": video_info.get("download_time")
-                }
+                "date": {"start": video_info.get("download_time")}
             }
 
         if "file_path" in video_info:
             properties["File_Path"] = {
                 "rich_text": [
-                    {
-                        "text": {
-                            "content": video_info.get("file_path") or "待下载"
-                        }
-                    }
+                    {"text": {"content": video_info.get("file_path") or "待下载"}}
                 ]
             }
 
@@ -291,7 +244,9 @@ class NotionService:
                 "rich_text": [
                     {
                         "text": {
-                            "content": video_info.get("file_size") or video_info.get("datasize") or "待下载后更新"
+                            "content": video_info.get("file_size")
+                            or video_info.get("datasize")
+                            or "待下载后更新"
                         }
                     }
                 ]
@@ -303,9 +258,7 @@ class NotionService:
             return {"success": True, "message": "无需更新"}
 
         # 准备请求数据
-        update_data = {
-            "properties": properties
-        }
+        update_data = {"properties": properties}
 
         # 获取客户端并发送请求
         try:
@@ -320,7 +273,7 @@ class NotionService:
             return {
                 "success": True,
                 "notion_page_url": response.get("url"),
-                "response": response
+                "response": response,
             }
 
         except Exception as e:
@@ -337,7 +290,7 @@ class NotionService:
             return {
                 "success": False,
                 "error": f"{error_type}: {error_message}",
-                "detail": error_detail
+                "detail": error_detail,
             }
 
     @classmethod
@@ -362,18 +315,12 @@ class NotionService:
 
             # 构建查询
             filter_params = {
-                "filter": {
-                    "property": "Aweme_ID",
-                    "rich_text": {
-                        "equals": platform_id
-                    }
-                }
+                "filter": {"property": "Aweme_ID", "rich_text": {"equals": platform_id}}
             }
 
             # 执行查询
             response = await notion_client.databases.query(
-                database_id=settings.NOTION_DATABASE_ID,
-                **filter_params
+                database_id=settings.NOTION_DATABASE_ID, **filter_params
             )
 
             # 检查是否有匹配结果
@@ -395,13 +342,15 @@ class NotionService:
                     if title_items and "text" in title_items[0]:
                         title = title_items[0]["text"].get("content", "")
 
-                logger.info(f"在Notion中找到重复视频: platform_id={platform_id}, title={title}")
+                logger.info(
+                    f"在Notion中找到重复视频: platform_id={platform_id}, title={title}"
+                )
 
                 return {
                     "exists": True,
                     "page_id": page_id,
                     "page_url": page_url,
-                    "title": title
+                    "title": title,
                 }
 
             # 没有找到匹配的视频
@@ -421,11 +370,13 @@ class NotionService:
             return {
                 "exists": False,
                 "error": f"{error_type}: {error_message}",
-                "detail": error_detail
+                "detail": error_detail,
             }
 
 
-async def push_to_notion_service(video_data, update_existing=False, notion_page_id=None):
+async def push_to_notion_service(
+    video_data, update_existing=False, notion_page_id=None
+):
     """
     处理推送数据到Notion的通用函数
 
@@ -448,18 +399,25 @@ async def push_to_notion_service(video_data, update_existing=False, notion_page_
                 "download_status": video_data.download_status,
                 "download_time": video_data.download_time,
                 "file_path": video_data.file_path,
-                "file_size": video_data.file_size
+                "file_size": video_data.file_size,
             }
             result = await NotionService.update_notion_page(notion_page_id, update_data)
         else:
             logger.info("创建新的Notion页面")
             # 确保包含视频分辨率信息
-            if hasattr(video_data, 'video_width') and hasattr(video_data,
-                                                              'video_height') and video_data.video_width and video_data.video_height and not video_data.resolution:
-                video_data.resolution = f"{video_data.video_width}x{video_data.video_height}"
+            if (
+                hasattr(video_data, "video_width")
+                and hasattr(video_data, "video_height")
+                and video_data.video_width
+                and video_data.video_height
+                and not video_data.resolution
+            ):
+                video_data.resolution = (
+                    f"{video_data.video_width}x{video_data.video_height}"
+                )
 
             # 如果是Pydantic模型，使用model_dump()
-            if hasattr(video_data, 'model_dump'):
+            if hasattr(video_data, "model_dump"):
                 data_dict = video_data.model_dump()
             else:
                 data_dict = video_data
@@ -468,7 +426,9 @@ async def push_to_notion_service(video_data, update_existing=False, notion_page_
 
         if not result.get("success"):
             error_details = result.get("error", "未知错误")
-            raise NotionError(f"Notion操作失败: {error_details}", {"error_details": error_details})
+            raise NotionError(
+                f"Notion操作失败: {error_details}", {"error_details": error_details}
+            )
 
         return result
     except Exception as e:

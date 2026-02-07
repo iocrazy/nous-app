@@ -8,10 +8,10 @@
 """
 
 from app.db.supabase_client import (
-    get_supabase,
-    get_supabase_admin,
     get_async_supabase,
     get_async_supabase_admin,
+    get_supabase,
+    get_supabase_admin,
 )
 
 __all__ = [

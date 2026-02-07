@@ -7,7 +7,7 @@ image-text, etc.) for data extraction and formatting.
 """
 
 import datetime
-from typing import Dict, Any ,Optional
+from typing import Any, Dict
 
 from loguru import logger
 
@@ -23,7 +23,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool = True,
         download_music: bool = False,
-        download_cover: bool = True
+        download_cover: bool = True,
     ) -> Dict[str, Any]:
         """
         Parse Douyin video detail data, handle different media types
@@ -47,14 +47,41 @@ class DouyinParser:
 
         # Handle different media types
         if aweme_type == 68:  # Image-text type
-            logger.info(f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_text(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
+            logger.info(
+                f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}"
+            )
+            return await DouyinParser._parse_image_text(
+                aweme_detail,
+                aweme_id,
+                valid_url,
+                download_video,
+                download_music,
+                download_cover,
+            )
         elif aweme_type in (0, 4, 61):  # Video type
-            logger.info(f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_video(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
+            logger.info(
+                f"解析视频类型数据:aweme_id={aweme_id}, media_type={aweme_type}"
+            )
+            return await DouyinParser._parse_video(
+                aweme_detail,
+                aweme_id,
+                valid_url,
+                download_video,
+                download_music,
+                download_cover,
+            )
         elif aweme_type == 2:  # Image collection
-            logger.info(f"解析图片合集类型数据:aweme_id={aweme_id}, media_type={aweme_type}")
-            return await DouyinParser._parse_image_collection(aweme_detail, aweme_id, valid_url, download_video, download_music, download_cover)
+            logger.info(
+                f"解析图片合集类型数据:aweme_id={aweme_id}, media_type={aweme_type}"
+            )
+            return await DouyinParser._parse_image_collection(
+                aweme_detail,
+                aweme_id,
+                valid_url,
+                download_video,
+                download_music,
+                download_cover,
+            )
         else:
             logger.warning(f"不支持的媒体类型: {aweme_type}")
             raise ValueError(f"不支持的媒体类型: {aweme_type}")
@@ -86,12 +113,13 @@ class DouyinParser:
         dynamic_cover = video_data.get("dynamic_cover", {})
         dynamic_cover_url = None
         if dynamic_cover and dynamic_cover.get("url_list"):
-            dynamic_cover_url = dynamic_cover.get("url_list", [])[0] if dynamic_cover.get("url_list") else None
+            dynamic_cover_url = (
+                dynamic_cover.get("url_list", [])[0]
+                if dynamic_cover.get("url_list")
+                else None
+            )
 
-        return {
-            "cover_urls": cover_urls,
-            "dynamic_cover_url": dynamic_cover_url
-        }
+        return {"cover_urls": cover_urls, "dynamic_cover_url": dynamic_cover_url}
 
     @staticmethod
     async def _parse_image_text(
@@ -100,7 +128,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool
+        download_cover: bool,
     ) -> Dict[str, Any]:
         """
         Parse image-text type Douyin data
@@ -120,7 +148,6 @@ class DouyinParser:
         image_download_urls = []
         video_download_urls = []
 
-
         if images:
             for item in images:
                 if not item.get("video", {}):
@@ -128,7 +155,9 @@ class DouyinParser:
                     image_download_urls.append(image_urls)
                     logger.debug(f"image_url_list: {image_download_urls}")
                 if item.get("video", {}):
-                    video_urls = item.get("video", {}).get("play_addr", {}).get("url_list", [])
+                    video_urls = (
+                        item.get("video", {}).get("play_addr", {}).get("url_list", [])
+                    )
                     video_download_urls.append(video_urls)
                     logger.debug(f"video_url_list: {video_download_urls}")
 
@@ -154,14 +183,18 @@ class DouyinParser:
             "share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "favorite_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "media_type": str(aweme_detail.get("aweme_type")),
-            "published_at": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
+            "published_at": datetime.datetime.fromtimestamp(
+                aweme_detail.get("create_time")
+            ),
             "hashtags": Utils.concat_hashtag_name(aweme_detail),
             "datasize_bytes": 0,  # Image/video mixed type doesn't have single file size
             "source_platform": "douyin",
             "external_id": aweme_id,
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
-            "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
+            "music_download_urls": aweme_detail.get("music", {})
+            .get("play_url", {})
+            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
             "need_download_music": download_music,
@@ -177,7 +210,7 @@ class DouyinParser:
         original_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool
+        download_cover: bool,
     ) -> Dict[str, Any]:
         """
         Parse video type Douyin data
@@ -194,10 +227,18 @@ class DouyinParser:
         """
         # Extract music info
         music_from = aweme_detail.get("music", {}).get("title")
-        music_author = aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("author")
-        music_title = aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("title")
+        music_author = (
+            aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("author")
+        )
+        music_title = (
+            aweme_detail.get("music", {}).get("matched_pgc_sound", {}).get("title")
+        )
 
-        music_name = f"{aweme_id}_{music_author}-{music_title}" if music_author and music_title else f"{aweme_id}:{music_from}"
+        music_name = (
+            f"{aweme_id}_{music_author}-{music_title}"
+            if music_author and music_title
+            else f"{aweme_id}:{music_from}"
+        )
         video_desc = aweme_detail.get("desc", "undefined")
 
         # Extract cover URLs
@@ -207,7 +248,11 @@ class DouyinParser:
         video_data = aweme_detail.get("video", {}) or {}
         bit_rate_list = video_data.get("bit_rate") or [{}]
         first_bit_rate = bit_rate_list[0] if bit_rate_list else {}
-        data_size = first_bit_rate.get("play_addr", {}).get("data_size", 0) if first_bit_rate else 0
+        data_size = (
+            first_bit_rate.get("play_addr", {}).get("data_size", 0)
+            if first_bit_rate
+            else 0
+        )
 
         # Build return data
         return {
@@ -222,15 +267,21 @@ class DouyinParser:
             "favorite_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "hashtags": Utils.concat_hashtag_name(aweme_detail),
             "media_type": str(aweme_detail.get("aweme_type")),
-            "published_at": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
+            "published_at": datetime.datetime.fromtimestamp(
+                aweme_detail.get("create_time")
+            ),
             "datasize": Utils.format_file_size(data_size),
             "datasize_bytes": data_size or 0,
             "duration": Utils.format_duration(video_data.get("duration")),
             "resolution": f"{video_data.get('width')}:{video_data.get('height')}",
             "source_platform": "douyin",
             "external_id": aweme_id,
-            "video_download_urls": video_data.get("play_addr", {}).get("url_list", None),
-            "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
+            "video_download_urls": video_data.get("play_addr", {}).get(
+                "url_list", None
+            ),
+            "music_download_urls": aweme_detail.get("music", {})
+            .get("play_url", {})
+            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
             "need_download_music": download_music,
@@ -246,7 +297,7 @@ class DouyinParser:
         valid_url: str,
         download_video: bool,
         download_music: bool,
-        download_cover: bool
+        download_cover: bool,
     ) -> Dict[str, Any]:
         """
         Parse image collection type Douyin data
@@ -292,13 +343,17 @@ class DouyinParser:
             "share_count": aweme_detail.get("statistics", {}).get("share_count"),
             "favorite_count": aweme_detail.get("statistics", {}).get("collect_count"),
             "media_type": str(aweme_detail.get("aweme_type")),
-            "published_at": datetime.datetime.fromtimestamp(aweme_detail.get("create_time")),
+            "published_at": datetime.datetime.fromtimestamp(
+                aweme_detail.get("create_time")
+            ),
             "hashtags": Utils.concat_hashtag_name(aweme_detail),
             "datasize_bytes": 0,  # Image collections don't have video file size
             "source_platform": "douyin",
             "external_id": aweme_id,
             "image_download_urls": image_download_urls,
-            "music_download_urls": aweme_detail.get("music", {}).get("play_url", {}).get("url_list", None),
+            "music_download_urls": aweme_detail.get("music", {})
+            .get("play_url", {})
+            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
             "need_download_music": download_music,

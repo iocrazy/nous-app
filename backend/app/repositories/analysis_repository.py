@@ -1,9 +1,11 @@
 """Repository for Video Analysis data access (异步)."""
-from typing import Optional, List
+
 from datetime import datetime
+from typing import List, Optional
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from loguru import logger
 
 
 class AnalysisRepository:
@@ -28,7 +30,9 @@ class AnalysisRepository:
     async def get_analysis(self, video_id: int) -> Optional[dict]:
         """Get analysis for a video."""
         table = await self._get_table()
-        result = await table.select("*").eq("video_id", video_id).maybe_single().execute()
+        result = (
+            await table.select("*").eq("video_id", video_id).maybe_single().execute()
+        )
         return result.data
 
     async def create_analysis(self, video_id: int, **kwargs) -> dict:
@@ -78,16 +82,24 @@ class AnalysisRepository:
         else:
             return await self.create_analysis(video_id, **kwargs)
 
-    async def update_embedding(self, video_id: int, embedding: List[float], full_text: str) -> dict:
+    async def update_embedding(
+        self, video_id: int, embedding: List[float], full_text: str
+    ) -> dict:
         """Update the embedding vector for a video."""
         # Convert list to PostgreSQL vector format
         embedding_str = f"[{','.join(map(str, embedding))}]"
 
         table = await self._get_table()
-        result = await table.update({
-            "content_embedding": embedding_str,
-            "full_text_for_embedding": full_text,
-        }).eq("video_id", video_id).execute()
+        result = (
+            await table.update(
+                {
+                    "content_embedding": embedding_str,
+                    "full_text_for_embedding": full_text,
+                }
+            )
+            .eq("video_id", video_id)
+            .execute()
+        )
 
         logger.info(f"Updated embedding for video {video_id}")
         return result.data[0] if result.data else None
@@ -102,7 +114,11 @@ class AnalysisRepository:
         analyzed_ids = [r["video_id"] for r in analyzed.data]
 
         # Get videos not in that list
-        query = client.table("videos").select("id, title, description, cover_url").limit(limit)
+        query = (
+            client.table("videos")
+            .select("id, title, description, cover_url")
+            .limit(limit)
+        )
 
         if analyzed_ids:
             query = query.not_.in_("id", analyzed_ids)
@@ -110,16 +126,23 @@ class AnalysisRepository:
         result = await query.execute()
         return result.data
 
-    async def get_videos_by_analysis_level(self, level: str, limit: int = 100) -> List[dict]:
+    async def get_videos_by_analysis_level(
+        self, level: str, limit: int = 100
+    ) -> List[dict]:
         """Get videos with a specific analysis level."""
         table = await self._get_table()
-        result = await table.select(
-            "*, videos(id, title, description, cover_url)"
-        ).eq("analysis_level", level).limit(limit).execute()
+        result = (
+            await table.select("*, videos(id, title, description, cover_url)")
+            .eq("analysis_level", level)
+            .limit(limit)
+            .execute()
+        )
 
         return result.data
 
-    async def search_by_embedding(self, embedding: List[float], limit: int = 10, threshold: float = 0.7) -> List[dict]:
+    async def search_by_embedding(
+        self, embedding: List[float], limit: int = 10, threshold: float = 0.7
+    ) -> List[dict]:
         """Search for similar videos using vector similarity.
 
         Note: Requires the 'match_videos_by_embedding' RPC function to be created in Supabase.
@@ -133,8 +156,8 @@ class AnalysisRepository:
             {
                 "query_embedding": embedding_str,
                 "match_threshold": threshold,
-                "match_count": limit
-            }
+                "match_count": limit,
+            },
         ).execute()
 
         return result.data
@@ -159,13 +182,7 @@ class AnalysisRepository:
         # Fallback: manual count if RPC doesn't exist
         all_analysis = await table.select("analysis_level").execute()
 
-        stats = {
-            "none": 0,
-            "L1": 0,
-            "L2": 0,
-            "L3": 0,
-            "total": len(all_analysis.data)
-        }
+        stats = {"none": 0, "L1": 0, "L2": 0, "L3": 0, "total": len(all_analysis.data)}
 
         for record in all_analysis.data:
             level = record.get("analysis_level", "none")

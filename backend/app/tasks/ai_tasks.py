@@ -20,6 +20,7 @@ def run_async(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -55,8 +56,8 @@ def extract_audio_task(self, platform_id: str, user_id: str):
     logger.info(f"[AI] Starting audio extraction for {platform_id}")
 
     try:
-        from app.repositories.video_repository import VideoRepository
         from app.core.utils import Utils
+        from app.repositories.video_repository import VideoRepository
 
         repo = VideoRepository()
         video = run_async(repo.get_by_platform_id(platform_id))
@@ -84,11 +85,20 @@ def extract_audio_task(self, platform_id: str, user_id: str):
 
         # Extract audio using ffmpeg
         import subprocess
+
         cmd = [
-            "ffmpeg", "-i", full_video_path,
-            "-vn", "-acodec", "pcm_s16le",
-            "-ar", "16000", "-ac", "1",
-            "-y", audio_path,
+            "ffmpeg",
+            "-i",
+            full_video_path,
+            "-vn",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-y",
+            audio_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
@@ -121,10 +131,9 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
     logger.info(f"[AI] Starting transcription for {platform_id}")
 
     try:
-        from app.repositories.video_repository import VideoRepository
-        from app.repositories.ai_repository import AIRepository
-        from app.services.whisper_service import WhisperService
         from app.core.utils import Utils
+        from app.repositories.video_repository import VideoRepository
+        from app.services.whisper_service import WhisperService
 
         video_repo = VideoRepository()
         video = run_async(video_repo.get_by_platform_id(platform_id))
@@ -156,6 +165,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         # Fall back to env config
         if not provider_config.get("api_key"):
             from app.core.config import settings
+
             provider_config["api_key"] = settings.OPENAI_API_KEY
 
         service = WhisperService(
@@ -163,10 +173,12 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             provider_config=provider_config,
         )
 
-        result = run_async(service.transcribe_and_save(
-            video_id=video_id,
-            audio_path=audio_path,
-        ))
+        result = run_async(
+            service.transcribe_and_save(
+                video_id=video_id,
+                audio_path=audio_path,
+            )
+        )
 
         logger.success(f"[AI] Transcription complete for {platform_id}")
         return {
@@ -194,8 +206,8 @@ def generate_summary_task(self, platform_id: str, user_id: str):
     logger.info(f"[AI] Starting summary generation for {platform_id}")
 
     try:
-        from app.repositories.video_repository import VideoRepository
         from app.repositories.ai_repository import AIRepository
+        from app.repositories.video_repository import VideoRepository
         from app.services.llm_analysis_service import LLMAnalysisService
 
         video_repo = VideoRepository()
@@ -226,6 +238,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
 
         if not provider_config.get("api_key"):
             from app.core.config import settings
+
             provider_config["api_key"] = settings.OPENAI_API_KEY
 
         service = LLMAnalysisService(
@@ -239,12 +252,14 @@ def generate_summary_task(self, platform_id: str, user_id: str):
             "author": video.get("author"),
         }
 
-        result = run_async(service.generate_summary_and_save(
-            video_id=video_id,
-            transcript_text=transcript["full_text"],
-            video_info=video_info,
-            model=summary_model,
-        ))
+        result = run_async(
+            service.generate_summary_and_save(
+                video_id=video_id,
+                transcript_text=transcript["full_text"],
+                video_info=video_info,
+                model=summary_model,
+            )
+        )
 
         logger.success(f"[AI] Summary generated for {platform_id}")
         return {
@@ -260,7 +275,12 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
-def chain_ai_pipeline(platform_id: str, user_id: str, transcript_bool: bool = True, summary_bool: bool = True):
+def chain_ai_pipeline(
+    platform_id: str,
+    user_id: str,
+    transcript_bool: bool = True,
+    summary_bool: bool = True,
+):
     """Create a Celery chain for the AI pipeline.
 
     Chain: extract_audio → transcribe → generate_summary

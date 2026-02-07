@@ -5,8 +5,9 @@ Download with progress tracking.
 Streams file download and reports progress to Redis.
 """
 
-import os
 import json
+import os
+
 import aiofiles
 import httpx
 from loguru import logger
@@ -15,12 +16,7 @@ from loguru import logger
 class DownloadProgressTracker:
     """Track download progress and report to callback."""
 
-    def __init__(
-        self,
-        task_id: str,
-        redis_client,
-        update_interval: float = 0.5
-    ):
+    def __init__(self, task_id: str, redis_client, update_interval: float = 0.5):
         self.task_id = task_id
         self.redis_client = redis_client
         self.update_interval = update_interval
@@ -71,7 +67,7 @@ class DownloadProgressTracker:
             self.redis_client.setex(
                 f"download_progress:{self.task_id}",
                 300,  # 5 min TTL
-                json.dumps(progress_data)
+                json.dumps(progress_data),
             )
 
             self.last_update = current_time
@@ -90,7 +86,7 @@ class DownloadProgressTracker:
         self.redis_client.setex(
             f"download_progress:{self.task_id}",
             60,  # Keep for 1 min after complete
-            json.dumps(progress_data)
+            json.dumps(progress_data),
         )
 
     def failed(self, error: str):
@@ -104,9 +100,7 @@ class DownloadProgressTracker:
             "error": error,
         }
         self.redis_client.setex(
-            f"download_progress:{self.task_id}",
-            300,
-            json.dumps(progress_data)
+            f"download_progress:{self.task_id}", 300, json.dumps(progress_data)
         )
 
 
@@ -132,6 +126,7 @@ async def download_file_with_progress(
     """
     if headers is None:
         from app.core.utils import Utils
+
         headers = Utils.get_headers()
 
     try:
@@ -151,7 +146,9 @@ async def download_file_with_progress(
                 timeout=timeout,
             ) as response:
                 if response.status_code != 200:
-                    logger.warning(f"Download failed {url}, status: {response.status_code}")
+                    logger.warning(
+                        f"Download failed {url}, status: {response.status_code}"
+                    )
                     return False
 
                 total = int(response.headers.get("content-length", 0))

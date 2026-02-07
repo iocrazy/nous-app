@@ -8,12 +8,13 @@ Integrates with TaskManager for task status tracking and automatic retries.
 """
 
 import asyncio
+
 from celery import shared_task
 from loguru import logger
 
-from app.services.downloader import DownloaderService
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
+from app.services.downloader import DownloaderService
 
 
 def run_async(coro):
@@ -23,6 +24,7 @@ def run_async(coro):
         if loop.is_running():
             # If event loop is already running, create new task
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -49,17 +51,23 @@ def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
         summary_bool = ai_settings.get("auto_summarize", False)
 
         if not transcript_bool and not summary_bool:
-            logger.info(f"[AI] Auto-transcribe/summarize disabled for user {user_id}, skipping AI pipeline")
+            logger.info(
+                f"[AI] Auto-transcribe/summarize disabled for user {user_id}, skipping AI pipeline"
+            )
             return
 
         from app.tasks.ai_tasks import chain_ai_pipeline
+
         chain_ai_pipeline(
             platform_id=platform_id,
             user_id=user_id,
             transcript_bool=transcript_bool,
             summary_bool=summary_bool,
         )
-        logger.info(f"[AI] Pipeline chained after download: {platform_id} (transcribe={transcript_bool}, summarize={summary_bool})")
+        logger.info(
+            f"[AI] Pipeline chained after download: {platform_id} "
+            f"(transcribe={transcript_bool}, summarize={summary_bool})"
+        )
 
     except Exception as e:
         logger.warning(f"[AI] Failed to chain AI pipeline for {platform_id}: {e}")
@@ -99,6 +107,7 @@ def download_media_task(
 
     # Initialize TaskManager
     from app.services.task_manager import get_task_manager
+
     task_manager = get_task_manager()
 
     # Create or get task in TaskManager
@@ -111,7 +120,6 @@ def download_media_task(
 
     try:
         from app.celery_app import celery_app
-        from app.services.download_progress import DownloadProgressTracker
 
         # Get Redis client from Celery backend
         redis_client = celery_app.backend.client
@@ -137,51 +145,83 @@ def download_media_task(
                 logger.info(f"[Celery] Downloading video: {platform_id}")
                 video_result = run_async(
                     DownloaderService.download_video_by_platform_id(
-                        platform_id,
-                        user_id=user_id,
-                        progress_tracker=tracker
+                        platform_id, user_id=user_id, progress_tracker=tracker
                     )
                 )
-                results["video"] = video_result.video_download_status.value if hasattr(video_result, 'video_download_status') else "unknown"
+                results["video"] = (
+                    video_result.video_download_status.value
+                    if hasattr(video_result, "video_download_status")
+                    else "unknown"
+                )
 
             if download_music:
                 logger.info(f"[Celery] Downloading music: {platform_id}")
                 result = run_async(
-                    DownloaderService.download_music_by_platform_id(platform_id=platform_id, user_id=user_id)
+                    DownloaderService.download_music_by_platform_id(
+                        platform_id=platform_id, user_id=user_id
+                    )
                 )
-                results["music"] = result.music_download_status.value if hasattr(result, 'music_download_status') else "unknown"
+                results["music"] = (
+                    result.music_download_status.value
+                    if hasattr(result, "music_download_status")
+                    else "unknown"
+                )
 
             if download_cover:
                 logger.info(f"[Celery] Downloading cover: {platform_id}")
                 result = run_async(
-                    DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id)
+                    DownloaderService.download_cover_by_platform_id(
+                        platform_id, user_id=user_id
+                    )
                 )
-                results["cover"] = result.cover_download_status.value if hasattr(result, 'cover_download_status') else "unknown"
+                results["cover"] = (
+                    result.cover_download_status.value
+                    if hasattr(result, "cover_download_status")
+                    else "unknown"
+                )
 
         elif int(media_type) in (2, 68):  # Image types
             if download_video:  # "video" flag used for images too
                 logger.info(f"[Celery] Downloading images: {platform_id}")
                 video_result = run_async(
-                    DownloaderService.download_images_by_platform_id(platform_id, user_id=user_id)
+                    DownloaderService.download_images_by_platform_id(
+                        platform_id, user_id=user_id
+                    )
                 )
-                results["video"] = video_result.video_download_status.value if hasattr(video_result, 'video_download_status') else "unknown"
+                results["video"] = (
+                    video_result.video_download_status.value
+                    if hasattr(video_result, "video_download_status")
+                    else "unknown"
+                )
 
             if download_music:
                 logger.info(f"[Celery] Downloading music: {platform_id}")
                 result = run_async(
-                    DownloaderService.download_music_by_platform_id(platform_id=platform_id, user_id=user_id)
+                    DownloaderService.download_music_by_platform_id(
+                        platform_id=platform_id, user_id=user_id
+                    )
                 )
-                results["music"] = result.music_download_status.value if hasattr(result, 'music_download_status') else "unknown"
+                results["music"] = (
+                    result.music_download_status.value
+                    if hasattr(result, "music_download_status")
+                    else "unknown"
+                )
 
             if download_cover:
                 logger.info(f"[Celery] Downloading cover: {platform_id}")
                 result = run_async(
-                    DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id)
+                    DownloaderService.download_cover_by_platform_id(
+                        platform_id, user_id=user_id
+                    )
                 )
-                results["cover"] = result.cover_download_status.value if hasattr(result, 'cover_download_status') else "unknown"
+                results["cover"] = (
+                    result.cover_download_status.value
+                    if hasattr(result, "cover_download_status")
+                    else "unknown"
+                )
 
         # Check if video download was successful
-        if video_result and hasattr(video_result, 'video_download_status'):
+        if video_result and hasattr(video_result, "video_download_status"):
             if video_result.video_download_status == DownloadStatus.COMPLETED:
                 # Mark complete in TaskManager
                 task_manager.complete_task(platform_id)
@@ -198,7 +238,11 @@ def download_media_task(
                 }
             else:
                 # Download failed
-                error_msg = video_result.error if hasattr(video_result, 'error') and video_result.error else "Download failed"
+                error_msg = (
+                    video_result.error
+                    if hasattr(video_result, "error") and video_result.error
+                    else "Download failed"
+                )
                 raise Exception(error_msg)
 
         # No video result means video download was not requested, mark as complete
@@ -213,7 +257,9 @@ def download_media_task(
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[Celery] Download task failed: {platform_id}, error: {error_msg}")
+        logger.error(
+            f"[Celery] Download task failed: {platform_id}, error: {error_msg}"
+        )
 
         # Mark as failed in TaskManager
         task_manager.fail_task(platform_id, error_msg)
@@ -224,8 +270,10 @@ def download_media_task(
 
         if retry_count < 3:
             # Auto retry with exponential backoff
-            countdown = 30 * (2 ** retry_count)
-            logger.info(f"[Celery] Scheduling retry {retry_count + 1}/3 for {platform_id} in {countdown}s")
+            countdown = 30 * (2**retry_count)
+            logger.info(
+                f"[Celery] Scheduling retry {retry_count + 1}/3 for {platform_id} in {countdown}s"
+            )
             raise self.retry(exc=e, countdown=countdown)
 
         logger.error(f"[Celery] Max retries reached for {platform_id}")
@@ -249,8 +297,8 @@ class DownloadProgressTrackerWithTaskManager:
 
     def update(self, downloaded: int, total: int):
         """Update download progress."""
-        import time
         import json
+        import time
 
         # Throttle updates to avoid Redis spam
         now = time.time()
@@ -270,9 +318,7 @@ class DownloadProgressTrackerWithTaskManager:
             "status": "downloading",
         }
         self.redis.setex(
-            f"download_progress:{self.task_id}",
-            3600,
-            json.dumps(progress_data)
+            f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
         # Update TaskManager
@@ -291,6 +337,7 @@ class DownloadProgressTrackerWithTaskManager:
     def complete(self):
         """Mark download as complete."""
         import json
+
         progress_data = {
             "percent": 100,
             "downloaded": 0,
@@ -299,9 +346,7 @@ class DownloadProgressTrackerWithTaskManager:
             "status": "completed",
         }
         self.redis.setex(
-            f"download_progress:{self.task_id}",
-            3600,
-            json.dumps(progress_data)
+            f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
 
@@ -336,6 +381,7 @@ def download_ytdlp_task(
 
     # Initialize TaskManager
     from app.services.task_manager import get_task_manager
+
     task_manager = get_task_manager()
 
     task = task_manager.get_task(platform_id)
@@ -345,8 +391,8 @@ def download_ytdlp_task(
     task_manager.start_download(platform_id)
 
     try:
-        from app.services.ytdlp_service import YtdlpService
         from app.repositories.video_repository import VideoRepository
+        from app.services.ytdlp_service import YtdlpService
 
         results = {"video": None, "music": None, "cover": None}
 
@@ -361,17 +407,22 @@ def download_ytdlp_task(
             )
             if result.get("file_path"):
                 import os
+
                 file_name = os.path.basename(result["file_path"])
                 relative_path = f"{relative_month}/{file_name}"
                 repo = repo_class()
-                run_async(repo.mark_video_as_downloaded(
-                    platform_id=platform_id,
-                    download_path=relative_path,
-                    duration=0,
-                    storage_size=result.get("file_size", 0),
-                ))
+                run_async(
+                    repo.mark_video_as_downloaded(
+                        platform_id=platform_id,
+                        download_path=relative_path,
+                        duration=0,
+                        storage_size=result.get("file_size", 0),
+                    )
+                )
                 # Optimize for streaming
-                run_async(DownloaderService.optimize_video_for_streaming(result["file_path"]))
+                run_async(
+                    DownloaderService.optimize_video_for_streaming(result["file_path"])
+                )
                 results["video"] = DownloadStatus.COMPLETED.value
             else:
                 results["video"] = DownloadStatus.FAILED.value
@@ -393,7 +444,9 @@ def download_ytdlp_task(
             logger.info(f"[Celery/yt-dlp] Downloading cover: {platform_id}")
             repo = repo_class()
             run_async(
-                DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id)
+                DownloaderService.download_cover_by_platform_id(
+                    platform_id, user_id=user_id
+                )
             )
             results["cover"] = "attempted"
 
@@ -411,13 +464,17 @@ def download_ytdlp_task(
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[Celery/yt-dlp] Download task failed: {platform_id}, error: {error_msg}")
+        logger.error(
+            f"[Celery/yt-dlp] Download task failed: {platform_id}, error: {error_msg}"
+        )
 
         task_manager.fail_task(platform_id, error_msg)
 
         if self.request.retries < self.max_retries:
-            countdown = 30 * (2 ** self.request.retries)
-            logger.info(f"[Celery/yt-dlp] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s")
+            countdown = 30 * (2**self.request.retries)
+            logger.info(
+                f"[Celery/yt-dlp] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
+            )
             raise self.retry(exc=e, countdown=countdown)
 
         return {
@@ -443,7 +500,9 @@ def download_video_task(self, platform_id: str, user_id: str = None):
 
     try:
         result = run_async(
-            DownloaderService.download_video_by_platform_id(platform_id, user_id=user_id)
+            DownloaderService.download_video_by_platform_id(
+                platform_id, user_id=user_id
+            )
         )
 
         if result.video_download_status == DownloadStatus.COMPLETED:
@@ -455,17 +514,21 @@ def download_video_task(self, platform_id: str, user_id: str = None):
                 "duration": result.download_duration,
             }
         else:
-            logger.warning(f"[Celery] Video download failed: {platform_id}, error: {result.error}")
+            logger.warning(
+                f"[Celery] Video download failed: {platform_id}, error: {result.error}"
+            )
             # Retry
             raise self.retry(
                 exc=Exception(result.error),
-                countdown=10 * (2 ** self.request.retries)  # Exponential backoff
+                countdown=10 * (2**self.request.retries),  # Exponential backoff
             )
 
     except Exception as e:
-        logger.error(f"[Celery] Video download task error: {platform_id}, error: {str(e)}")
+        logger.error(
+            f"[Celery] Video download task error: {platform_id}, error: {str(e)}"
+        )
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
         return {
             "status": "failed",
             "platform_id": platform_id,
@@ -489,7 +552,9 @@ def download_images_task(self, platform_id: str, user_id: str = None):
 
     try:
         result = run_async(
-            DownloaderService.download_images_by_platform_id(platform_id, user_id=user_id)
+            DownloaderService.download_images_by_platform_id(
+                platform_id, user_id=user_id
+            )
         )
 
         if result.video_download_status == DownloadStatus.COMPLETED:
@@ -499,16 +564,19 @@ def download_images_task(self, platform_id: str, user_id: str = None):
                 "platform_id": platform_id,
             }
         else:
-            logger.warning(f"[Celery] Image set download failed: {platform_id}, error: {result.error}")
+            logger.warning(
+                f"[Celery] Image set download failed: {platform_id}, error: {result.error}"
+            )
             raise self.retry(
-                exc=Exception(result.error),
-                countdown=10 * (2 ** self.request.retries)
+                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
             )
 
     except Exception as e:
-        logger.error(f"[Celery] Image set download task error: {platform_id}, error: {str(e)}")
+        logger.error(
+            f"[Celery] Image set download task error: {platform_id}, error: {str(e)}"
+        )
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
         return {
             "status": "failed",
             "platform_id": platform_id,
@@ -532,7 +600,9 @@ def download_music_task(self, platform_id: str, user_id: str = None):
 
     try:
         result = run_async(
-            DownloaderService.download_music_by_platform_id(platform_id=platform_id, user_id=user_id)
+            DownloaderService.download_music_by_platform_id(
+                platform_id=platform_id, user_id=user_id
+            )
         )
 
         if result.music_download_status == DownloadStatus.COMPLETED:
@@ -543,16 +613,19 @@ def download_music_task(self, platform_id: str, user_id: str = None):
                 "path": result.music_path,
             }
         else:
-            logger.warning(f"[Celery] Music download failed: {platform_id}, error: {result.error}")
+            logger.warning(
+                f"[Celery] Music download failed: {platform_id}, error: {result.error}"
+            )
             raise self.retry(
-                exc=Exception(result.error),
-                countdown=10 * (2 ** self.request.retries)
+                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
             )
 
     except Exception as e:
-        logger.error(f"[Celery] Music download task error: {platform_id}, error: {str(e)}")
+        logger.error(
+            f"[Celery] Music download task error: {platform_id}, error: {str(e)}"
+        )
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
         return {
             "status": "failed",
             "platform_id": platform_id,
@@ -576,7 +649,9 @@ def download_cover_task(self, platform_id: str, user_id: str = None):
 
     try:
         result = run_async(
-            DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id)
+            DownloaderService.download_cover_by_platform_id(
+                platform_id, user_id=user_id
+            )
         )
 
         if result.cover_download_status == DownloadStatus.COMPLETED:
@@ -587,16 +662,19 @@ def download_cover_task(self, platform_id: str, user_id: str = None):
                 "path": result.cover_path,
             }
         else:
-            logger.warning(f"[Celery] Cover download failed: {platform_id}, error: {result.error}")
+            logger.warning(
+                f"[Celery] Cover download failed: {platform_id}, error: {result.error}"
+            )
             raise self.retry(
-                exc=Exception(result.error),
-                countdown=10 * (2 ** self.request.retries)
+                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
             )
 
     except Exception as e:
-        logger.error(f"[Celery] Cover download task error: {platform_id}, error: {str(e)}")
+        logger.error(
+            f"[Celery] Cover download task error: {platform_id}, error: {str(e)}"
+        )
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
         return {
             "status": "failed",
             "platform_id": platform_id,

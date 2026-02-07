@@ -62,7 +62,7 @@ jobs:
         run: uv run isort --check-only app/
 
       - name: Lint (flake8)
-        run: uv run flake8 app/ --max-line-length 120 --exclude __pycache__
+        run: uv run flake8 app/
 
   rust:
     name: Rust Check

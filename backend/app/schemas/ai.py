@@ -4,12 +4,14 @@
 AI settings request/response schemas.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class AISettingsUpdate(BaseModel):
     """Request body for saving AI settings."""
+
     ai_providers: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Provider configs keyed by provider name, e.g. {'openai': {'api_key': '...', 'model': '...'}}",
@@ -36,6 +38,7 @@ class AISettingsUpdate(BaseModel):
 
 class AISettingsResponse(BaseModel):
     """Response body for AI settings."""
+
     ai_providers: Dict[str, Any] = Field(default_factory=dict)
     whisper_provider: str = "openai_api"
     default_summary_model: str = "gpt-4o-mini"
@@ -44,7 +47,10 @@ class AISettingsResponse(BaseModel):
 
 class TestConnectionRequest(BaseModel):
     """Request body for testing an AI provider connection."""
-    provider_key: str = Field(..., description="Provider key: openai, deepseek, doubao, ollama, lmstudio")
+
+    provider_key: str = Field(
+        ..., description="Provider key: openai, deepseek, doubao, ollama, lmstudio"
+    )
     api_key: Optional[str] = Field(default="", description="API key for the provider")
     base_url: Optional[str] = Field(default="", description="Custom base URL")
     model: Optional[str] = Field(default="", description="Model to use")
@@ -52,6 +58,7 @@ class TestConnectionRequest(BaseModel):
 
 class TestConnectionResponse(BaseModel):
     """Response body for connection test."""
+
     success: bool
     models: Optional[List[str]] = None
     error: Optional[str] = None
@@ -61,8 +68,10 @@ class TestConnectionResponse(BaseModel):
 # Transcript / Summary response schemas (for API endpoints)
 # ------------------------------------------------------------------
 
+
 class TranscriptSegmentSchema(BaseModel):
     """A single timed segment from a transcript."""
+
     start: float
     end: float
     text: str
@@ -70,6 +79,7 @@ class TranscriptSegmentSchema(BaseModel):
 
 class TranscriptResponse(BaseModel):
     """Response body for a video transcript."""
+
     video_id: str
     language: Optional[str] = None
     full_text: Optional[str] = None
@@ -81,6 +91,7 @@ class TranscriptResponse(BaseModel):
 
 class SummaryResponse(BaseModel):
     """Response body for a video summary."""
+
     video_id: str
     summary_type: Optional[str] = None
     summary_text: Optional[str] = None

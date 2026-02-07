@@ -8,14 +8,12 @@ Contains scheduled tasks dispatched by Celery Beat.
 
 import asyncio
 import os
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from celery import shared_task
 from loguru import logger
 
-from app.core.config import settings
 from app.core.enums import DownloadStatus
 
 
@@ -25,6 +23,7 @@ def run_async(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -51,7 +50,9 @@ def cleanup_temp_files():
         try:
             base_path = Path(Utils.get_download_base_path())
         except ValueError:
-            logger.warning("[Celery Beat] Download path not configured, skipping cleanup")
+            logger.warning(
+                "[Celery Beat] Download path not configured, skipping cleanup"
+            )
             return {"status": "skipped", "message": "Download path not configured"}
 
         if not base_path.exists():
@@ -70,7 +71,7 @@ def cleanup_temp_files():
             # Delete temp files (.tmp, .part, .downloading)
             for file in files:
                 file_path = root_path / file
-                if file.endswith(('.tmp', '.part', '.downloading')):
+                if file.endswith((".tmp", ".part", ".downloading")):
                     try:
                         file_stat = file_path.stat()
                         if datetime.fromtimestamp(file_stat.st_mtime) < cutoff_time:
@@ -123,7 +124,7 @@ def retry_failed_downloads():
 
     try:
         from app.repositories.video_repository import VideoRepository
-        from app.tasks.download_tasks import download_video_task, download_images_task
+        from app.tasks.download_tasks import download_images_task, download_video_task
 
         repo = VideoRepository()
 
@@ -146,10 +147,14 @@ def retry_failed_downloads():
             try:
                 # Reset status to PENDING
                 run_async(
-                    repo.update(platform_id, {
-                        "video_download_status": DownloadStatus.PENDING.value,
-                        "error_message": None
-                    }, user_id=user_id)
+                    repo.update(
+                        platform_id,
+                        {
+                            "video_download_status": DownloadStatus.PENDING.value,
+                            "error_message": None,
+                        },
+                        user_id=user_id,
+                    )
                 )
 
                 # Submit download task based on type
@@ -170,7 +175,9 @@ def retry_failed_downloads():
             "retried": retried_count,
         }
 
-        logger.success(f"[Celery Beat] Retry complete: {retried_count}/{len(failed_videos)} tasks resubmitted")
+        logger.success(
+            f"[Celery Beat] Retry complete: {retried_count}/{len(failed_videos)} tasks resubmitted"
+        )
 
         return result
 
@@ -232,6 +239,7 @@ def health_check():
     # Check Redis
     try:
         from app.celery_app import celery_app
+
         celery_app.control.ping(timeout=5)
         checks["redis"] = "ok"
     except Exception as e:
@@ -240,6 +248,7 @@ def health_check():
     # Check Supabase
     try:
         from app.repositories.video_repository import VideoRepository
+
         repo = VideoRepository()
         # Simple query to test connection
         run_async(repo.get_statistics())
@@ -250,6 +259,7 @@ def health_check():
     # Check storage directory
     try:
         from app.core.utils import Utils
+
         base_path = Path(Utils.get_download_base_path())
         if base_path.exists() and os.access(base_path, os.W_OK):
             checks["storage"] = "ok"

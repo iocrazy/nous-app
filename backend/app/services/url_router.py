@@ -9,6 +9,7 @@ Douyin URLs use the existing Douyin parser; all others use yt-dlp.
 
 import re
 from urllib.parse import urlparse
+
 from loguru import logger
 
 
@@ -16,13 +17,13 @@ class URLRouter:
     """Detect URL source platform, dispatch to appropriate handler"""
 
     PLATFORM_PATTERNS: dict[str, list[str]] = {
-        'douyin': ['douyin.com', 'iesdouyin.com'],
-        'youtube': ['youtube.com', 'youtu.be'],
-        'bilibili': ['bilibili.com', 'b23.tv'],
-        'twitter': ['twitter.com', 'x.com'],
-        'tiktok': ['tiktok.com'],
-        'instagram': ['instagram.com'],
-        'xiaohongshu': ['xiaohongshu.com', 'xhslink.com'],
+        "douyin": ["douyin.com", "iesdouyin.com"],
+        "youtube": ["youtube.com", "youtu.be"],
+        "bilibili": ["bilibili.com", "b23.tv"],
+        "twitter": ["twitter.com", "x.com"],
+        "tiktok": ["tiktok.com"],
+        "instagram": ["instagram.com"],
+        "xiaohongshu": ["xiaohongshu.com", "xhslink.com"],
     }
 
     @staticmethod
@@ -46,7 +47,9 @@ class URLRouter:
             for domain in domains:
                 if hostname == domain or hostname.endswith(f".{domain}"):
                     handler_type = "douyin" if platform == "douyin" else "ytdlp"
-                    logger.info(f"[URLRouter] Detected platform: {platform}, handler: {handler_type} for {url}")
+                    logger.info(
+                        f"[URLRouter] Detected platform: {platform}, handler: {handler_type} for {url}"
+                    )
                     return (platform, handler_type)
 
         # Unknown platform, default to yt-dlp
@@ -60,7 +63,7 @@ class URLRouter:
             return False
 
         # Must start with http(s)
-        if not re.match(r'^https?://', url):
+        if not re.match(r"^https?://", url):
             return False
 
         try:
@@ -69,7 +72,7 @@ class URLRouter:
             if not parsed.hostname:
                 return False
             # Must have at least one dot in hostname (e.g. example.com)
-            if '.' not in parsed.hostname:
+            if "." not in parsed.hostname:
                 return False
             return True
         except Exception:

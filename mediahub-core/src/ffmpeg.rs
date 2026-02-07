@@ -281,7 +281,7 @@ impl FfmpegWrapper {
             let f = stream
                 .get("r_frame_rate")
                 .and_then(|v| v.as_str())
-                .and_then(|s| Self::parse_frame_rate(s));
+                .and_then(Self::parse_frame_rate);
             (w, h, c, br, f)
         } else {
             (0, 0, "unknown".to_string(), None, None)

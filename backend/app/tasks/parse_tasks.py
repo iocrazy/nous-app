@@ -7,7 +7,8 @@ Contains link parsing related Celery tasks.
 """
 
 import asyncio
-from celery import shared_task, group
+
+from celery import group, shared_task
 from loguru import logger
 
 from app.core.utils import Utils
@@ -20,6 +21,7 @@ def run_async(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
@@ -29,17 +31,20 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
-async def log_user_action(user_id: str, action: str, message: str, status: str, aweme_id: str = None):
+async def log_user_action(
+    user_id: str, action: str, message: str, status: str, aweme_id: str = None
+):
     """Log user action helper."""
     try:
         from app.repositories.user_action_log_repository import UserActionLogRepository
+
         repo = UserActionLogRepository()
         await repo.log_action(
             user_id=user_id,
             action=action,
             message=message,
             status=status,
-            aweme_id=aweme_id
+            aweme_id=aweme_id,
         )
     except Exception as e:
         logger.warning(f"Failed to log user action: {e}")
@@ -53,7 +58,7 @@ def parse_single_link_task(
     video_bool: bool = True,
     music_bool: bool = False,
     cover_bool: bool = True,
-    categories: str = None
+    categories: str = None,
 ):
     """
     Parse metadata for a video link (Phase 1).
@@ -86,9 +91,9 @@ def parse_single_link_task(
                 "error": f"Invalid URL: {str(e)}",
             }
 
+        from app.repositories.video_repository import VideoRepository
         from app.services.douyin_analysis import DouyinAnalysis
         from app.services.douyin_parser import DouyinParser
-        from app.repositories.video_repository import VideoRepository
         from app.tasks.download_tasks import download_media_task
 
         # Fetch video data
@@ -98,7 +103,7 @@ def parse_single_link_task(
             logger.warning(f"[Celery] Cannot fetch video info: {valid_url}")
             raise self.retry(
                 exc=Exception("Cannot fetch video info"),
-                countdown=30 * (2 ** self.request.retries)
+                countdown=30 * (2**self.request.retries),
             )
 
         # Parse metadata (without downloading files)
@@ -109,15 +114,14 @@ def parse_single_link_task(
                 download_video=video_bool,
                 download_music=music_bool,
                 download_cover=cover_bool,
-                categories=categories
+                categories=categories,
             )
         )
 
         if not parsed_data:
             logger.warning(f"[Celery] Parse failed: {valid_url}")
             raise self.retry(
-                exc=Exception("Parse failed"),
-                countdown=30 * (2 ** self.request.retries)
+                exc=Exception("Parse failed"), countdown=30 * (2**self.request.retries)
             )
 
         platform_id = parsed_data.get("platform_id")
@@ -126,8 +130,8 @@ def parse_single_link_task(
         parsed_data["user_id"] = user_id
 
         # Save metadata to database (without downloading)
-        from app.schemas.video import VideoCreate
         from app.core.enums import DownloadStatus
+        from app.schemas.video import VideoCreate
 
         repo = VideoRepository()
 
@@ -181,16 +185,22 @@ def parse_single_link_task(
                         if tag.get("hashtag_name")
                     ]
 
-                added_tags = run_async(ClassificationService.auto_tag_video(
-                    video_id=video_db_id,
-                    title=video_title or "",
-                    description=parsed_data.get("description", ""),
-                    original_tags=original_tags
-                ))
+                added_tags = run_async(
+                    ClassificationService.auto_tag_video(
+                        video_id=video_db_id,
+                        title=video_title or "",
+                        description=parsed_data.get("description", ""),
+                        original_tags=original_tags,
+                    )
+                )
                 if added_tags:
-                    logger.info(f"[Celery] Auto-tagged video {platform_id} with {len(added_tags)} tags")
+                    logger.info(
+                        f"[Celery] Auto-tagged video {platform_id} with {len(added_tags)} tags"
+                    )
             else:
-                logger.warning(f"[Celery] Cannot auto-tag video {platform_id}: no database ID returned")
+                logger.warning(
+                    f"[Celery] Cannot auto-tag video {platform_id}: no database ID returned"
+                )
         except Exception as e:
             # Auto-tagging is non-blocking - failures should not affect the main flow
             logger.warning(f"[Celery] Auto-tagging failed for {platform_id}: {e}")
@@ -215,28 +225,37 @@ def parse_single_link_task(
 
         # Trigger L1 analysis automatically (non-blocking)
         try:
-            cover_url = parsed_data.get("cover_urls", [None])[0] if parsed_data.get("cover_urls") else None
+            cover_url = (
+                parsed_data.get("cover_urls", [None])[0]
+                if parsed_data.get("cover_urls")
+                else None
+            )
             if video_db_id and cover_url:
                 from app.tasks.analysis_tasks import analyze_video_l1_task
+
                 analyze_video_l1_task.delay(
                     video_id=video_db_id,
                     cover_url=cover_url,
                     title=video_title or "",
-                    description=parsed_data.get("description", "")
+                    description=parsed_data.get("description", ""),
                 )
                 logger.info(f"[Celery] Triggered L1 analysis for video {platform_id}")
         except Exception as e:
             # L1 analysis is non-blocking - failures should not affect the main flow
-            logger.warning(f"[Celery] Failed to trigger L1 analysis for {platform_id}: {e}")
+            logger.warning(
+                f"[Celery] Failed to trigger L1 analysis for {platform_id}: {e}"
+            )
 
         # Log user action
-        run_async(log_user_action(
-            user_id=user_id,
-            action="fetch",
-            message=f"{video_title[:20]}...: Metadata parsed",
-            status="success",
-            aweme_id=platform_id
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"{video_title[:20]}...: Metadata parsed",
+                status="success",
+                aweme_id=platform_id,
+            )
+        )
 
         # Build metadata response
         metadata = {
@@ -270,7 +289,7 @@ def parse_single_link_task(
     except Exception as e:
         logger.error(f"[Celery] Parse task error: {url}, error: {str(e)}")
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
         return {
             "status": "failed",
             "url": url,
@@ -286,7 +305,7 @@ def parse_batch_links_task(
     video_bool: bool = True,
     music_bool: bool = False,
     cover_bool: bool = True,
-    categories: str = None
+    categories: str = None,
 ):
     """
     Celery task for batch parsing video links.
@@ -314,7 +333,7 @@ def parse_batch_links_task(
             video_bool=video_bool,
             music_bool=music_bool,
             cover_bool=cover_bool,
-            categories=categories
+            categories=categories,
         )
         for url in urls
     )

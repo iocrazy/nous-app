@@ -7,7 +7,8 @@ Handles CRUD operations for video_transcripts, video_summaries,
 and AI-related status fields on the videos table.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
@@ -28,7 +29,9 @@ class AIRepository:
     # Transcripts
     # ------------------------------------------------------------------
 
-    async def save_transcript(self, video_id: str, data: Dict[str, Any]) -> Optional[Dict]:
+    async def save_transcript(
+        self, video_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict]:
         """Save a transcript record for a video.
 
         Args:
@@ -39,9 +42,11 @@ class AIRepository:
         try:
             client = await self._get_client()
             row = {"video_id": video_id, **data}
-            result = await client.table("video_transcripts").upsert(
-                row, on_conflict="video_id"
-            ).execute()
+            result = (
+                await client.table("video_transcripts")
+                .upsert(row, on_conflict="video_id")
+                .execute()
+            )
             if result.data:
                 logger.info(f"Saved transcript for video {video_id}")
                 return result.data[0]
@@ -81,9 +86,11 @@ class AIRepository:
         try:
             client = await self._get_client()
             row = {"video_id": video_id, **data}
-            result = await client.table("video_summaries").upsert(
-                row, on_conflict="video_id"
-            ).execute()
+            result = (
+                await client.table("video_summaries")
+                .upsert(row, on_conflict="video_id")
+                .execute()
+            )
             if result.data:
                 logger.info(f"Saved summary for video {video_id}")
                 return result.data[0]
@@ -124,7 +131,9 @@ class AIRepository:
         """
         valid_fields = {"transcript_status", "summary_status", "visual_analysis_status"}
         if field not in valid_fields:
-            raise ValueError(f"Invalid status field: {field}. Must be one of {valid_fields}")
+            raise ValueError(
+                f"Invalid status field: {field}. Must be one of {valid_fields}"
+            )
 
         try:
             client = await self._get_client()
@@ -146,7 +155,9 @@ class AIRepository:
             client = await self._get_client()
             result = (
                 await client.table("videos")
-                .select("id, platform_id, title, download_path, duration, source_platform")
+                .select(
+                    "id, platform_id, title, download_path, duration, source_platform"
+                )
                 .eq("transcript_status", "pending")
                 .eq("transcript_bool", True)
                 .not_.is_("download_path", "null")

@@ -53,13 +53,17 @@ class WhisperService:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        provider = AIProviderFactory.get_provider(self._provider_key, self._provider_config)
+        provider = AIProviderFactory.get_provider(
+            self._provider_key, self._provider_config
+        )
 
         kwargs = {"model": whisper_model}
         if language and language != "auto":
             kwargs["language"] = language
 
-        logger.info(f"Transcribing {audio_path} with {self._provider_key} ({whisper_model})")
+        logger.info(
+            f"Transcribing {audio_path} with {self._provider_key} ({whisper_model})"
+        )
         result = await provider.transcribe(audio_path, **kwargs)
         logger.info(
             f"Transcription complete: {len(result.segments)} segments, "
@@ -79,7 +83,9 @@ class WhisperService:
         Updates video status to 'processing' before starting and
         'completed' or 'failed' after.
         """
-        await self._repo.update_video_ai_status(video_id, "transcript_status", "processing")
+        await self._repo.update_video_ai_status(
+            video_id, "transcript_status", "processing"
+        )
 
         try:
             result = await self.transcribe(audio_path, language, whisper_model)
@@ -90,19 +96,26 @@ class WhisperService:
                 for s in result.segments
             ]
 
-            await self._repo.save_transcript(video_id, {
-                "language": result.language,
-                "full_text": result.text,
-                "segments": segments_json,
-                "whisper_model": whisper_model,
-                "duration_seconds": result.duration,
-            })
+            await self._repo.save_transcript(
+                video_id,
+                {
+                    "language": result.language,
+                    "full_text": result.text,
+                    "segments": segments_json,
+                    "whisper_model": whisper_model,
+                    "duration_seconds": result.duration,
+                },
+            )
 
-            await self._repo.update_video_ai_status(video_id, "transcript_status", "completed")
+            await self._repo.update_video_ai_status(
+                video_id, "transcript_status", "completed"
+            )
             logger.info(f"Transcript saved for video {video_id}")
             return result
 
         except Exception as e:
             logger.error(f"Transcription failed for video {video_id}: {e}")
-            await self._repo.update_video_ai_status(video_id, "transcript_status", "failed")
+            await self._repo.update_video_ai_status(
+                video_id, "transcript_status", "failed"
+            )
             raise

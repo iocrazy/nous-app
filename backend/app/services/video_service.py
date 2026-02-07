@@ -7,7 +7,8 @@ Integrates video data fetching, parsing, storage (Supabase) and download functio
 """
 
 import asyncio
-from typing import Dict, Any
+from typing import Any, Dict
+
 from loguru import logger
 
 from app.core.enums import DownloadStatus
@@ -69,7 +70,7 @@ class VideoService:
                         to_download_cover,
                         media_type,
                         title,
-                        user_id
+                        user_id,
                     )
 
                 download_msgs = []
@@ -107,7 +108,7 @@ class VideoService:
             Dict[str, Any]: Storage result with download status info
         """
         platform_id = parsed_data.get("platform_id")
-        media_type = parsed_data.get('media_type')
+        media_type = parsed_data.get("media_type")
         title = parsed_data.get("title", "undefined")
         user_id = parsed_data.get("user_id")
 
@@ -118,7 +119,9 @@ class VideoService:
         # Data validation
         try:
             video_data = VideoCreate(**parsed_data)
-            logger.success(f"数据验证通过: platform_id={platform_id}, user_id={user_id}")
+            logger.success(
+                f"数据验证通过: platform_id={platform_id}, user_id={user_id}"
+            )
         except Exception as e:
             logger.error(f"数据验证失败: {str(e)}")
             return {"success": False, "message": f"存储失败: {str(e)}"}
@@ -134,7 +137,9 @@ class VideoService:
             if not data_exists:
                 global_exists = await repo.check_video_existence(platform_id)
                 if global_exists:
-                    logger.info(f"视频 {platform_id} 已存在但属于其他用户，为当前用户创建新记录")
+                    logger.info(
+                        f"视频 {platform_id} 已存在但属于其他用户，为当前用户创建新记录"
+                    )
                     data_exists = True
 
             video_downloaded = await repo.check_video_downloaded(platform_id)
@@ -152,9 +157,15 @@ class VideoService:
             if data_exists:
                 # Update existing record
                 update_data = {
-                    k: v for k, v in data_dict.items()
-                    if k not in ["video_download_status", "download_path",
-                                 "music_download_status", "download_duration"]
+                    k: v
+                    for k, v in data_dict.items()
+                    if k
+                    not in [
+                        "video_download_status",
+                        "download_path",
+                        "music_download_status",
+                        "download_duration",
+                    ]
                 }
 
                 if video_downloaded and music_downloaded:
@@ -162,37 +173,63 @@ class VideoService:
                     message = f"媒体 {platform_id}_{title} 已下载，仅更新数据"
                 elif video_downloaded and not music_downloaded:
                     if need_download_music:
-                        update_data["music_download_status"] = DownloadStatus.PENDING.value
+                        update_data["music_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
                         message = f"媒体 {platform_id}_{title} 视频已下载，音频待下载"
                     else:
-                        update_data["music_download_status"] = DownloadStatus.SKIPPED.value
+                        update_data["music_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
                         message = f"媒体 {platform_id}_{title} 视频已下载，跳过音频"
                     await repo.update(platform_id, update_data)
                 elif not video_downloaded and music_downloaded:
                     if need_download_video:
-                        update_data["video_download_status"] = DownloadStatus.PENDING.value
+                        update_data["video_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
                         message = f"媒体 {platform_id}_{title} 音频已下载，视频待下载"
                     else:
-                        update_data["video_download_status"] = DownloadStatus.SKIPPED.value
+                        update_data["video_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
                         message = f"媒体 {platform_id}_{title} 音频已下载，跳过视频"
                     await repo.update(platform_id, update_data)
                 else:
                     # Neither downloaded
                     if need_download_video and need_download_music:
-                        update_data["video_download_status"] = DownloadStatus.PENDING.value
-                        update_data["music_download_status"] = DownloadStatus.PENDING.value
-                        message = f"媒体 {platform_id}_{title} 更新数据，视频和音频待下载"
+                        update_data["video_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
+                        update_data["music_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
+                        message = (
+                            f"媒体 {platform_id}_{title} 更新数据，视频和音频待下载"
+                        )
                     elif need_download_video:
-                        update_data["video_download_status"] = DownloadStatus.PENDING.value
-                        update_data["music_download_status"] = DownloadStatus.SKIPPED.value
+                        update_data["video_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
+                        update_data["music_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
                         message = f"媒体 {platform_id}_{title} 更新数据，视频待下载"
                     elif need_download_music:
-                        update_data["music_download_status"] = DownloadStatus.PENDING.value
-                        update_data["video_download_status"] = DownloadStatus.SKIPPED.value
+                        update_data["music_download_status"] = (
+                            DownloadStatus.PENDING.value
+                        )
+                        update_data["video_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
                         message = f"媒体 {platform_id}_{title} 更新数据，音频待下载"
                     else:
-                        update_data["video_download_status"] = DownloadStatus.SKIPPED.value
-                        update_data["music_download_status"] = DownloadStatus.SKIPPED.value
+                        update_data["video_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
+                        update_data["music_download_status"] = (
+                            DownloadStatus.SKIPPED.value
+                        )
                         message = f"媒体 {platform_id}_{title} 仅更新数据"
                     await repo.update(platform_id, update_data)
             else:
@@ -215,13 +252,17 @@ class VideoService:
                     message = f"媒体 {platform_id}_{title} 已创建，无下载请求"
 
                 await repo.create(data_dict)
-                logger.info(f"创建新视频记录: platform_id={platform_id}, user_id={user_id}")
+                logger.info(
+                    f"创建新视频记录: platform_id={platform_id}, user_id={user_id}"
+                )
 
             # Re-check download status
             video_downloaded = await repo.check_video_downloaded(platform_id)
             music_downloaded = await repo.check_music_downloaded(platform_id)
 
-            logger.debug(f"下载状态: video_dl={video_downloaded}, music_dl={music_downloaded}")
+            logger.debug(
+                f"下载状态: video_dl={video_downloaded}, music_dl={music_downloaded}"
+            )
             logger.debug(f"{message}")
 
             # Check cover download status
@@ -235,7 +276,7 @@ class VideoService:
                 "download_cover": need_download_cover and not cover_downloaded,
                 "platform_id": platform_id,
                 "media_type": media_type,
-                "title": title
+                "title": title,
             }
 
         except Exception as e:
@@ -250,7 +291,7 @@ class VideoService:
         download_cover: bool,
         media_type: int,
         title: str,
-        user_id: str = None
+        user_id: str = None,
     ):
         """
         Execute download tasks
@@ -267,28 +308,56 @@ class VideoService:
         try:
             async with asyncio.TaskGroup() as tg:
                 if int(media_type) in (0, 4, 61):  # Video types
-                    logger.info(f"开始下载 Video: {platform_id}_{title}, media_type: {media_type}")
+                    logger.info(
+                        f"开始下载 Video: {platform_id}_{title}, media_type: {media_type}"
+                    )
                     if download_video:
                         logger.info("创建视频下载任务")
-                        tg.create_task(DownloaderService.download_video_by_platform_id(platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_video_by_platform_id(
+                                platform_id, user_id=user_id
+                            )
+                        )
                     if download_music:
                         logger.info("创建音频下载任务")
-                        tg.create_task(DownloaderService.download_music_by_platform_id(platform_id=platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_music_by_platform_id(
+                                platform_id=platform_id, user_id=user_id
+                            )
+                        )
                     if download_cover:
                         logger.info("创建封面下载任务")
-                        tg.create_task(DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_cover_by_platform_id(
+                                platform_id, user_id=user_id
+                            )
+                        )
 
                 elif int(media_type) in (2, 68):  # Image collection/image-text types
-                    logger.info(f"开始下载 Video: {platform_id}_{title}, media_type: {media_type}")
+                    logger.info(
+                        f"开始下载 Video: {platform_id}_{title}, media_type: {media_type}"
+                    )
                     if download_video:
                         logger.info("创建图片下载任务")
-                        tg.create_task(DownloaderService.download_images_by_platform_id(platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_images_by_platform_id(
+                                platform_id, user_id=user_id
+                            )
+                        )
                     if download_music:
                         logger.info("创建音频下载任务")
-                        tg.create_task(DownloaderService.download_music_by_platform_id(platform_id=platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_music_by_platform_id(
+                                platform_id=platform_id, user_id=user_id
+                            )
+                        )
                     if download_cover:
                         logger.info("创建封面下载任务")
-                        tg.create_task(DownloaderService.download_cover_by_platform_id(platform_id, user_id=user_id))
+                        tg.create_task(
+                            DownloaderService.download_cover_by_platform_id(
+                                platform_id, user_id=user_id
+                            )
+                        )
 
                 else:
                     logger.error(f"暂不支持 media_type: {media_type} 类型的下载")
@@ -323,7 +392,9 @@ class VideoService:
             # Data validation
             try:
                 video_data = VideoCreate(**parsed_data)
-                logger.success(f"数据验证通过: platform_id={platform_id}, user_id={user_id}")
+                logger.success(
+                    f"数据验证通过: platform_id={platform_id}, user_id={user_id}"
+                )
             except Exception as e:
                 logger.error(f"数据验证失败: {str(e)}")
                 return {"success": False, "message": f"存储失败: {str(e)}"}
@@ -350,7 +421,8 @@ class VideoService:
                 # Update existing record
                 video_id = existing_video.get("id")
                 update_data = {
-                    k: v for k, v in data_dict.items()
+                    k: v
+                    for k, v in data_dict.items()
                     if k not in ["download_path", "download_duration"]
                 }
                 await repo.update(platform_id, update_data)

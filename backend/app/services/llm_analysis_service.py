@@ -9,7 +9,7 @@ Provides:
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from loguru import logger
@@ -54,7 +54,9 @@ class LLMAnalysisService:
         Returns:
             SummaryResult with summary, key_points, topics.
         """
-        provider = AIProviderFactory.get_provider(self._provider_key, self._provider_config)
+        provider = AIProviderFactory.get_provider(
+            self._provider_key, self._provider_config
+        )
 
         context_parts = []
         if video_info:
@@ -76,7 +78,7 @@ class LLMAnalysisService:
             "Only return the JSON object, nothing else."
         )
 
-        user_message = f"Summarize this video transcript.\n\n"
+        user_message = "Summarize this video transcript.\n\n"
         if context_str:
             user_message += f"Video info:\n{context_str}\n\n"
         user_message += f"Transcript:\n{transcript_text[:8000]}"
@@ -103,27 +105,36 @@ class LLMAnalysisService:
         Updates video status to 'processing' before starting and
         'completed' or 'failed' after.
         """
-        await self._repo.update_video_ai_status(video_id, "summary_status", "processing")
+        await self._repo.update_video_ai_status(
+            video_id, "summary_status", "processing"
+        )
 
         try:
             result = await self.generate_summary(transcript_text, video_info, model)
 
-            await self._repo.save_summary(video_id, {
-                "summary_type": "transcript",
-                "summary_text": result.summary,
-                "key_points": result.key_points,
-                "topics": result.topics,
-                "llm_model": model or self._provider_config.get("model", ""),
-                "llm_provider": self._provider_key,
-            })
+            await self._repo.save_summary(
+                video_id,
+                {
+                    "summary_type": "transcript",
+                    "summary_text": result.summary,
+                    "key_points": result.key_points,
+                    "topics": result.topics,
+                    "llm_model": model or self._provider_config.get("model", ""),
+                    "llm_provider": self._provider_key,
+                },
+            )
 
-            await self._repo.update_video_ai_status(video_id, "summary_status", "completed")
+            await self._repo.update_video_ai_status(
+                video_id, "summary_status", "completed"
+            )
             logger.info(f"Summary saved for video {video_id}")
             return result
 
         except Exception as e:
             logger.error(f"Summary generation failed for video {video_id}: {e}")
-            await self._repo.update_video_ai_status(video_id, "summary_status", "failed")
+            await self._repo.update_video_ai_status(
+                video_id, "summary_status", "failed"
+            )
             raise
 
     def _parse_summary_response(self, text: str) -> SummaryResult:
@@ -146,7 +157,9 @@ class LLMAnalysisService:
                 topics=data.get("topics", []),
             )
         except json.JSONDecodeError:
-            logger.warning("Failed to parse LLM response as JSON, using raw text as summary")
+            logger.warning(
+                "Failed to parse LLM response as JSON, using raw text as summary"
+            )
             return SummaryResult(
                 summary=text.strip()[:500],
                 key_points=[],

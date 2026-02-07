@@ -7,7 +7,8 @@ Supabase 认证服务
 使用异步 Supabase 客户端。
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase, get_async_supabase_admin
@@ -26,10 +27,7 @@ class SupabaseAuthService:
         return self._client
 
     async def sign_up(
-        self,
-        email: str,
-        password: str,
-        metadata: Optional[Dict[str, Any]] = None
+        self, email: str, password: str, metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         用户注册
@@ -48,11 +46,13 @@ class SupabaseAuthService:
             if metadata:
                 options["data"] = metadata
 
-            response = await client.auth.sign_up({
-                "email": email,
-                "password": password,
-                "options": options if options else None
-            })
+            response = await client.auth.sign_up(
+                {
+                    "email": email,
+                    "password": password,
+                    "options": options if options else None,
+                }
+            )
 
             if response.user:
                 logger.info(f"用户注册成功: {email}")
@@ -61,13 +61,33 @@ class SupabaseAuthService:
                     "user": {
                         "id": response.user.id,
                         "email": response.user.email,
-                        "created_at": str(response.user.created_at) if response.user.created_at else None
+                        "created_at": (
+                            str(response.user.created_at)
+                            if response.user.created_at
+                            else None
+                        ),
                     },
-                    "session": {
-                        "access_token": response.session.access_token if response.session else None,
-                        "refresh_token": response.session.refresh_token if response.session else None,
-                        "expires_at": response.session.expires_at if response.session else None
-                    } if response.session else None
+                    "session": (
+                        {
+                            "access_token": (
+                                response.session.access_token
+                                if response.session
+                                else None
+                            ),
+                            "refresh_token": (
+                                response.session.refresh_token
+                                if response.session
+                                else None
+                            ),
+                            "expires_at": (
+                                response.session.expires_at
+                                if response.session
+                                else None
+                            ),
+                        }
+                        if response.session
+                        else None
+                    ),
                 }
             else:
                 return {"success": False, "message": "注册失败"}
@@ -89,10 +109,9 @@ class SupabaseAuthService:
         """
         try:
             client = await self._get_client()
-            response = await client.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
+            response = await client.auth.sign_in_with_password(
+                {"email": email, "password": password}
+            )
 
             if response.user and response.session:
                 logger.info(f"用户登录成功: {email}")
@@ -101,14 +120,14 @@ class SupabaseAuthService:
                     "user": {
                         "id": response.user.id,
                         "email": response.user.email,
-                        "user_metadata": response.user.user_metadata
+                        "user_metadata": response.user.user_metadata,
                     },
                     "session": {
                         "access_token": response.session.access_token,
                         "refresh_token": response.session.refresh_token,
                         "expires_at": response.session.expires_at,
-                        "token_type": response.session.token_type
-                    }
+                        "token_type": response.session.token_type,
+                    },
                 }
             else:
                 return {"success": False, "message": "登录失败"}
@@ -147,7 +166,11 @@ class SupabaseAuthService:
                     "email": response.user.email,
                     "user_metadata": response.user.user_metadata,
                     "app_metadata": response.user.app_metadata,
-                    "created_at": str(response.user.created_at) if response.user.created_at else None
+                    "created_at": (
+                        str(response.user.created_at)
+                        if response.user.created_at
+                        else None
+                    ),
                 }
             return None
         except Exception as e:
@@ -173,8 +196,8 @@ class SupabaseAuthService:
                     "session": {
                         "access_token": response.session.access_token,
                         "refresh_token": response.session.refresh_token,
-                        "expires_at": response.session.expires_at
-                    }
+                        "expires_at": response.session.expires_at,
+                    },
                 }
             return {"success": False, "message": "刷新会话失败"}
         except Exception as e:
@@ -205,7 +228,7 @@ class SupabaseAuthService:
         access_token: str,
         email: Optional[str] = None,
         password: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         更新用户信息
@@ -240,8 +263,8 @@ class SupabaseAuthService:
                     "user": {
                         "id": response.user.id,
                         "email": response.user.email,
-                        "user_metadata": response.user.user_metadata
-                    }
+                        "user_metadata": response.user.user_metadata,
+                    },
                 }
             return {"success": False, "message": "更新失败"}
         except Exception as e:
@@ -271,33 +294,28 @@ class SupabaseAdminAuthService:
                     "id": response.user.id,
                     "email": response.user.email,
                     "user_metadata": response.user.user_metadata,
-                    "app_metadata": response.user.app_metadata
+                    "app_metadata": response.user.app_metadata,
                 }
             return None
         except Exception as e:
             logger.error(f"获取用户信息失败: {e}")
             return None
 
-    async def list_users(
-        self,
-        page: int = 1,
-        per_page: int = 50
-    ) -> Dict[str, Any]:
+    async def list_users(self, page: int = 1, per_page: int = 50) -> Dict[str, Any]:
         """获取用户列表"""
         try:
             client = await self._get_admin_client()
-            response = await client.auth.admin.list_users(
-                page=page,
-                per_page=per_page
-            )
+            response = await client.auth.admin.list_users(page=page, per_page=per_page)
             users = []
             for user in response:
-                users.append({
-                    "id": user.id,
-                    "email": user.email,
-                    "created_at": str(user.created_at) if user.created_at else None,
-                    "user_metadata": user.user_metadata
-                })
+                users.append(
+                    {
+                        "id": user.id,
+                        "email": user.email,
+                        "created_at": str(user.created_at) if user.created_at else None,
+                        "user_metadata": user.user_metadata,
+                    }
+                )
             return {"success": True, "users": users}
         except Exception as e:
             logger.error(f"获取用户列表失败: {e}")
@@ -314,17 +332,12 @@ class SupabaseAdminAuthService:
             logger.error(f"删除用户失败: {e}")
             return {"success": False, "message": str(e)}
 
-    async def update_user_role(
-        self,
-        user_id: str,
-        role: str
-    ) -> Dict[str, Any]:
+    async def update_user_role(self, user_id: str, role: str) -> Dict[str, Any]:
         """更新用户角色（存储在 app_metadata 中）"""
         try:
             client = await self._get_admin_client()
             response = await client.auth.admin.update_user_by_id(
-                user_id,
-                {"app_metadata": {"role": role}}
+                user_id, {"app_metadata": {"role": role}}
             )
             if response.user:
                 logger.info(f"用户角色已更新: {user_id} -> {role}")

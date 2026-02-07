@@ -1,3 +1,6 @@
+// PyO3 macro-generated code triggers useless_conversion for PyResult error types
+#![allow(clippy::useless_conversion)]
+
 pub mod errors;
 pub mod ffmpeg;
 pub mod hls;

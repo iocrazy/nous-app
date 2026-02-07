@@ -8,23 +8,26 @@ filename generation, and error handling. Uses httpx and aiofiles for efficient
 async downloads.
 """
 
-import os
-
-from typing import  Dict, Any
 import asyncio
+import os
+from typing import Any, Dict
 
 import aiofiles
 import httpx
 from loguru import logger
 
-
-from app.core.utils import Utils
-from app.core.enums import DownloadStatus
-from app.repositories.video_repository import VideoRepository
-from app.repositories.user_logs_repository import log_user_action
-from app.schemas.video import DownloadVideoResult, DownloadMusicResult, DownloadImagesResult, DownloadCoverResult
 # from app.db.session import get_async_transaction_session
 from app.core.config import settings
+from app.core.enums import DownloadStatus
+from app.core.utils import Utils
+from app.repositories.user_logs_repository import log_user_action
+from app.repositories.video_repository import VideoRepository
+from app.schemas.video import (
+    DownloadCoverResult,
+    DownloadImagesResult,
+    DownloadMusicResult,
+    DownloadVideoResult,
+)
 
 
 class DownloaderService:
@@ -39,27 +42,31 @@ class DownloaderService:
 
         Returns True if optimization succeeded, False otherwise.
         """
-        import subprocess
         import shutil
+        import subprocess
 
-        if not file_path.endswith('.mp4'):
+        if not file_path.endswith(".mp4"):
             return True  # Skip non-MP4 files
 
-        temp_path = file_path + '.optimizing.mp4'
+        temp_path = file_path + ".optimizing.mp4"
 
         try:
             # Run ffmpeg to optimize the video
             result = subprocess.run(
                 [
-                    'ffmpeg', '-y',  # Overwrite output
-                    '-i', file_path,
-                    '-c', 'copy',  # Copy streams without re-encoding (fast)
-                    '-movflags', 'faststart',  # Move moov atom to beginning
-                    temp_path
+                    "ffmpeg",
+                    "-y",  # Overwrite output
+                    "-i",
+                    file_path,
+                    "-c",
+                    "copy",  # Copy streams without re-encoding (fast)
+                    "-movflags",
+                    "faststart",  # Move moov atom to beginning
+                    temp_path,
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout for large files
+                timeout=300,  # 5 minute timeout for large files
             )
 
             if result.returncode == 0 and os.path.exists(temp_path):
@@ -74,11 +81,15 @@ class DownloaderService:
                     logger.info(f"视频已优化为流式播放: {os.path.basename(file_path)}")
                     return True
                 else:
-                    logger.warning(f"优化后文件大小异常，保留原文件: {os.path.basename(file_path)}")
+                    logger.warning(
+                        f"优化后文件大小异常，保留原文件: {os.path.basename(file_path)}"
+                    )
                     os.remove(temp_path)
                     return False
             else:
-                logger.warning(f"视频优化失败: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+                logger.warning(
+                    f"视频优化失败: {result.stderr[:200] if result.stderr else 'Unknown error'}"
+                )
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
                 return False
@@ -110,28 +121,35 @@ class DownloaderService:
             # Use ffmpeg to verify the file can be decoded
             result = subprocess.run(
                 [
-                    'ffmpeg', '-v', 'error',
-                    '-i', file_path,
-                    '-f', 'null', '-',
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-i",
+                    file_path,
+                    "-f",
+                    "null",
+                    "-",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=60  # 1 minute timeout
+                timeout=60,  # 1 minute timeout
             )
 
             # Check for critical errors
             stderr = result.stderr.lower()
             critical_errors = [
-                'partial file',
-                'invalid nal unit',
-                'error splitting',
-                'truncated',
-                'moov atom not found',
+                "partial file",
+                "invalid nal unit",
+                "error splitting",
+                "truncated",
+                "moov atom not found",
             ]
 
             for error in critical_errors:
                 if error in stderr:
-                    logger.error(f"视频文件损坏: {error} in {os.path.basename(file_path)}")
+                    logger.error(
+                        f"视频文件损坏: {error} in {os.path.basename(file_path)}"
+                    )
                     return False
 
             # If return code is non-zero and has errors, file is bad
@@ -154,10 +172,7 @@ class DownloaderService:
 
     @staticmethod
     async def download_file(
-        url: str,
-        file_path: str,
-        headers: Dict[str, Any] = None,
-        progress_tracker=None
+        url: str, file_path: str, headers: Dict[str, Any] = None, progress_tracker=None
     ) -> bool:
         """
         Download a single file with optional progress tracking
@@ -183,15 +198,21 @@ class DownloaderService:
                     existing_size = os.path.getsize(file_path)
                     # Get expected size via HEAD request
                     try:
-                        head_resp = await client.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                        head_resp = await client.head(
+                            url, headers=headers, follow_redirects=True, timeout=10.0
+                        )
                         expected_size = int(head_resp.headers.get("content-length", 0))
                         if expected_size > 0 and existing_size >= expected_size:
-                            logger.info(f"文件已存在且完整，跳过下载: {os.path.basename(file_path)} ({existing_size} bytes)")
+                            logger.info(
+                                f"文件已存在且完整，跳过下载: {os.path.basename(file_path)} ({existing_size} bytes)"
+                            )
                             if progress_tracker:
                                 progress_tracker.complete()
                             return True
                         else:
-                            logger.warning(f"文件不完整 ({existing_size}/{expected_size} bytes)，重新下载: {os.path.basename(file_path)}")
+                            logger.warning(
+                                f"文件不完整 ({existing_size}/{expected_size} bytes)，重新下载: {os.path.basename(file_path)}"
+                            )
                             os.remove(file_path)
                     except Exception as e:
                         logger.warning(f"无法验证文件完整性，重新下载: {e}")
@@ -199,7 +220,9 @@ class DownloaderService:
                 # Get expected size via HEAD request first
                 expected_size = 0
                 try:
-                    head_resp = await client.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                    head_resp = await client.head(
+                        url, headers=headers, follow_redirects=True, timeout=10.0
+                    )
                     expected_size = int(head_resp.headers.get("content-length", 0))
                 except Exception as e:
                     logger.warning(f"无法获取预期文件大小: {e}")
@@ -214,7 +237,9 @@ class DownloaderService:
                         timeout=settings.DOWNLOAD_TIMEOUT,
                     ) as response:
                         if response.status_code != 200:
-                            logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")
+                            logger.warning(
+                                f"下载失败 {url}, 状态码: {response.status_code}"
+                            )
                             return False
 
                         total = int(response.headers.get("content-length", 0))
@@ -222,26 +247,44 @@ class DownloaderService:
                             expected_size = total
                         downloaded = 0
 
-                        async with aiofiles.open(file_path, mode='wb') as f:
-                            async for chunk in response.aiter_bytes(chunk_size=65536):  # 64KB chunks
+                        async with aiofiles.open(file_path, mode="wb") as f:
+                            async for chunk in response.aiter_bytes(
+                                chunk_size=65536
+                            ):  # 64KB chunks
                                 await f.write(chunk)
                                 downloaded += len(chunk)
                                 progress_tracker.update(downloaded, total)
 
                         # Post-download verification
-                        actual_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-                        if expected_size > 0 and actual_size < expected_size * 0.95:  # Allow 5% tolerance
-                            logger.error(f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes")
+                        actual_size = (
+                            os.path.getsize(file_path)
+                            if os.path.exists(file_path)
+                            else 0
+                        )
+                        if (
+                            expected_size > 0 and actual_size < expected_size * 0.95
+                        ):  # Allow 5% tolerance
+                            logger.error(
+                                f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes"
+                            )
                             os.remove(file_path)
-                            raise Exception(f"File size mismatch: expected {expected_size}, got {actual_size}")
+                            raise Exception(
+                                f"File size mismatch: expected {expected_size}, got {actual_size}"
+                            )
 
                         # Verify video file integrity with ffprobe
-                        if file_path.endswith('.mp4'):
-                            if not await DownloaderService.verify_video_integrity(file_path):
+                        if file_path.endswith(".mp4"):
+                            if not await DownloaderService.verify_video_integrity(
+                                file_path
+                            ):
                                 os.remove(file_path)
-                                raise Exception(f"Video file corrupted or incomplete: {os.path.basename(file_path)}")
+                                raise Exception(
+                                    f"Video file corrupted or incomplete: {os.path.basename(file_path)}"
+                                )
 
-                        logger.success(f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)")
+                        logger.success(
+                            f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)"
+                        )
                         return True
                 else:
                     # Original non-streaming download (larger timeout for big files)
@@ -249,30 +292,48 @@ class DownloaderService:
                         url,
                         headers=headers,
                         follow_redirects=True,
-                        timeout=httpx.Timeout(settings.DOWNLOAD_TIMEOUT, connect=30.0)
+                        timeout=httpx.Timeout(settings.DOWNLOAD_TIMEOUT, connect=30.0),
                     )
 
                     if response.status_code == 200:
-                        async with aiofiles.open(file_path, mode='wb') as f:
+                        async with aiofiles.open(file_path, mode="wb") as f:
                             await f.write(response.content)
 
                         # Post-download verification
-                        actual_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-                        if expected_size > 0 and actual_size < expected_size * 0.95:  # Allow 5% tolerance
-                            logger.error(f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes")
+                        actual_size = (
+                            os.path.getsize(file_path)
+                            if os.path.exists(file_path)
+                            else 0
+                        )
+                        if (
+                            expected_size > 0 and actual_size < expected_size * 0.95
+                        ):  # Allow 5% tolerance
+                            logger.error(
+                                f"文件大小不匹配: 预期 {expected_size} bytes, 实际 {actual_size} bytes"
+                            )
                             os.remove(file_path)
-                            raise Exception(f"File size mismatch: expected {expected_size}, got {actual_size}")
+                            raise Exception(
+                                f"File size mismatch: expected {expected_size}, got {actual_size}"
+                            )
 
                         # Verify video file integrity with ffprobe
-                        if file_path.endswith('.mp4'):
-                            if not await DownloaderService.verify_video_integrity(file_path):
+                        if file_path.endswith(".mp4"):
+                            if not await DownloaderService.verify_video_integrity(
+                                file_path
+                            ):
                                 os.remove(file_path)
-                                raise Exception(f"Video file corrupted or incomplete: {os.path.basename(file_path)}")
+                                raise Exception(
+                                    f"Video file corrupted or incomplete: {os.path.basename(file_path)}"
+                                )
 
-                        logger.success(f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)")
+                        logger.success(
+                            f"成功下载文件: {os.path.basename(file_path)} ({actual_size} bytes)"
+                        )
                         return True
                     else:
-                        logger.warning(f"下载失败 {url}, 状态码: {response.status_code}")
+                        logger.warning(
+                            f"下载失败 {url}, 状态码: {response.status_code}"
+                        )
                         return False
 
         except Exception as e:
@@ -283,9 +344,7 @@ class DownloaderService:
 
     @staticmethod
     async def download_video_by_platform_id(
-        platform_id,
-        user_id: str = None,
-        progress_tracker=None
+        platform_id, user_id: str = None, progress_tracker=None
     ) -> DownloadVideoResult:
         """
         Download video and optional music files
@@ -336,10 +395,14 @@ class DownloaderService:
                 result.error = f"视频 {platform_id} 没有可用的下载URL"
 
                 # Update database status to "failed"
-                await repo.update(platform_id, {
-                    "download_status": DownloadStatus.FAILED,
-                    "error_message": result.error
-                }, user_id=user_id)
+                await repo.update(
+                    platform_id,
+                    {
+                        "download_status": DownloadStatus.FAILED,
+                        "error_message": result.error,
+                    },
+                    user_id=user_id,
+                )
                 return result
 
             # todo calculate download time
@@ -347,30 +410,46 @@ class DownloaderService:
 
             # download video while one of the urls is successful
             for url in video_urls:
-                if await DownloaderService.download_file(url, video_full_path, headers, progress_tracker):
+                if await DownloaderService.download_file(
+                    url, video_full_path, headers, progress_tracker
+                ):
                     # Optimize video for streaming (move moov atom to beginning)
-                    await DownloaderService.optimize_video_for_streaming(video_full_path)
+                    await DownloaderService.optimize_video_for_streaming(
+                        video_full_path
+                    )
 
                     try:
                         # Calculate file size (after optimization)
-                        file_size = os.path.getsize(video_full_path) if os.path.exists(video_full_path) else 0
+                        file_size = (
+                            os.path.getsize(video_full_path)
+                            if os.path.exists(video_full_path)
+                            else 0
+                        )
 
                         # Store relative path and file size to database
                         await repo.mark_video_as_downloaded(
                             platform_id=platform_id,
                             download_path=video_relative_path,  # Use relative path
                             duration=download_duration,
-                            storage_size=file_size
+                            storage_size=file_size,
                         )
                     except Exception as e:
-                        logger.error(f"Marked video {platform_id} as downloaded successfully, but failed to update the database: {e}.")
-                        result.error = f"Marked video {platform_id} as downloaded successfully, but failed to update the database: {e}."
+                        logger.error(
+                            f"Marked video {platform_id} as downloaded successfully, "
+                            f"but failed to update the database: {e}."
+                        )
+                        result.error = (
+                            f"Marked video {platform_id} as downloaded successfully, "
+                            f"but failed to update the database: {e}."
+                        )
 
                     # Update result object
                     result.video_download_status = DownloadStatus.COMPLETED
                     result.video_path = video_relative_path  # Return relative path
                     result.download_duration = download_duration
-                    logger.success(f"Video {platform_id} downloaded successfully and saved to {video_full_path}.")
+                    logger.success(
+                        f"Video {platform_id} downloaded successfully and saved to {video_full_path}."
+                    )
 
                     # Log success
                     if user_id:
@@ -379,7 +458,7 @@ class DownloaderService:
                             action="download",
                             message=f"视频下载成功: {video_title[:30]}...",
                             status="success",
-                            aweme_id=platform_id
+                            aweme_id=platform_id,
                         )
                     break
 
@@ -389,10 +468,14 @@ class DownloaderService:
                 result.error = f"All download URLs for the video {platform_id} failed."
 
                 # Update database status to "failed"
-                await repo.update(platform_id, {
-                    "video_download_status": DownloadStatus.FAILED,
-                    "error_message": result.error
-                }, user_id=user_id)
+                await repo.update(
+                    platform_id,
+                    {
+                        "video_download_status": DownloadStatus.FAILED,
+                        "error_message": result.error,
+                    },
+                    user_id=user_id,
+                )
 
                 # Log failure
                 if user_id:
@@ -402,7 +485,7 @@ class DownloaderService:
                         message=f"视频下载失败: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": result.error}
+                        details={"error": result.error},
                     )
 
             return result
@@ -425,7 +508,7 @@ class DownloaderService:
         Returns:
             DownloadImagesResult: Download result info
         """
-        #todo: get and accumulate error_message
+        # todo: get and accumulate error_message
 
         result = DownloadImagesResult.model_construct()
         headers = Utils.get_headers()
@@ -454,9 +537,13 @@ class DownloaderService:
 
             # Full path and relative path
             sub_download_full_path = os.path.join(full_path, file_name)
-            sub_download_relative_path = f"{relative_month}/{file_name}"  # Relative path
+            sub_download_relative_path = (
+                f"{relative_month}/{file_name}"  # Relative path
+            )
             os.makedirs(sub_download_full_path, exist_ok=True)
-            logger.success(f"Successfully created download file path: {sub_download_full_path}")
+            logger.success(
+                f"Successfully created download file path: {sub_download_full_path}"
+            )
 
             video_urls = video_data.get("video_download_urls")
             image_urls = video_data.get("image_download_urls")
@@ -466,12 +553,16 @@ class DownloaderService:
 
             # Download videos
 
-            if  Utils.is_nested_list(video_urls):
+            if Utils.is_nested_list(video_urls):
                 logger.info(f"准备下载  {len(video_urls)} 个视频")
                 video_tasks = []
                 async with asyncio.TaskGroup() as tg:
                     for i, url_list in enumerate(video_urls):
-                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_full_path,file_name, headers))
+                        task = tg.create_task(
+                            DownloaderService.download_single_list_item(
+                                i, url_list, sub_download_full_path, file_name, headers
+                            )
+                        )
                         logger.debug(f"添加视频第{i+1}下载任务: {task}")
                         video_tasks.append(task)
 
@@ -483,10 +574,11 @@ class DownloaderService:
                     except Exception as e:
                         logger.error(f"获取视频下载任务结果失败: {e}")
 
-                logger.info(f"{file_name} 视频下载完成，共下载了 {video_downloaded_count}/{len(video_urls)} 个视频文件。")
+                logger.info(
+                    f"{file_name} 视频下载完成，共下载了 {video_downloaded_count}/{len(video_urls)} 个视频文件。"
+                )
             else:
-                logger.info(f"No videos require downloading.")
-
+                logger.info("No videos require downloading.")
 
             # todo check errors
             if Utils.is_nested_list(image_urls):
@@ -494,7 +586,11 @@ class DownloaderService:
                 image_tasks = []
                 async with asyncio.TaskGroup() as tg:
                     for i, url_list in enumerate(image_urls):
-                        task = tg.create_task(DownloaderService.download_single_list_item(i,url_list, sub_download_full_path,file_name, headers))
+                        task = tg.create_task(
+                            DownloaderService.download_single_list_item(
+                                i, url_list, sub_download_full_path, file_name, headers
+                            )
+                        )
                         logger.debug(f"添加图片第{i+1}下载任务: {task}")
                         image_tasks.append(task)
 
@@ -504,12 +600,16 @@ class DownloaderService:
                         result_data = task.result()
                         if result_data and result_data.get("success", False):
                             image_downloaded_count += 1
-                            logger.debug(f"成功下载图片，当前计数: {image_downloaded_count}")
+                            logger.debug(
+                                f"成功下载图片，当前计数: {image_downloaded_count}"
+                            )
 
                     except Exception as e:
                         logger.error(f"获取图片下载任务结果失败: {e}")
 
-                logger.info(f"{file_name} 图片下载完成，共下载了 {image_downloaded_count}/{len(image_urls)} 个图片文件。")
+                logger.info(
+                    f"{file_name} 图片下载完成，共下载了 {image_downloaded_count}/{len(image_urls)} 个图片文件。"
+                )
 
             # Calculate total download count
             total_expected = 0
@@ -520,13 +620,18 @@ class DownloaderService:
 
             total_downloaded = video_downloaded_count + image_downloaded_count
 
-
             if total_downloaded == total_expected and total_expected > 0:
-                logger.success(f"{file_name} 下载完成，共下载了 {video_downloaded_count}个视频文件和 {image_downloaded_count}个图片文件。")
-                await repo.update(platform_id, {
-                    "video_download_status": DownloadStatus.COMPLETED,
-                    "download_path": sub_download_relative_path  # Use relative path
-                }, user_id=user_id)
+                logger.success(
+                    f"{file_name} 下载完成，共下载了 {video_downloaded_count}个视频文件和 {image_downloaded_count}个图片文件。"
+                )
+                await repo.update(
+                    platform_id,
+                    {
+                        "video_download_status": DownloadStatus.COMPLETED,
+                        "download_path": sub_download_relative_path,  # Use relative path
+                    },
+                    user_id=user_id,
+                )
                 result.video_download_status = DownloadStatus.COMPLETED
 
                 # Log success
@@ -536,16 +641,27 @@ class DownloaderService:
                         action="download",
                         message=f"图集下载成功: {video_title[:30]}... ({total_downloaded}个文件)",
                         status="success",
-                        aweme_id=platform_id
+                        aweme_id=platform_id,
                     )
 
             else:
-                error_msg = f"{file_name} 下载失败，共下载了 {video_downloaded_count}/{len(video_urls) if Utils.is_nested_list(video_urls) else 0} 个视频文件和 {image_downloaded_count}/{len(image_urls) if Utils.is_nested_list(image_urls) else 0} 个图片文件。Download Path: {sub_download_full_path}"
+                video_total = len(video_urls) if Utils.is_nested_list(video_urls) else 0
+                image_total = len(image_urls) if Utils.is_nested_list(image_urls) else 0
+                error_msg = (
+                    f"{file_name} 下载失败，共下载了 "
+                    f"{video_downloaded_count}/{video_total} 个视频文件和 "
+                    f"{image_downloaded_count}/{image_total} 个图片文件。"
+                    f"Download Path: {sub_download_full_path}"
+                )
                 logger.error(error_msg)
-                await repo.update(platform_id, {
-                    "video_download_status": DownloadStatus.FAILED,
-                    "error_message": error_msg
-                }, user_id=user_id)
+                await repo.update(
+                    platform_id,
+                    {
+                        "video_download_status": DownloadStatus.FAILED,
+                        "error_message": error_msg,
+                    },
+                    user_id=user_id,
+                )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = error_msg
 
@@ -557,7 +673,7 @@ class DownloaderService:
                         message=f"图集下载失败: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": error_msg[:200]}
+                        details={"error": error_msg[:200]},
                     )
 
         except Exception as e:
@@ -568,7 +684,9 @@ class DownloaderService:
         return result
 
     @staticmethod
-    async def download_music_by_platform_id(*, platform_id, user_id: str = None) -> DownloadMusicResult:
+    async def download_music_by_platform_id(
+        *, platform_id, user_id: str = None
+    ) -> DownloadMusicResult:
         """
         Download music file only
 
@@ -593,7 +711,9 @@ class DownloaderService:
             try:
                 music_data = await repo.get_music_data(platform_id)
                 # Use dict comprehension to shorten each value
-                shortened_data = {k: Utils.shorten_item(v, 30) for k, v in music_data.items()}
+                shortened_data = {
+                    k: Utils.shorten_item(v, 30) for k, v in music_data.items()
+                }
                 logger.debug(f" {platform_id} music data: {shortened_data}")
             except ValueError as e:
                 logger.error(f"Failed to retrieve music data: {e}")
@@ -621,25 +741,41 @@ class DownloaderService:
                     try:
                         await repo.mark_music_as_downloaded(platform_id)
                     except Exception as e:
-                        logger.error(f"Marked music {platform_id} as downloaded successfully, but failed to update the database: {e}.")
-                        result.error += f"Marked music {platform_id} as downloaded successfully, but failed to update the database: {e}."
+                        logger.error(
+                            f"Marked music {platform_id} as downloaded successfully, "
+                            f"but failed to update the database: {e}."
+                        )
+                        result.error += (
+                            f"Marked music {platform_id} as downloaded successfully, "
+                            f"but failed to update the database: {e}."
+                        )
 
                     result.music_path = music_relative_path  # Return relative path
                     result.music_download_status = DownloadStatus.COMPLETED
 
-                    logger.success(f"Music for video {platform_id} downloaded successfully and saved to {music_full_path}.")
+                    logger.success(
+                        f"Music for video {platform_id} downloaded successfully and saved to {music_full_path}."
+                    )
                     break
 
             if result.music_download_status != DownloadStatus.COMPLETED:
-                logger.error(f"All download URLs for the music of video {platform_id} failed.")
+                logger.error(
+                    f"All download URLs for the music of video {platform_id} failed."
+                )
                 result.music_download_status = DownloadStatus.FAILED
-                result.error += f"All download URLs for the music of video {platform_id} failed."
+                result.error += (
+                    f"All download URLs for the music of video {platform_id} failed."
+                )
 
                 # Update database status to "failed"
-                await repo.update(platform_id, {
-                    "music_download_status": DownloadStatus.FAILED,
-                    "error_message": result.error
-                }, user_id=user_id)
+                await repo.update(
+                    platform_id,
+                    {
+                        "music_download_status": DownloadStatus.FAILED,
+                        "error_message": result.error,
+                    },
+                    user_id=user_id,
+                )
 
             return result
 
@@ -649,7 +785,9 @@ class DownloaderService:
             return result
 
     @staticmethod
-    async def download_single_list_item(i, url_list, sub_download_full_path, file_name, headers):
+    async def download_single_list_item(
+        i, url_list, sub_download_full_path, file_name, headers
+    ):
         """Download a single list item (video or image), try multiple URLs until success"""
         # Determine file extension
         extension = ".mp4" if "mp4" in str(url_list) else ".jpg"
@@ -673,10 +811,16 @@ class DownloaderService:
                 continue
 
         # All URLs failed
-        return {"success": False, "path": None, "message": f"所有URL都失败了，共尝试了{len(url_list)}个URL"}
+        return {
+            "success": False,
+            "path": None,
+            "message": f"所有URL都失败了，共尝试了{len(url_list)}个URL",
+        }
 
     @staticmethod
-    async def download_cover_by_platform_id(platform_id: str, user_id: str = None) -> DownloadCoverResult:
+    async def download_cover_by_platform_id(
+        platform_id: str, user_id: str = None
+    ) -> DownloadCoverResult:
         """
         Download video cover image
 
@@ -725,10 +869,14 @@ class DownloaderService:
                 if await DownloaderService.download_file(url, cover_full_path, headers):
                     # Update database (store relative path)
                     try:
-                        await repo.update(platform_id, {
-                            "cover_download_status": DownloadStatus.COMPLETED.value,
-                            "cover_download_path": cover_relative_path  # Use relative path
-                        }, user_id=user_id)
+                        await repo.update(
+                            platform_id,
+                            {
+                                "cover_download_status": DownloadStatus.COMPLETED.value,
+                                "cover_download_path": cover_relative_path,  # Use relative path
+                            },
+                            user_id=user_id,
+                        )
                     except Exception as e:
                         logger.error(f"更新封面下载状态失败: {e}")
 
@@ -743,7 +891,7 @@ class DownloaderService:
                             action="download",
                             message=f"封面下载成功: {video_title[:30]}...",
                             status="success",
-                            aweme_id=platform_id
+                            aweme_id=platform_id,
                         )
                     return result
 
@@ -752,10 +900,14 @@ class DownloaderService:
             result.cover_download_status = DownloadStatus.FAILED
             result.error = "所有封面 URL 下载失败"
 
-            await repo.update(platform_id, {
-                "cover_download_status": DownloadStatus.FAILED.value,
-                "error_message": result.error
-            }, user_id=user_id)
+            await repo.update(
+                platform_id,
+                {
+                    "cover_download_status": DownloadStatus.FAILED.value,
+                    "error_message": result.error,
+                },
+                user_id=user_id,
+            )
 
             # Log failure
             if user_id:
@@ -764,7 +916,7 @@ class DownloaderService:
                     action="download",
                     message=f"封面下载失败: {video_title[:30]}...",
                     status="error",
-                    aweme_id=platform_id
+                    aweme_id=platform_id,
                 )
 
             return result

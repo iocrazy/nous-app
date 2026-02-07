@@ -7,12 +7,13 @@ Video data access layer based on Supabase, providing CRUD operations and query f
 Uses async Supabase client.
 """
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
-from app.db.supabase_client import get_async_supabase_admin
 from app.core.enums import DownloadStatus
+from app.db.supabase_client import get_async_supabase_admin
 
 
 class VideoRepository:
@@ -46,11 +47,17 @@ class VideoRepository:
         """
         try:
             # 处理枚举类型
-            if "video_download_status" in data and isinstance(data["video_download_status"], DownloadStatus):
+            if "video_download_status" in data and isinstance(
+                data["video_download_status"], DownloadStatus
+            ):
                 data["video_download_status"] = data["video_download_status"].value
-            if "music_download_status" in data and isinstance(data["music_download_status"], DownloadStatus):
+            if "music_download_status" in data and isinstance(
+                data["music_download_status"], DownloadStatus
+            ):
                 data["music_download_status"] = data["music_download_status"].value
-            if "cover_download_status" in data and isinstance(data["cover_download_status"], DownloadStatus):
+            if "cover_download_status" in data and isinstance(
+                data["cover_download_status"], DownloadStatus
+            ):
                 data["cover_download_status"] = data["cover_download_status"].value
 
             # 处理 datetime
@@ -68,9 +75,7 @@ class VideoRepository:
             raise
 
     async def get_by_platform_id(
-        self,
-        platform_id: str,
-        user_id: Optional[str] = None
+        self, platform_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         根据 platform_id 获取视频记录
@@ -85,7 +90,11 @@ class VideoRepository:
         try:
             client = await self._get_client()
             # Use videos_with_tags view which includes tags array
-            query = client.table("videos_with_tags").select("*").eq("platform_id", platform_id)
+            query = (
+                client.table("videos_with_tags")
+                .select("*")
+                .eq("platform_id", platform_id)
+            )
             if user_id:
                 query = query.eq("user_id", user_id)
             result = await query.execute()
@@ -95,10 +104,7 @@ class VideoRepository:
             return None
 
     async def update(
-        self,
-        platform_id: str,
-        data: Dict[str, Any],
-        user_id: Optional[str] = None
+        self, platform_id: str, data: Dict[str, Any], user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         更新视频记录
@@ -113,11 +119,17 @@ class VideoRepository:
         """
         try:
             # 处理枚举类型
-            if "video_download_status" in data and isinstance(data["video_download_status"], DownloadStatus):
+            if "video_download_status" in data and isinstance(
+                data["video_download_status"], DownloadStatus
+            ):
                 data["video_download_status"] = data["video_download_status"].value
-            if "music_download_status" in data and isinstance(data["music_download_status"], DownloadStatus):
+            if "music_download_status" in data and isinstance(
+                data["music_download_status"], DownloadStatus
+            ):
                 data["music_download_status"] = data["music_download_status"].value
-            if "cover_download_status" in data and isinstance(data["cover_download_status"], DownloadStatus):
+            if "cover_download_status" in data and isinstance(
+                data["cover_download_status"], DownloadStatus
+            ):
                 data["cover_download_status"] = data["cover_download_status"].value
 
             # 处理 datetime
@@ -194,38 +206,40 @@ class VideoRepository:
         platform_id: str,
         download_path: str,
         duration: float,
-        storage_size: int = 0
+        storage_size: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """标记视频为已下载"""
         data = {
             "video_download_status": DownloadStatus.COMPLETED.value,
             "download_path": download_path,
             "download_duration": duration,
-            "download_time": datetime.now().isoformat()
+            "download_time": datetime.now().isoformat(),
         }
         if storage_size > 0:
             data["storage_size"] = storage_size
         return await self.update(platform_id, data)
 
-    async def mark_music_as_downloaded(self, platform_id: str) -> Optional[Dict[str, Any]]:
+    async def mark_music_as_downloaded(
+        self, platform_id: str
+    ) -> Optional[Dict[str, Any]]:
         """标记音乐为已下载"""
-        return await self.update(platform_id, {
-            "music_download_status": DownloadStatus.COMPLETED.value
-        })
+        return await self.update(
+            platform_id, {"music_download_status": DownloadStatus.COMPLETED.value}
+        )
 
     async def mark_images_as_downloaded(
-        self,
-        platform_id: str,
-        download_path: str,
-        duration: float
+        self, platform_id: str, download_path: str, duration: float
     ) -> Optional[Dict[str, Any]]:
         """标记图片为已下载"""
-        return await self.update(platform_id, {
-            "video_download_status": DownloadStatus.COMPLETED.value,
-            "download_path": download_path,
-            "download_duration": duration,
-            "download_time": datetime.now().isoformat()
-        })
+        return await self.update(
+            platform_id,
+            {
+                "video_download_status": DownloadStatus.COMPLETED.value,
+                "download_path": download_path,
+                "download_duration": duration,
+                "download_time": datetime.now().isoformat(),
+            },
+        )
 
     async def get_music_data(self, platform_id: str) -> Dict[str, Any]:
         """
@@ -245,27 +259,24 @@ class VideoRepository:
             raise ValueError(f"找不到视频数据: {platform_id}")
         return {
             "music_download_urls": result.get("music_download_urls"),
-            "music_name": result.get("music_name")
+            "music_name": result.get("music_name"),
         }
 
     async def mark_download_failed(
-        self,
-        platform_id: str,
-        error_message: str,
-        is_video: bool = True
+        self, platform_id: str, error_message: str, is_video: bool = True
     ) -> Optional[Dict[str, Any]]:
         """标记下载失败"""
         status_field = "video_download_status" if is_video else "music_download_status"
-        return await self.update(platform_id, {
-            status_field: DownloadStatus.FAILED.value,
-            "error_message": error_message
-        })
+        return await self.update(
+            platform_id,
+            {status_field: DownloadStatus.FAILED.value, "error_message": error_message},
+        )
 
     async def get_pending_downloads(
         self,
         status: DownloadStatus = DownloadStatus.PENDING,
         limit: int = 100,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """获取待下载的视频列表"""
         try:
@@ -285,7 +296,7 @@ class VideoRepository:
         limit: int = 100,
         order_by: str = "created_at",
         ascending: bool = False,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         获取所有视频记录（分页）
@@ -325,7 +336,7 @@ class VideoRepository:
         end_date: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 100,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         搜索视频记录
@@ -353,7 +364,9 @@ class VideoRepository:
                 query = query.eq("user_id", user_id)
 
             if keyword:
-                query = query.or_(f"title.ilike.%{keyword}%,description.ilike.%{keyword}%")
+                query = query.or_(
+                    f"title.ilike.%{keyword}%,description.ilike.%{keyword}%"
+                )
 
             if author:
                 query = query.ilike("author", f"%{author}%")
@@ -437,9 +450,13 @@ class VideoRepository:
             if user_id:
                 authors_query = authors_query.eq("user_id", user_id)
             authors_result = await authors_query.execute()
-            unique_authors = len(set(
-                row.get("author") for row in (authors_result.data or []) if row.get("author")
-            ))
+            unique_authors = len(
+                set(
+                    row.get("author")
+                    for row in (authors_result.data or [])
+                    if row.get("author")
+                )
+            )
 
             return {
                 "total": total,
@@ -448,11 +465,16 @@ class VideoRepository:
                 "failed": failed,
                 "skipped": total - pending - completed - failed,
                 "total_storage_bytes": total_storage_bytes,
-                "unique_authors": unique_authors
+                "unique_authors": unique_authors,
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
             return {
-                "total": 0, "pending": 0, "completed": 0, "failed": 0, "skipped": 0,
-                "total_storage_bytes": 0, "unique_authors": 0
+                "total": 0,
+                "pending": 0,
+                "completed": 0,
+                "failed": 0,
+                "skipped": 0,
+                "total_storage_bytes": 0,
+                "unique_authors": 0,
             }
