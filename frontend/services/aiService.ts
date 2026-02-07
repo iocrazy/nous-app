@@ -46,7 +46,15 @@ export const getTranscript = async (
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const raw = await response.json();
+  // Map backend field names to frontend interface
+  return {
+    text: raw.full_text || raw.text || '',
+    segments: raw.segments || [],
+    language: raw.language || '',
+    duration: raw.duration_seconds ?? raw.duration ?? 0,
+    created_at: raw.created_at || '',
+  } as TranscriptData;
 };
 
 // --- Summary ---
@@ -84,7 +92,14 @@ export const getSummary = async (
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const raw = await response.json();
+  // Map backend field names to frontend interface
+  return {
+    summary: raw.summary_text || raw.summary || '',
+    key_points: raw.key_points || [],
+    topics: raw.topics || [],
+    created_at: raw.created_at || '',
+  } as SummaryData;
 };
 
 // --- Visual Analysis ---
@@ -130,10 +145,24 @@ export const saveAISettings = async (
 ): Promise<void> => {
   const apiUrl = getApiUrl();
 
+  // Map frontend AISettings shape to backend AISettingsUpdate schema
+  const backendPayload = {
+    ai_providers: settings.providers,
+    whisper_provider: settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
+    default_summary_model: settings.task_assignment?.summarization || 'gpt-4o-mini',
+    default_analysis_model: settings.task_assignment?.visual_analysis || 'gpt-4o',
+    // Include frontend-specific fields as extra data for persistence
+    ai_enabled: settings.ai_enabled,
+    auto_transcribe: settings.auto_transcribe,
+    auto_summarize: settings.auto_summarize,
+    preferred_language: settings.preferred_language,
+    task_assignment: settings.task_assignment,
+  };
+
   const response = await fetch(`${apiUrl}/api/v1/ai/settings`, {
     method: 'PUT',
     headers: getAuthHeaders(),
-    body: JSON.stringify(settings),
+    body: JSON.stringify(backendPayload),
   });
 
   if (!response.ok) {
@@ -151,7 +180,7 @@ export const testAIConnection = async (
   const response = await fetch(`${apiUrl}/api/v1/ai/test-connection`, {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ provider, ...config }),
+    body: JSON.stringify({ provider_key: provider, ...config }),
   });
 
   if (!response.ok) {

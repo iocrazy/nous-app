@@ -26,6 +26,12 @@ class AISettingsUpdate(BaseModel):
         default=None,
         description="Default LLM model key for visual analysis",
     )
+    # Frontend-specific fields persisted for UI state
+    ai_enabled: Optional[bool] = None
+    auto_transcribe: Optional[bool] = None
+    auto_summarize: Optional[bool] = None
+    preferred_language: Optional[str] = None
+    task_assignment: Optional[Dict[str, str]] = None
 
 
 class AISettingsResponse(BaseModel):
