@@ -47,6 +47,18 @@ def _get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
+def _update_status(platform_id: str, field: str, status: str):
+    """Helper to update AI status on the videos table by platform_id."""
+    from app.repositories.ai_repository import AIRepository
+    from app.repositories.video_repository import VideoRepository
+
+    repo = VideoRepository()
+    video = run_async(repo.get_by_platform_id(platform_id))
+    if video:
+        ai_repo = AIRepository()
+        run_async(ai_repo.update_video_ai_status(video["id"], field, status))
+
+
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
 def extract_audio_task(self, platform_id: str, user_id: str):
     """Extract audio from a downloaded video file.
@@ -63,11 +75,16 @@ def extract_audio_task(self, platform_id: str, user_id: str):
         video = run_async(repo.get_by_platform_id(platform_id))
         if not video:
             logger.error(f"[AI] Video not found: {platform_id}")
+            _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": "Video not found"}
+
+        # Mark as processing at the start of audio extraction
+        _update_status(platform_id, "transcript_status", "processing")
 
         download_path = video.get("download_path")
         if not download_path:
             logger.error(f"[AI] No download path for video: {platform_id}")
+            _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": "No download path"}
 
         # Resolve full path
@@ -76,6 +93,7 @@ def extract_audio_task(self, platform_id: str, user_id: str):
 
         if not os.path.exists(full_video_path):
             logger.error(f"[AI] Video file not found: {full_video_path}")
+            _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": f"File not found: {full_video_path}"}
 
         # Output audio path alongside the video
@@ -116,6 +134,7 @@ def extract_audio_task(self, platform_id: str, user_id: str):
         logger.error(f"[AI] Audio extraction failed for {platform_id}: {e}")
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
+        _update_status(platform_id, "transcript_status", "failed")
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
@@ -138,6 +157,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         video_repo = VideoRepository()
         video = run_async(video_repo.get_by_platform_id(platform_id))
         if not video:
+            _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": "Video not found"}
 
         video_id = video["id"]
@@ -155,6 +175,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
         if not os.path.exists(audio_path):
             logger.error(f"[AI] Audio file not found: {audio_path}")
+            _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": f"Audio file not found: {audio_path}"}
 
         # Load user AI settings
@@ -192,6 +213,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         logger.error(f"[AI] Transcription failed for {platform_id}: {e}")
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
+        _update_status(platform_id, "transcript_status", "failed")
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
@@ -213,6 +235,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         video_repo = VideoRepository()
         video = run_async(video_repo.get_by_platform_id(platform_id))
         if not video:
+            _update_status(platform_id, "summary_status", "failed")
             return {"status": "failed", "error": "Video not found"}
 
         video_id = video["id"]
@@ -226,6 +249,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         transcript = run_async(ai_repo.get_transcript(video_id))
         if not transcript or not transcript.get("full_text"):
             logger.warning(f"[AI] No transcript for {platform_id}, cannot summarize")
+            _update_status(platform_id, "summary_status", "failed")
             return {"status": "failed", "error": "No transcript available"}
 
         # Load user AI settings
@@ -272,6 +296,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         logger.error(f"[AI] Summary generation failed for {platform_id}: {e}")
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
+        _update_status(platform_id, "summary_status", "failed")
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
