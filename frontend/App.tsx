@@ -1900,6 +1900,10 @@ export default function App() {
           </div>
         </nav>
 
+        {/* Version */}
+        <div className="pt-4 pb-2 px-2 border-t border-zinc-800">
+          <span className="text-xs text-zinc-600">v{__APP_VERSION__}</span>
+        </div>
       </aside>
 
       {/* Main Content */}
