@@ -287,7 +287,7 @@ class YtdlpService:
             "resolution": resolution,
             "datasize": datasize,
             "datasize_bytes": filesize,
-            "media_type": 0,  # Standard video
+            "media_type": "0",  # Standard video
             "like_count": like_count,
             "comment_count": comment_count,
             "share_count": 0,
