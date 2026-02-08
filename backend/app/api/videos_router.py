@@ -1060,6 +1060,7 @@ async def _handle_ytdlp_fetch(
                 user_id: str,
                 download_video: bool,
                 download_music: bool,
+                download_cover: bool,
             ):
                 """Background task for yt-dlp download"""
                 from app.core.enums import DownloadStatus
@@ -1096,6 +1097,11 @@ async def _handle_ytdlp_fetch(
                         if result.get("file_path"):
                             await repo.mark_music_as_downloaded(platform_id)
 
+                    if download_cover:
+                        await DownloaderService.download_cover_by_platform_id(
+                            platform_id, user_id=user_id
+                        )
+
                 except Exception as e:
                     logger.error(f"[yt-dlp] Background download failed: {e}")
                     await repo.update(
@@ -1116,6 +1122,7 @@ async def _handle_ytdlp_fetch(
                 auth.user_id,
                 request.video_bool,
                 request.music_bool,
+                request.cover_bool,
             )
             logger.info(
                 f"[yt-dlp] FastAPI background download tasks added: {platform_id}"

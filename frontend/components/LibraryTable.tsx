@@ -398,6 +398,9 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
               {/* Info Column */}
               <th className="px-4 py-4 w-36">Info</th>
 
+              {/* Source Column */}
+              <th className="px-4 py-4 w-20">Source</th>
+
               {/* Date Added Sortable */}
               <th
                 className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors w-28"
@@ -501,6 +504,13 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                         </a>
                       </div>
                    </div>
+                </td>
+
+                {/* Source */}
+                <td className="px-4 py-4">
+                  <span className="text-xs text-zinc-400 capitalize">
+                    {item.source_platform || 'douyin'}
+                  </span>
                 </td>
 
                 {/* Date Added */}

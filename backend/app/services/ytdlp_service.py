@@ -251,6 +251,9 @@ class YtdlpService:
         thumbnails = ytdlp_info.get("thumbnails", [])
         cover_urls = []
         if thumbnail:
+            # Upgrade HTTP to HTTPS for CDN URLs
+            if thumbnail.startswith("http://"):
+                thumbnail = thumbnail.replace("http://", "https://", 1)
             cover_urls.append(thumbnail)
         elif thumbnails:
             # Get the best quality thumbnail
@@ -291,7 +294,7 @@ class YtdlpService:
             "like_count": like_count,
             "comment_count": comment_count,
             "share_count": 0,
-            "favorite_count": view_count,  # Map view_count to favorite_count for display
+            "favorite_count": 0,
             "hashtags": hashtags,
             "published_at": published_at,
             "cover_urls": cover_urls,

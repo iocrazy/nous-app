@@ -4,6 +4,18 @@ import { Video } from '../types';
 import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
+const getPlatformLabel = (platform?: string): string => {
+  if (!platform) return '';
+  const labels: Record<string, string> = {
+    bilibili: 'B\u7AD9',
+    youtube: 'YouTube',
+    twitter: 'X',
+    tiktok: 'TikTok',
+    xiaohongshu: '\u5C0F\u7EA2\u4E66',
+  };
+  return labels[platform] || platform.charAt(0).toUpperCase() + platform.slice(1);
+};
+
 interface CompactMediaCardProps {
   data: Video;
   onClick: () => void;
@@ -146,6 +158,15 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                   </>
                 )}
                 
+                {/* Platform Badge */}
+                {data.source_platform && data.source_platform !== 'douyin' && (
+                  <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
+                    <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
+                      {getPlatformLabel(data.source_platform)}
+                    </span>
+                  </div>
+                )}
+
                 {/* Type Indicator (Right side) */}
                 <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
                   {isShared && (
