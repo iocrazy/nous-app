@@ -109,6 +109,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
+  const isVideo = isVideoType(data.media_type);
+  const images = data.image_download_urls || [];
+  const isAlbum = !isVideo && images.length > 1;
+
+  // 视频 URL: 优先使用 download_path
+  const videoUrl = getVideoUrl(data);
+  // 封面 URL
+  const coverUrl = getCoverUrl(data);
+
   // Setup HLS.js for .m3u8 video playback
   useEffect(() => {
     if (!isPlaying || !videoRef.current || !videoUrl) return;
@@ -151,15 +160,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       setIsDeleting(false);
     }
   };
-
-  const isVideo = isVideoType(data.media_type);
-  const images = data.image_download_urls || [];
-  const isAlbum = !isVideo && images.length > 1;
-
-  // 视频 URL: 优先使用 download_path
-  const videoUrl = getVideoUrl(data);
-  // 封面 URL
-  const coverUrl = getCoverUrl(data);
 
   const handleSlide = (direction: 'left' | 'right') => {
     if (direction === 'left') {

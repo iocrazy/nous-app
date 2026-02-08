@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Video } from '../types';
-import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check } from 'lucide-react';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
 interface CompactMediaCardProps {
@@ -9,6 +9,20 @@ interface CompactMediaCardProps {
   onClick: () => void;
   isShared?: boolean;
 }
+
+// Helper to get AI status icon styling
+const getAIStatusClass = (status?: string): string => {
+  switch (status) {
+    case 'processing':
+      return 'animate-spin text-indigo-400';
+    case 'completed':
+      return 'text-emerald-400';
+    case 'failed':
+      return 'text-red-400';
+    default:
+      return 'text-zinc-600';
+  }
+};
 
 // Helper for consistent tag colors matching the neon dark aesthetic
 const getTagColor = (tag: string) => {
@@ -187,6 +201,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         ) : (
            <div className="h-0" />
         )}
+
+        {/* AI Status Icons */}
+        <div className="flex items-center gap-2">
+          <div title={`Transcript: ${data.transcript_status || 'pending'}`}>
+            <FileText size={12} className={getAIStatusClass(data.transcript_status)} />
+          </div>
+          <div title={`Summary: ${data.summary_status || 'pending'}`}>
+            <Sparkles size={12} className={getAIStatusClass(data.summary_status)} />
+          </div>
+          <div title={`Visual Analysis: ${data.visual_analysis_status || 'pending'}`}>
+            <Eye size={12} className={getAIStatusClass(data.visual_analysis_status)} />
+          </div>
+        </div>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-4 gap-2">

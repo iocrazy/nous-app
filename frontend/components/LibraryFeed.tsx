@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import Hls from 'hls.js';
 import { Video } from '../types';
 import {
   Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check
@@ -105,14 +106,37 @@ const FeedItem = ({
   formatNumber: (n?: number) => string;
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [copiedShare, setCopiedShare] = useState(false);
   const isVideo = isVideoType(item.media_type);
   // 视频 URL: 优先使用 download_path
   const videoUrl = getVideoUrl(item);
   // 封面 URL
   const coverUrl = getCoverUrl(item);
+  const isHlsUrl = videoUrl?.endsWith('.m3u8') ?? false;
 
   const imageUrl = item.image_download_urls?.[0] || "https://picsum.photos/400/800";
+
+  // Setup HLS.js for .m3u8 video playback
+  useEffect(() => {
+    if (!isHlsUrl || !videoRef.current || !videoUrl) return;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(videoUrl);
+      hls.attachMedia(videoRef.current);
+      hlsRef.current = hls;
+    } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+      videoRef.current.src = videoUrl;
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [videoUrl, isHlsUrl]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -139,13 +163,13 @@ const FeedItem = ({
       {isVideo ? (
         <video
           ref={videoRef}
-          src={videoUrl}
+          src={isHlsUrl ? undefined : videoUrl}
           // UPDATED: object-contain to ensure full video visibility
           className="w-full h-full object-contain cursor-pointer bg-black"
           loop
           muted={isMuted}
           playsInline
-          poster={imageUrl} 
+          poster={imageUrl}
         />
       ) : (
         <div className="w-full h-full relative flex items-center justify-center bg-black">
