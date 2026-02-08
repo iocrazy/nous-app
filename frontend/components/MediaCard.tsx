@@ -13,6 +13,13 @@ import { getSupabaseClient } from '../supabaseClient';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { TagSelector } from './TagSelector';
+import { useToast } from './Toast';
+import {
+  triggerTranscription, getTranscript,
+  triggerSummary, getSummary,
+  triggerVisualAnalysis,
+  pollForResult,
+} from '../services/aiService';
 
 interface MediaCardProps {
   data: Video;
@@ -358,8 +365,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   };
 
-  const handleAction = (e: React.MouseEvent, action: string) => {
+  const { addToast } = useToast();
+
+  const handleAction = async (e: React.MouseEvent, action: string) => {
     e.stopPropagation();
+    const platformId = data.platform_id;
+
     if (action === 'copy') {
       const textToCopy = data.description || data.title || "";
       if (textToCopy) {
@@ -368,31 +379,75 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             setTimeout(() => setCopied(false), 2000);
         });
       }
-    } else if (action === 'rewrite') {
-        setLoadingAction('rewrite');
-        // Mock API latency for demo - TODO: 接入真实 AI API
-        setTimeout(() => {
-            const generatedText = "Here's a catchy version: Check out this mind-blowing #coding feature we just shipped! React & Gemini are changing the game. Don't miss this!";
-            setRewrittenText(generatedText);
-            saveAIContent('ai_rewrite_text', generatedText);
-            setLoadingAction(null);
-        }, 1500);
     } else if (action === 'extract') {
-        setLoadingAction('extract');
-        setTimeout(() => {
-            const generatedText = "Extracted Summary:\n- Topic: React & Gemini Integration\n- Key Feature: UI Generation\n- Target Audience: Developers\n- Tone: Exciting, Tech-focused";
-            setExtractText(generatedText);
-            saveAIContent('ai_extract_text', generatedText);
-            setLoadingAction(null);
-        }, 1500);
+      if (!platformId) return;
+      setLoadingAction('extract');
+      try {
+        // If already completed, fetch directly
+        if (data.transcript_status === 'completed') {
+          const result = await getTranscript(platformId);
+          const text = result.text || '';
+          setExtractText(text);
+          saveAIContent('ai_extract_text', text);
+        } else {
+          // Trigger transcription task
+          await triggerTranscription(platformId);
+          // Poll for result
+          const result = await pollForResult(() => getTranscript(platformId));
+          const text = result.text || '';
+          setExtractText(text);
+          saveAIContent('ai_extract_text', text);
+          if (onUpdate) onUpdate(platformId, { transcript_status: 'completed' });
+        }
+        addToast('Transcription completed', 'success');
+      } catch (err: any) {
+        addToast(err?.message || 'Transcription failed', 'error');
+      } finally {
+        setLoadingAction(null);
+      }
+    } else if (action === 'rewrite') {
+      if (!platformId) return;
+      setLoadingAction('rewrite');
+      try {
+        // If already completed, fetch directly
+        if (data.summary_status === 'completed') {
+          const result = await getSummary(platformId);
+          const text = result.summary + (result.key_points?.length ? '\n\nKey Points:\n' + result.key_points.map(p => `- ${p}`).join('\n') : '');
+          setRewrittenText(text);
+          saveAIContent('ai_rewrite_text', text);
+        } else {
+          // Trigger summary task
+          await triggerSummary(platformId);
+          // Poll for result
+          const result = await pollForResult(() => getSummary(platformId));
+          const text = result.summary + (result.key_points?.length ? '\n\nKey Points:\n' + result.key_points.map(p => `- ${p}`).join('\n') : '');
+          setRewrittenText(text);
+          saveAIContent('ai_rewrite_text', text);
+          if (onUpdate) onUpdate(platformId, { summary_status: 'completed' });
+        }
+        addToast('Summary completed', 'success');
+      } catch (err: any) {
+        addToast(err?.message || 'Summary failed', 'error');
+      } finally {
+        setLoadingAction(null);
+      }
     } else if (action === 'analyze') {
-        setLoadingAction('analyze');
-        setTimeout(() => {
-            const generatedText = "Analysis: This content targets tech enthusiasts. Key engagement drivers are the 'React' and 'Gemini' keywords. The visual hook appears at 0:05. Sentiment is highly positive.";
-            setAnalysisText(generatedText);
-            saveAIContent('ai_analyze_text', generatedText);
-            setLoadingAction(null);
-        }, 1500);
+      if (!platformId) return;
+      setLoadingAction('analyze');
+      try {
+        await triggerVisualAnalysis(platformId);
+        addToast('Visual analysis started', 'info');
+      } catch (err: any) {
+        const msg = err?.message || 'Visual analysis failed';
+        // Handle 501 Not Implemented gracefully
+        if (msg.includes('501') || msg.includes('Not Implemented')) {
+          addToast('Visual analysis is not yet available', 'info');
+        } else {
+          addToast(msg, 'error');
+        }
+      } finally {
+        setLoadingAction(null);
+      }
     } else {
       console.log(`Action triggered: ${action}`);
     }

@@ -109,6 +109,12 @@ export const supabase = client;
  * @returns 新的 Supabase 客户端或 null
  */
 export const reinitializeSupabaseClient = (url: string, anonKey: string): SupabaseClient | null => {
+  // Prevent mixed content: don't downgrade to HTTP when page is served over HTTPS
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http://')) {
+    console.warn(`Skipping Supabase reinit: refusing HTTP URL (${url}) on HTTPS page. Using existing client.`);
+    return client;
+  }
+
   configuredSupabaseUrl = url;
   configuredSupabaseAnonKey = anonKey;
 
