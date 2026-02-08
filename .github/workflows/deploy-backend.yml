@@ -91,19 +91,23 @@ jobs:
           username: ${{ secrets.NAS_USER }}
           key: ${{ secrets.NAS_SSH_KEY }}
           script: |
+            set -e
+            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
             cd ${{ secrets.NAS_PROJECT_PATH }}
 
             echo "📥 Pulling latest code..."
-            git pull origin master
+            git fetch origin master
+            git reset --hard origin/master
 
             echo "🐳 Pulling Docker image from Docker Hub..."
-            docker pull imheygo/mediahub:latest
+            sudo docker pull imheygo/mediahub:latest
 
             echo "🚀 Restarting services..."
             cd docker
-            docker-compose up -d --force-recreate mediahub celery-worker celery-beat
+            sudo docker compose up -d --force-recreate mediahub celery-worker celery-beat
 
             echo "🧹 Cleaning up old images..."
-            docker image prune -f
+            sudo docker image prune -f
 
             echo "✅ Backend deployment complete!"
