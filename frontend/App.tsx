@@ -46,6 +46,7 @@ import { TeamLibraryView } from './components/TeamLibraryView';
 import { SettingsModal } from './components/SettingsModal';
 import { VideoDetailPanel } from './components/VideoDetailPanel';
 import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
+import { ToastProvider } from './components/Toast';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -1516,6 +1517,7 @@ export default function App() {
 
   // 2. If authenticated, show Main Dashboard (existing logic)
   return (
+    <ToastProvider>
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30">
       
       {/* User Profile Modal */}
@@ -2563,5 +2565,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </ToastProvider>
   );
 }

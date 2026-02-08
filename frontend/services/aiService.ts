@@ -2,6 +2,29 @@
 import { AISettings, TranscriptData, SummaryData } from '../types';
 import { getAuthHeaders } from './parserService';
 
+// --- Polling Helper ---
+
+export async function pollForResult<T>(
+  fetcher: () => Promise<T>,
+  interval: number = 3000,
+  maxRetries: number = 10
+): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, interval));
+    try {
+      const result = await fetcher();
+      return result;
+    } catch (err: any) {
+      // If the resource is not ready yet (404 or processing), keep polling
+      if (i === maxRetries - 1) throw err;
+      // If it's a non-retryable error (e.g., 500, 401), throw immediately
+      const message = err?.message || '';
+      if (message.includes('401') || message.includes('403')) throw err;
+    }
+  }
+  throw new Error('Polling timed out');
+}
+
 const getApiUrl = (): string => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
