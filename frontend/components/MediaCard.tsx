@@ -18,7 +18,6 @@ import {
   triggerTranscription, getTranscript,
   triggerSummary, getSummary,
   triggerVisualAnalysis,
-  pollForResult,
 } from '../services/aiService';
 
 interface MediaCardProps {
@@ -389,17 +388,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           const text = result.text || '';
           setExtractText(text);
           saveAIContent('ai_extract_text', text);
+          addToast('Transcription loaded', 'success');
         } else {
-          // Trigger transcription task
+          // Trigger transcription task — don't poll, let backend process async
           await triggerTranscription(platformId);
-          // Poll for result
-          const result = await pollForResult(() => getTranscript(platformId));
-          const text = result.text || '';
-          setExtractText(text);
-          saveAIContent('ai_extract_text', text);
-          if (onUpdate) onUpdate(platformId, { transcript_status: 'completed' });
+          if (onUpdate) onUpdate(platformId, { transcript_status: 'processing' });
+          addToast('Transcription started. Check back shortly.', 'info');
         }
-        addToast('Transcription completed', 'success');
       } catch (err: any) {
         addToast(err?.message || 'Transcription failed', 'error');
       } finally {
@@ -415,17 +410,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           const text = result.summary + (result.key_points?.length ? '\n\nKey Points:\n' + result.key_points.map(p => `- ${p}`).join('\n') : '');
           setRewrittenText(text);
           saveAIContent('ai_rewrite_text', text);
+          addToast('Summary loaded', 'success');
         } else {
-          // Trigger summary task
+          // Trigger summary task — don't poll, let backend process async
           await triggerSummary(platformId);
-          // Poll for result
-          const result = await pollForResult(() => getSummary(platformId));
-          const text = result.summary + (result.key_points?.length ? '\n\nKey Points:\n' + result.key_points.map(p => `- ${p}`).join('\n') : '');
-          setRewrittenText(text);
-          saveAIContent('ai_rewrite_text', text);
-          if (onUpdate) onUpdate(platformId, { summary_status: 'completed' });
+          if (onUpdate) onUpdate(platformId, { summary_status: 'processing' });
+          addToast('Summary started. Check back shortly.', 'info');
         }
-        addToast('Summary completed', 'success');
       } catch (err: any) {
         addToast(err?.message || 'Summary failed', 'error');
       } finally {
