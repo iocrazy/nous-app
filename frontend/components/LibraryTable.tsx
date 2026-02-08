@@ -1,10 +1,12 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import Hls from 'hls.js';
 import { Video } from '../types';
 import {
   Video as VideoIcon, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
-  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play, Plus
+  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play, Plus,
+  FileText, Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { TagSelector } from './TagSelector';
@@ -42,12 +44,30 @@ const getTagStyle = (tag: string) => {
   return styles[Math.abs(hash) % styles.length];
 };
 
+// Helper to get AI status icon styling
+const getAIStatusClass = (status?: string): string => {
+  switch (status) {
+    case 'processing':
+      return 'animate-spin text-indigo-400';
+    case 'completed':
+      return 'text-emerald-400';
+    case 'failed':
+      return 'text-red-400';
+    default:
+      return 'text-zinc-600';
+  }
+};
+
 export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ notes: string }>({ notes: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
+
+  // HLS video refs
+  const modalVideoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   // Tag selector state
   const [tagSelectorVideoId, setTagSelectorVideoId] = useState<number | null>(null);
@@ -79,6 +99,35 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [activeMedia, tagSelectorVideoId]);
+
+  // Setup HLS.js for .m3u8 video playback in modal
+  useEffect(() => {
+    if (!activeMedia || activeMedia.type !== 'video' || !modalVideoRef.current) return;
+
+    const isHls = activeMedia.url.endsWith('.m3u8');
+    if (!isHls) return;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(activeMedia.url);
+      hls.attachMedia(modalVideoRef.current);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        modalVideoRef.current?.play();
+      });
+      hlsRef.current = hls;
+    } else if (modalVideoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
+      modalVideoRef.current.src = activeMedia.url;
+      modalVideoRef.current.play();
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [activeMedia]);
 
   const startEditing = (item: Video) => {
     setEditingId(item.platform_id);
@@ -301,6 +350,19 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
         </span>
       </div>
 
+      {/* AI Status */}
+      <div className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-1.5" title={`Transcript: ${item.transcript_status || 'pending'}`}>
+          <FileText size={12} className={getAIStatusClass(item.transcript_status)} />
+        </div>
+        <div className="flex items-center gap-1.5" title={`Summary: ${item.summary_status || 'pending'}`}>
+          <Sparkles size={12} className={getAIStatusClass(item.summary_status)} />
+        </div>
+        <div className="flex items-center gap-1.5" title={`Visual Analysis: ${item.visual_analysis_status || 'pending'}`}>
+          <Eye size={12} className={getAIStatusClass(item.visual_analysis_status)} />
+        </div>
+      </div>
+
       {/* Tags */}
       {item.tags && item.tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -347,6 +409,9 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                   {getSortIcon('created_at')}
                 </div>
               </th>
+
+              {/* AI Status Column */}
+              <th className="px-4 py-4 w-20">AI</th>
 
               {/* Content Column */}
               <th className="px-4 py-4 w-1/4">Content</th>
@@ -443,6 +508,15 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
                    <span className="text-xs text-zinc-400 whitespace-nowrap">
                      {formatDate(item.created_at)}
                    </span>
+                </td>
+
+                {/* AI Status */}
+                <td className="px-4 py-4">
+                  <div className="flex items-center gap-2">
+                    <FileText size={14} className={getAIStatusClass(item.transcript_status)} title={`Transcript: ${item.transcript_status || 'pending'}`} />
+                    <Sparkles size={14} className={getAIStatusClass(item.summary_status)} title={`Summary: ${item.summary_status || 'pending'}`} />
+                    <Eye size={14} className={getAIStatusClass(item.visual_analysis_status)} title={`Visual Analysis: ${item.visual_analysis_status || 'pending'}`} />
+                  </div>
                 </td>
 
                 {/* Content Column with Copy Interaction */}
@@ -652,7 +726,8 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
              <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
                {activeMedia.type === 'video' ? (
                  <video
-                   src={activeMedia.url}
+                   ref={modalVideoRef}
+                   src={activeMedia.url.endsWith('.m3u8') ? undefined : activeMedia.url}
                    controls
                    autoPlay
                    style={{
