@@ -26,6 +26,7 @@ USER_AGENTS:
 CORS_ORIGINS:
   - "http://localhost:3000"
   - "http://localhost:8080"
+  - "https://mediahub.heygo.cn"
   - "https://mediahubserver.heygo.cn:88"
   - "https://mediahubserver.heygo.cn"
   - "http://mediahubserver.heygo.cn:88"
