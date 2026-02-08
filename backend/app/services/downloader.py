@@ -847,6 +847,18 @@ class DownloaderService:
 
             logger.info(f"准备下载视频 {platform_id} 的封面")
 
+            # Set platform-appropriate Referer for CDN compatibility
+            source_platform = video_data.get("source_platform", "douyin")
+            platform_referers = {
+                "bilibili": "https://www.bilibili.com/",
+                "youtube": "https://www.youtube.com/",
+                "twitter": "https://x.com/",
+                "tiktok": "https://www.tiktok.com/",
+                "xiaohongshu": "https://www.xiaohongshu.com/",
+            }
+            if source_platform in platform_referers:
+                headers["Referer"] = platform_referers[source_platform]
+
             # Get cover URL list
             cover_urls = video_data.get("cover_urls", [])
             if not cover_urls:

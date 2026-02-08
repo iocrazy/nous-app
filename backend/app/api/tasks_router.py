@@ -24,8 +24,8 @@ TAGS = ["Tasks"]
 
 
 class TaskItem(BaseModel):
-    aweme_id: str
-    video_title: str
+    platform_id: str
+    title: str
     status: str
     percent: int
     downloaded: int
@@ -102,8 +102,25 @@ async def get_tasks(
     all_tasks = task_manager.get_tasks(status=status_filter, limit=10000)
     total = len(all_tasks)
 
+    def _map_task(t: dict) -> TaskItem:
+        """Map Redis task fields to API response fields."""
+        return TaskItem(
+            platform_id=t.get("aweme_id", ""),
+            title=t.get("video_title", "Unknown"),
+            status=t.get("status", "pending"),
+            percent=t.get("percent", 0),
+            downloaded=t.get("downloaded", 0),
+            total=t.get("total", 0),
+            speed=t.get("speed", "0 B/s"),
+            retry_count=t.get("retry_count", 0),
+            max_retries=t.get("max_retries", 3),
+            error=t.get("error"),
+            started_at=t.get("started_at", ""),
+            updated_at=t.get("updated_at", ""),
+        )
+
     return TaskListResponse(
-        items=[TaskItem(**t) for t in tasks],
+        items=[_map_task(t) for t in tasks],
         total=total,
     )
 
