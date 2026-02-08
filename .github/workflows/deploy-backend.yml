@@ -19,6 +19,9 @@ on:
 env:
   IMAGE_NAME: imheygo/mediahub
 
+permissions:
+  contents: write
+
 jobs:
   build-and-push:
     name: Build and Push to Docker Hub
