@@ -14,6 +14,7 @@ import { TagSelector } from './TagSelector';
 interface LibraryTableProps {
   data: Video[];
   onUpdate: (id: string, updates: Partial<Video>) => void;
+  onItemClick?: (item: Video) => void;
 }
 
 type SortKey = keyof Video | 'published_at' | 'created_at';
@@ -58,7 +59,7 @@ const getAIStatusClass = (status?: string): string => {
   }
 };
 
-export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) => {
+export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ notes: string }>({ notes: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -280,11 +281,14 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate }) =>
 
   // Mobile Card Component
   const MobileCard = ({ item }: { item: Video }) => (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3">
+    <div
+      className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3 cursor-pointer active:scale-[0.98] transition-all hover:border-zinc-600"
+      onClick={() => onItemClick?.(item)}
+    >
       <div className="flex gap-3">
         {/* Thumbnail */}
         <div
-          onClick={() => handleMediaClick(item)}
+          onClick={(e) => { e.stopPropagation(); handleMediaClick(item); }}
           className="w-20 h-20 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700"
         >
           <img

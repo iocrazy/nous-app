@@ -1005,6 +1005,17 @@ async def _handle_ytdlp_fetch(
     # Step 2: Map yt-dlp metadata to our Video schema
     parsed_data = YtdlpService._map_metadata_to_video(ytdlp_info, url)
 
+    # Step 2.5: Enrich Bilibili stats (favorite_count, share_count)
+    if platform == "bilibili" and parsed_data.get("external_id"):
+        bvid = parsed_data["external_id"]
+        extra_stats = await YtdlpService._fetch_bilibili_stats(bvid)
+        if extra_stats:
+            parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
+            parsed_data["share_count"] = extra_stats.get("share", 0)
+            logger.info(
+                f"[yt-dlp] Bilibili stats enriched: fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
+            )
+
     platform_id = parsed_data["platform_id"]
     video_title = parsed_data.get("title", "")
 

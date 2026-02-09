@@ -68,55 +68,41 @@ export const ParseModeCard: React.FC<ParseModeCardProps> = ({ onModeChange }) =>
   const isLightHttp = mode === 'lighthttp';
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          {isLightHttp ? (
-            <Zap size={18} className="text-yellow-500" />
-          ) : (
-            <Globe size={18} className="text-blue-500" />
-          )}
-          <span className="text-sm font-medium text-zinc-300">Parse Mode</span>
-        </div>
-        <button
-          onClick={toggleMode}
-          disabled={loading}
-          className={`
-            relative w-12 h-6 rounded-full transition-colors duration-200
-            ${isLightHttp ? 'bg-yellow-500/20' : 'bg-blue-500/20'}
-            ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}
-          `}
-        >
-          <div
-            className={`
-              absolute top-1 w-4 h-4 rounded-full transition-all duration-200
-              ${isLightHttp
-                ? 'left-1 bg-yellow-500'
-                : 'left-7 bg-blue-500'
-              }
-            `}
-          >
-            {loading && (
-              <RefreshCw size={10} className="animate-spin text-white m-0.5" />
-            )}
-          </div>
-        </button>
+    <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
+      <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
+        isLightHttp ? 'bg-yellow-900/30 text-yellow-400' : 'bg-blue-900/30 text-blue-400'
+      }`}>
+        {isLightHttp ? (
+          <>
+            <Zap size={16} className="md:hidden" />
+            <Zap size={20} className="hidden md:block" />
+          </>
+        ) : (
+          <>
+            <Globe size={16} className="md:hidden" />
+            <Globe size={20} className="hidden md:block" />
+          </>
+        )}
       </div>
-
-      <div className="space-y-1">
-        <div className={`text-lg font-semibold ${isLightHttp ? 'text-yellow-500' : 'text-blue-500'}`}>
-          {isLightHttp ? 'LightHTTP' : 'DrissionPage'}
-        </div>
-        <div className="text-xs text-zinc-500">
-          {isLightHttp
-            ? 'Fast HTTP parsing'
-            : 'Browser-based parsing'
-          }
-        </div>
-      </div>
-
+      <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Parse Mode</h4>
+      <button
+        onClick={toggleMode}
+        disabled={loading}
+        className={`text-xs md:text-sm font-mono mb-1 ${
+          loading ? 'opacity-50' : 'hover:opacity-80'
+        } ${isLightHttp ? 'text-yellow-500' : 'text-blue-500'}`}
+      >
+        {loading ? (
+          <RefreshCw size={14} className="animate-spin inline" />
+        ) : (
+          isLightHttp ? 'LightHTTP' : 'DrissionPage'
+        )}
+      </button>
+      <p className="text-[10px] md:text-xs text-zinc-500">
+        {isLightHttp ? 'Fast HTTP parsing' : 'Browser-based'}
+      </p>
       {error && (
-        <div className="mt-2 text-xs text-red-400">{error}</div>
+        <p className="text-[10px] text-red-400 mt-0.5">{error}</p>
       )}
     </div>
   );
