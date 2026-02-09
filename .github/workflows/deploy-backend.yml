@@ -16,6 +16,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
 env:
   IMAGE_NAME: imheygo/mediahub
 
