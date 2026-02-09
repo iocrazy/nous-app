@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import './i18n';
 import App from './App';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 
 // Loading component for i18n lazy loading
 const LoadingFallback = () => (
@@ -24,6 +25,7 @@ root.render(
   <React.StrictMode>
     <Suspense fallback={<LoadingFallback />}>
       <App />
+      <PWAUpdatePrompt />
     </Suspense>
   </React.StrictMode>
 );
