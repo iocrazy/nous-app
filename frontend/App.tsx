@@ -6,7 +6,7 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText, ListTodo
+  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
@@ -37,6 +37,9 @@ import { CreateCollectionModal } from './components/CreateCollectionModal';
 import { DownloadProgress, DownloadStatus as ProgressStatus } from './components/DownloadProgress';
 import { useDownloadProgress } from './hooks/useDownloadProgress';
 import { SmartCollectionsSidebar } from './components/SmartCollectionsSidebar';
+import { TasksPanel } from './components/TasksPanel';
+import { LogsPanel } from './components/LogsPanel';
+import { SystemMonitorPanel } from './components/SystemMonitorPanel';
 import { SemanticSearchBar } from './components/SemanticSearchBar';
 import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
 import { SmartCollection } from './services/smartCollectionService';
@@ -353,6 +356,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'tasks' | 'logs' | 'monitor'>('overview');
+  const [isDashboardMenuOpen, setIsDashboardMenuOpen] = useState(false);
 
   // Dashboard Stats State
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
@@ -1420,6 +1425,7 @@ export default function App() {
   };
 
   const handleMobileLibraryClick = () => {
+    setIsDashboardMenuOpen(false);
     if (view === 'library') {
       if (selectedLibraryItem) {
         setSelectedLibraryItem(null); // Go back to list if in detail view
@@ -1433,9 +1439,20 @@ export default function App() {
     }
   };
 
+  const handleMobileDashboardClick = () => {
+    if (view === 'dashboard') {
+      setIsDashboardMenuOpen(!isDashboardMenuOpen);
+    } else {
+      setView('dashboard');
+      setIsDashboardMenuOpen(false);
+    }
+    setIsMobileMenuOpen(false);
+  };
+
   const handleMobileNavClick = (targetView: ViewState) => {
     setView(targetView);
     setIsMobileMenuOpen(false);
+    setIsDashboardMenuOpen(false);
   };
 
   // Filter and sort library - 默认按添加时间降序（最新在前）
@@ -1698,13 +1715,54 @@ export default function App() {
           )}
         </div>
         
-        {/* 3. Dashboard */}
-        <button 
-          onClick={() => handleMobileNavClick('dashboard')} 
-          className={`flex flex-col items-center gap-1 transition-colors ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-        >
-          <LayoutDashboard size={24}/>
-        </button>
+        {/* 3. Dashboard with popup menu */}
+        <div className="relative">
+          <button
+            onClick={handleMobileDashboardClick}
+            className={`flex flex-col items-center gap-1 transition-colors relative ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            <LayoutDashboard size={24}/>
+            {view === 'dashboard' && isDashboardMenuOpen && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+            )}
+          </button>
+
+          {/* Dashboard Sub-view Popup Menu */}
+          {isDashboardMenuOpen && view === 'dashboard' && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+              <button
+                onClick={() => { setDashboardSubView('overview'); setIsDashboardMenuOpen(false); }}
+                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'overview' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                title="Overview"
+              >
+                <BarChart3 size={20} />
+              </button>
+              <button
+                onClick={() => { setDashboardSubView('tasks'); setIsDashboardMenuOpen(false); }}
+                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'tasks' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                title="Tasks"
+              >
+                <ListTodo size={20} />
+              </button>
+              <button
+                onClick={() => { setDashboardSubView('logs'); setIsDashboardMenuOpen(false); }}
+                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'logs' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                title="Logs"
+              >
+                <ScrollText size={20} />
+              </button>
+              <button
+                onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
+                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                title="Monitor"
+              >
+                <Activity size={20} />
+              </button>
+              {/* Little triangle arrow pointing down */}
+              <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
+            </div>
+          )}
+        </div>
 
         {/* 4. User Profile Button (MOVED TO RIGHT) */}
         <button 
@@ -2444,71 +2502,86 @@ export default function App() {
 
         {/* VIEW: DASHBOARD */}
         {view === 'dashboard' && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <header className="mb-8">
-                <h1 className="text-2xl font-bold text-white">{t('dashboard.title')}</h1>
-                <p className="text-zinc-400 text-sm">{t('dashboard.subtitle')}</p>
-             </header>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {dashboardSubView === 'overview' && (
+              <div className="space-y-8">
+                <header className="mb-8">
+                  <h1 className="text-2xl font-bold text-white">{t('dashboard.title')}</h1>
+                  <p className="text-zinc-400 text-sm">{t('dashboard.subtitle')}</p>
+                </header>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                {(() => {
-                  // Format storage size
-                  const formatStorage = (bytes: number): string => {
-                    if (bytes >= 1024 * 1024 * 1024) {
-                      return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-                    } else if (bytes >= 1024 * 1024) {
-                      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-                    } else if (bytes >= 1024) {
-                      return `${(bytes / 1024).toFixed(1)} KB`;
-                    }
-                    return `${bytes} B`;
-                  };
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                  {(() => {
+                    const formatStorage = (bytes: number): string => {
+                      if (bytes >= 1024 * 1024 * 1024) {
+                        return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+                      } else if (bytes >= 1024 * 1024) {
+                        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+                      } else if (bytes >= 1024) {
+                        return `${(bytes / 1024).toFixed(1)} KB`;
+                      }
+                      return `${bytes} B`;
+                    };
 
-                  const stats = dashboardStats;
-                  return [
-                    {
-                      label: t('dashboard.totalVideos'),
-                      val: stats?.totalVideos?.toLocaleString() || "0",
-                      change: `${stats?.completedDownloads || 0} done`,
-                      color: "text-indigo-400"
-                    },
-                    {
-                      label: t('dashboard.storageUsed'),
-                      val: formatStorage(stats?.totalStorageBytes || 0),
-                      change: `${stats?.pendingDownloads || 0} pending`,
-                      color: "text-purple-400"
-                    },
-                    {
-                      label: t('dashboard.savedCreators'),
-                      val: (stats?.uniqueAuthors || 0).toString(),
-                      change: `${stats?.failedDownloads || 0} failed`,
-                      color: "text-pink-400"
-                    },
-                    {
-                      label: t('dashboard.successRate'),
-                      val: stats?.totalVideos
-                        ? `${Math.round((stats.completedDownloads / stats.totalVideos) * 100)}%`
-                        : "0%",
-                      change: "overall",
-                      color: "text-green-400"
-                    },
-                  ];
-                })().map((stat, i) => (
-                  <div key={i} className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-sm">
-                     <p className="text-zinc-500 text-sm font-medium mb-2">{stat.label}</p>
-                     <div className="flex items-end justify-between">
+                    const stats = dashboardStats;
+                    return [
+                      {
+                        label: t('dashboard.totalVideos'),
+                        val: stats?.totalVideos?.toLocaleString() || "0",
+                        change: `${stats?.completedDownloads || 0} done`,
+                        color: "text-indigo-400"
+                      },
+                      {
+                        label: t('dashboard.storageUsed'),
+                        val: formatStorage(stats?.totalStorageBytes || 0),
+                        change: `${stats?.pendingDownloads || 0} pending`,
+                        color: "text-purple-400"
+                      },
+                      {
+                        label: t('dashboard.savedCreators'),
+                        val: (stats?.uniqueAuthors || 0).toString(),
+                        change: `${stats?.failedDownloads || 0} failed`,
+                        color: "text-pink-400"
+                      },
+                      {
+                        label: t('dashboard.successRate'),
+                        val: stats?.totalVideos
+                          ? `${Math.round((stats.completedDownloads / stats.totalVideos) * 100)}%`
+                          : "0%",
+                        change: "overall",
+                        color: "text-green-400"
+                      },
+                    ];
+                  })().map((stat, i) => (
+                    <div key={i} className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-sm">
+                      <p className="text-zinc-500 text-sm font-medium mb-2">{stat.label}</p>
+                      <div className="flex items-end justify-between">
                         <span className="text-2xl font-bold text-white">{stat.val}</span>
                         <span className={`text-xs ${stat.color} bg-zinc-950 px-1.5 py-0.5 rounded`}>{stat.change}</span>
-                     </div>
-                  </div>
-                ))}
-             </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-             <StatsChart
-               weeklyActivity={dashboardStats?.weeklyActivity || []}
-               mediaDistribution={dashboardStats?.mediaDistribution || []}
-               topTags={dashboardStats?.topTags || []}
-             />
+                <StatsChart
+                  weeklyActivity={dashboardStats?.weeklyActivity || []}
+                  mediaDistribution={dashboardStats?.mediaDistribution || []}
+                  topTags={dashboardStats?.topTags || []}
+                />
+              </div>
+            )}
+
+            {dashboardSubView === 'tasks' && (
+              <TasksPanel />
+            )}
+
+            {dashboardSubView === 'logs' && (
+              <LogsPanel />
+            )}
+
+            {dashboardSubView === 'monitor' && (
+              <SystemMonitorPanel />
+            )}
           </div>
         )}
         
