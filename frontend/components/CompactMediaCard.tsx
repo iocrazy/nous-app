@@ -132,6 +132,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                     src={coverUrl}
                     alt={data.title}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block"
+                    referrerPolicy="no-referrer"
                     onError={() => setImageError(true)}
                   />
                 )}

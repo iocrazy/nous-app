@@ -481,6 +481,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                     src={coverUrl || "https://picsum.photos/400/600"}
                     alt="Thumbnail"
                     className="w-full h-full object-contain opacity-90"
+                    referrerPolicy="no-referrer"
                    />
                    <div className="absolute z-20 w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-white/20 shadow-xl">
                       <Play className="w-8 h-8 text-white fill-white ml-1" />
@@ -495,6 +496,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 src={(isAlbum ? images[currentImageIndex] : images[0]) || "https://picsum.photos/400/600"}
                 alt="Cover"
                 className="w-full h-full object-cover transition-opacity duration-300"
+                referrerPolicy="no-referrer"
                />
 
                {isAlbum ? (
@@ -941,6 +943,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   src={coverUrl || "https://picsum.photos/80/80"}
                   alt="Preview"
                   className="w-12 h-12 rounded-lg object-cover"
+                  referrerPolicy="no-referrer"
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white font-medium truncate">

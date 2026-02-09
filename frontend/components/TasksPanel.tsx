@@ -144,7 +144,7 @@ export const TasksPanel: React.FC = () => {
     }
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-3 md:space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -166,72 +166,72 @@ export const TasksPanel: React.FC = () => {
         </div>
 
         {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
             {error}
           </div>
         )}
 
-        {/* Stats Cards */}
+        {/* Stats Cards - compact on mobile */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 bg-zinc-900 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-2 mb-2">
-                <Clock size={16} className="text-yellow-500" />
-                <span className="text-sm text-zinc-400">Pending</span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+            <div className="p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-2 mb-1 md:mb-2">
+                <Clock size={14} className="text-yellow-500" />
+                <span className="text-xs md:text-sm text-zinc-400">Pending</span>
               </div>
-              <div className="text-2xl font-bold text-white">{stats.pending}</div>
+              <div className="text-xl md:text-2xl font-bold text-white">{stats.pending}</div>
             </div>
-            <div className="p-4 bg-zinc-900 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-2 mb-2">
-                <Download size={16} className="text-blue-500" />
-                <span className="text-sm text-zinc-400">Downloading</span>
+            <div className="p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-2 mb-1 md:mb-2">
+                <Download size={14} className="text-blue-500" />
+                <span className="text-xs md:text-sm text-zinc-400">Downloading</span>
               </div>
-              <div className="text-2xl font-bold text-white">{stats.downloading}</div>
+              <div className="text-xl md:text-2xl font-bold text-white">{stats.downloading}</div>
             </div>
-            <div className="p-4 bg-zinc-900 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle size={16} className="text-green-500" />
-                <span className="text-sm text-zinc-400">Completed</span>
+            <div className="p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-2 mb-1 md:mb-2">
+                <CheckCircle size={14} className="text-green-500" />
+                <span className="text-xs md:text-sm text-zinc-400">Completed</span>
               </div>
-              <div className="text-2xl font-bold text-white">{stats.completed}</div>
+              <div className="text-xl md:text-2xl font-bold text-white">{stats.completed}</div>
             </div>
-            <div className="p-4 bg-zinc-900 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-2 mb-2">
-                <XCircle size={16} className="text-red-500" />
-                <span className="text-sm text-zinc-400">Failed</span>
+            <div className="p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-2 mb-1 md:mb-2">
+                <XCircle size={14} className="text-red-500" />
+                <span className="text-xs md:text-sm text-zinc-400">Failed</span>
               </div>
-              <div className="text-2xl font-bold text-white">{stats.failed}</div>
+              <div className="text-xl md:text-2xl font-bold text-white">{stats.failed}</div>
             </div>
           </div>
         )}
 
-        {/* System Status */}
+        {/* System Status - compact */}
         {stats && (
-          <div className="flex flex-wrap gap-4 p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
             <div className="flex items-center gap-2">
-              <Server size={16} className={stats.worker_online ? 'text-green-500' : 'text-red-500'} />
-              <span className="text-sm text-zinc-400">Celery Worker:</span>
-              <span className={`text-sm font-medium ${stats.worker_online ? 'text-green-500' : 'text-red-500'}`}>
+              <Server size={14} className={stats.worker_online ? 'text-green-500' : 'text-red-500'} />
+              <span className="text-xs md:text-sm text-zinc-400">Celery Worker:</span>
+              <span className={`text-xs md:text-sm font-medium ${stats.worker_online ? 'text-green-500' : 'text-red-500'}`}>
                 {stats.worker_online ? 'Online' : 'Offline'}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <HardDrive size={16} className="text-amber-500" />
-              <span className="text-sm text-zinc-400">Storage:</span>
-              <span className="text-sm font-medium text-amber-500">{stats.storage_free} Free</span>
-              <span className="text-xs text-zinc-500">({stats.storage_used_percent}% used)</span>
+              <HardDrive size={14} className="text-amber-500" />
+              <span className="text-xs md:text-sm text-zinc-400">Storage:</span>
+              <span className="text-xs md:text-sm font-medium text-amber-500">{stats.storage_free} Free</span>
+              <span className="text-[10px] md:text-xs text-zinc-500">({stats.storage_used_percent}% used)</span>
             </div>
           </div>
         )}
 
         {/* Filter & Actions */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 md:gap-4">
           <div className="flex items-center gap-2">
             <Filter size={16} className="text-zinc-400" />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-500"
+              className="px-3 py-1.5 md:py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-500"
             >
               <option value="">All Status</option>
               <option value="pending">Pending</option>
@@ -244,7 +244,7 @@ export const TasksPanel: React.FC = () => {
             {stats && stats.failed > 0 && (
               <button
                 onClick={() => handleRetryAll(false)}
-                className="px-3 py-2 bg-orange-500/10 text-orange-400 rounded-lg text-sm hover:bg-orange-500/20 transition-colors flex items-center gap-2"
+                className="px-3 py-1.5 md:py-2 bg-orange-500/10 text-orange-400 rounded-lg text-sm hover:bg-orange-500/20 transition-colors flex items-center gap-2"
               >
                 <RotateCcw size={14} />
                 Retry All Failed
@@ -253,7 +253,7 @@ export const TasksPanel: React.FC = () => {
             {stats && stats.completed > 50 && (
               <button
                 onClick={handleCleanup}
-                className="px-3 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700 transition-colors flex items-center gap-2"
+                className="px-3 py-1.5 md:py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700 transition-colors flex items-center gap-2"
               >
                 <Trash2 size={14} />
                 Cleanup
@@ -262,8 +262,8 @@ export const TasksPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* Task List */}
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+        {/* Task List - scrollable on mobile */}
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden max-h-[40vh] md:max-h-none overflow-y-auto">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

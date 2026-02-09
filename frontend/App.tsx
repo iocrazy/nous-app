@@ -541,11 +541,29 @@ export default function App() {
     // Fetch immediately
     fetchStatus();
 
-    // Poll every 10 seconds (reduced from 3s for better performance)
-    const interval = setInterval(fetchStatus, 10000);
+    // Poll every 30 seconds
+    const interval = setInterval(fetchStatus, 30000);
 
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  // Lazy-load dashboard stats only when viewing the overview
+  useEffect(() => {
+    if (!isAuthenticated || view !== 'dashboard' || dashboardSubView !== 'overview') return;
+    let cancelled = false;
+
+    const loadStats = async () => {
+      try {
+        const stats = await fetchDashboardStats();
+        if (!cancelled) setDashboardStats(stats);
+      } catch (e) {
+        console.debug('Failed to load dashboard stats:', e);
+      }
+    };
+
+    loadStats();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, view, dashboardSubView]);
 
   // Auto-select first team if no team is selected
   useEffect(() => {
@@ -1055,17 +1073,11 @@ export default function App() {
         setLibrary(data);
         setHasMoreData(false);
       }
-      // Calculate dashboard stats from library data
-      const stats = await fetchDashboardStats(data);
-      setDashboardStats(stats);
     } catch (err: any) {
       console.error("Failed to load library:", err);
       // Fallback to mock on error (e.g. table doesn't exist yet)
       setLibrary(MOCK_LIBRARY);
       setHasMoreData(false);
-      // Calculate dashboard stats even from mock data
-      const stats = await fetchDashboardStats(MOCK_LIBRARY);
-      setDashboardStats(stats);
       // Display a more useful error message than [object Object]
       const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
