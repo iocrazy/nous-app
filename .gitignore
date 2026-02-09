@@ -220,6 +220,8 @@ public
 frontend/public/*
 !frontend/public/locales/
 !frontend/public/favicon.svg
+!frontend/public/pwa-*.png
+!frontend/public/apple-touch-icon-*.png
 !frontend/public/_redirects
 !frontend/public/404.html
 !frontend/public/500.html
