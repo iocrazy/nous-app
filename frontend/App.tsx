@@ -2162,47 +2162,49 @@ export default function App() {
             )}
 
             {!currentResult && batchResults.length === 0 && !isParsing && taskProgress === 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+              <div className="grid grid-cols-3 gap-3 mt-8">
                  {/* Queue Status */}
-                 <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
+                 <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
+                    <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                       systemStatus?.queue.status === 'offline' ? 'bg-red-900/30 text-red-400' :
                       systemStatus?.queue.active ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
                     }`}>
-                      <ListVideo size={20} />
+                      <ListVideo size={16} className="md:hidden" />
+                      <ListVideo size={20} className="hidden md:block" />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Queue</h4>
-                    <p className={`text-sm font-mono ${
+                    <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Queue</h4>
+                    <p className={`text-xs md:text-sm font-mono ${
                       systemStatus?.queue.status === 'offline' ? 'text-red-400' :
                       systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
                     }`}>
-                      {systemStatus ? getQueueDisplay(systemStatus.queue) : 'Loading...'}
+                      {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
                     </p>
                     {systemStatus?.queue.pending ? (
-                      <p className="text-xs text-zinc-600 mt-1">{systemStatus.queue.pending} pending</p>
+                      <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">{systemStatus.queue.pending} pending</p>
                     ) : null}
                  </div>
                  {/* Parse Mode */}
                  <ParseModeCard />
                  {/* Storage Status */}
-                 <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mx-auto mb-3 ${
+                 <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
+                    <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                       systemStatus?.storage.status === 'ok' ? 'bg-purple-900/30 text-purple-400' :
                       systemStatus?.storage.status === 'warning' ? 'bg-yellow-900/30 text-yellow-400' :
                       systemStatus?.storage.status === 'critical' ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800/50 text-zinc-500'
                     }`}>
-                      <HardDrive size={20} />
+                      <HardDrive size={16} className="md:hidden" />
+                      <HardDrive size={20} className="hidden md:block" />
                     </div>
-                    <h4 className="font-semibold text-zinc-200 mb-1">Storage</h4>
-                    <p className={`text-sm font-mono ${
+                    <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Storage</h4>
+                    <p className={`text-xs md:text-sm font-mono ${
                       systemStatus?.storage.status === 'ok' ? 'text-purple-400' :
                       systemStatus?.storage.status === 'warning' ? 'text-yellow-400' :
                       systemStatus?.storage.status === 'critical' ? 'text-red-400' : 'text-zinc-500'
                     }`}>
-                      {systemStatus ? getStorageDisplay(systemStatus.storage) : 'Loading...'}
+                      {systemStatus ? getStorageDisplay(systemStatus.storage) : '...'}
                     </p>
                     {systemStatus?.storage.percent_used ? (
-                      <p className="text-xs text-zinc-600 mt-1">{systemStatus.storage.percent_used}% used</p>
+                      <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">{systemStatus.storage.percent_used}% used</p>
                     ) : null}
                  </div>
               </div>
@@ -2422,9 +2424,10 @@ export default function App() {
                         </div>
                       ) : libraryViewMode === 'list' ? (
                         <div className="p-4 md:p-0">
-                          <LibraryTable 
-                            data={filteredLibrary} 
-                            onUpdate={handleUpdateLibraryItem} 
+                          <LibraryTable
+                            data={filteredLibrary}
+                            onUpdate={handleUpdateLibraryItem}
+                            onItemClick={(item) => setSelectedLibraryItem(item)}
                           />
                         </div>
                       ) : (

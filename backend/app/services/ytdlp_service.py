@@ -11,8 +11,9 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
+import httpx
 from loguru import logger
 
 from app.core.utils import Utils
@@ -74,17 +75,23 @@ class YtdlpService:
         return info
 
     @staticmethod
-    async def download_video(url: str, output_dir: str, platform_id: str) -> dict:
+    async def download_video(
+        url: str,
+        output_dir: str,
+        platform_id: str,
+        progress_callback: Optional[Callable] = None,
+    ) -> dict:
         """
-        Download video file via yt-dlp.
+        Download video file via yt-dlp with real-time progress tracking.
 
         Args:
             url: Video URL
             output_dir: Directory to save the file
             platform_id: Used for filename
+            progress_callback: Optional callback(downloaded, total, speed) for progress updates
 
         Returns:
-            dict: {file_path, file_size, resolution, duration}
+            dict: {file_path, file_size}
         """
         os.makedirs(output_dir, exist_ok=True)
 
@@ -98,6 +105,9 @@ class YtdlpService:
             "mp4",
             "--no-playlist",
             "--no-warnings",
+            "--newline",
+            "--progress-template",
+            "download:%(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
             "-o",
             output_template,
             url,
@@ -111,13 +121,43 @@ class YtdlpService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+
+            stderr_lines = []
+
+            async def read_stdout():
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    if decoded.startswith("download:") and progress_callback:
+                        parts = decoded[len("download:") :].split()
+                        if len(parts) >= 2:
+                            try:
+                                downloaded = int(float(parts[0]))
+                                total = int(float(parts[1]))
+                                speed = parts[2] if len(parts) > 2 else "0 B/s"
+                                progress_callback(downloaded, total, speed)
+                            except (ValueError, IndexError):
+                                pass
+
+            async def read_stderr():
+                while True:
+                    line = await proc.stderr.readline()
+                    if not line:
+                        break
+                    stderr_lines.append(line.decode("utf-8", errors="replace"))
+
+            await asyncio.gather(read_stdout(), read_stderr())
+            await asyncio.wait_for(proc.wait(), timeout=600)
+
         except asyncio.TimeoutError:
+            proc.kill()
             logger.error(f"[yt-dlp] Download timed out: {platform_id}")
             raise RuntimeError(f"yt-dlp download timed out for {platform_id}")
 
         if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            error_msg = "".join(stderr_lines).strip()
             parsed_error = YtdlpService._parse_error(error_msg)
             logger.error(f"[yt-dlp] Download failed: {parsed_error}")
             raise RuntimeError(f"yt-dlp download failed: {parsed_error}")
@@ -300,6 +340,30 @@ class YtdlpService:
             "cover_urls": cover_urls,
             "video_download_urls": [original_url],
         }
+
+    @staticmethod
+    async def _fetch_bilibili_stats(bvid: str) -> Optional[dict]:
+        """Fetch detailed stats from Bilibili public API.
+
+        Args:
+            bvid: Bilibili video BV ID
+
+        Returns:
+            dict with keys like 'favorite', 'share', 'view', 'like', 'coin', etc.
+            None on failure.
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://api.bilibili.com/x/web-interface/archive/stat?bvid={bvid}",
+                    timeout=10.0,
+                )
+                data = resp.json()
+                if data.get("code") == 0:
+                    return data.get("data", {})
+        except Exception as e:
+            logger.warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
+        return None
 
     @staticmethod
     def _find_downloaded_file(directory: str, prefix: str) -> Optional[str]:

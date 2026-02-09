@@ -402,8 +402,14 @@ def download_ytdlp_task(
 
         if download_video:
             logger.info(f"[Celery/yt-dlp] Downloading video: {platform_id}")
+
+            def on_progress(downloaded: int, total: int, speed: str):
+                task_manager.update_progress(platform_id, downloaded, total, speed)
+
             result = run_async(
-                YtdlpService.download_video(url, str(storage_dir), platform_id)
+                YtdlpService.download_video(
+                    url, str(storage_dir), platform_id, progress_callback=on_progress
+                )
             )
             if result.get("file_path"):
                 import os
