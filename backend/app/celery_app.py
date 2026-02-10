@@ -61,5 +61,9 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.update_statistics",
             "schedule": 21600.0,  # 每 6 小时执行一次
         },
+        "update-system-status-30s": {
+            "task": "app.tasks.scheduled_tasks.update_system_status",
+            "schedule": 30.0,  # 每 30 秒执行一次
+        },
     },
 )

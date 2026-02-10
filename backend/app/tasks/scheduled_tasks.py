@@ -220,6 +220,47 @@ def update_statistics():
 
 
 @shared_task
+def update_system_status():
+    """
+    Update system_status in Supabase (triggers Realtime broadcast).
+
+    Collects queue, storage, network, workers, and active tasks metrics,
+    then upserts into the single-row system_status table.
+    Runs every 30 seconds via Celery Beat.
+    """
+    logger.debug("[Celery Beat] Updating system_status...")
+
+    try:
+        from app.db.supabase_client import get_supabase_admin
+        from app.services.system_monitor_service import (
+            get_active_tasks,
+            get_network_status,
+            get_queue_status,
+            get_storage_status,
+            get_worker_stats,
+        )
+
+        data = {
+            "id": 1,
+            "queue": get_queue_status(),
+            "storage": get_storage_status(),
+            "network": get_network_status(),
+            "workers": get_worker_stats(),
+            "active_tasks": get_active_tasks(),
+        }
+
+        supabase = get_supabase_admin()
+        supabase.table("system_status").upsert(data).execute()
+
+        logger.debug("[Celery Beat] system_status updated successfully")
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] update_system_status failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def health_check():
     """
     Health check task

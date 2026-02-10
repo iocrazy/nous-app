@@ -40,6 +40,7 @@ export const TasksPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasActiveDownloads, setHasActiveDownloads] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -59,11 +60,28 @@ export const TasksPanel: React.FC = () => {
     }
   }, [statusFilter]);
 
+  // Initial fetch
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Track whether downloads are active
+  useEffect(() => {
+    setHasActiveDownloads((stats?.downloading ?? 0) > 0);
+  }, [stats]);
+
+  // Fast polling (2s) only when downloads are active
+  useEffect(() => {
+    if (!hasActiveDownloads) return;
+    const interval = setInterval(fetchData, 2000);
+    return () => clearInterval(interval);
+  }, [hasActiveDownloads, fetchData]);
+
+  // Heartbeat poll (30s) when idle — catch missed state changes
+  useEffect(() => {
+    const heartbeat = setInterval(() => { if (!hasActiveDownloads) fetchData(); }, 30000);
+    return () => clearInterval(heartbeat);
+  }, [hasActiveDownloads, fetchData]);
 
   const handleRetry = async (platformId: string, force: boolean = false) => {
     try {
