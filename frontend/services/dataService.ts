@@ -1,6 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { Video } from '../types';
-import { getAuthHeaders } from './parserService';
 
 const TABLE_NAME = 'videos';
 const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
@@ -376,145 +375,104 @@ export interface DashboardStats {
 }
 
 /**
- * Fetch dashboard statistics
+ * Fetch dashboard statistics via Supabase RPC (server-side computation)
  */
-export const fetchDashboardStats = async (library: Video[]): Promise<DashboardStats> => {
-  let backendStats = {
-    total: library.length,
-    completed: 0,
-    pending: 0,
-    failed: 0,
-    total_storage_bytes: 0,
-    unique_authors: 0
+export const fetchDashboardStats = async (): Promise<DashboardStats> => {
+  const supabase = getSupabaseClient();
+
+  // Default empty stats
+  const emptyStats: DashboardStats = {
+    totalVideos: 0,
+    completedDownloads: 0,
+    pendingDownloads: 0,
+    failedDownloads: 0,
+    totalStorageBytes: 0,
+    uniqueAuthors: 0,
+    mediaDistribution: [
+      { name: 'Video', value: 0 },
+      { name: 'Images', value: 0 },
+      { name: 'Audio', value: 0 },
+    ],
+    weeklyActivity: [],
+    topTags: [],
+    recentLogs: [],
   };
 
-  try {
-    const apiUrl = getApiUrl();
-
-    const response = await fetch(`${apiUrl}/api/v1/videos/statistics`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.statistics) {
-        backendStats = {
-          total: data.statistics.total || library.length,
-          completed: data.statistics.completed || 0,
-          pending: data.statistics.pending || 0,
-          failed: data.statistics.failed || 0,
-          total_storage_bytes: data.statistics.total_storage_bytes || 0,
-          unique_authors: data.statistics.unique_authors || 0
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to fetch backend statistics, using local calculation:', e);
+  if (!isSupabaseConfigured() || !supabase) {
+    return emptyStats;
   }
 
-  const completedDownloads = backendStats.completed;
-  const pendingDownloads = backendStats.pending;
-  const failedDownloads = backendStats.failed;
-  const totalStorageBytes = backendStats.total_storage_bytes;
-  const uniqueAuthors = backendStats.unique_authors;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return emptyStats;
 
-  // Media type distribution (supports both new string types and legacy numeric)
-  const videoCount = library.filter(v => {
-    const t = v.media_type;
-    return t === 'video' || t === 'special' || t === 'short' || t === 'live_clip' ||
-           ['0', '4', '61', 0, 4, 61].includes(t as any);
-  }).length;
-  const albumCount = library.filter(v => {
-    const t = v.media_type;
-    return t === 'carousel' || t === 'image_text' ||
-           ['2', '68', 2, 68].includes(t as any);
-  }).length;
-  const audioCount = library.filter(v => v.need_download_music).length;
-
-  const mediaDistribution = [
-    { name: 'Video', value: videoCount },
-    { name: 'Images', value: albumCount },
-    { name: 'Audio', value: audioCount },
-  ];
-
-  // Weekly activity (last 7 days)
-  const now = new Date();
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const weeklyActivity: { name: string; downloads: number; shares: number }[] = [];
-
-  for (let i = 6; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    const dayStart = new Date(date.setHours(0, 0, 0, 0));
-    const dayEnd = new Date(date.setHours(23, 59, 59, 999));
-
-    const dayVideos = library.filter(v => {
-      if (!v.created_at) return false;
-      const createdAt = new Date(v.created_at);
-      return createdAt >= dayStart && createdAt <= dayEnd;
+    const { data, error } = await supabase.rpc('get_dashboard_stats', {
+      p_user_id: user.id,
     });
 
-    weeklyActivity.push({
-      name: dayNames[dayStart.getDay()],
-      downloads: dayVideos.length,
+    if (error) {
+      console.error('RPC get_dashboard_stats failed:', error);
+      return emptyStats;
+    }
+
+    const d = data as Record<string, any>;
+
+    // Map media distribution from RPC format
+    const mediaDist = d.media_distribution?.[0] || {};
+    const mediaDistribution = [
+      { name: 'Video', value: mediaDist.video || 0 },
+      { name: 'Images', value: mediaDist.images || 0 },
+      { name: 'Audio', value: mediaDist.audio || 0 },
+    ];
+
+    // Map weekly activity
+    const weeklyActivity = (d.weekly_activity || []).map((w: any) => ({
+      name: w.name,
+      downloads: w.downloads,
       shares: 0,
-    });
-  }
-
-  // Tag statistics
-  let topTags: { name: string; count: number }[] = [];
-  try {
-    const { fetchTagStatistics } = await import('./tagsService');
-    const tagStats = await fetchTagStatistics(10);
-    if (tagStats.success && tagStats.top_tags) {
-      topTags = tagStats.top_tags.map(t => ({ name: t.name, count: t.count }));
-    }
-  } catch (e) {
-    console.warn('Failed to fetch tag statistics:', e);
-  }
-
-  // Recent logs
-  let recentLogs: { message: string; time: string; status: 'success' | 'pending' | 'error' }[] = [];
-
-  try {
-    const userLogs = await fetchUserLogs(10);
-    if (userLogs.length > 0) {
-      recentLogs = userLogs.map(log => ({
-        message: log.message,
-        time: log.created_at ? new Date(log.created_at).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        }) : '',
-        status: (log.status === 'success' ? 'success' : log.status === 'error' ? 'error' : 'pending') as 'success' | 'pending' | 'error',
-      }));
-    }
-  } catch (e) {
-    console.error('Failed to fetch user logs:', e);
-  }
-
-  // Fallback to video data if no logs
-  if (recentLogs.length === 0) {
-    recentLogs = library.slice(0, 5).map(v => ({
-      message: `${v.video_download_status === 'COMPLETED' ? 'Download completed' : v.video_download_status === 'FAILED' ? 'Download failed' : 'Processing'}: ${v.title?.substring(0, 20) || v.platform_id?.substring(0, 10)}...`,
-      time: v.created_at ? new Date(v.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
-      status: (v.video_download_status === 'COMPLETED' ? 'success' : v.video_download_status === 'FAILED' ? 'error' : 'pending') as 'success' | 'pending' | 'error',
     }));
-  }
 
-  return {
-    totalVideos: backendStats.total,
-    completedDownloads,
-    pendingDownloads,
-    failedDownloads,
-    totalStorageBytes,
-    uniqueAuthors,
-    mediaDistribution,
-    weeklyActivity,
-    topTags,
-    recentLogs,
-  };
+    // Map top tags
+    const topTags = (d.top_tags || []).map((t: any) => ({
+      name: t.name,
+      count: t.count,
+    }));
+
+    // Fetch recent logs separately (not in RPC)
+    let recentLogs: DashboardStats['recentLogs'] = [];
+    try {
+      const userLogs = await fetchUserLogs(10);
+      if (userLogs.length > 0) {
+        recentLogs = userLogs.map(log => ({
+          message: log.message,
+          time: log.created_at ? new Date(log.created_at).toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }) : '',
+          status: (log.status === 'success' ? 'success' : log.status === 'error' ? 'error' : 'pending') as 'success' | 'pending' | 'error',
+        }));
+      }
+    } catch (e) {
+      console.debug('Failed to fetch user logs:', e);
+    }
+
+    return {
+      totalVideos: d.total || 0,
+      completedDownloads: d.completed || 0,
+      pendingDownloads: d.pending || 0,
+      failedDownloads: d.failed || 0,
+      totalStorageBytes: d.total_storage_bytes || 0,
+      uniqueAuthors: d.unique_authors || 0,
+      mediaDistribution,
+      weeklyActivity,
+      topTags,
+      recentLogs,
+    };
+  } catch (e) {
+    console.error('Error fetching dashboard stats:', e);
+    return emptyStats;
+  }
 };
 
 /**

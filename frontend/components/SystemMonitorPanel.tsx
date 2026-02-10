@@ -1,6 +1,7 @@
 /**
- * SystemMonitorPanel - System monitoring in Settings
+ * SystemMonitorPanel - System monitoring (admin only)
  * Shows Celery queue, workers, storage, and network status
+ * Data comes from `system_status` Supabase table via Realtime (no polling)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -18,8 +19,9 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getAuthHeaders } from '../services/parserService';
+import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
-// API configuration
+// API configuration (kept for manual Refresh fallback)
 const getApiUrl = (): string => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
@@ -50,13 +52,6 @@ interface NetworkStatus {
   status: 'idle' | 'active' | 'error';
 }
 
-interface SystemStatus {
-  queue: QueueStatus;
-  storage: StorageStatus;
-  network: NetworkStatus;
-  timestamp: number;
-}
-
 interface WorkerInfo {
   name: string;
   status: string;
@@ -65,24 +60,12 @@ interface WorkerInfo {
   total_tasks: Record<string, number>;
 }
 
-interface WorkerStats {
-  success: boolean;
-  worker_count: number;
-  workers: WorkerInfo[];
-}
-
 interface ActiveTask {
   task_id: string;
   name: string;
   status: string;
   worker: string;
   args: unknown[];
-}
-
-interface ActiveTasks {
-  success: boolean;
-  count: number;
-  tasks: ActiveTask[];
 }
 
 // Format bytes to human readable
@@ -95,42 +78,48 @@ const formatBytes = (bytes: number): string => {
 };
 
 export const SystemMonitorPanel: React.FC = () => {
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-  const [workerStats, setWorkerStats] = useState<WorkerStats | null>(null);
-  const [activeTasks, setActiveTasks] = useState<ActiveTasks | null>(null);
+  const [queue, setQueue] = useState<QueueStatus | null>(null);
+  const [storage, setStorage] = useState<StorageStatus | null>(null);
+  const [network, setNetwork] = useState<NetworkStatus | null>(null);
+  const [workers, setWorkers] = useState<WorkerInfo[]>([]);
+  const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
+  // Apply a system_status row to component state
+  const applyStatus = useCallback((row: Record<string, unknown>) => {
+    if (row.queue) setQueue(row.queue as QueueStatus);
+    if (row.storage) setStorage(row.storage as StorageStatus);
+    if (row.network) setNetwork(row.network as NetworkStatus);
+    if (row.workers) setWorkers(row.workers as WorkerInfo[]);
+    if (row.active_tasks) setActiveTasks(row.active_tasks as ActiveTask[]);
+    setLastUpdate(row.updated_at ? new Date(row.updated_at as string) : new Date());
+  }, []);
+
+  // Manual refresh — hits the backend API directly (Refresh button)
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-
     const apiUrl = getApiUrl();
 
     try {
-      // Fetch all data in parallel
-      const [statusRes, workersRes, tasksRes] = await Promise.all([
-        fetch(`${apiUrl}/api/v1/system/status`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/v1/tasks/stats/workers`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/v1/tasks/`, { headers: getAuthHeaders() }),
-      ]);
-
+      const statusRes = await fetch(`${apiUrl}/api/v1/system/status`, { headers: getAuthHeaders() });
       if (statusRes.ok) {
         const status = await statusRes.json();
-        setSystemStatus(status);
+        setQueue(status.queue);
+        setStorage(status.storage);
+        setNetwork(status.network);
       }
-
-      if (workersRes.ok) {
-        const workers = await workersRes.json();
-        setWorkerStats(workers);
+      // Also try to get fresh data from system_status table
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data } = await supabase.from('system_status').select('*').eq('id', 1).single();
+        if (data) {
+          if (data.workers) setWorkers(data.workers as WorkerInfo[]);
+          if (data.active_tasks) setActiveTasks(data.active_tasks as ActiveTask[]);
+        }
       }
-
-      if (tasksRes.ok) {
-        const tasks = await tasksRes.json();
-        setActiveTasks(tasks);
-      }
-
       setLastUpdate(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch system status');
@@ -139,16 +128,42 @@ export const SystemMonitorPanel: React.FC = () => {
     }
   }, []);
 
-  // Initial fetch
+  // Initial load from system_status table + Realtime subscription
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) {
+      // Fallback: single API fetch
+      fetchData();
+      return;
+    }
 
-  // Auto-refresh every 10 seconds
-  useEffect(() => {
-    const interval = setInterval(fetchData, 10000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    // Load initial data
+    setIsLoading(true);
+    supabase.from('system_status').select('*').eq('id', 1).single()
+      .then(({ data, error: fetchErr }) => {
+        if (data) {
+          applyStatus(data);
+        } else if (fetchErr) {
+          // Fallback to API if table doesn't exist yet
+          fetchData();
+        }
+        setIsLoading(false);
+      });
+
+    // Subscribe to Realtime updates
+    const channel = supabase
+      .channel('system_status_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'system_status' },
+        (payload) => {
+          applyStatus(payload.new);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [applyStatus, fetchData]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -230,25 +245,25 @@ export const SystemMonitorPanel: React.FC = () => {
           <div className="flex items-center gap-2 mb-3">
             <ListVideo size={18} className="text-indigo-400" />
             <h3 className="font-medium text-zinc-200">Queue</h3>
-            {systemStatus && (
-              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(systemStatus.queue.status)} ${getStatusColor(systemStatus.queue.status)}`}>
-                {systemStatus.queue.status}
+            {queue && (
+              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(queue.status)} ${getStatusColor(queue.status)}`}>
+                {queue.status}
               </span>
             )}
           </div>
-          {systemStatus ? (
+          {queue ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-500">Active Tasks</span>
-                <span className="text-zinc-200 font-mono">{systemStatus.queue.active}</span>
+                <span className="text-zinc-200 font-mono">{queue.active}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Pending</span>
-                <span className="text-zinc-200 font-mono">{systemStatus.queue.pending}</span>
+                <span className="text-zinc-200 font-mono">{queue.pending}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Scheduled</span>
-                <span className="text-zinc-200 font-mono">{systemStatus.queue.scheduled}</span>
+                <span className="text-zinc-200 font-mono">{queue.scheduled}</span>
               </div>
             </div>
           ) : (
@@ -263,39 +278,39 @@ export const SystemMonitorPanel: React.FC = () => {
           <div className="flex items-center gap-2 mb-3">
             <HardDrive size={18} className="text-purple-400" />
             <h3 className="font-medium text-zinc-200">Storage</h3>
-            {systemStatus && (
-              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(systemStatus.storage.status)} ${getStatusColor(systemStatus.storage.status)}`}>
-                {systemStatus.storage.status}
+            {storage && (
+              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(storage.status)} ${getStatusColor(storage.status)}`}>
+                {storage.status}
               </span>
             )}
           </div>
-          {systemStatus ? (
+          {storage ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-500">Used</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(systemStatus.storage.used_bytes)}</span>
+                <span className="text-zinc-200 font-mono">{formatBytes(storage.used_bytes)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Free</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(systemStatus.storage.free_bytes)}</span>
+                <span className="text-zinc-200 font-mono">{formatBytes(storage.free_bytes)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Total</span>
-                <span className="text-zinc-200 font-mono">{formatBytes(systemStatus.storage.total_bytes)}</span>
+                <span className="text-zinc-200 font-mono">{formatBytes(storage.total_bytes)}</span>
               </div>
               {/* Progress bar */}
               <div className="mt-2">
                 <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all ${
-                      systemStatus.storage.percent_used > 90 ? 'bg-red-500' :
-                      systemStatus.storage.percent_used > 75 ? 'bg-yellow-500' : 'bg-purple-500'
+                      storage.percent_used > 90 ? 'bg-red-500' :
+                      storage.percent_used > 75 ? 'bg-yellow-500' : 'bg-purple-500'
                     }`}
-                    style={{ width: `${systemStatus.storage.percent_used}%` }}
+                    style={{ width: `${storage.percent_used}%` }}
                   />
                 </div>
                 <div className="text-xs text-zinc-500 mt-1 text-right">
-                  {systemStatus.storage.percent_used}% used
+                  {storage.percent_used}% used
                 </div>
               </div>
             </div>
@@ -311,22 +326,22 @@ export const SystemMonitorPanel: React.FC = () => {
           <div className="flex items-center gap-2 mb-3">
             <Wifi size={18} className="text-emerald-400" />
             <h3 className="font-medium text-zinc-200">Network</h3>
-            {systemStatus && (
-              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(systemStatus.network.status)} ${getStatusColor(systemStatus.network.status)}`}>
-                {systemStatus.network.status}
+            {network && (
+              <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(network.status)} ${getStatusColor(network.status)}`}>
+                {network.status}
               </span>
             )}
           </div>
-          {systemStatus ? (
+          {network ? (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-500">Download Speed</span>
-                <span className="text-zinc-200 font-mono">{systemStatus.network.speed}</span>
+                <span className="text-zinc-200 font-mono">{network.speed}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Status</span>
-                <span className={`font-medium ${getStatusColor(systemStatus.network.status)}`}>
-                  {systemStatus.network.status === 'active' ? 'Downloading' : 'Idle'}
+                <span className={`font-medium ${getStatusColor(network.status)}`}>
+                  {network.status === 'active' ? 'Downloading' : 'Idle'}
                 </span>
               </div>
             </div>
@@ -343,16 +358,14 @@ export const SystemMonitorPanel: React.FC = () => {
         <div className="flex items-center gap-2 mb-4">
           <Server size={18} className="text-blue-400" />
           <h3 className="font-medium text-zinc-200">Celery Workers</h3>
-          {workerStats && (
-            <span className="ml-auto text-sm text-zinc-500">
-              {workerStats.worker_count} worker(s)
-            </span>
-          )}
+          <span className="ml-auto text-sm text-zinc-500">
+            {workers.length} worker(s)
+          </span>
         </div>
 
-        {workerStats?.workers && workerStats.workers.length > 0 ? (
+        {workers.length > 0 ? (
           <div className="space-y-3">
-            {workerStats.workers.map((worker) => (
+            {workers.map((worker) => (
               <div key={worker.name} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
                 <div className={`w-2 h-2 rounded-full ${worker.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
                 <div className="flex-1 min-w-0">
@@ -386,16 +399,14 @@ export const SystemMonitorPanel: React.FC = () => {
         <div className="flex items-center gap-2 mb-4">
           <Clock size={18} className="text-amber-400" />
           <h3 className="font-medium text-zinc-200">Active Tasks</h3>
-          {activeTasks && (
-            <span className="ml-auto text-sm text-zinc-500">
-              {activeTasks.count} task(s)
-            </span>
-          )}
+          <span className="ml-auto text-sm text-zinc-500">
+            {activeTasks.length} task(s)
+          </span>
         </div>
 
-        {activeTasks?.tasks && activeTasks.tasks.length > 0 ? (
+        {activeTasks.length > 0 ? (
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {activeTasks.tasks.map((task) => (
+            {activeTasks.map((task) => (
               <div key={task.task_id} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
                 <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                 <div className="flex-1 min-w-0">
@@ -427,9 +438,9 @@ export const SystemMonitorPanel: React.FC = () => {
       </div>
 
       {/* Storage Path */}
-      {systemStatus?.storage.path && (
+      {storage?.path && (
         <div className="text-xs text-zinc-600 text-right">
-          Storage path: {systemStatus.storage.path}
+          Storage path: {storage.path}
         </div>
       )}
     </div>

@@ -459,6 +459,20 @@ export default function App() {
         setCurrentUserId(session.user.id);
         setIsAuthenticated(true);
 
+        // Load user role from user_profiles
+        try {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('role')
+            .eq('id', session.user.id)
+            .single();
+          if (profile?.role) {
+            setUserProfile(prev => ({ ...prev, role: profile.role }));
+          }
+        } catch (err) {
+          console.debug('Failed to load user role:', err);
+        }
+
         // Load user settings from Supabase
         try {
           const settings = await fetchUserSettings();
@@ -541,11 +555,29 @@ export default function App() {
     // Fetch immediately
     fetchStatus();
 
-    // Poll every 10 seconds (reduced from 3s for better performance)
-    const interval = setInterval(fetchStatus, 10000);
+    // Poll every 30 seconds
+    const interval = setInterval(fetchStatus, 30000);
 
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  // Lazy-load dashboard stats only when viewing the overview
+  useEffect(() => {
+    if (!isAuthenticated || view !== 'dashboard' || dashboardSubView !== 'overview') return;
+    let cancelled = false;
+
+    const loadStats = async () => {
+      try {
+        const stats = await fetchDashboardStats();
+        if (!cancelled) setDashboardStats(stats);
+      } catch (e) {
+        console.debug('Failed to load dashboard stats:', e);
+      }
+    };
+
+    loadStats();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, view, dashboardSubView]);
 
   // Auto-select first team if no team is selected
   useEffect(() => {
@@ -854,6 +886,38 @@ export default function App() {
     };
   }, [isAuthenticated]);
 
+  // Supabase Realtime for user_logs — push new logs into Dashboard Recent Activity
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
+
+    const logsChannel = supabase
+      .channel('dashboard_logs_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'user_logs' },
+        (payload) => {
+          setDashboardStats(prev => {
+            if (!prev) return prev;
+            const row = payload.new as { message?: string; created_at?: string; status?: string };
+            const newEntry = {
+              message: row.message || '',
+              time: row.created_at
+                ? new Date(row.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+                : '',
+              status: row.status === 'success' ? 'success' as const
+                : row.status === 'error' ? 'error' as const
+                : 'pending' as const,
+            };
+            return { ...prev, recentLogs: [newEntry, ...prev.recentLogs].slice(0, 10) };
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(logsChannel); };
+  }, [isAuthenticated]);
+
   // Load collections for selected video
   useEffect(() => {
     if (selectedLibraryItem?.platform_id) {
@@ -1055,17 +1119,11 @@ export default function App() {
         setLibrary(data);
         setHasMoreData(false);
       }
-      // Calculate dashboard stats from library data
-      const stats = await fetchDashboardStats(data);
-      setDashboardStats(stats);
     } catch (err: any) {
       console.error("Failed to load library:", err);
       // Fallback to mock on error (e.g. table doesn't exist yet)
       setLibrary(MOCK_LIBRARY);
       setHasMoreData(false);
-      // Calculate dashboard stats even from mock data
-      const stats = await fetchDashboardStats(MOCK_LIBRARY);
-      setDashboardStats(stats);
       // Display a more useful error message than [object Object]
       const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
@@ -1535,7 +1593,7 @@ export default function App() {
   // 2. If authenticated, show Main Dashboard (existing logic)
   return (
     <ToastProvider>
-    <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30">
+    <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       
       {/* User Profile Modal */}
       <UserProfileModal
@@ -1751,6 +1809,7 @@ export default function App() {
               >
                 <ScrollText size={20} />
               </button>
+              {userProfile.role === 'admin' && (
               <button
                 onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
                 className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
@@ -1758,6 +1817,7 @@ export default function App() {
               >
                 <Activity size={20} />
               </button>
+              )}
               {/* Little triangle arrow pointing down */}
               <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
             </div>
@@ -2568,6 +2628,37 @@ export default function App() {
                   mediaDistribution={dashboardStats?.mediaDistribution || []}
                   topTags={dashboardStats?.topTags || []}
                 />
+
+                {/* Recent Activity */}
+                {dashboardStats?.recentLogs && dashboardStats.recentLogs.length > 0 && (
+                  <div className="mt-8 bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Activity size={18} className="text-amber-400" />
+                        <h3 className="text-sm font-semibold text-zinc-200">Recent Activity</h3>
+                      </div>
+                      <button
+                        onClick={() => setDashboardSubView('logs')}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                      >
+                        View all logs
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {dashboardStats.recentLogs.slice(0, 5).map((log, i) => (
+                        <div key={i} className="flex items-center gap-3 py-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            log.status === 'success' ? 'bg-green-400' :
+                            log.status === 'error' ? 'bg-red-400' :
+                            'bg-zinc-500'
+                          }`} />
+                          <span className="text-sm text-zinc-300 truncate flex-1">{log.message}</span>
+                          <span className="text-xs text-zinc-600 flex-shrink-0">{log.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2579,7 +2670,7 @@ export default function App() {
               <LogsPanel />
             )}
 
-            {dashboardSubView === 'monitor' && (
+            {dashboardSubView === 'monitor' && userProfile.role === 'admin' && (
               <SystemMonitorPanel />
             )}
           </div>

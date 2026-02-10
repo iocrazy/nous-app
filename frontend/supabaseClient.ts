@@ -122,6 +122,11 @@ export const reinitializeSupabaseClient = (url: string, anonKey: string): Supaba
     return null;
   }
 
+  // Clean up old client to prevent "Multiple GoTrueClient" warning
+  if (client) {
+    client.removeAllChannels();
+  }
+
   client = initializeClient();
   return client;
 };

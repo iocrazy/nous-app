@@ -42,6 +42,7 @@ interface LogsResponse {
 }
 
 import { getAuthHeaders } from '../services/parserService';
+import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 // API configuration
 const getApiUrl = (): string => {
@@ -111,6 +112,9 @@ export const LogsPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
+  // Expanded log details
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
   // Filters
   const [level, setLevel] = useState('');
   const [dateRange, setDateRange] = useState('7days');
@@ -167,6 +171,28 @@ export const LogsPanel: React.FC = () => {
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  // Realtime: auto-prepend new logs when on page 1
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    const channel = supabase
+      .channel('logs_panel_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'user_logs' },
+        (payload) => {
+          if (page === 1) {
+            setLogs(prev => [payload.new as LogEntry, ...prev].slice(0, pageSize));
+            setTotal(prev => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [page, pageSize]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -335,35 +361,68 @@ export const LogsPanel: React.FC = () => {
             {logs.map((log) => {
               const statusDisplay = getStatusDisplay(log.status);
               const StatusIcon = statusDisplay.icon;
+              const isExpanded = expandedLogId === log.id;
+              const hasDetails = log.details && Object.keys(log.details).length > 0;
 
               return (
                 <div
                   key={log.id}
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-zinc-900/50 transition-colors"
+                  className={`${hasDetails ? 'cursor-pointer' : ''} hover:bg-zinc-900/50 transition-colors`}
+                  onClick={() => hasDetails && setExpandedLogId(isExpanded ? null : log.id)}
                 >
-                  {/* Time */}
-                  <div className="flex-shrink-0 text-xs text-zinc-500 font-mono w-20">
-                    <div>{formatTime(log.created_at)}</div>
-                    <div className="text-zinc-600">{formatDate(log.created_at)}</div>
-                  </div>
+                  <div className="flex items-start gap-3 px-4 py-3">
+                    {/* Time */}
+                    <div className="flex-shrink-0 text-xs text-zinc-500 font-mono w-20">
+                      <div>{formatTime(log.created_at)}</div>
+                      <div className="text-zinc-600">{formatDate(log.created_at)}</div>
+                    </div>
 
-                  {/* Status Badge */}
-                  <div
-                    className={`flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium border flex items-center gap-1 ${statusDisplay.color}`}
-                  >
-                    <StatusIcon size={10} />
-                    {statusDisplay.label}
-                  </div>
+                    {/* Status Badge */}
+                    <div
+                      className={`flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium border flex items-center gap-1 ${statusDisplay.color}`}
+                    >
+                      <StatusIcon size={10} />
+                      {statusDisplay.label}
+                    </div>
 
-                  {/* Message */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-300 break-words">{log.message}</p>
-                    {log.platform_id && (
-                      <p className="text-xs text-zinc-600 mt-0.5 font-mono">
-                        Video: {log.platform_id}
-                      </p>
+                    {/* Action Tag */}
+                    {log.action && (
+                      <div className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
+                        {log.action}
+                      </div>
+                    )}
+
+                    {/* Message */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-zinc-300 break-words">{log.message}</p>
+                      {log.platform_id && (
+                        <p className="text-xs text-zinc-600 mt-0.5 font-mono">
+                          Video: {log.platform_id}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Expand indicator */}
+                    {hasDetails && (
+                      <div className={`flex-shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                        <ChevronRight size={14} />
+                      </div>
                     )}
                   </div>
+
+                  {/* Expanded Details */}
+                  {isExpanded && hasDetails && (
+                    <div className="px-4 pb-3 ml-24 mr-4">
+                      <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono space-y-1">
+                        {Object.entries(log.details!).map(([key, value]) => (
+                          <div key={key} className="flex gap-2">
+                            <span className="text-zinc-500">{key}:</span>
+                            <span className="text-zinc-300 break-all">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
