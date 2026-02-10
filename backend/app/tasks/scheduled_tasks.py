@@ -241,7 +241,7 @@ def update_system_status():
         )
 
         data = {
-            "id": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
             "queue": get_queue_status(),
             "storage": get_storage_status(),
             "network": get_network_status(),

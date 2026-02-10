@@ -2,8 +2,12 @@
 -- Single-row table that stores aggregated system metrics (queue, storage, network, workers, tasks)
 -- Updated by Celery Beat every 30s, pushed to admin clients via Supabase Realtime
 
+-- Fixed UUID for the single-row constraint
+-- 00000000-0000-0000-0000-000000000001
+
 CREATE TABLE IF NOT EXISTS system_status (
-    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),  -- Force single row
+    id UUID PRIMARY KEY DEFAULT '00000000-0000-0000-0000-000000000001'::uuid
+        CHECK (id = '00000000-0000-0000-0000-000000000001'::uuid),
     queue JSONB NOT NULL DEFAULT '{}',
     workers JSONB NOT NULL DEFAULT '[]',
     storage JSONB NOT NULL DEFAULT '{}',
@@ -12,8 +16,7 @@ CREATE TABLE IF NOT EXISTS system_status (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed the single row
-INSERT INTO system_status (id) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO system_status (id) VALUES ('00000000-0000-0000-0000-000000000001') ON CONFLICT DO NOTHING;
 
 -- RLS: all authenticated users can read, only service_role can write
 ALTER TABLE system_status ENABLE ROW LEVEL SECURITY;
