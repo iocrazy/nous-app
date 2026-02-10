@@ -97,6 +97,7 @@ class ApiKeyRepository:
             "key_id": key_id,
             "key_hash": key_hash,
             "key_prefix": key_prefix,
+            "key_value": full_key,
             "name": name,
             "description": description,
             "user_id": user_id,
@@ -113,7 +114,7 @@ class ApiKeyRepository:
 
             if result.data:
                 record = result.data[0]
-                record["secret_key"] = full_key  # 仅返回一次
+                record["secret_key"] = full_key
                 logger.info(f"创建 API 密钥成功: {key_id} for user {user_id}")
                 return record
 

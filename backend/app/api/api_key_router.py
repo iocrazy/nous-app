@@ -52,7 +52,7 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
     """
     创建新的 API 密钥
 
-    返回完整密钥（仅此一次），请妥善保存！
+    返回完整密钥，可随时从列表中复制。
     """
     repo = ApiKeyRepository()
 
@@ -113,6 +113,7 @@ async def list_api_keys(auth: AuthDep, include_revoked: bool = False):
             id=k["id"],
             key_id=k["key_id"],
             key_prefix=k["key_prefix"],
+            key_value=k.get("key_value"),
             name=k["name"],
             description=k.get("description"),
             scopes=k["scopes"],
@@ -151,6 +152,7 @@ async def get_api_key(key_id: str, auth: AuthDep):
         id=key_data["id"],
         key_id=key_data["key_id"],
         key_prefix=key_data["key_prefix"],
+        key_value=key_data.get("key_value"),
         name=key_data["name"],
         description=key_data.get("description"),
         scopes=key_data["scopes"],
@@ -191,6 +193,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
             id=result["id"],
             key_id=result["key_id"],
             key_prefix=result["key_prefix"],
+            key_value=result.get("key_value"),
             name=result["name"],
             description=result.get("description"),
             scopes=result["scopes"],

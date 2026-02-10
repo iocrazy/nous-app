@@ -78,11 +78,12 @@ class ApiKeyUpdate(BaseModel):
 
 
 class ApiKeyResponse(BaseModel):
-    """API 密钥响应（不包含敏感信息）"""
+    """API 密钥响应"""
 
     id: int = Field(..., description="密钥 ID")
     key_id: str = Field(..., description="密钥公开标识符")
     key_prefix: str = Field(..., description="密钥前缀（如 dk_xxxx...）")
+    key_value: Optional[str] = Field(None, description="完整密钥")
     name: str = Field(..., description="密钥名称")
     description: Optional[str] = Field(None, description="密钥描述")
     scopes: List[str] = Field(..., description="权限范围")
@@ -98,13 +99,14 @@ class ApiKeyResponse(BaseModel):
 
 
 class ApiKeyCreateResponse(BaseModel):
-    """创建 API 密钥响应（仅首次返回完整密钥）"""
+    """创建 API 密钥响应"""
 
     success: bool = True
-    message: str = "API 密钥创建成功，请妥善保存密钥！"
+    message: str = "API key created successfully."
     id: int
     key_id: str
     key_prefix: str
+    key_value: Optional[str] = None
     name: str
     description: Optional[str] = None
     scopes: List[str]
@@ -114,8 +116,8 @@ class ApiKeyCreateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # 完整密钥（仅首次返回）
-    secret_key: str = Field(..., description="完整密钥（仅显示一次，请妥善保存）")
+    # Full key (also stored in key_value for persistent access)
+    secret_key: str = Field(..., description="完整密钥")
 
 
 class ApiKeyListResponse(BaseModel):

@@ -4,7 +4,7 @@ import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
 import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle, Eye, EyeOff
+  Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
@@ -56,9 +56,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   // Available scopes from backend
   const [availableScopes, setAvailableScopes] = useState<apiKeyService.ApiKeyScopeInfo[]>([]);
 
-  // Newly created key secret (shown only once)
+  // Newly created key secret
   const [newKeySecret, setNewKeySecret] = useState<string | null>(null);
-  const [showKeySecret, setShowKeySecret] = useState(false);
 
   // Form State for New/Edit Key
   const [keyForm, setKeyForm] = useState({
@@ -217,9 +216,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
           rate_limit: keyForm.rateLimit ? parseInt(keyForm.rateLimit) : undefined,
         });
 
-        // Show the secret key (only shown once!)
+        // Show the key in success dialog
         setNewKeySecret(result.secret_key);
-        setShowKeySecret(true);
         await loadApiKeys();
       }
     } catch (err) {
@@ -259,7 +257,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const closeKeyModal = () => {
     setIsKeyModalOpen(false);
     setNewKeySecret(null);
-    setShowKeySecret(false);
     setFormError(null);
   };
 
@@ -578,9 +575,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                              <div className="flex items-center gap-2">
                                 <span className="opacity-70 bg-zinc-950 px-2 py-1 rounded border border-zinc-800 select-all">{key.key_prefix}</span>
                                 <button
-                                  onClick={() => handleCopyKey(key.key_prefix, key.id.toString())}
+                                  onClick={() => handleCopyKey(key.key_value || key.key_prefix, key.id.toString())}
                                   className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id.toString() ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
-                                  title="Copy prefix"
+                                  title="Copy full key"
                                 >
                                    {copiedKeyId === key.id.toString() ? <CheckCircle size={14} /> : <Copy size={14} />}
                                 </button>
@@ -858,15 +855,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   </button>
                </div>
 
-               {/* Show Secret Key After Creation */}
+               {/* Show Key After Creation */}
                {newKeySecret ? (
                   <div className="p-6 space-y-6">
-                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                     <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
                         <div className="flex items-start gap-3">
-                           <AlertCircle size={20} className="text-yellow-400 mt-0.5 flex-shrink-0" />
-                           <div className="text-sm text-yellow-300">
-                              <p className="font-medium">Save this key now!</p>
-                              <p className="text-yellow-300/70 mt-1">This is the only time you'll see this key. Copy it somewhere safe.</p>
+                           <CheckCircle size={20} className="text-green-400 mt-0.5 flex-shrink-0" />
+                           <div className="text-sm text-green-300">
+                              <p className="font-medium">API key created successfully!</p>
+                              <p className="text-green-300/70 mt-1">You can always copy this key from the table using the copy button.</p>
                            </div>
                         </div>
                      </div>
@@ -876,17 +873,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                         <div className="flex items-center gap-2">
                            <div className="flex-1 relative">
                               <input
-                                 type={showKeySecret ? 'text' : 'password'}
+                                 type="text"
                                  value={newKeySecret}
                                  readOnly
-                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 font-mono text-sm pr-20"
+                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 font-mono text-sm pr-12"
                               />
-                              <button
-                                 onClick={() => setShowKeySecret(!showKeySecret)}
-                                 className="absolute right-12 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                              >
-                                 {showKeySecret ? <EyeOff size={18} /> : <Eye size={18} />}
-                              </button>
                               <button
                                  onClick={() => handleCopyKey(newKeySecret, 'new-key')}
                                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}

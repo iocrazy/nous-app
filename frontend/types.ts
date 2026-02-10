@@ -125,6 +125,7 @@ export interface ApiKey {
   id: number;
   key_id: string;        // Identifier for API calls
   key_prefix: string;    // Display prefix like dk_xxxx...
+  key_value?: string;    // Full key (always accessible)
   name: string;
   description?: string;
   status: 'active' | 'revoked';
