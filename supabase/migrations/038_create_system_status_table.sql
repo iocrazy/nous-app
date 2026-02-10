@@ -27,6 +27,20 @@ CREATE POLICY "auth_select" ON system_status
 CREATE POLICY "service_upsert" ON system_status
     FOR ALL USING (auth.role() = 'service_role');
 
+-- Auto-update updated_at on every upsert
+CREATE OR REPLACE FUNCTION update_system_status_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_system_status_updated_at
+  BEFORE UPDATE ON system_status
+  FOR EACH ROW
+  EXECUTE FUNCTION update_system_status_updated_at();
+
 -- Enable Realtime
 ALTER TABLE system_status REPLICA IDENTITY FULL;
 ALTER PUBLICATION supabase_realtime ADD TABLE system_status;
