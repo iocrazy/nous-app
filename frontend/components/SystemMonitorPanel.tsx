@@ -114,7 +114,7 @@ export const SystemMonitorPanel: React.FC = () => {
       // Also try to get fresh data from system_status table
       const supabase = getSupabaseClient();
       if (supabase) {
-        const { data } = await supabase.from('system_status').select('*').eq('id', 1).single();
+        const { data } = await supabase.from('system_status').select('*').eq('id', '00000000-0000-0000-0000-000000000001').single();
         if (data) {
           if (data.workers) setWorkers(data.workers as WorkerInfo[]);
           if (data.active_tasks) setActiveTasks(data.active_tasks as ActiveTask[]);
@@ -139,7 +139,7 @@ export const SystemMonitorPanel: React.FC = () => {
 
     // Load initial data
     setIsLoading(true);
-    supabase.from('system_status').select('*').eq('id', 1).single()
+    supabase.from('system_status').select('*').eq('id', '00000000-0000-0000-0000-000000000001').single()
       .then(({ data, error: fetchErr }) => {
         if (data) {
           applyStatus(data);
