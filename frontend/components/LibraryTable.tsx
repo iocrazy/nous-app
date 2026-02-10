@@ -295,6 +295,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
             src={getCoverUrl(item) || "https://picsum.photos/400/600"}
             alt="Preview"
             className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
               target.style.display = 'none';
@@ -472,6 +473,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                       src={getCoverUrl(item) || "https://picsum.photos/400/600"}
                       alt="Preview"
                       className="w-full h-full object-cover opacity-80 group-hover:opacity-60 transition-all"
+                      referrerPolicy="no-referrer"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';

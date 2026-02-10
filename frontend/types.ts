@@ -151,6 +151,7 @@ export interface UserProfile {
   email: string;
   avatarUrl: string;
   plan: string;
+  role?: 'admin' | 'user' | 'test';
 }
 
 // API Response types
