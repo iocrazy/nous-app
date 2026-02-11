@@ -234,10 +234,11 @@ export const saveItem = async (item: Video): Promise<Video> => {
     throw new Error("Supabase is not configured");
   }
 
+  // Strip computed/joined fields that are not actual DB columns
+  const { tags, summary_text, ...dbFields } = item;
   const payload = {
-    ...item,
+    ...dbFields,
     published_at: item.published_at || new Date().toISOString(),
-    tags: item.tags || [],
     video_download_urls: item.video_download_urls || [],
     image_download_urls: item.image_download_urls || [],
   };
