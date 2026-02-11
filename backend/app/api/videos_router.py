@@ -329,6 +329,7 @@ async def fetch_video(
             message=f"Video parsed successfully: {video_title[:30]}...",
             status="success",
             aweme_id=platform_id,
+            details={"platform": "douyin", "parse_method": parse_method},
         )
 
         # Handle datetime objects to string
@@ -372,7 +373,7 @@ async def fetch_video(
             "download_task_id": download_task_id,
         }
 
-    except HTTPException:
+    except HTTPException as he:
         # Log failure
         background_tasks.add_task(
             log_user_action,
@@ -380,6 +381,7 @@ async def fetch_video(
             action="fetch",
             message=f"Failed to fetch video: {request.url[:30]}...",
             status="error",
+            details={"error": he.detail if hasattr(he, 'detail') else str(he)},
         )
         raise
     except Exception as e:
@@ -391,6 +393,7 @@ async def fetch_video(
             action="fetch",
             message=f"Failed to fetch video: {str(e)[:50]}",
             status="error",
+            details={"error": str(e)[:200]},
         )
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {str(e)}")
 
@@ -430,6 +433,7 @@ async def fetch_videos_batch(
             action="fetch_batch",
             message=f"Submitted batch Celery task: {len(request.urls)} links",
             status="pending",
+            details={"url_count": len(request.urls)},
         )
 
         return {
@@ -1147,6 +1151,7 @@ async def _handle_ytdlp_fetch(
         message=f"Video parsed via yt-dlp ({platform}): {video_title[:30]}...",
         status="success",
         aweme_id=platform_id,
+        details={"platform": platform, "parse_method": "ytdlp"},
     )
 
     # Handle datetime objects to string
