@@ -8,6 +8,10 @@
       "destination": "https://mediahubserver.heygo.cn:88/api/:path*"
     },
     {
+      "source": "/auth/v1/:path*",
+      "destination": "https://sb-mediahub.heygo.cn:88/auth/v1/:path*"
+    },
+    {
       "source": "/((?!assets/|sw\\.js|workbox-.*|manifest\\.webmanifest).*)",
       "destination": "/index.html"
     }

@@ -6,7 +6,7 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3
+  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3, BookOpen
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
@@ -214,7 +214,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -2011,6 +2011,19 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <Sparkles size={14} />
                     <span>AI</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('docs'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'docs'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} />
+                    <span>API Docs</span>
                   </div>
                 </button>
               </div>
