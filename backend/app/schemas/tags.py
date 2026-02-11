@@ -86,7 +86,7 @@ class VideoTagResponse(BaseModel):
 class VideoTagsResponse(BaseModel):
     """Schema for video's tags response."""
 
-    video_id: int = Field(..., description="Video ID (BIGINT in database)")
+    video_id: str = Field(..., description="Video UUID")
     tags: List[VideoTagResponse]
 
 

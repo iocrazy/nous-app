@@ -199,7 +199,7 @@ async def delete_tag(
 
 @router.get("/videos/{video_id}/tags", response_model=VideoTagsResponse)
 async def get_video_tags(
-    video_id: int,
+    video_id: str,
     auth: AuthDep = None,
 ):
     """Get all tags associated with a video."""
@@ -223,7 +223,7 @@ async def get_video_tags(
 
 @router.post("/videos/{video_id}/tags", status_code=status.HTTP_201_CREATED)
 async def add_tag_to_video(
-    video_id: int,
+    video_id: str,
     video_tag: VideoTagCreate,
     auth: AuthDep = None,
 ):
@@ -243,7 +243,7 @@ async def add_tag_to_video(
     "/videos/{video_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 async def remove_tag_from_video(
-    video_id: int,
+    video_id: str,
     tag_id: str,
     auth: AuthDep = None,
 ):

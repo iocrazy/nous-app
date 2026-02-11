@@ -15,7 +15,7 @@ import {
 } from '../services/tagsService';
 
 interface TagSelectorProps {
-  videoId: number;
+  videoId: string;
   onTagsChange?: (tags: Tag[]) => void;
   compact?: boolean;
   inline?: boolean;  // When true, shows dropdown content directly without toggle button
