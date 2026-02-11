@@ -353,3 +353,65 @@ export interface AISettings {
     visual_analysis: string;
   };
 }
+
+// Points System Types
+export interface PointPackage {
+  id: string;
+  name: string;
+  description: string | null;
+  points_amount: number;
+  price_cents: number;
+  currency: string;
+  sort_order: number;
+}
+
+export interface TeamQuota {
+  team_id: string;
+  points_balance: number;
+  storage_limit_bytes: number;
+  storage_used_bytes: number;
+  storage_used_percent: number;
+}
+
+export interface PointTransaction {
+  id: string;
+  team_id: string;
+  user_id: string | null;
+  amount: number;
+  balance_after: number;
+  type: 'purchase' | 'consume' | 'refund' | 'gift' | 'admin_adjust';
+  reference_type: string | null;
+  reference_id: string | null;
+  description: string | null;
+  created_at: string;
+}
+
+export interface PointPricing {
+  action_type: string;
+  points_cost: number;
+  description: string | null;
+}
+
+export interface PaymentOrder {
+  id: string;
+  team_id: string;
+  user_id: string;
+  package_id: string;
+  points_amount: number;
+  amount_cents: number;
+  currency: string;
+  payment_method: 'wechat' | 'alipay';
+  payment_status: 'pending' | 'paid' | 'failed' | 'expired' | 'refunded';
+  payment_url: string | null;
+  trade_no: string | null;
+  paid_at: string | null;
+  expired_at: string;
+  created_at: string;
+}
+
+export interface QuotaCheck {
+  allowed: boolean;
+  points_cost: number;
+  current_balance: number;
+  reason: string | null;
+}
