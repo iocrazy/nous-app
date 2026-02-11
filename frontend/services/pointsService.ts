@@ -70,7 +70,7 @@ export const fetchPointsTransactions = async (
   if (!result.success) {
     throw new Error(result.message || 'Failed to fetch transactions');
   }
-  return result.data;
+  return result.transactions;
 };
 
 /**
@@ -93,7 +93,7 @@ export const fetchPointsPricing = async (): Promise<PointPricing[]> => {
   if (!result.success) {
     throw new Error(result.message || 'Failed to fetch pricing');
   }
-  return result.data;
+  return result.pricing;
 };
 
 /**
@@ -136,7 +136,7 @@ export const checkQuota = async (
   params.set('count', String(count));
   if (teamId) params.set('team_id', teamId);
 
-  const url = `${API_BASE}/api/v1/points/check-quota?${params.toString()}`;
+  const url = `${API_BASE}/api/v1/points/check?${params.toString()}`;
 
   const response = await fetch(url, {
     method: 'GET',
