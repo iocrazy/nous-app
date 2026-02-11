@@ -20,7 +20,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS point_packages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(100) NOT NULL,
+  name VARCHAR(100) NOT NULL UNIQUE,
   description TEXT,
   points_amount INTEGER NOT NULL CHECK (points_amount > 0),
   price_cents INTEGER NOT NULL CHECK (price_cents > 0),
@@ -188,7 +188,7 @@ INSERT INTO point_packages (name, description, points_amount, price_cents, curre
   ('Standard Pack', '500 points with 10% bonus value',                500,  4500,  'CNY', 2),
   ('Pro Pack',      '2000 points — best value for power users',      2000, 16000,  'CNY', 3),
   ('Team Pack',     '10000 points for teams with heavy usage',       10000, 70000, 'CNY', 4)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================================
 -- Part 11: Enable RLS on all new tables
