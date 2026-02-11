@@ -10,7 +10,7 @@ Supabase 客户端模块
 from typing import Optional
 
 from loguru import logger
-from supabase import Client, ClientOptions, create_client
+from supabase import AsyncClientOptions, Client, ClientOptions, create_client
 from supabase._async.client import AsyncClient
 from supabase._async.client import create_client as create_async_client
 
@@ -18,12 +18,21 @@ from app.core.config import settings
 
 
 def _get_client_options() -> ClientOptions:
-    """获取 Supabase 客户端配置（包含多租户 header）"""
+    """获取 Supabase 同步客户端配置（包含多租户 header）"""
     headers = {}
     if settings.SUPABASE_TENANT_ID:
         headers["X-Tenant-ID"] = settings.SUPABASE_TENANT_ID
         logger.debug(f"Using tenant ID: {settings.SUPABASE_TENANT_ID}")
     return ClientOptions(headers=headers) if headers else ClientOptions()
+
+
+def _get_async_client_options() -> AsyncClientOptions:
+    """获取 Supabase 异步客户端配置（使用 AsyncMemoryStorage）"""
+    headers = {}
+    if settings.SUPABASE_TENANT_ID:
+        headers["X-Tenant-ID"] = settings.SUPABASE_TENANT_ID
+        logger.debug(f"Using tenant ID: {settings.SUPABASE_TENANT_ID}")
+    return AsyncClientOptions(headers=headers) if headers else AsyncClientOptions()
 
 
 class SupabaseClient:
@@ -88,7 +97,7 @@ class AsyncSupabaseClient:
             cls._instance = await create_async_client(
                 settings.SUPABASE_URL,
                 settings.SUPABASE_ANON_KEY,
-                options=_get_client_options(),
+                options=_get_async_client_options(),
             )
             logger.info("Supabase 异步客户端初始化成功")
 
@@ -104,7 +113,7 @@ class AsyncSupabaseClient:
             cls._admin_instance = await create_async_client(
                 settings.SUPABASE_URL,
                 settings.SUPABASE_SERVICE_ROLE_KEY,
-                options=_get_client_options(),
+                options=_get_async_client_options(),
             )
             logger.info("Supabase 异步管理员客户端初始化成功")
 
