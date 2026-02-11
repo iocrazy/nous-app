@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, UserPlus, Trash2, LogOut, Shield, User, Crown, AlertTriangle } from 'lucide-react';
+import { Loader2, UserPlus, Trash2, LogOut, Shield, User, Crown, AlertTriangle, BarChart3 } from 'lucide-react';
 import { TeamMember } from '../types';
-import { fetchTeamMembers, updateTeam, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
+import { fetchTeamMembers, updateTeam, updateMemberRole, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
+import { fetchUsageStats, fetchPointsBalance } from '../services/pointsService';
 
 interface TeamSettingsProps {
   teamId: string;
@@ -13,6 +14,15 @@ interface TeamSettingsProps {
   onOpenInviteModal: () => void;
   onTeamDeleted: () => void;
   onTeamLeft: () => void;
+}
+
+// Per-member usage info returned from usage stats
+interface MemberUsage {
+  user_id: string;
+  name: string | null;
+  email: string | null;
+  points_used: number;
+  monthly_limit: number | null; // null = unlimited
 }
 
 export const TeamSettings: React.FC<TeamSettingsProps> = ({
@@ -41,9 +51,29 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
 
+  // Role update loading state
+  const [updatingRoleFor, setUpdatingRoleFor] = useState<string | null>(null);
+
+  // Team consumption stats
+  const [usageStats, setUsageStats] = useState<any>(null);
+  const [teamBalance, setTeamBalance] = useState<number | null>(null);
+  const [memberUsages, setMemberUsages] = useState<MemberUsage[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+
+  // Determine if current user is owner or admin
+  const currentMember = members.find(m => m.user_id === currentUserId);
+  const isAdmin = currentMember?.role === 'admin';
+  const canViewStats = isOwner || isAdmin;
+
   useEffect(() => {
     loadMembers();
   }, [teamId]);
+
+  useEffect(() => {
+    if (canViewStats && teamId) {
+      loadConsumptionStats();
+    }
+  }, [canViewStats, teamId]);
 
   const loadMembers = async () => {
     setIsLoading(true);
@@ -57,6 +87,27 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     }
   };
 
+  const loadConsumptionStats = async () => {
+    setIsLoadingStats(true);
+    try {
+      const [stats, balance] = await Promise.all([
+        fetchUsageStats(teamId).catch(() => null),
+        fetchPointsBalance(teamId).catch(() => null),
+      ]);
+      setUsageStats(stats);
+      setTeamBalance(balance?.points_balance ?? null);
+
+      // Extract per-member usage from stats if available
+      if (stats?.member_usage && Array.isArray(stats.member_usage)) {
+        setMemberUsages(stats.member_usage);
+      }
+    } catch {
+      // Stats are non-critical, fail silently
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
   const handleSaveName = async () => {
     if (name === teamName) return;
     setIsSaving(true);
@@ -66,6 +117,20 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       setError('Failed to update team name');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRoleChange = async (userId: string, newRole: 'admin' | 'member') => {
+    setUpdatingRoleFor(userId);
+    try {
+      await updateMemberRole(teamId, userId, newRole);
+      setMembers(members.map(m =>
+        m.user_id === userId ? { ...m, role: newRole } : m
+      ));
+    } catch (err) {
+      setError('Failed to update member role');
+    } finally {
+      setUpdatingRoleFor(null);
     }
   };
 
@@ -115,12 +180,40 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     }
   };
 
+  const getRoleBadge = (role: string) => {
+    switch (role) {
+      case 'owner':
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            Owner
+          </span>
+        );
+      case 'admin':
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30">
+            Admin
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
+            Member
+          </span>
+        );
+    }
+  };
+
   // Get display info for a member - use current user's info if it's the current user
   const getMemberDisplayInfo = (member: TeamMember) => {
     const isCurrentUser = member.user_id === currentUserId;
     const name = isCurrentUser ? currentUserName : (member.name || null);
     const email = isCurrentUser ? currentUserEmail : (member.email || null);
     return { name, email, isCurrentUser };
+  };
+
+  // Get member monthly usage info
+  const getMemberUsage = (userId: string): MemberUsage | undefined => {
+    return memberUsages.find(u => u.user_id === userId);
   };
 
   return (
@@ -143,6 +236,66 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
             >
               {isSaving ? <Loader2 size={16} className="animate-spin" /> : 'Save'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Team Consumption Stats (owner and admin only) */}
+      {canViewStats && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <BarChart3 size={18} />
+            Team Consumption
+          </h3>
+          <div className="border border-zinc-800 rounded-lg p-4 bg-zinc-900/30">
+            {isLoadingStats ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="animate-spin text-zinc-500" size={20} />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Summary row */}
+                <div className="flex items-center gap-6">
+                  <div>
+                    <p className="text-xs text-zinc-500 uppercase font-medium">Points Used This Month</p>
+                    <p className="text-2xl font-bold text-white">
+                      {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
+                    </p>
+                  </div>
+                  {teamBalance !== null && (
+                    <div>
+                      <p className="text-xs text-zinc-500 uppercase font-medium">Current Balance</p>
+                      <p className="text-2xl font-bold text-indigo-400">
+                        {teamBalance.toLocaleString()}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Top consumers */}
+                {usageStats?.top_consumers && usageStats.top_consumers.length > 0 && (
+                  <div>
+                    <p className="text-xs text-zinc-500 uppercase font-medium mb-2">Top Consumers</p>
+                    <div className="space-y-1.5">
+                      {usageStats.top_consumers.map((consumer: any, idx: number) => (
+                        <div key={consumer.user_id || idx} className="flex items-center justify-between text-sm">
+                          <span className="text-zinc-300">
+                            {consumer.name || consumer.email || 'Unknown'}
+                          </span>
+                          <span className="text-zinc-400 font-mono">
+                            {consumer.points_used?.toLocaleString() ?? 0} pts
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!usageStats && (
+                  <p className="text-sm text-zinc-500">No consumption data available yet.</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -173,6 +326,9 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Member</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Role</th>
+                  {canViewStats && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Monthly Usage</th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Joined</th>
                   {isOwner && (
                     <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 uppercase">Actions</th>
@@ -182,6 +338,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
               <tbody className="divide-y divide-zinc-800/50">
                 {members.map((member) => {
                   const { name, email, isCurrentUser } = getMemberDisplayInfo(member);
+                  const usage = getMemberUsage(member.user_id);
                   return (
                   <tr key={member.user_id} className="hover:bg-zinc-800/30">
                     <td className="px-4 py-3">
@@ -192,10 +349,11 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                           </span>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-zinc-200">
-                            {name || email || 'Unknown'}
+                          <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+                            <span>{name || email || 'Unknown'}</span>
+                            {getRoleBadge(member.role)}
                             {isCurrentUser && (
-                              <span className="ml-2 text-xs text-zinc-500">(You)</span>
+                              <span className="text-xs text-zinc-500">(You)</span>
                             )}
                           </p>
                           {email && name && (
@@ -205,11 +363,47 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="flex items-center gap-1.5 text-sm text-zinc-300">
-                        {getRoleIcon(member.role)}
-                        {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
-                      </span>
+                      {isOwner && member.role !== 'owner' ? (
+                        <div className="flex items-center gap-2">
+                          {getRoleIcon(member.role)}
+                          <select
+                            value={member.role}
+                            onChange={(e) => handleRoleChange(member.user_id, e.target.value as 'admin' | 'member')}
+                            disabled={updatingRoleFor === member.user_id}
+                            className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
+                          >
+                            <option value="member">Member</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          {updatingRoleFor === member.user_id && (
+                            <Loader2 size={12} className="animate-spin text-zinc-500" />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-sm text-zinc-300">
+                          {getRoleIcon(member.role)}
+                          {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
+                        </span>
+                      )}
                     </td>
+                    {canViewStats && (
+                      <td className="px-4 py-3 text-sm text-zinc-400">
+                        {usage ? (
+                          usage.monthly_limit !== null ? (
+                            <span>
+                              {usage.points_used.toLocaleString()} / {usage.monthly_limit.toLocaleString()} points used
+                            </span>
+                          ) : (
+                            <span>
+                              {usage.points_used.toLocaleString()} points used
+                              <span className="ml-1 text-zinc-600">(Unlimited)</span>
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-zinc-600">--</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-sm text-zinc-500">
                       {new Date(member.joined_at).toLocaleDateString()}
                     </td>
@@ -230,7 +424,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 })}
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={isOwner ? 4 : 3} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)} className="px-4 py-8 text-center text-zinc-500">
                       No members found
                     </td>
                   </tr>
