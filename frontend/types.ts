@@ -119,7 +119,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points';
 
 export interface ApiKey {
   id: number;
@@ -191,7 +191,7 @@ export interface Team {
 export interface TeamMember {
   team_id: string;
   user_id: string;
-  role: 'owner' | 'member';
+  role: 'owner' | 'admin' | 'member';
   joined_at: string;
   // Joined from auth.users
   email?: string;
