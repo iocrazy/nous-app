@@ -1614,6 +1614,7 @@ export default function App() {
         unreadCount={notifications.filter(n => !n.read).length}
         onNotificationClick={() => setIsNotificationPanelOpen(!isNotificationPanelOpen)}
         onUserClick={() => setIsUserDropdownOpen(true)}
+        onPointsClick={() => setView('points')}
       />
 
       {/* Notification Panel - positioned relative to header */}
