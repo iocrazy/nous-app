@@ -8,10 +8,11 @@ Supabase 认证路由
 
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
+from app.repositories.user_logs_repository import log_user_action
 from app.services.supabase_auth_service import (
     SupabaseAdminAuthService,
     SupabaseAuthService,
@@ -73,7 +74,7 @@ class UpdateRoleRequest(BaseModel):
 
 
 @router.post("/signup")
-async def sign_up(request: SignUpRequest):
+async def sign_up(request: SignUpRequest, background_tasks: BackgroundTasks):
     """
     用户注册
 
@@ -96,11 +97,22 @@ async def sign_up(request: SignUpRequest):
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "注册失败"))
 
+    # Log signup
+    user_id = result.get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User registered",
+            status="success",
+        )
+
     return result
 
 
 @router.post("/signin")
-async def sign_in(request: SignInRequest):
+async def sign_in(request: SignInRequest, background_tasks: BackgroundTasks):
     """
     用户登录
 
@@ -114,14 +126,50 @@ async def sign_in(request: SignInRequest):
     if not result.get("success"):
         raise HTTPException(status_code=401, detail=result.get("message", "登录失败"))
 
+    # Log signin
+    user_id = result.get("session", {}).get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User logged in",
+            status="success",
+        )
+
     return result
 
 
 @router.post("/signout")
-async def sign_out():
+async def sign_out(
+    background_tasks: BackgroundTasks,
+    authorization: Optional[str] = Header(None),
+):
     """用户登出"""
+    # Try to extract user_id before signing out
+    user_id = None
+    if authorization:
+        try:
+            token = authorization.replace("Bearer ", "")
+            auth_svc = SupabaseAuthService()
+            user = await auth_svc.get_user(token)
+            if user:
+                user_id = user.get("id")
+        except Exception:
+            pass
+
     auth_service = SupabaseAuthService()
     result = await auth_service.sign_out()
+
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User logged out",
+            status="success",
+        )
+
     return result
 
 

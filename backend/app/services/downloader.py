@@ -456,9 +456,10 @@ class DownloaderService:
                         await log_user_action(
                             user_id=user_id,
                             action="download",
-                            message=f"视频下载成功: {video_title[:30]}...",
+                            message=f"Video downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
+                            details={"media_type": "video", "platform": video_data.get("source_platform", "douyin")},
                         )
                     break
 
@@ -482,10 +483,10 @@ class DownloaderService:
                     await log_user_action(
                         user_id=user_id,
                         action="download",
-                        message=f"视频下载失败: {video_title[:30]}...",
+                        message=f"Video download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": result.error},
+                        details={"error": result.error, "platform": video_data.get("source_platform", "douyin")},
                     )
 
             return result
@@ -639,9 +640,10 @@ class DownloaderService:
                     await log_user_action(
                         user_id=user_id,
                         action="download",
-                        message=f"图集下载成功: {video_title[:30]}... ({total_downloaded}个文件)",
+                        message=f"Image set downloaded: {video_title[:30]}... ({total_downloaded} files)",
                         status="success",
                         aweme_id=platform_id,
+                        details={"media_type": "images", "file_count": total_downloaded, "platform": video_data.get("source_platform", "douyin")},
                     )
 
             else:
@@ -670,10 +672,10 @@ class DownloaderService:
                     await log_user_action(
                         user_id=user_id,
                         action="download",
-                        message=f"图集下载失败: {video_title[:30]}...",
+                        message=f"Image set download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": error_msg[:200]},
+                        details={"error": error_msg[:200], "platform": video_data.get("source_platform", "douyin")},
                     )
 
         except Exception as e:
@@ -901,9 +903,10 @@ class DownloaderService:
                         await log_user_action(
                             user_id=user_id,
                             action="download",
-                            message=f"封面下载成功: {video_title[:30]}...",
+                            message=f"Cover downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
+                            details={"media_type": "cover", "platform": source_platform},
                         )
                     return result
 
@@ -926,9 +929,10 @@ class DownloaderService:
                 await log_user_action(
                     user_id=user_id,
                     action="download",
-                    message=f"封面下载失败: {video_title[:30]}...",
+                    message=f"Cover download failed: {video_title[:30]}...",
                     status="error",
                     aweme_id=platform_id,
+                    details={"platform": source_platform},
                 )
 
             return result

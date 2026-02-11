@@ -14,6 +14,7 @@ from loguru import logger
 
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
+from app.repositories.user_logs_repository import log_user_action
 from app.services.downloader import DownloaderService
 
 
@@ -228,6 +229,16 @@ def download_media_task(
                 tracker.complete()
                 logger.success(f"[Celery] Download task completed: {platform_id}")
 
+                # Log success
+                run_async(log_user_action(
+                    user_id=user_id,
+                    action="download",
+                    message=f"Download completed: {video_title[:30]}...",
+                    status="success",
+                    aweme_id=platform_id,
+                    details={"media_type": media_type, "task_id": task_id},
+                ))
+
                 # Chain AI pipeline if user has auto-transcribe enabled
                 _maybe_chain_ai_pipeline(platform_id, user_id)
 
@@ -275,6 +286,16 @@ def download_media_task(
                 f"[Celery] Scheduling retry {retry_count + 1}/3 for {platform_id} in {countdown}s"
             )
             raise self.retry(exc=e, countdown=countdown)
+
+        # Log failure after max retries
+        run_async(log_user_action(
+            user_id=user_id,
+            action="download",
+            message=f"Download failed: {video_title[:30]}...",
+            status="error",
+            aweme_id=platform_id,
+            details={"error": error_msg[:200], "retry_count": retry_count},
+        ))
 
         logger.error(f"[Celery] Max retries reached for {platform_id}")
         return {
@@ -459,6 +480,16 @@ def download_ytdlp_task(
         task_manager.complete_task(platform_id)
         logger.success(f"[Celery/yt-dlp] Download task completed: {platform_id}")
 
+        # Log success
+        run_async(log_user_action(
+            user_id=user_id,
+            action="download",
+            message=f"Download completed (yt-dlp): {video_title[:30]}...",
+            status="success",
+            aweme_id=platform_id,
+            details={"media_type": "video", "task_id": task_id},
+        ))
+
         # Chain AI pipeline if user has auto-transcribe enabled
         _maybe_chain_ai_pipeline(platform_id, user_id)
 
@@ -482,6 +513,16 @@ def download_ytdlp_task(
                 f"[Celery/yt-dlp] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
             )
             raise self.retry(exc=e, countdown=countdown)
+
+        # Log failure after max retries
+        run_async(log_user_action(
+            user_id=user_id,
+            action="download",
+            message=f"Download failed (yt-dlp): {video_title[:30]}...",
+            status="error",
+            aweme_id=platform_id,
+            details={"error": error_msg[:200], "retry_count": self.request.retries},
+        ))
 
         return {
             "status": "failed",
