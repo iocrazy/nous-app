@@ -28,6 +28,7 @@ export interface ApiKeyResponse {
   id: number;
   key_id: string;
   key_prefix: string;
+  key_value?: string | null;
   name: string;
   description: string | null;
   scopes: string[];

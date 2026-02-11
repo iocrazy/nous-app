@@ -84,6 +84,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
         id: k.id,
         key_id: k.key_id,
         key_prefix: k.key_prefix,
+        key_value: k.key_value || undefined,
         name: k.name,
         description: k.description || undefined,
         status: k.status as 'active' | 'revoked',
