@@ -1,5 +1,6 @@
 
 import { Video, DownloadStatus } from '../types';
+import { getSupabaseClient } from '../supabaseClient';
 
 // API config
 const getApiUrl = (): string => {
@@ -22,19 +23,31 @@ const getApiKey = (): string | null => {
   return null;
 };
 
-// Get auth token from Supabase session
+// Get auth token from Supabase session in localStorage
 const getAuthToken = (): string | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
+      // Derive the expected key from the Supabase client URL
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        // Supabase JS stores session as sb-{host-part}-auth-token
+        // e.g. https://sb-mediahub.heygo.cn:88 → sb-sb-mediahub-auth-token
+        const url = new URL((supabase as any).supabaseUrl);
+        const hostPrefix = url.hostname.split('.')[0];
+        const expectedKey = `sb-${hostPrefix}-auth-token`;
+        const session = window.localStorage.getItem(expectedKey);
+        if (session) {
+          const parsed = JSON.parse(session);
+          if (parsed?.access_token) return parsed.access_token;
+        }
+      }
+
+      // Fallback: find any matching key
       const keys = Object.keys(window.localStorage).filter(k =>
         k.startsWith('sb-') && k.endsWith('-auth-token')
       );
-
-      const selfHostedKey = keys.find(k => !k.includes('zesczfidxsikvohrxson'));
-      const keyToUse = selfHostedKey || keys[0];
-
-      if (keyToUse) {
-        const session = window.localStorage.getItem(keyToUse);
+      if (keys.length > 0) {
+        const session = window.localStorage.getItem(keys[0]);
         if (session) {
           const parsed = JSON.parse(session);
           return parsed?.access_token || null;
