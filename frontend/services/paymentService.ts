@@ -43,7 +43,7 @@ export const createOrder = async (
   paymentMethod: 'wechat' | 'alipay',
   teamId: string
 ): Promise<PaymentOrder> => {
-  const url = `${API_BASE}/api/v1/payment/orders`;
+  const url = `${API_BASE}/api/v1/payment/create-order`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -74,7 +74,7 @@ export const createOrder = async (
 export const pollOrderStatus = async (
   orderId: string
 ): Promise<{ payment_status: string; points_amount: number; paid_at: string | null }> => {
-  const url = `${API_BASE}/api/v1/payment/orders/${orderId}/status`;
+  const url = `${API_BASE}/api/v1/payment/order/${orderId}/status`;
 
   const response = await fetch(url, {
     method: 'GET',

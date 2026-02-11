@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
@@ -42,6 +42,8 @@ import { LogsPanel } from './components/LogsPanel';
 import { SystemMonitorPanel } from './components/SystemMonitorPanel';
 import { SemanticSearchBar } from './components/SemanticSearchBar';
 import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
+import { PointsCenter } from './components/PointsCenter';
+import { PaymentModal } from './components/PaymentModal';
 import { SmartCollection } from './services/smartCollectionService';
 import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
@@ -390,6 +392,7 @@ export default function App() {
   });
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -2712,7 +2715,29 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW: POINTS */}
+        {view === 'points' && (
+          <PointsCenter onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
+        )}
+
       </main>
+
+      {/* Payment Modal */}
+      {selectedPaymentPackage && selectedTeamId && (
+        <PaymentModal
+          package={selectedPaymentPackage}
+          teamId={selectedTeamId}
+          onClose={() => setSelectedPaymentPackage(null)}
+          onSuccess={() => {
+            setSelectedPaymentPackage(null);
+            // Refresh the points view if currently viewing it
+            if (view === 'points') {
+              setView('parser');
+              setTimeout(() => setView('points'), 0);
+            }
+          }}
+        />
+      )}
 
       {/* Mobile Library Search - Fixed outside main to avoid transform issues */}
       {view === 'library' && !selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (
