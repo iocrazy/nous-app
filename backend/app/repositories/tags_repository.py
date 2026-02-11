@@ -168,7 +168,7 @@ class TagsRepository:
 
     async def add_tag_to_video(
         self,
-        video_id: int,
+        video_id: str,
         tag_id: str,
         confidence: Optional[float] = None,
         source: str = "manual",
@@ -176,7 +176,7 @@ class TagsRepository:
         """Add a tag to a video.
 
         Args:
-            video_id: The video ID (BIGINT in database)
+            video_id: The video UUID
             tag_id: The tag UUID
             confidence: Optional confidence score for auto-assigned tags
             source: How the tag was added ('manual', 'auto', 'ai')
@@ -190,7 +190,7 @@ class TagsRepository:
         logger.info(f"Added tag {tag_id} to video {video_id}")
         return result.data[0]
 
-    async def remove_tag_from_video(self, video_id: int, tag_id: str) -> bool:
+    async def remove_tag_from_video(self, video_id: str, tag_id: str) -> bool:
         """Remove a tag from a video."""
         video_tags_table = await self._get_video_tags_table()
         result = (
@@ -201,7 +201,7 @@ class TagsRepository:
         )
         return len(result.data) > 0
 
-    async def get_video_tags(self, video_id: int) -> List[dict]:
+    async def get_video_tags(self, video_id: str) -> List[dict]:
         """Get all tags for a video with tag details."""
         video_tags_table = await self._get_video_tags_table()
         result = (
@@ -227,7 +227,7 @@ class TagsRepository:
         return [r["videos"] for r in result.data if r.get("videos")]
 
     async def bulk_add_tags_to_video(
-        self, video_id: int, tag_ids: List[str], source: str = "manual"
+        self, video_id: str, tag_ids: List[str], source: str = "manual"
     ) -> List[dict]:
         """Add multiple tags to a video at once."""
         data = [

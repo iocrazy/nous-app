@@ -41,7 +41,7 @@ export interface TagUpdate {
 }
 
 export interface VideoTagsResponse {
-  video_id: number;
+  video_id: string;
   tags: Tag[];
 }
 
@@ -125,7 +125,7 @@ export const deleteTag = async (tagId: number): Promise<void> => {
 /**
  * Get tags for a specific video
  */
-export const getVideoTags = async (videoId: number): Promise<Tag[]> => {
+export const getVideoTags = async (videoId: string): Promise<Tag[]> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags`, {
@@ -146,7 +146,7 @@ export const getVideoTags = async (videoId: number): Promise<Tag[]> => {
 /**
  * Add tags to a video
  */
-export const addTagsToVideo = async (videoId: number, tagIds: string[]): Promise<VideoTagsResponse> => {
+export const addTagsToVideo = async (videoId: string, tagIds: string[]): Promise<VideoTagsResponse> => {
   const apiUrl = getApiUrl();
 
   // Backend expects single tag at a time: { tag_id, confidence?, source? }
@@ -172,7 +172,7 @@ export const addTagsToVideo = async (videoId: number, tagIds: string[]): Promise
 /**
  * Remove a tag from a video
  */
-export const removeTagFromVideo = async (videoId: number, tagId: string): Promise<void> => {
+export const removeTagFromVideo = async (videoId: string, tagId: string): Promise<void> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags/${tagId}`, {

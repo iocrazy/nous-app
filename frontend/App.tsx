@@ -845,8 +845,8 @@ export default function App() {
         async (payload) => {
           console.log('Video tags realtime update:', payload.eventType, payload);
 
-          const newRecord = payload.new as { video_id: number; tag_id: string };
-          const oldRecord = payload.old as { video_id: number; tag_id: string };
+          const newRecord = payload.new as { video_id: string; tag_id: string };
+          const oldRecord = payload.old as { video_id: string; tag_id: string };
           const videoId = newRecord?.video_id || oldRecord?.video_id;
 
           if (!videoId) return;
