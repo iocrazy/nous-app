@@ -231,7 +231,7 @@ def update_system_status():
     logger.debug("[Celery Beat] Updating system_status...")
 
     try:
-        from app.db.supabase_client import get_supabase_admin
+        from app.db.supabase_client import get_async_supabase_admin
         from app.services.system_monitor_service import (
             get_active_tasks,
             get_network_status,
@@ -249,8 +249,11 @@ def update_system_status():
             "active_tasks": get_active_tasks(),
         }
 
-        supabase = get_supabase_admin()
-        supabase.table("system_status").upsert(data).execute()
+        async def _upsert():
+            supabase = await get_async_supabase_admin()
+            await supabase.table("system_status").upsert(data).execute()
+
+        run_async(_upsert())
 
         logger.debug("[Celery Beat] system_status updated successfully")
         return {"status": "success"}

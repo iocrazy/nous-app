@@ -15,28 +15,13 @@ from typing import Annotated, List, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
-from supabase import Client
 from supabase._async.client import AsyncClient
 
 from app.core.api_key_scopes import check_scope_permission, get_required_scopes
 from app.db.supabase_client import get_async_supabase as _get_async_supabase
 from app.db.supabase_client import get_async_supabase_admin as _get_async_supabase_admin
-from app.db.supabase_client import get_supabase as _get_supabase
-from app.db.supabase_client import get_supabase_admin as _get_supabase_admin
 
 
-# 同步客户端 (for backward compatibility and Celery)
-def get_supabase() -> Client:
-    """获取 Supabase 客户端 (同步)"""
-    return _get_supabase()
-
-
-def get_supabase_admin() -> Client:
-    """获取 Supabase Admin 客户端 (同步)"""
-    return _get_supabase_admin()
-
-
-# 异步客户端 (推荐用于 FastAPI)
 async def get_async_supabase() -> AsyncClient:
     """获取异步 Supabase 客户端"""
     return await _get_async_supabase()
@@ -48,8 +33,6 @@ async def get_async_supabase_admin() -> AsyncClient:
 
 
 # 依赖注入类型
-SupabaseDep = Annotated[Client, Depends(get_supabase)]
-SupabaseAdminDep = Annotated[Client, Depends(get_supabase_admin)]
 AsyncSupabaseDep = Annotated[AsyncClient, Depends(get_async_supabase)]
 AsyncSupabaseAdminDep = Annotated[AsyncClient, Depends(get_async_supabase_admin)]
 
