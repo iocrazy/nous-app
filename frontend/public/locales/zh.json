@@ -70,7 +70,15 @@
     "leave": "离开团队",
     "delete": "删除团队",
     "confirmLeave": "确定离开此团队？",
-    "confirmDelete": "确定删除此团队？此操作无法撤销。"
+    "confirmDelete": "确定删除此团队？此操作无法撤销。",
+    "admin": "管理员",
+    "changeRole": "更改角色",
+    "monthlyUsage": "本月用量",
+    "teamConsumption": "团队消耗",
+    "pointsUsedThisMonth": "本月已用积分",
+    "currentBalance": "当前余额",
+    "topConsumers": "消耗排行",
+    "unlimited": "无限制"
   },
   "common": {
     "save": "保存",
@@ -145,6 +153,31 @@
       "empty": "暂无标签，创建第一个标签吧！",
       "noResults": "未找到匹配的标签"
     }
+  },
+  "points": {
+    "balance": "积分余额",
+    "buyPoints": "购买积分",
+    "pricing": "定价",
+    "transactions": "最近交易",
+    "noTransactions": "暂无交易记录",
+    "storage": "存储空间",
+    "storageUsed": "{{used}} / {{total}}",
+    "perPoint": "/积分",
+    "insufficientPoints": "积分不足，需要 {{need}}，当前 {{have}}。",
+    "monthlyLimitExceeded": "已超出月度限额。",
+    "usageStats": "使用统计",
+    "totalConsumed": "总消耗",
+    "totalPurchased": "总购买"
+  },
+  "payment": {
+    "selectMethod": "选择支付方式",
+    "wechatPay": "微信支付",
+    "alipay": "支付宝",
+    "confirmPayment": "确认支付",
+    "waitingForPayment": "等待支付中...",
+    "paymentSuccessful": "支付成功！",
+    "pointsAdded": "已充值 {{amount}} 积分",
+    "orderHistory": "订单历史"
   },
   "download": {
     "downloading": "下载中",
