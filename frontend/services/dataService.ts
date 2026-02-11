@@ -241,6 +241,10 @@ export const saveItem = async (item: Video): Promise<Video> => {
     published_at: item.published_at || new Date().toISOString(),
     video_download_urls: item.video_download_urls || [],
     image_download_urls: item.image_download_urls || [],
+    // DB enum uses lowercase values
+    video_download_status: item.video_download_status?.toLowerCase() || 'pending',
+    music_download_status: item.music_download_status?.toLowerCase() || 'pending',
+    cover_download_status: item.cover_download_status?.toLowerCase() || 'pending',
   };
 
   const { data, error } = await supabase
