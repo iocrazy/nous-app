@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project, ProjectFile } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project, ProjectFile, SidebarMode } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
@@ -48,8 +48,10 @@ import { PointsCenter } from './components/PointsCenter';
 import { PaymentModal } from './components/PaymentModal';
 import { SmartCollection } from './services/smartCollectionService';
 import { SearchResult } from './services/searchService';
-import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
-import { TeamLibraryView } from './components/TeamLibraryView';
+import { LibraryTab } from './components/LibraryTabs';
+import { Sidebar } from './components/Sidebar';
+import { resolvePermissions } from './utils/permissions';
+import { fetchTeamMembers } from './services/teamService';
 import { SettingsModal } from './components/SettingsModal';
 import { VideoDetailPanel } from './components/VideoDetailPanel';
 import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
@@ -69,38 +71,6 @@ interface LogEntry {
 
 // --- Sub-components for Cleaner App ---
 
-const SidebarItem = ({ 
-  icon: Icon, 
-  label, 
-  active, 
-  onClick,
-  hasSubmenu = false,
-  isOpen = false
-}: { 
-  icon: React.ElementType, 
-  label: string, 
-  active: boolean, 
-  onClick: () => void,
-  hasSubmenu?: boolean,
-  isOpen?: boolean
-}) => (
-  <button 
-    onClick={onClick}
-    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 group ${
-      active 
-        ? 'bg-indigo-600/10 text-indigo-400 font-medium' 
-        : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-    }`}
-  >
-    <div className="flex items-center gap-3">
-      <Icon className={`w-5 h-5 ${active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`} />
-      <span>{label}</span>
-    </div>
-    {hasSubmenu && (
-      <ChevronDown size={16} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-    )}
-  </button>
-);
 
 // --- Task Monitor Component ---
 const TaskMonitor = ({
@@ -254,6 +224,7 @@ export default function App() {
   const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [userPermissions, setUserPermissions] = useState<string[]>([]);
 
   // Library Tab State (new unified library)
   const [activeLibraryTab, setActiveLibraryTab] = useState<LibraryTab>(() => {
@@ -291,6 +262,9 @@ export default function App() {
 
   // Get current team based on selectedTeamId
   const currentTeam = teams.find(t => t.id === selectedTeamId) || null;
+
+  // Sidebar mode: derived from activeTeamId and selectedProject
+  const sidebarMode: SidebarMode = selectedProject && selectedTeamId ? 'project' : selectedTeamId ? 'team' : 'personal';
 
   // Smart Collections State
   const [activeSmartCollectionId, setActiveSmartCollectionId] = useState<number | null>(null);
@@ -556,6 +530,25 @@ export default function App() {
       fetchMyCollections().then(setCollections).catch(console.error);
     }
   }, [isAuthenticated]);
+
+  // Resolve permissions when team changes
+  useEffect(() => {
+    if (!selectedTeamId || !currentUserId) {
+      setUserPermissions([]);
+      return;
+    }
+    // Check if current user is owner first (fast path)
+    const team = teams.find(t => t.id === selectedTeamId);
+    if (team?.owner_id === currentUserId) {
+      setUserPermissions(resolvePermissions('owner'));
+      return;
+    }
+    // Fetch member role for permission resolution
+    fetchTeamMembers(selectedTeamId).then(members => {
+      const me = members.find(m => m.user_id === currentUserId);
+      setUserPermissions(resolvePermissions(me?.role || 'member'));
+    }).catch(() => setUserPermissions(resolvePermissions('member')));
+  }, [selectedTeamId, currentUserId, teams]);
 
   // Poll for system status (queue, storage, network)
   useEffect(() => {
@@ -1884,209 +1877,46 @@ export default function App() {
       </div>
 
       {/* Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xl font-bold tracking-tight">MediaHub</span>
-        </div>
-
-        <nav className="flex-1 space-y-2">
-          <SidebarItem
-            icon={Search}
-            label={t('nav.linkParser')}
-            active={view === 'parser'}
-            onClick={() => setView('parser')}
-          />
-          {/* Library with submenu (unified My Library + Team Library) */}
-          <div className="space-y-1">
-            <SidebarItem
-              icon={Library}
-              label="Library"
-              active={view === 'library'}
-              onClick={() => {
-                setView('library');
-                if (!isLibraryOpen) {
-                  toggleLibraryMenu();
-                }
-              }}
-              hasSubmenu
-              isOpen={isLibraryOpen}
-            />
-
-            {/* Library Sub-menu - Smart Collections */}
-            {isLibraryOpen && (
-              <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-                {/* Smart Collections inline */}
-                <SmartCollectionsSidebar
-                  activeCollectionId={activeSmartCollectionId}
-                  onSelectCollection={(collection) => {
-                    // Clear search state when selecting a smart collection
-                    setIsSearchActive(false);
-                    setSearchResults([]);
-                    setSearchQueryText('');
-                    setActiveSmartCollectionId(collection?.id || null);
-                    setView('library');
-                    setActiveCollectionId(null);
-                    setActiveLibraryTab('my-library');
-                  }}
-                  isInline
-                />
-
-                {/* Storage Cleanup */}
-                <button
-                  onClick={() => setView('cleanup')}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'cleanup'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Trash2 size={14} />
-                    <span>Storage Cleanup</span>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          <SidebarItem
-            icon={FolderKanban}
-            label={t('mediatrack.projects')}
-            active={view === 'mediatrack'}
-            onClick={() => { setView('mediatrack'); setSelectedProject(null); setReviewFile(null); }}
-          />
-
-          <SidebarItem
-            icon={LayoutDashboard}
-            label={t('nav.dashboard')}
-            active={view === 'dashboard'}
-            onClick={() => setView('dashboard')}
-          />
-
-          {/* Settings with submenu */}
-          <div className="space-y-1">
-            <SidebarItem
-              icon={Settings}
-              label={t('nav.settings')}
-              active={view === 'settings'}
-              onClick={() => {
-                toggleSettingsMenu();
-                if (!isSettingsOpen) {
-                  setView('settings');
-                  if (settingsTab === 'api') setSettingsTab('general');
-                }
-              }}
-              hasSubmenu
-              isOpen={isSettingsOpen}
-            />
-
-            {/* Settings Sub-menu */}
-            {isSettingsOpen && (
-              <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('general'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'general'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <FolderOpen size={14} />
-                    <span>General</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('api'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'api'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Key size={14} />
-                    <span>API Management</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('logs'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'logs'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <ScrollText size={14} />
-                    <span>Logs</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('tasks'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'tasks'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <ListTodo size={14} />
-                    <span>Tasks</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('tags'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'tags'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Tag size={14} />
-                    <span>Tags</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('ai'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'ai'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={14} />
-                    <span>AI</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setView('settings'); setSettingsTab('docs'); }}
-                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                    view === 'settings' && settingsTab === 'docs'
-                      ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <BookOpen size={14} />
-                    <span>API Docs</span>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-        </nav>
-
-        {/* Version */}
-        <div className="pt-4 pb-2 px-2 border-t border-zinc-800">
-          <span className="text-xs text-zinc-600">v{__APP_VERSION__}</span>
-        </div>
-      </aside>
+      <Sidebar
+        mode={sidebarMode}
+        view={view}
+        settingsTab={settingsTab}
+        teams={teams}
+        activeTeamId={selectedTeamId}
+        currentTeam={currentTeam}
+        permissions={userPermissions}
+        activeProject={selectedProject}
+        isLibraryOpen={isLibraryOpen}
+        isSettingsOpen={isSettingsOpen}
+        activeSmartCollectionId={activeSmartCollectionId}
+        onViewChange={(v) => {
+          setView(v as ViewState);
+          if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
+        }}
+        onSettingsTabChange={(tab) => setSettingsTab(tab as any)}
+        onToggleLibrary={toggleLibraryMenu}
+        onToggleSettings={toggleSettingsMenu}
+        onTeamChange={(teamId) => {
+          setSelectedTeamId(teamId);
+          setActiveCollectionId(null);
+          setSelectedProject(null);
+          setReviewFile(null);
+          if (!teamId) setView('parser');
+          else setView('mediatrack');
+        }}
+        onCreateTeam={handleCreateTeam}
+        onProjectBack={() => { setSelectedProject(null); setReviewFile(null); }}
+        onSmartCollectionSelect={(collection) => {
+          setIsSearchActive(false);
+          setSearchResults([]);
+          setSearchQueryText('');
+          setActiveSmartCollectionId(collection?.id || null);
+          setView('library');
+          setActiveCollectionId(null);
+          setActiveLibraryTab('my-library');
+        }}
+        onProjectSelect={setSelectedProject}
+      />
 
       {/* Main Content */}
       <main className={mainContentClass}>
@@ -2426,40 +2256,8 @@ export default function App() {
             ) : (
               // LIST/GRID VIEW
               <>
-                {/* Library Tabs - My Library | Team Library */}
-                <div className="hidden md:block">
-                  <LibraryTabs
-                    activeTab={activeLibraryTab}
-                    onTabChange={handleLibraryTabChange}
-                    currentTeam={currentTeam}
-                    onTeamClick={() => setIsUserDropdownOpen(true)}
-                  />
-                </div>
-
-                {/* Team Library Folder View - When no collection is selected */}
-                {activeLibraryTab === 'team-library' && !activeCollectionId && (
-                  <TeamLibraryView
-                      collections={collections.filter(c => c.team_id === selectedTeamId)}
-                    activeCollectionId={activeCollectionId}
-                    onSelectCollection={(id) => {
-                      // Clear search state when selecting a collection
-                      setIsSearchActive(false);
-                      setSearchResults([]);
-                      setSearchQueryText('');
-                      setActiveCollectionId(id);
-                    }}
-                    onBackToFolders={() => setActiveCollectionId(null)}
-                    onCreateCollection={() => {
-                      // Pre-select current team when creating from Team Library
-                      setIsCreateCollectionModalOpen(true);
-                    }}
-                    currentTeam={currentTeam}
-                    isLoading={isLoadingLibrary}
-                  />
-                )}
-
-                {/* Desktop Header - Show when in My Library or inside a collection */}
-                {(activeLibraryTab === 'my-library' || activeCollectionId) && (
+                {/* Desktop Header */}
+                {(
                 <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
                     <div className="flex items-center gap-3">
