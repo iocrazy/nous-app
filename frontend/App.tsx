@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project, ProjectFile } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
@@ -57,6 +57,7 @@ import { ToastProvider } from './components/Toast';
 import { ProjectsListView } from './components/ProjectsListView';
 import { ProjectFilesView } from './components/ProjectFilesView';
 import { CreateProjectModal } from './components/CreateProjectModal';
+import { VideoReviewPage } from './components/VideoReviewPage';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -231,6 +232,7 @@ export default function App() {
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsModalInitialTab, setSettingsModalInitialTab] = useState<'personal' | 'team'>('personal');
@@ -1954,7 +1956,7 @@ export default function App() {
             icon={FolderKanban}
             label={t('mediatrack.projects')}
             active={view === 'mediatrack'}
-            onClick={() => { setView('mediatrack'); setSelectedProject(null); }}
+            onClick={() => { setView('mediatrack'); setSelectedProject(null); setReviewFile(null); }}
           />
 
           <SidebarItem
@@ -2762,19 +2764,29 @@ export default function App() {
 
         {/* VIEW: MEDIATRACK */}
         {view === 'mediatrack' && (
-          <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {selectedProject ? (
-              <ProjectFilesView
-                project={selectedProject}
-                onBack={() => setSelectedProject(null)}
-              />
-            ) : (
-              <ProjectsListView
-                onProjectSelect={setSelectedProject}
-                onCreateProject={() => setIsCreateProjectModalOpen(true)}
-              />
-            )}
-          </div>
+          reviewFile && selectedProject ? (
+            <VideoReviewPage
+              projectId={selectedProject.id}
+              file={reviewFile}
+              onBack={() => setReviewFile(null)}
+              currentUserId={currentUserId || ''}
+            />
+          ) : (
+            <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {selectedProject ? (
+                <ProjectFilesView
+                  project={selectedProject}
+                  onBack={() => setSelectedProject(null)}
+                  onFileReview={(file) => setReviewFile(file)}
+                />
+              ) : (
+                <ProjectsListView
+                  onProjectSelect={setSelectedProject}
+                  onCreateProject={() => setIsCreateProjectModalOpen(true)}
+                />
+              )}
+            </div>
+          )
         )}
 
         {/* VIEW: POINTS */}

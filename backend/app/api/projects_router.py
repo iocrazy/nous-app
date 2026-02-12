@@ -16,10 +16,12 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.projects_repository import ProjectsRepository
 from app.schemas.projects import (
+    CreateCommentRequest,
     LinkVideoRequest,
     ProjectCreate,
     ProjectFileUpdate,
     ProjectUpdate,
+    ReviewStatusUpdate,
 )
 from app.services.projects_service import ProjectsService
 
@@ -276,3 +278,168 @@ async def delete_file(project_id: str, file_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to delete file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete file")
+
+
+# ============================================
+# Version endpoints
+# ============================================
+
+
+@router.get("/{project_id}/files/{file_id}/versions")
+async def list_versions(project_id: str, file_id: str, auth: AuthDep):
+    """List all versions of a file."""
+    try:
+        repo = ProjectsRepository()
+        file_record = await repo.get_file_by_id(file_id)
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        if file_record.get("project_id") != project_id:
+            raise HTTPException(status_code=404, detail="File not found in this project")
+        versions = await repo.get_file_versions(file_id)
+        return {"success": True, "data": versions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list versions for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list versions")
+
+
+@router.post("/{project_id}/files/{file_id}/versions")
+async def upload_version(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    file: UploadFile = File(...),
+    notes: Optional[str] = Query(None, description="Optional notes for this version"),
+):
+    """Upload a new version of a file."""
+    try:
+        if file.size and file.size > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413, detail="File too large. Maximum size is 500 MB."
+            )
+        svc = ProjectsService()
+        result = await svc.upload_new_version(
+            project_id=project_id,
+            file_id=file_id,
+            user_id=auth.user_id,
+            file=file,
+            notes=notes,
+        )
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload version for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload version")
+
+
+# ============================================
+# Comment endpoints
+# ============================================
+
+
+@router.get("/{project_id}/files/{file_id}/comments")
+async def list_comments(
+    project_id: str,
+    file_id: str,
+    auth: AuthDep,
+    version_id: Optional[str] = Query(None, description="Filter by version ID"),
+):
+    """List comments on a file."""
+    try:
+        repo = ProjectsRepository()
+        file_record = await repo.get_file_by_id(file_id)
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        if file_record.get("project_id") != project_id:
+            raise HTTPException(status_code=404, detail="File not found in this project")
+        comments = await repo.get_comments_for_file(file_id, version_id=version_id)
+        return {"success": True, "data": comments}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list comments for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list comments")
+
+
+@router.post("/{project_id}/files/{file_id}/comments")
+async def add_comment(
+    project_id: str,
+    file_id: str,
+    data: CreateCommentRequest,
+    auth: AuthDep,
+):
+    """Add a comment to a file."""
+    try:
+        repo = ProjectsRepository()
+        file_record = await repo.get_file_by_id(file_id)
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        if file_record.get("project_id") != project_id:
+            raise HTTPException(status_code=404, detail="File not found in this project")
+
+        svc = ProjectsService()
+        result = await svc.add_comment(
+            file_id=file_id,
+            author_id=auth.user_id,
+            content=data.content,
+            timestamp_seconds=data.timestamp_seconds,
+            version_id=data.version_id,
+        )
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to add comment to file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to add comment")
+
+
+@router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
+async def delete_comment(
+    project_id: str, file_id: str, comment_id: str, auth: AuthDep
+):
+    """Delete a comment. Only the author can delete their own comment."""
+    try:
+        repo = ProjectsRepository()
+        comment = await repo.get_comment_by_id(comment_id)
+        if not comment:
+            raise HTTPException(status_code=404, detail="Comment not found")
+        if comment.get("author_id") != auth.user_id:
+            raise HTTPException(status_code=403, detail="Can only delete your own comments")
+
+        await repo.delete_comment(comment_id)
+        return {"success": True, "message": "Comment deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete comment {comment_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete comment")
+
+
+# ============================================
+# Review status endpoint
+# ============================================
+
+
+@router.put("/{project_id}/files/{file_id}/review-status")
+async def update_review_status(
+    project_id: str, file_id: str, data: ReviewStatusUpdate, auth: AuthDep
+):
+    """Update the review status of a file."""
+    try:
+        svc = ProjectsService()
+        result = await svc.update_review_status(
+            project_id=project_id,
+            file_id=file_id,
+            user_id=auth.user_id,
+            review_status=data.review_status,
+        )
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to update review status for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update review status")

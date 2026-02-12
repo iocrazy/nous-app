@@ -1,6 +1,7 @@
 import React from 'react';
 import { Video, FileText, Image, File, Clock } from 'lucide-react';
-import { ProjectFile } from '../types';
+import { useTranslation } from 'react-i18next';
+import { ProjectFile, ReviewStatus } from '../types';
 
 interface FileCardProps {
   file: ProjectFile;
@@ -33,6 +34,24 @@ const formatDate = (dateStr: string): string => {
   });
 };
 
+const STATUS_STYLES: Record<ReviewStatus, { bg: string; text: string; label: string }> = {
+  pending_review: { bg: 'bg-yellow-400/10', text: 'text-yellow-300', label: 'mediatrack.review.pendingReview' },
+  in_review: { bg: 'bg-blue-400/10', text: 'text-blue-300', label: 'mediatrack.review.inReview' },
+  feedback_collected: { bg: 'bg-orange-400/10', text: 'text-orange-300', label: 'mediatrack.review.feedbackCollected' },
+  approved: { bg: 'bg-green-400/10', text: 'text-green-300', label: 'mediatrack.review.approved' },
+};
+
+const StatusBadge: React.FC<{ status: ReviewStatus }> = ({ status }) => {
+  const { t } = useTranslation();
+  const style = STATUS_STYLES[status];
+  if (!style) return null;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text}`}>
+      {t(style.label)}
+    </span>
+  );
+};
+
 export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode }) => {
   const { icon: IconComponent, color, bg } = getFileIcon(file.file_type);
 
@@ -50,6 +69,11 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode }) =
             {file.filename}
           </p>
         </div>
+        {file.review_status && (
+          <div className="flex-shrink-0">
+            <StatusBadge status={file.review_status} />
+          </div>
+        )}
         <div className="text-xs text-zinc-500 flex-shrink-0">
           {formatFileSize(file.file_size_bytes)}
         </div>
@@ -77,7 +101,11 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode }) =
         </p>
         <div className="flex items-center justify-between mt-2 text-xs text-zinc-500">
           <span>{formatFileSize(file.file_size_bytes)}</span>
-          <span>{formatDate(file.created_at)}</span>
+          {file.review_status ? (
+            <StatusBadge status={file.review_status} />
+          ) : (
+            <span>{formatDate(file.created_at)}</span>
+          )}
         </div>
       </div>
     </div>
