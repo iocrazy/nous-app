@@ -119,7 +119,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing';
 
 export interface ApiKey {
   id: number;
@@ -197,6 +197,22 @@ export interface TeamMember {
   email?: string;
   name?: string;
 }
+
+// Sidebar modes
+export type SidebarMode = 'personal' | 'team' | 'project';
+
+// Permission system
+export type Permission =
+  | 'project.view'
+  | 'project.create'
+  | 'project.manage'
+  | 'resource.view'
+  | 'resource.upload'
+  | 'member.view'
+  | 'member.manage'
+  | 'billing.view'
+  | 'review.view'
+  | 'review.approve';
 
 // Collection types
 export interface Collection {

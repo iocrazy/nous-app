@@ -9,6 +9,20 @@
     "dashboard": "Dashboard",
     "settings": "Settings"
   },
+  "sidebar": {
+    "personal": "Personal",
+    "resources": "Resources",
+    "members": "Members",
+    "billing": "Billing",
+    "files": "Files",
+    "allFiles": "All Files",
+    "review": "Review",
+    "comments": "Comments",
+    "status": "Status",
+    "activity": "Activity",
+    "backToProjects": "Projects",
+    "projectSettings": "Project Settings"
+  },
   "user": {
     "profile": "Profile",
     "account": "Account",
