@@ -2,6 +2,7 @@ import React from 'react';
 import { Bell, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { PointsBadge } from './PointsBadge';
 
 interface HeaderProps {
   userProfile: {
@@ -12,6 +13,7 @@ interface HeaderProps {
   unreadCount: number;
   onNotificationClick: () => void;
   onUserClick: () => void;
+  onPointsClick: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,6 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
   unreadCount,
   onNotificationClick,
   onUserClick,
+  onPointsClick,
 }) => {
   const { t } = useTranslation();
 
@@ -26,6 +29,9 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="hidden md:flex h-16 items-center justify-end gap-4 px-6 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm fixed top-0 right-0 left-64 z-30">
       {/* Language Switcher */}
       <LanguageSwitcher />
+
+      {/* Points Badge */}
+      <PointsBadge onClick={onPointsClick} />
 
       {/* Notification Bell */}
       <button

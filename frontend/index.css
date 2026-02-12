@@ -11,6 +11,11 @@
 }
 
 /* Global styles */
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-background);

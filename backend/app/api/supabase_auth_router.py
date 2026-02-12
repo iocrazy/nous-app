@@ -8,16 +8,57 @@ Supabase 认证路由
 
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
+from app.db.supabase_client import get_async_supabase_admin
+from app.repositories.user_logs_repository import log_user_action
+from app.services.points_service import PointsService
 from app.services.supabase_auth_service import (
     SupabaseAdminAuthService,
     SupabaseAuthService,
 )
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+# ============================================
+# Background helpers
+# ============================================
+
+
+async def _create_team_quota_for_new_user(user_id: str) -> None:
+    """Look up the user's team and create a quota with free welcome points.
+
+    This runs as a background task so it never blocks the signup response.
+    """
+    try:
+        client = await get_async_supabase_admin()
+        team_result = (
+            await client.table("team_members")
+            .select("team_id")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not team_result.data:
+            logger.info(
+                f"No team found for new user {user_id} – skipping quota creation"
+            )
+            return
+
+        team_id = team_result.data[0]["team_id"]
+        points_service = PointsService()
+        await points_service.ensure_team_quota(team_id, grant_free_points=True)
+        logger.info(
+            f"Created team quota with welcome points for user {user_id}, "
+            f"team {team_id}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to create team quota for user {user_id}: {e}"
+        )
 
 
 # ============================================
@@ -73,7 +114,7 @@ class UpdateRoleRequest(BaseModel):
 
 
 @router.post("/signup")
-async def sign_up(request: SignUpRequest):
+async def sign_up(request: SignUpRequest, background_tasks: BackgroundTasks):
     """
     用户注册
 
@@ -96,11 +137,26 @@ async def sign_up(request: SignUpRequest):
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "注册失败"))
 
+    # Log signup and create team quota with welcome points
+    user_id = result.get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User registered",
+            status="success",
+        )
+        background_tasks.add_task(
+            _create_team_quota_for_new_user,
+            user_id,
+        )
+
     return result
 
 
 @router.post("/signin")
-async def sign_in(request: SignInRequest):
+async def sign_in(request: SignInRequest, background_tasks: BackgroundTasks):
     """
     用户登录
 
@@ -114,14 +170,50 @@ async def sign_in(request: SignInRequest):
     if not result.get("success"):
         raise HTTPException(status_code=401, detail=result.get("message", "登录失败"))
 
+    # Log signin
+    user_id = result.get("session", {}).get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User logged in",
+            status="success",
+        )
+
     return result
 
 
 @router.post("/signout")
-async def sign_out():
+async def sign_out(
+    background_tasks: BackgroundTasks,
+    authorization: Optional[str] = Header(None),
+):
     """用户登出"""
+    # Try to extract user_id before signing out
+    user_id = None
+    if authorization:
+        try:
+            token = authorization.replace("Bearer ", "")
+            auth_svc = SupabaseAuthService()
+            user = await auth_svc.get_user(token)
+            if user:
+                user_id = user.get("id")
+        except Exception:
+            pass
+
     auth_service = SupabaseAuthService()
     result = await auth_service.sign_out()
+
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User logged out",
+            status="success",
+        )
+
     return result
 
 

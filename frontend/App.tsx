@@ -6,11 +6,11 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3
+  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3, BookOpen
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
@@ -42,6 +42,8 @@ import { LogsPanel } from './components/LogsPanel';
 import { SystemMonitorPanel } from './components/SystemMonitorPanel';
 import { SemanticSearchBar } from './components/SemanticSearchBar';
 import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
+import { PointsCenter } from './components/PointsCenter';
+import { PaymentModal } from './components/PaymentModal';
 import { SmartCollection } from './services/smartCollectionService';
 import { SearchResult } from './services/searchService';
 import { LibraryTabs, LibraryTab } from './components/LibraryTabs';
@@ -214,7 +216,7 @@ const TaskMonitor = ({
 export default function App() {
   const { t } = useTranslation();
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs'>('general');
   const [urlInput, setUrlInput] = useState('');
 
   // Team and Notification State
@@ -390,6 +392,7 @@ export default function App() {
   });
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1614,6 +1617,7 @@ export default function App() {
         unreadCount={notifications.filter(n => !n.read).length}
         onNotificationClick={() => setIsNotificationPanelOpen(!isNotificationPanelOpen)}
         onUserClick={() => setIsUserDropdownOpen(true)}
+        onPointsClick={() => setView('points')}
       />
 
       {/* Notification Panel - positioned relative to header */}
@@ -2011,6 +2015,19 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <Sparkles size={14} />
                     <span>AI</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setView('settings'); setSettingsTab('docs'); }}
+                  className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
+                    view === 'settings' && settingsTab === 'docs'
+                      ? 'text-indigo-400 bg-indigo-500/5'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} />
+                    <span>API Docs</span>
                   </div>
                 </button>
               </div>
@@ -2698,7 +2715,29 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW: POINTS */}
+        {view === 'points' && (
+          <PointsCenter onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
+        )}
+
       </main>
+
+      {/* Payment Modal */}
+      {selectedPaymentPackage && selectedTeamId && (
+        <PaymentModal
+          package={selectedPaymentPackage}
+          teamId={selectedTeamId}
+          onClose={() => setSelectedPaymentPackage(null)}
+          onSuccess={() => {
+            setSelectedPaymentPackage(null);
+            // Refresh the points view if currently viewing it
+            if (view === 'points') {
+              setView('parser');
+              setTimeout(() => setView('points'), 0);
+            }
+          }}
+        />
+      )}
 
       {/* Mobile Library Search - Fixed outside main to avoid transform issues */}
       {view === 'library' && !selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (

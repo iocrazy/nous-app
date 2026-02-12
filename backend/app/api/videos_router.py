@@ -26,6 +26,7 @@ from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
 from app.services.url_router import URLRouter
+from app.services.points_service import PointsService
 from app.services.video_service import VideoService
 from app.services.ytdlp_service import YtdlpService
 
@@ -108,6 +109,23 @@ async def fetch_video(
             )
 
         logger.info(f"User {auth.user_id} starting video fetch: {url}")
+
+        # === Points check ===
+        points_service = PointsService()
+        from app.db.supabase_client import get_async_supabase_admin as _get_admin
+        _admin = await _get_admin()
+        _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+        _team_id = _tm.data[0]["team_id"] if _tm.data else None
+        if _team_id:
+            await points_service.ensure_team_quota(_team_id)
+            points_result = await points_service.check_and_consume(
+                team_id=_team_id,
+                user_id=auth.user_id,
+                action_type="video_parse",
+            )
+            if not points_result["success"]:
+                raise HTTPException(status_code=402, detail=points_result["reason"])
+        # === End points check ===
 
         # Detect platform and handler type
         platform, handler_type = URLRouter.detect_platform(url)
@@ -329,6 +347,7 @@ async def fetch_video(
             message=f"Video parsed successfully: {video_title[:30]}...",
             status="success",
             aweme_id=platform_id,
+            details={"platform": "douyin", "parse_method": parse_method},
         )
 
         # Handle datetime objects to string
@@ -372,7 +391,7 @@ async def fetch_video(
             "download_task_id": download_task_id,
         }
 
-    except HTTPException:
+    except HTTPException as he:
         # Log failure
         background_tasks.add_task(
             log_user_action,
@@ -380,6 +399,7 @@ async def fetch_video(
             action="fetch",
             message=f"Failed to fetch video: {request.url[:30]}...",
             status="error",
+            details={"error": he.detail if hasattr(he, 'detail') else str(he)},
         )
         raise
     except Exception as e:
@@ -391,6 +411,7 @@ async def fetch_video(
             action="fetch",
             message=f"Failed to fetch video: {str(e)[:50]}",
             status="error",
+            details={"error": str(e)[:200]},
         )
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {str(e)}")
 
@@ -411,6 +432,24 @@ async def fetch_videos_batch(
 
     Authentication: Bearer Token or API Key (requires `videos:fetch:batch` scope)
     """
+    # === Points check ===
+    points_service = PointsService()
+    from app.db.supabase_client import get_async_supabase_admin as _get_admin
+    _admin = await _get_admin()
+    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    if _team_id:
+        await points_service.ensure_team_quota(_team_id)
+        points_result = await points_service.check_and_consume(
+            team_id=_team_id,
+            user_id=auth.user_id,
+            action_type="video_parse_batch",
+            count=len(request.urls),
+        )
+        if not points_result["success"]:
+            raise HTTPException(status_code=402, detail=points_result["reason"])
+    # === End points check ===
+
     # If using Celery async tasks
     if request.use_celery:
         from app.tasks.parse_tasks import parse_batch_links_task
@@ -430,6 +469,7 @@ async def fetch_videos_batch(
             action="fetch_batch",
             message=f"Submitted batch Celery task: {len(request.urls)} links",
             status="pending",
+            details={"url_count": len(request.urls)},
         )
 
         return {
@@ -1147,6 +1187,7 @@ async def _handle_ytdlp_fetch(
         message=f"Video parsed via yt-dlp ({platform}): {video_title[:30]}...",
         status="success",
         aweme_id=platform_id,
+        details={"platform": platform, "parse_method": "ytdlp"},
     )
 
     # Handle datetime objects to string

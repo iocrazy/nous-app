@@ -70,7 +70,15 @@
     "leave": "Leave Team",
     "delete": "Delete Team",
     "confirmLeave": "Leave this team?",
-    "confirmDelete": "Delete this team? This cannot be undone."
+    "confirmDelete": "Delete this team? This cannot be undone.",
+    "admin": "Admin",
+    "changeRole": "Change Role",
+    "monthlyUsage": "Monthly Usage",
+    "teamConsumption": "Team Consumption",
+    "pointsUsedThisMonth": "Points Used This Month",
+    "currentBalance": "Current Balance",
+    "topConsumers": "Top Consumers",
+    "unlimited": "Unlimited"
   },
   "common": {
     "save": "Save",
@@ -145,6 +153,31 @@
       "empty": "No tags yet. Create your first tag!",
       "noResults": "No matching tags found"
     }
+  },
+  "points": {
+    "balance": "Points Balance",
+    "buyPoints": "Buy Points",
+    "pricing": "Pricing",
+    "transactions": "Recent Transactions",
+    "noTransactions": "No transactions yet",
+    "storage": "Storage",
+    "storageUsed": "{{used}} / {{total}}",
+    "perPoint": "/pt",
+    "insufficientPoints": "Insufficient points. Need {{need}}, have {{have}}.",
+    "monthlyLimitExceeded": "Monthly limit exceeded.",
+    "usageStats": "Usage Statistics",
+    "totalConsumed": "Total Consumed",
+    "totalPurchased": "Total Purchased"
+  },
+  "payment": {
+    "selectMethod": "Select Payment Method",
+    "wechatPay": "WeChat Pay",
+    "alipay": "Alipay",
+    "confirmPayment": "Confirm Payment",
+    "waitingForPayment": "Waiting for Payment...",
+    "paymentSuccessful": "Payment Successful!",
+    "pointsAdded": "{{amount}} points added",
+    "orderHistory": "Order History"
   },
   "download": {
     "downloading": "Downloading",
