@@ -311,7 +311,6 @@ class YtdlpService:
         # Engagement metrics
         like_count = ytdlp_info.get("like_count") or 0
         comment_count = ytdlp_info.get("comment_count") or 0
-        view_count = ytdlp_info.get("view_count") or 0
 
         # Hashtags
         tags = ytdlp_info.get("tags") or []
