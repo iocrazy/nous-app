@@ -1,7 +1,7 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import '@arco-design/web-react/dist/css/arco.css';
 
 body {
-  @apply bg-gray-50 text-gray-900;
+  margin: 0;
+  background-color: var(--color-bg-1);
+  color: var(--color-text-1);
 }
