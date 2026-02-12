@@ -15,11 +15,9 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.services.system_monitor_service import (
-    get_active_tasks,
     get_network_status,
     get_queue_status,
     get_storage_status,
-    get_worker_stats,
 )
 
 router = APIRouter(prefix="/system")

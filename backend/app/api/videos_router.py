@@ -1116,7 +1116,8 @@ async def _handle_ytdlp_fetch(
             parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
             parsed_data["share_count"] = extra_stats.get("share", 0)
             logger.info(
-                f"[yt-dlp] Bilibili stats enriched: fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
+                "[yt-dlp] Bilibili stats enriched: "
+                f"fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
             )
 
     platform_id = parsed_data["platform_id"]
