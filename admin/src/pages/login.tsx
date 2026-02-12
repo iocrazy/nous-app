@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Form, Input, Button, Message, Card, Typography } from '@arco-design/web-react'
 import { IconEmail, IconLock } from '@arco-design/web-react/icon'
@@ -8,8 +8,13 @@ const { Title, Text } = Typography
 
 export function Login() {
   const [loading, setLoading] = useState(false)
-  const { login } = useAuth()
+  const { login, user } = useAuth()
   const navigate = useNavigate()
+
+  // Redirect to dashboard if already authenticated (handles late onAuthStateChange)
+  useEffect(() => {
+    if (user) navigate('/', { replace: true })
+  }, [user, navigate])
 
   const handleSubmit = async (values: { email: string; password: string }) => {
     setLoading(true)

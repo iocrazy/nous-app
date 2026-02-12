@@ -21,6 +21,68 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
+/**
+ * Try to recover a Supabase session from localStorage.
+ * Supabase JS v2 stores sessions under a key like "sb-<ref>-auth-token".
+ * When the browser Lock API hangs, getSession() never resolves,
+ * so we read localStorage directly as a fallback.
+ */
+function recoverSessionFromStorage(): { user: User; access_token: string } | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const raw = localStorage.getItem(key)
+        if (!raw) continue
+        const parsed = JSON.parse(raw)
+        if (parsed?.access_token && parsed?.user) {
+          return { user: parsed.user, access_token: parsed.access_token }
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null
+}
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+/**
+ * Fetch user profile via raw fetch() instead of Supabase client.
+ * When the Lock API blocks the Supabase client, all .from() queries
+ * also hang. This bypasses the client entirely.
+ */
+async function fetchProfileRaw(
+  userId: string,
+  email: string,
+  accessToken: string,
+): Promise<UserIdentity | null> {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/user_profiles?select=username,avatar_url,role&id=eq.${userId}`
+    const resp = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+    if (!resp.ok) return null
+    const rows = await resp.json()
+    const profile = rows?.[0]
+    if (!profile) return null
+    return {
+      id: userId,
+      email,
+      name: profile.username || email,
+      avatar: profile.avatar_url || undefined,
+      role: profile.role,
+    }
+  } catch {
+    return null
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserIdentity | null>(null)
   const [session, setSession] = useState<Session | null>(null)
@@ -48,51 +110,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loadIdentity = useCallback(async (authUser: User) => {
+    try {
+      const identity = await fetchProfile(authUser)
+      if (identity?.role === 'admin') {
+        setUser(identity)
+      } else {
+        setUser(null)
+      }
+    } catch {
+      setUser(null)
+    }
+  }, [fetchProfile])
+
   useEffect(() => {
-    // Supabase JS v2 getSession() uses browser Lock API which can hang;
-    // race against a timeout so the UI is never stuck loading.
-    const timeout = new Promise<null>(res => setTimeout(() => res(null), 5000))
-    const sessionPromise = supabase.auth.getSession()
-      .then(async ({ data: { session: s } }) => {
-        setSession(s)
-        if (s?.user) {
-          try {
-            const identity = await fetchProfile(s.user)
-            if (identity?.role === 'admin') {
-              setUser(identity)
-            } else {
-              setUser(null)
-            }
-          } catch {
-            setUser(null)
+    let cancelled = false
+
+    async function initSession() {
+      // Race getSession() against a 2s timeout.
+      // If the Lock API hangs, fall back to reading localStorage directly.
+      const TIMEOUT_MS = 2000
+      let resolved = false
+
+      const sessionResult = await Promise.race([
+        supabase.auth.getSession().then(({ data }) => {
+          resolved = true
+          return data.session
+        }).catch(() => null),
+        new Promise<null>(res => setTimeout(() => {
+          if (!resolved) res(null)
+        }, TIMEOUT_MS)),
+      ])
+
+      if (cancelled) return
+
+      if (sessionResult?.user) {
+        setSession(sessionResult)
+        await loadIdentity(sessionResult.user)
+      } else {
+        // Fallback: read session from localStorage and use raw fetch
+        // (Supabase client data queries also hang when Lock API blocks)
+        const stored = recoverSessionFromStorage()
+        if (stored) {
+          const identity = await fetchProfileRaw(
+            stored.user.id,
+            stored.user.email || '',
+            stored.access_token,
+          )
+          if (identity?.role === 'admin') {
+            setUser(identity)
           }
         }
-        return true
-      })
-      .catch(() => null)
+      }
 
-    Promise.race([sessionPromise, timeout]).then(() => {
-      setIsLoading(false)
-    })
+      if (!cancelled) setIsLoading(false)
+    }
+
+    initSession()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, s) => {
         setSession(s)
         if (s?.user) {
-          const identity = await fetchProfile(s.user)
-          if (identity?.role === 'admin') {
-            setUser(identity)
-          } else {
-            setUser(null)
-          }
+          await loadIdentity(s.user)
         } else {
           setUser(null)
         }
       },
     )
 
-    return () => subscription.unsubscribe()
-  }, [fetchProfile])
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
+  }, [loadIdentity])
 
   const login = useCallback(async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
