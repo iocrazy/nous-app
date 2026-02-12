@@ -1,0 +1,109 @@
+# app/schemas/projects.py
+
+"""
+MediaTrack project and file validation schema module
+
+Defines Pydantic 2.0 validation schemas for the project-based file
+management system, including project CRUD, file metadata, and
+video linking operations.
+"""
+
+from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class ProjectCreate(BaseModel):
+    """Request body for creating a new project"""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    team_id: Optional[str] = None
+    project_type: str = Field(
+        default="personal", pattern="^(internal|external|personal)$"
+    )
+    project_group: Optional[str] = Field(None, max_length=100)
+
+
+class ProjectUpdate(BaseModel):
+    """Request body for updating an existing project"""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    project_type: Optional[str] = Field(
+        None, pattern="^(internal|external|personal)$"
+    )
+    project_group: Optional[str] = Field(None, max_length=100)
+    is_starred: Optional[bool] = None
+
+
+class ProjectResponse(BaseModel):
+    """API response for a single project"""
+
+    id: str
+    name: str
+    description: Optional[str] = None
+    owner_id: str
+    team_id: Optional[str] = None
+    project_type: str
+    project_group: Optional[str] = None
+    is_starred: bool = False
+    file_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectFileCreate(BaseModel):
+    """Request body for creating a file record"""
+
+    filename: str = Field(..., min_length=1, max_length=500)
+    notes: Optional[str] = None
+
+
+class ProjectFileUpdate(BaseModel):
+    """Request body for updating an existing file"""
+
+    filename: Optional[str] = Field(None, min_length=1, max_length=500)
+    notes: Optional[str] = None
+    is_trashed: Optional[bool] = None
+
+
+class ProjectFileResponse(BaseModel):
+    """API response for a single project file"""
+
+    id: str
+    project_id: str
+    filename: str
+    file_type: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    video_id: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    resolution: Optional[str] = None
+    fps: Optional[float] = None
+    video_codec: Optional[str] = None
+    audio_codec: Optional[str] = None
+    video_bitrate_kbps: Optional[int] = None
+    audio_bitrate_kbps: Optional[int] = None
+    audio_channels: Optional[int] = None
+    audio_sample_rate: Optional[int] = None
+    thumbnail_path: Optional[str] = None
+    cover_image_path: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    notes: Optional[str] = None
+    is_trashed: bool = False
+    trashed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LinkVideoRequest(BaseModel):
+    """Request body for linking a video to a project"""
+
+    video_id: str = Field(..., description="ID of the video to link")

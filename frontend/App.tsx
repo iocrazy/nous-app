@@ -6,11 +6,12 @@ import {
   LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
   CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
   ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3, BookOpen
+  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3, BookOpen,
+  FolderKanban
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage } from './types';
+import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project } from './types';
 import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
 import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
 import { fetchMyTeams } from './services/teamService';
@@ -53,6 +54,9 @@ import { SettingsModal } from './components/SettingsModal';
 import { VideoDetailPanel } from './components/VideoDetailPanel';
 import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
 import { ToastProvider } from './components/Toast';
+import { ProjectsListView } from './components/ProjectsListView';
+import { ProjectFilesView } from './components/ProjectFilesView';
+import { CreateProjectModal } from './components/CreateProjectModal';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -226,6 +230,8 @@ export default function App() {
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsModalInitialTab, setSettingsModalInitialTab] = useState<'personal' | 'team'>('personal');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
@@ -1945,6 +1951,13 @@ export default function App() {
           </div>
 
           <SidebarItem
+            icon={FolderKanban}
+            label={t('mediatrack.projects')}
+            active={view === 'mediatrack'}
+            onClick={() => { setView('mediatrack'); setSelectedProject(null); }}
+          />
+
+          <SidebarItem
             icon={LayoutDashboard}
             label={t('nav.dashboard')}
             active={view === 'dashboard'}
@@ -2747,6 +2760,23 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW: MEDIATRACK */}
+        {view === 'mediatrack' && (
+          <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {selectedProject ? (
+              <ProjectFilesView
+                project={selectedProject}
+                onBack={() => setSelectedProject(null)}
+              />
+            ) : (
+              <ProjectsListView
+                onProjectSelect={setSelectedProject}
+                onCreateProject={() => setIsCreateProjectModalOpen(true)}
+              />
+            )}
+          </div>
+        )}
+
         {/* VIEW: POINTS */}
         {view === 'points' && (
           <PointsCenter onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
@@ -2770,6 +2800,17 @@ export default function App() {
           }}
         />
       )}
+
+      {/* Create Project Modal */}
+      <CreateProjectModal
+        isOpen={isCreateProjectModalOpen}
+        onClose={() => setIsCreateProjectModalOpen(false)}
+        onProjectCreated={(project) => {
+          setIsCreateProjectModalOpen(false);
+          setSelectedProject(project);
+          setView('mediatrack');
+        }}
+      />
 
       {/* Mobile Library Search - Fixed outside main to avoid transform issues */}
       {view === 'library' && !selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (
