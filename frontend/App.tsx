@@ -33,6 +33,7 @@ import { UserDropdown } from './components/UserDropdown';
 import { ParserTagSelector } from './components/ParserTagSelector';
 import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
+import { PointsConfirmDialog } from './components/PointsConfirmDialog';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
 import { DownloadProgress, DownloadStatus as ProgressStatus } from './components/DownloadProgress';
 import { useDownloadProgress } from './hooks/useDownloadProgress';
@@ -315,6 +316,13 @@ export default function App() {
 
   const [currentResult, setCurrentResult] = useState<Video | null>(null);
   const [batchResults, setBatchResults] = useState<Video[]>([]);
+
+  // Points confirmation dialog state
+  const [pendingAction, setPendingAction] = useState<{
+    type: string;
+    count: number;
+    callback: () => void;
+  } | null>(null);
 
   // Progressive download state
   const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
@@ -1212,11 +1220,22 @@ export default function App() {
     },
   });
 
-  const handleParse = async () => {
+  const handleParse = () => {
     if (parserMode === 'batch') {
-      await handleBatchParse();
+      const links = batchInput.split(/\r?\n/).filter(line => line.trim().length > 0);
+      if (links.length === 0) return;
+      setPendingAction({
+        type: 'video_parse_batch',
+        count: links.length,
+        callback: () => handleBatchParse(),
+      });
     } else {
-      await handleSingleParse();
+      if (!urlInput) return;
+      setPendingAction({
+        type: 'video_parse',
+        count: 1,
+        callback: () => handleSingleParse(),
+      });
     }
   };
 
@@ -1680,6 +1699,19 @@ export default function App() {
         isOpen={isCreateTeamModalOpen}
         onClose={() => setIsCreateTeamModalOpen(false)}
         onTeamCreated={handleTeamCreated}
+      />
+
+      {/* Points Confirmation Dialog */}
+      <PointsConfirmDialog
+        isOpen={pendingAction !== null}
+        actionType={pendingAction?.type ?? 'video_parse'}
+        actionCount={pendingAction?.count ?? 1}
+        onConfirm={() => {
+          const cb = pendingAction?.callback;
+          setPendingAction(null);
+          cb?.();
+        }}
+        onClose={() => setPendingAction(null)}
       />
 
       {/* Settings Modal */}

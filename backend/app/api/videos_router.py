@@ -116,6 +116,7 @@ async def fetch_video(
         _admin = await _get_admin()
         _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
         _team_id = _tm.data[0]["team_id"] if _tm.data else None
+        _points_cost = 0
         if _team_id:
             await points_service.ensure_team_quota(_team_id)
             points_result = await points_service.check_and_consume(
@@ -125,6 +126,7 @@ async def fetch_video(
             )
             if not points_result["success"]:
                 raise HTTPException(status_code=402, detail=points_result["reason"])
+            _points_cost = points_result.get("points_cost", 0)
         # === End points check ===
 
         # Detect platform and handler type
@@ -392,6 +394,19 @@ async def fetch_video(
         }
 
     except HTTPException as he:
+        # Refund points on failure (skip 402 which means insufficient balance)
+        if _points_cost > 0 and _team_id and getattr(he, 'status_code', 0) != 402:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=_points_cost,
+                    reference_type="video_parse",
+                    reason=f"Parse failed: {getattr(he, 'detail', str(he))[:100]}",
+                )
+                logger.info(f"Refunded {_points_cost} points for failed video parse")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund points: {refund_err}")
         # Log failure
         background_tasks.add_task(
             log_user_action,
@@ -403,6 +418,19 @@ async def fetch_video(
         )
         raise
     except Exception as e:
+        # Refund points on failure
+        if _points_cost > 0 and _team_id:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=_points_cost,
+                    reference_type="video_parse",
+                    reason=f"Parse failed: {str(e)[:100]}",
+                )
+                logger.info(f"Refunded {_points_cost} points for failed video parse")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund points: {refund_err}")
         logger.error(f"Failed to fetch video: {e}")
         # Log failure
         background_tasks.add_task(
@@ -438,6 +466,7 @@ async def fetch_videos_batch(
     _admin = await _get_admin()
     _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    _batch_points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id)
         points_result = await points_service.check_and_consume(
@@ -448,6 +477,7 @@ async def fetch_videos_batch(
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
+        _batch_points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
     # If using Celery async tasks
@@ -589,6 +619,23 @@ async def fetch_videos_batch(
 
         except Exception as e:
             errors.append({"url": url, "error": str(e)})
+
+    # Refund points for failed URLs in the batch
+    if errors and _batch_points_cost > 0 and _team_id and len(request.urls) > 0:
+        per_url_cost = _batch_points_cost // len(request.urls)
+        refund_amount = per_url_cost * len(errors)
+        if refund_amount > 0:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=refund_amount,
+                    reference_type="video_parse_batch",
+                    reason=f"Partial batch refund: {len(errors)}/{len(request.urls)} URLs failed",
+                )
+                logger.info(f"Refunded {refund_amount} points for {len(errors)} failed batch URLs")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund batch points: {refund_err}")
 
     return {
         "success": True,

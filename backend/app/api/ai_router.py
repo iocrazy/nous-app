@@ -8,6 +8,7 @@ Endpoints for triggering and retrieving AI analysis results
 """
 
 from fastapi import APIRouter, HTTPException
+from loguru import logger
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
@@ -46,6 +47,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     _admin = await get_async_supabase_admin()
     _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id)
         points_result = await points_service.check_and_consume(
@@ -55,16 +57,33 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
+        _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    from app.tasks.ai_tasks import chain_ai_pipeline
+    try:
+        from app.tasks.ai_tasks import chain_ai_pipeline
 
-    chain_ai_pipeline(
-        platform_id=platform_id,
-        user_id=auth.user_id,
-        transcript_bool=True,
-        summary_bool=False,
-    )
+        chain_ai_pipeline(
+            platform_id=platform_id,
+            user_id=auth.user_id,
+            transcript_bool=True,
+            summary_bool=False,
+        )
+    except Exception as e:
+        if _points_cost > 0 and _team_id:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=_points_cost,
+                    reference_type="ai_transcription",
+                    reference_id=platform_id,
+                    reason=f"Task dispatch failed: {str(e)[:100]}",
+                )
+                logger.info(f"Refunded {_points_cost} points for failed transcription dispatch")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund points: {refund_err}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue transcription: {str(e)}")
 
     return {"message": "Transcription queued", "platform_id": platform_id}
 
@@ -81,6 +100,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     _admin = await get_async_supabase_admin()
     _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id)
         points_result = await points_service.check_and_consume(
@@ -90,6 +110,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
+        _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
     video = await _get_video_or_404(platform_id)
@@ -98,26 +119,42 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     ai_repo = AIRepository()
     transcript = await ai_repo.get_transcript(video_id)
 
-    if transcript and transcript.get("full_text"):
-        # Transcript exists, just run summary
-        from app.tasks.ai_tasks import generate_summary_task
+    try:
+        if transcript and transcript.get("full_text"):
+            # Transcript exists, just run summary
+            from app.tasks.ai_tasks import generate_summary_task
 
-        generate_summary_task.delay(platform_id, auth.user_id)
-        return {"message": "Summary generation queued", "platform_id": platform_id}
-    else:
-        # No transcript, run full pipeline
-        from app.tasks.ai_tasks import chain_ai_pipeline
+            generate_summary_task.delay(platform_id, auth.user_id)
+            return {"message": "Summary generation queued", "platform_id": platform_id}
+        else:
+            # No transcript, run full pipeline
+            from app.tasks.ai_tasks import chain_ai_pipeline
 
-        chain_ai_pipeline(
-            platform_id=platform_id,
-            user_id=auth.user_id,
-            transcript_bool=True,
-            summary_bool=True,
-        )
-        return {
-            "message": "Full AI pipeline queued (transcribe + summarize)",
-            "platform_id": platform_id,
-        }
+            chain_ai_pipeline(
+                platform_id=platform_id,
+                user_id=auth.user_id,
+                transcript_bool=True,
+                summary_bool=True,
+            )
+            return {
+                "message": "Full AI pipeline queued (transcribe + summarize)",
+                "platform_id": platform_id,
+            }
+    except Exception as e:
+        if _points_cost > 0 and _team_id:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=_points_cost,
+                    reference_type="ai_summary",
+                    reference_id=platform_id,
+                    reason=f"Task dispatch failed: {str(e)[:100]}",
+                )
+                logger.info(f"Refunded {_points_cost} points for failed summary dispatch")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund points: {refund_err}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue summary: {str(e)}")
 
 
 @router.post("/analyze/{platform_id}")
@@ -133,6 +170,7 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
     _admin = await get_async_supabase_admin()
     _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id)
         points_result = await points_service.check_and_consume(
@@ -142,9 +180,23 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
+        _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    # Visual analysis is planned for a future iteration
+    # Visual analysis is not yet implemented — refund consumed points
+    if _points_cost > 0 and _team_id:
+        try:
+            await points_service.refund_points(
+                team_id=_team_id,
+                user_id=auth.user_id,
+                amount=_points_cost,
+                reference_type="ai_visual_analysis",
+                reference_id=platform_id,
+                reason="Visual analysis not yet implemented",
+            )
+        except Exception as refund_err:
+            logger.error(f"Failed to refund points: {refund_err}")
+
     raise HTTPException(
         status_code=501,
         detail="Visual analysis is not yet implemented",

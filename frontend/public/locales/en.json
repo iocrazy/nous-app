@@ -167,7 +167,14 @@
     "monthlyLimitExceeded": "Monthly limit exceeded.",
     "usageStats": "Usage Statistics",
     "totalConsumed": "Total Consumed",
-    "totalPurchased": "Total Purchased"
+    "totalPurchased": "Total Purchased",
+    "confirmAction": "Confirm Action",
+    "actionWillCost": "This will cost {{cost}} points",
+    "currentBalance": "Current Balance: {{balance}} points",
+    "remainingAfter": "Remaining: {{remaining}} points",
+    "confirmAndProceed": "Confirm & Proceed",
+    "insufficientForAction": "Insufficient points for this action",
+    "storageUsage": "Storage"
   },
   "payment": {
     "selectMethod": "Select Payment Method",
