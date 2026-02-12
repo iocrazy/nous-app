@@ -12,6 +12,7 @@ from celery import group, shared_task
 from loguru import logger
 
 from app.core.utils import Utils
+from app.repositories.user_logs_repository import log_user_action
 from app.services.classification_service import ClassificationService
 
 
@@ -29,25 +30,6 @@ def run_async(coro):
             return loop.run_until_complete(coro)
     except RuntimeError:
         return asyncio.run(coro)
-
-
-async def log_user_action(
-    user_id: str, action: str, message: str, status: str, aweme_id: str = None
-):
-    """Log user action helper."""
-    try:
-        from app.repositories.user_action_log_repository import UserActionLogRepository
-
-        repo = UserActionLogRepository()
-        await repo.log_action(
-            user_id=user_id,
-            action=action,
-            message=message,
-            status=status,
-            aweme_id=aweme_id,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to log user action: {e}")
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
@@ -254,6 +236,7 @@ def parse_single_link_task(
                 message=f"{video_title[:20]}...: Metadata parsed",
                 status="success",
                 aweme_id=platform_id,
+                details={"media_type": media_type, "platform": "douyin"},
             )
         )
 
@@ -290,6 +273,16 @@ def parse_single_link_task(
         logger.error(f"[Celery] Parse task error: {url}, error: {str(e)}")
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
+        # Log failure after max retries
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"Parse failed: {url[:30]}...",
+                status="error",
+                details={"error": str(e)[:200]},
+            )
+        )
         return {
             "status": "failed",
             "url": url,

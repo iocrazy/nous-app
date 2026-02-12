@@ -16,6 +16,8 @@ from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.logs_router import router as logs_router
+from app.api.payment_router import router as payment_router
+from app.api.points_router import router as points_router
 from app.api.search_router import router as search_router
 from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router
@@ -61,3 +63,7 @@ api_router.include_router(router=tasks_management_router, tags=["Tasks"])
 api_router.include_router(router=ai_settings_router, tags=["AI"])
 
 api_router.include_router(router=ai_pipeline_router, tags=["AI"])
+
+api_router.include_router(router=points_router, tags=["Points"])
+
+api_router.include_router(router=payment_router, tags=["Payment"])

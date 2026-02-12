@@ -10,9 +10,11 @@ Endpoints for triggering and retrieving AI analysis results
 from fastapi import APIRouter, HTTPException
 
 from app.core.deps import AuthDep
+from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.ai_repository import AIRepository
 from app.repositories.video_repository import VideoRepository
 from app.schemas.ai import SummaryResponse, TranscriptResponse
+from app.services.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -39,6 +41,22 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     """
     await _get_video_or_404(platform_id)
 
+    # === Points check ===
+    points_service = PointsService()
+    _admin = await get_async_supabase_admin()
+    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    if _team_id:
+        await points_service.ensure_team_quota(_team_id)
+        points_result = await points_service.check_and_consume(
+            team_id=_team_id,
+            user_id=auth.user_id,
+            action_type="ai_transcription",
+        )
+        if not points_result["success"]:
+            raise HTTPException(status_code=402, detail=points_result["reason"])
+    # === End points check ===
+
     from app.tasks.ai_tasks import chain_ai_pipeline
 
     chain_ai_pipeline(
@@ -58,6 +76,22 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     Requires an existing transcript. If no transcript exists,
     queues the full pipeline (extract → transcribe → summarize).
     """
+    # === Points check ===
+    points_service = PointsService()
+    _admin = await get_async_supabase_admin()
+    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    if _team_id:
+        await points_service.ensure_team_quota(_team_id)
+        points_result = await points_service.check_and_consume(
+            team_id=_team_id,
+            user_id=auth.user_id,
+            action_type="ai_summary",
+        )
+        if not points_result["success"]:
+            raise HTTPException(status_code=402, detail=points_result["reason"])
+    # === End points check ===
+
     video = await _get_video_or_404(platform_id)
     video_id = video["id"]
 
@@ -93,6 +127,22 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
     (Placeholder - visual analysis is not yet implemented.)
     """
     await _get_video_or_404(platform_id)
+
+    # === Points check ===
+    points_service = PointsService()
+    _admin = await get_async_supabase_admin()
+    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    if _team_id:
+        await points_service.ensure_team_quota(_team_id)
+        points_result = await points_service.check_and_consume(
+            team_id=_team_id,
+            user_id=auth.user_id,
+            action_type="ai_visual_analysis",
+        )
+        if not points_result["success"]:
+            raise HTTPException(status_code=402, detail=points_result["reason"])
+    # === End points check ===
 
     # Visual analysis is planned for a future iteration
     raise HTTPException(

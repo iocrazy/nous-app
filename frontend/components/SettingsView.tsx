@@ -10,12 +10,13 @@ import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TasksPanel } from './TasksPanel';
 import { TagsSettings } from './TagsSettings';
+import { ApiDocsPanel } from './ApiDocsPanel';
 import * as apiKeyService from '../services/apiKeyService';
 
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
 }
@@ -650,159 +651,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            )}
         </section>
 
-        {/* API Reference Section - Separate Card */}
-        <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300 mt-6">
-           <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
-              <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-                 <Shield size={20} />
-              </div>
-              <div>
-                 <h2 className="font-semibold text-zinc-200">API Reference</h2>
-                 <p className="text-xs text-zinc-500">Available endpoints for your API key</p>
-              </div>
-           </div>
-
-           <div className="p-6 space-y-6">
-              {/* Video APIs */}
-              <div className="space-y-3">
-                 <h3 className="text-sm font-semibold text-indigo-400 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full"></span>
-                    Video APIs
-                 </h3>
-                 <div className="grid gap-2 text-sm">
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/fetch</code>
-                       <span className="text-zinc-500 text-xs">Parse single video link</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/fetch/batch</code>
-                       <span className="text-zinc-500 text-xs">Batch parse multiple links</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos</code>
-                       <span className="text-zinc-500 text-xs">List all videos (paginated)</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos/{'{id}'}</code>
-                       <span className="text-zinc-500 text-xs">Get video details by ID</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs font-mono">DELETE</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/videos/{'{id}'}</code>
-                       <span className="text-zinc-500 text-xs">Delete a video</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/retry/{'{id}'}</code>
-                       <span className="text-zinc-500 text-xs">Retry failed download</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/videos/statistics</code>
-                       <span className="text-zinc-500 text-xs">Get download statistics</span>
-                    </div>
-                 </div>
-              </div>
-
-              {/* Tags APIs */}
-              <div className="space-y-3">
-                 <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
-                    Tags APIs
-                 </h3>
-                 <div className="grid gap-2 text-sm">
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/tags</code>
-                       <span className="text-zinc-500 text-xs">List all tags</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/tags</code>
-                       <span className="text-zinc-500 text-xs">Create new tag</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs font-mono">PUT</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/tags/{'{id}'}</code>
-                       <span className="text-zinc-500 text-xs">Update tag</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs font-mono">DELETE</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/tags/{'{id}'}</code>
-                       <span className="text-zinc-500 text-xs">Delete tag</span>
-                    </div>
-                 </div>
-              </div>
-
-              {/* Collections APIs */}
-              <div className="space-y-3">
-                 <h3 className="text-sm font-semibold text-purple-400 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
-                    Collections APIs
-                 </h3>
-                 <div className="grid gap-2 text-sm">
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/collections</code>
-                       <span className="text-zinc-500 text-xs">List all collections</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/collections</code>
-                       <span className="text-zinc-500 text-xs">Create collection</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/collections/{'{id}'}/videos</code>
-                       <span className="text-zinc-500 text-xs">Add video to collection</span>
-                    </div>
-                 </div>
-              </div>
-
-              {/* Auth APIs */}
-              <div className="space-y-3">
-                 <h3 className="text-sm font-semibold text-pink-400 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-pink-400 rounded-full"></span>
-                    Authentication
-                 </h3>
-                 <div className="grid gap-2 text-sm">
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/auth/signup</code>
-                       <span className="text-zinc-500 text-xs">Register new user</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-mono">POST</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/auth/signin</code>
-                       <span className="text-zinc-500 text-xs">User login</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-                       <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-mono">GET</span>
-                       <code className="text-zinc-300 font-mono text-xs flex-1">/api/v1/auth/me</code>
-                       <span className="text-zinc-500 text-xs">Get current user info</span>
-                    </div>
-                 </div>
-              </div>
-
-              {/* Usage Note */}
-              <div className="p-4 bg-indigo-500/5 rounded-lg border border-indigo-500/20">
-                 <div className="flex items-start gap-3">
-                    <Key size={16} className="text-indigo-400 mt-0.5 flex-shrink-0" />
-                    <div className="text-xs text-indigo-300 space-y-1">
-                       <p className="font-medium">Authentication</p>
-                       <p className="text-indigo-300/70">Include your API key in the request header:</p>
-                       <code className="block mt-2 p-2 bg-zinc-950 rounded text-zinc-400 font-mono">
-                          X-API-Key: your_api_key_here
-                       </code>
-                    </div>
-                 </div>
-              </div>
-           </div>
-        </section>
         </>
       )}
 
@@ -829,6 +677,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* AI Tab */}
       {activeTab === 'ai' && aiSettings && onSaveAISettings && (
         <AISettings settings={aiSettings} onSave={onSaveAISettings} />
+      )}
+
+      {/* Docs Tab */}
+      {activeTab === 'docs' && (
+        <ApiDocsPanel />
       )}
 
       {/* Wave animation keyframes */}
