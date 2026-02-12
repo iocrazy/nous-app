@@ -7,19 +7,24 @@ ALTER TABLE smart_collections REPLICA IDENTITY FULL;
 ALTER TABLE user_profiles REPLICA IDENTITY FULL;
 ALTER TABLE team_invites REPLICA IDENTITY FULL;
 
--- Step 2: Add all tables to supabase_realtime publication
--- Tables already in publication: douyin_videos, collections, tags, video_collections, video_tags
--- Tables with REPLICA IDENTITY FULL but not in publication:
-ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE user_notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE team_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE user_logs;
-
--- Tables newly configured with REPLICA IDENTITY FULL:
-ALTER PUBLICATION supabase_realtime ADD TABLE teams;
-ALTER PUBLICATION supabase_realtime ADD TABLE smart_collections;
-ALTER PUBLICATION supabase_realtime ADD TABLE user_profiles;
-ALTER PUBLICATION supabase_realtime ADD TABLE team_invites;
+-- Step 2: Add tables to supabase_realtime publication (skip if already member)
+DO $$
+DECLARE
+    tbl TEXT;
+BEGIN
+    FOREACH tbl IN ARRAY ARRAY[
+        'notifications', 'user_notifications', 'team_members', 'user_logs',
+        'teams', 'smart_collections', 'user_profiles', 'team_invites'
+    ]
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime' AND tablename = tbl
+        ) THEN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', tbl);
+        END IF;
+    END LOOP;
+END $$;
 
 -- Verify the changes
 SELECT schemaname, tablename

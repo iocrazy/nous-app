@@ -36,7 +36,8 @@ ON douyin_videos(cover_download_status);
 -- 3. 更新统计视图
 -- ============================================
 
-CREATE OR REPLACE VIEW video_statistics AS
+DROP VIEW IF EXISTS video_statistics;
+CREATE VIEW video_statistics AS
 SELECT
     COUNT(*) as total_videos,
     COUNT(*) FILTER (WHERE video_download_status = 'completed') as downloaded,
