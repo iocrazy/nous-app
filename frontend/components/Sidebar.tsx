@@ -438,12 +438,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
       <Logo />
 
-      <TeamSwitcherInline
-        teams={teams}
-        activeTeamId={activeTeamId}
-        onTeamChange={onTeamChange}
-        onCreateTeam={onCreateTeam}
-      />
+      <div className="mb-4 px-2">
+        <TeamSwitcher
+          teams={teams}
+          activeTeamId={activeTeamId}
+          currentTeam={null}
+          onTeamChange={onTeamChange}
+          onCreateTeam={onCreateTeam}
+        />
+      </div>
 
       <nav className="flex-1 space-y-2">
         <SidebarItem
