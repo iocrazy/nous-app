@@ -202,9 +202,7 @@ class ProjectsService:
     # Link video
     # ------------------------------------------------------------------ #
 
-    async def link_video(
-        self, project_id: str, video_id: str, user_id: str
-    ) -> dict:
+    async def link_video(self, project_id: str, video_id: str, user_id: str) -> dict:
         """
         Link an existing video from the videos table to a project.
 
@@ -304,7 +302,9 @@ class ProjectsService:
             metadata = await self._extract_video_metadata(str(target))
 
         # Create version record
-        relative_path = f"mediatrack/{project_id}/versions/{file_id}/v{next_version}_{safe_name}"
+        relative_path = (
+            f"mediatrack/{project_id}/versions/{file_id}/v{next_version}_{safe_name}"
+        )
         version_data = {
             "file_id": file_id,
             "version_number": next_version,

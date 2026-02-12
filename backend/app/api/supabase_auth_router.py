@@ -56,9 +56,7 @@ async def _create_team_quota_for_new_user(user_id: str) -> None:
             f"team {team_id}"
         )
     except Exception as e:
-        logger.error(
-            f"Failed to create team quota for user {user_id}: {e}"
-        )
+        logger.error(f"Failed to create team quota for user {user_id}: {e}")
 
 
 # ============================================

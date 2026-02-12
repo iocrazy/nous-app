@@ -459,7 +459,10 @@ class DownloaderService:
                             message=f"Video downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
-                            details={"media_type": "video", "platform": video_data.get("source_platform", "douyin")},
+                            details={
+                                "media_type": "video",
+                                "platform": video_data.get("source_platform", "douyin"),
+                            },
                         )
                     break
 
@@ -486,7 +489,10 @@ class DownloaderService:
                         message=f"Video download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": result.error, "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "error": result.error,
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
             return result
@@ -643,7 +649,11 @@ class DownloaderService:
                         message=f"Image set downloaded: {video_title[:30]}... ({total_downloaded} files)",
                         status="success",
                         aweme_id=platform_id,
-                        details={"media_type": "images", "file_count": total_downloaded, "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "media_type": "images",
+                            "file_count": total_downloaded,
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
             else:
@@ -675,7 +685,10 @@ class DownloaderService:
                         message=f"Image set download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": error_msg[:200], "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "error": error_msg[:200],
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
         except Exception as e:
@@ -906,7 +919,10 @@ class DownloaderService:
                             message=f"Cover downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
-                            details={"media_type": "cover", "platform": source_platform},
+                            details={
+                                "media_type": "cover",
+                                "platform": source_platform,
+                            },
                         )
                     return result
 

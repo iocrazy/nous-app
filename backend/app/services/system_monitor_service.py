@@ -53,6 +53,7 @@ def _parse_speed(speed_str: str) -> float:
 # Public helpers — all return plain dicts (JSON-serializable)
 # ---------------------------------------------------------------------------
 
+
 def get_queue_status() -> dict:
     """Return Celery queue metrics (with 5-second cache)."""
     current_time = time.time()
@@ -102,7 +103,14 @@ def get_storage_status() -> dict:
         storage_path = settings.DOWNLOAD_PATH
 
         if not os.path.exists(storage_path):
-            return {"total_bytes": 0, "used_bytes": 0, "free_bytes": 0, "percent_used": 0, "status": "error", "path": storage_path}
+            return {
+                "total_bytes": 0,
+                "used_bytes": 0,
+                "free_bytes": 0,
+                "percent_used": 0,
+                "status": "error",
+                "path": storage_path,
+            }
 
         usage = shutil.disk_usage(storage_path)
         percent_used = (usage.used / usage.total) * 100 if usage.total > 0 else 0
@@ -125,7 +133,14 @@ def get_storage_status() -> dict:
 
     except Exception as e:
         logger.warning(f"get_storage_status failed: {e}")
-        return {"total_bytes": 0, "used_bytes": 0, "free_bytes": 0, "percent_used": 0, "status": "error", "path": ""}
+        return {
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "free_bytes": 0,
+            "percent_used": 0,
+            "status": "error",
+            "path": "",
+        }
 
 
 def get_network_status() -> dict:
@@ -173,13 +188,15 @@ def get_worker_stats() -> list[dict]:
         for worker_name in ping:
             worker_stats = stats.get(worker_name, {})
             pool = worker_stats.get("pool", {})
-            workers.append({
-                "name": worker_name,
-                "status": "online",
-                "concurrency": pool.get("max-concurrency", 0),
-                "processes": pool.get("processes", []),
-                "total_tasks": worker_stats.get("total", {}),
-            })
+            workers.append(
+                {
+                    "name": worker_name,
+                    "status": "online",
+                    "concurrency": pool.get("max-concurrency", 0),
+                    "processes": pool.get("processes", []),
+                    "total_tasks": worker_stats.get("total", {}),
+                }
+            )
 
         return workers
 
@@ -199,13 +216,15 @@ def get_active_tasks() -> list[dict]:
         tasks = []
         for worker_name, worker_tasks in active.items():
             for task in worker_tasks:
-                tasks.append({
-                    "task_id": task.get("id", ""),
-                    "name": task.get("name", ""),
-                    "status": "active",
-                    "worker": worker_name,
-                    "args": task.get("args", []),
-                })
+                tasks.append(
+                    {
+                        "task_id": task.get("id", ""),
+                        "name": task.get("name", ""),
+                        "status": "active",
+                        "worker": worker_name,
+                        "args": task.get("args", []),
+                    }
+                )
 
         return tasks
 

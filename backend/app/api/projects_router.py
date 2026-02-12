@@ -147,7 +147,9 @@ async def list_files(
         project = await repo.get_project_by_id(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        files = await repo.get_project_files(project_id, include_trashed=include_trashed)
+        files = await repo.get_project_files(
+            project_id, include_trashed=include_trashed
+        )
         return {"success": True, "data": files}
     except HTTPException:
         raise
@@ -219,7 +221,9 @@ async def get_file_info(project_id: str, file_id: str, auth: AuthDep):
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
         return {"success": True, "data": file_record}
     except HTTPException:
         raise
@@ -239,7 +243,9 @@ async def update_file(
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
 
         update_data = data.model_dump(exclude_none=True)
 
@@ -269,7 +275,9 @@ async def delete_file(project_id: str, file_id: str, auth: AuthDep):
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
 
         await repo.delete_file(file_id)
         return {"success": True, "message": "File deleted"}
@@ -294,7 +302,9 @@ async def list_versions(project_id: str, file_id: str, auth: AuthDep):
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
         versions = await repo.get_file_versions(file_id)
         return {"success": True, "data": versions}
     except HTTPException:
@@ -355,7 +365,9 @@ async def list_comments(
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
         comments = await repo.get_comments_for_file(file_id, version_id=version_id)
         return {"success": True, "data": comments}
     except HTTPException:
@@ -379,7 +391,9 @@ async def add_comment(
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
         if file_record.get("project_id") != project_id:
-            raise HTTPException(status_code=404, detail="File not found in this project")
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
 
         svc = ProjectsService()
         result = await svc.add_comment(
@@ -398,9 +412,7 @@ async def add_comment(
 
 
 @router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
-async def delete_comment(
-    project_id: str, file_id: str, comment_id: str, auth: AuthDep
-):
+async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: AuthDep):
     """Delete a comment. Only the author can delete their own comment."""
     try:
         repo = ProjectsRepository()
@@ -408,7 +420,9 @@ async def delete_comment(
         if not comment:
             raise HTTPException(status_code=404, detail="Comment not found")
         if comment.get("author_id") != auth.user_id:
-            raise HTTPException(status_code=403, detail="Can only delete your own comments")
+            raise HTTPException(
+                status_code=403, detail="Can only delete your own comments"
+            )
 
         await repo.delete_comment(comment_id)
         return {"success": True, "message": "Comment deleted"}

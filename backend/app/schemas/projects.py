@@ -31,9 +31,7 @@ class ProjectUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
-    project_type: Optional[str] = Field(
-        None, pattern="^(internal|external|personal)$"
-    )
+    project_type: Optional[str] = Field(None, pattern="^(internal|external|personal)$")
     project_group: Optional[str] = Field(None, max_length=100)
     is_starred: Optional[bool] = None
 
@@ -113,6 +111,7 @@ class LinkVideoRequest(BaseModel):
 
 class FileVersionResponse(BaseModel):
     """API response for a file version"""
+
     id: str
     file_id: str
     version_number: int
@@ -140,6 +139,7 @@ class FileVersionResponse(BaseModel):
 
 class CreateCommentRequest(BaseModel):
     """Request body for creating a review comment"""
+
     content: str = Field(..., min_length=1)
     timestamp_seconds: Optional[float] = None
     version_id: Optional[str] = None
@@ -147,6 +147,7 @@ class CreateCommentRequest(BaseModel):
 
 class CommentResponse(BaseModel):
     """API response for a review comment"""
+
     id: str
     file_id: str
     version_id: Optional[str] = None
@@ -162,8 +163,9 @@ class CommentResponse(BaseModel):
 
 class ReviewStatusUpdate(BaseModel):
     """Request body for updating review status"""
+
     review_status: Optional[str] = Field(
         None,
         pattern="^(pending_review|in_review|feedback_collected|approved)$",
-        description="Set to null to remove status"
+        description="Set to null to remove status",
     )

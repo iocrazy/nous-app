@@ -100,7 +100,9 @@ async def _check_admin_role(user_id: str) -> bool:
 @router.get("/balance")
 async def get_balance(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Get team points balance and storage info.
@@ -127,7 +129,9 @@ async def get_balance(
 @router.get("/transactions")
 async def get_transactions(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     type: Optional[str] = Query(None, description="Filter by transaction type"),
@@ -154,7 +158,11 @@ async def get_transactions(
             offset=offset,
             type_filter=type,
         )
-        return {"success": True, "count": len(transactions), "transactions": transactions}
+        return {
+            "success": True,
+            "count": len(transactions),
+            "transactions": transactions,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -183,7 +191,9 @@ async def get_pricing(auth: AuthDep):
 @router.get("/usage-stats")
 async def get_usage_stats(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Get team usage statistics.
@@ -210,9 +220,13 @@ async def get_usage_stats(
 @router.get("/check")
 async def check_quota(
     auth: AuthDep,
-    action_type: str = Query(..., description="Action type to check (e.g. video_parse)"),
+    action_type: str = Query(
+        ..., description="Action type to check (e.g. video_parse)"
+    ),
     count: int = Query(1, ge=1, description="Number of actions to check"),
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Pre-check whether an action is allowed.
