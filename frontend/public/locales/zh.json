@@ -231,6 +231,39 @@
     "noFiles": "暂无文件",
     "uploadOrLink": "上传文件或关联已有视频开始使用",
     "files": "个文件",
-    "selectTeam": "选择团队"
+    "selectTeam": "选择团队",
+    "review": {
+      "comments": "评论",
+      "fileInfo": "文件信息",
+      "addComment": "添加评论",
+      "commentPlaceholder": "写下评论...",
+      "captureTimestamp": "标记时间点",
+      "clearTimestamp": "清除",
+      "noComments": "暂无评论",
+      "deleteComment": "删除评论",
+      "reviewStatus": "审阅状态",
+      "setStatus": "设置审阅状态",
+      "removeStatus": "移除状态",
+      "pendingReview": "待审阅",
+      "inReview": "审阅中",
+      "feedbackCollected": "已收集反馈",
+      "approved": "已通过",
+      "version": "版本",
+      "versions": "版本管理",
+      "manageVersions": "管理版本",
+      "uploadNewVersion": "上传新版本",
+      "currentVersion": "当前",
+      "uploadedBy": "上传者",
+      "share": "分享",
+      "seekTo": "点击跳转",
+      "timeAgo": {
+        "justNow": "刚刚",
+        "minutesAgo": "{{count}}分钟前",
+        "hoursAgo": "{{count}}小时前",
+        "daysAgo": "{{count}}天前",
+        "weeksAgo": "{{count}}周前",
+        "monthsAgo": "{{count}}个月前"
+      }
+    }
   }
 }

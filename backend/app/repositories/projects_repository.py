@@ -20,6 +20,8 @@ class ProjectsRepository:
     TABLE_PROJECTS = "projects"
     TABLE_FILES = "project_files"
     TABLE_VIDEOS = "videos"
+    TABLE_VERSIONS = "file_versions"
+    TABLE_COMMENTS = "review_comments"
 
     def __init__(self):
         self._client = None
@@ -345,3 +347,155 @@ class ProjectsRepository:
         except Exception as e:
             logger.error(f"Failed to get video metadata {video_id}: {e}")
             return None
+
+    # ------------------------------------------------------------------ #
+    # File versions
+    # ------------------------------------------------------------------ #
+
+    async def get_file_versions(self, file_id: str) -> List[Dict[str, Any]]:
+        """Get all versions of a file, ordered by version_number DESC."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .select("*")
+                .eq("file_id", file_id)
+                .order("version_number", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get versions for file {file_id}: {e}")
+            return []
+
+    async def get_next_version_number(self, file_id: str) -> int:
+        """Get the next version number for a file (max + 1)."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .select("version_number")
+                .eq("file_id", file_id)
+                .order("version_number", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return result.data[0]["version_number"] + 1
+            return 1
+        except Exception as e:
+            logger.error(f"Failed to get next version for file {file_id}: {e}")
+            return 1
+
+    async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new file version record."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .insert(data)
+                .execute()
+            )
+            logger.info(
+                f"Created version {data.get('version_number')} for file {data.get('file_id')}"
+            )
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create version: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Review comments
+    # ------------------------------------------------------------------ #
+
+    async def get_comments_for_file(
+        self, file_id: str, version_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get comments for a file, optionally filtered by version.
+        Ordered by timestamp_seconds ASC (nulls last), then created_at ASC.
+        """
+        try:
+            client = await self._get_client()
+            query = (
+                client.table(self.TABLE_COMMENTS)
+                .select("*")
+                .eq("file_id", file_id)
+            )
+            if version_id:
+                query = query.eq("version_id", version_id)
+            query = query.order("timestamp_seconds", desc=False, nullsfirst=False)
+            query = query.order("created_at", desc=False)
+            result = await query.execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get comments for file {file_id}: {e}")
+            return []
+
+    async def create_comment(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new review comment."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_COMMENTS)
+                .insert(data)
+                .execute()
+            )
+            logger.info(f"Created comment on file {data.get('file_id')}")
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create comment: {e}")
+            raise
+
+    async def get_comment_by_id(self, comment_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single comment by its UUID."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_COMMENTS)
+                .select("*")
+                .eq("id", comment_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get comment {comment_id}: {e}")
+            return None
+
+    async def delete_comment(self, comment_id: str) -> bool:
+        """Delete a comment by its UUID."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_COMMENTS)
+                .delete()
+                .eq("id", comment_id)
+                .execute()
+            )
+            logger.info(f"Deleted comment {comment_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete comment {comment_id}: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Review status
+    # ------------------------------------------------------------------ #
+
+    async def update_review_status(
+        self, file_id: str, status: Optional[str]
+    ) -> Dict[str, Any]:
+        """Update the review status of a project file."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_FILES)
+                .update({"review_status": status})
+                .eq("id", file_id)
+                .execute()
+            )
+            logger.info(f"Updated review status for file {file_id} to {status}")
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to update review status for file {file_id}: {e}")
+            raise

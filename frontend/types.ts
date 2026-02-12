@@ -431,6 +431,44 @@ export interface Project {
   updated_at: string;
 }
 
+export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
+
+export interface FileVersion {
+  id: string;
+  file_id: string;
+  version_number: number;
+  filename: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  fps: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  video_bitrate_kbps: number | null;
+  audio_bitrate_kbps: number | null;
+  audio_channels: number | null;
+  audio_sample_rate: number | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ReviewComment {
+  id: string;
+  file_id: string;
+  version_id: string | null;
+  author_id: string;
+  author_email?: string;
+  content: string;
+  timestamp_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectFile {
   id: string;
   project_id: string;
@@ -455,6 +493,8 @@ export interface ProjectFile {
   notes: string | null;
   is_trashed: boolean;
   trashed_at: string | null;
+  review_status: ReviewStatus | null;
+  current_version: number;
   created_at: string;
   updated_at: string;
 }

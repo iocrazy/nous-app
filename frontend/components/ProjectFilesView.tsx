@@ -10,9 +10,10 @@ import { LinkVideoModal } from './LinkVideoModal';
 interface ProjectFilesViewProps {
   project: Project;
   onBack: () => void;
+  onFileReview?: (file: ProjectFile) => void;
 }
 
-export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onBack }) => {
+export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onBack, onFileReview }) => {
   const { t } = useTranslation();
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
@@ -35,6 +36,15 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       console.error('Failed to load files:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleFileClick = (file: ProjectFile) => {
+    // Video files go to the review page; others open the info panel
+    if (onFileReview && file.file_type === 'video') {
+      onFileReview(file);
+    } else {
+      setSelectedFile(file);
     }
   };
 
@@ -175,7 +185,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <FileCard
                 key={file.id}
                 file={file}
-                onClick={() => setSelectedFile(file)}
+                onClick={() => handleFileClick(file)}
                 viewMode="grid"
               />
             ))}
@@ -189,7 +199,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <FileCard
                 key={file.id}
                 file={file}
-                onClick={() => setSelectedFile(file)}
+                onClick={() => handleFileClick(file)}
                 viewMode="list"
               />
             ))}

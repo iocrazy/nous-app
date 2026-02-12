@@ -231,6 +231,39 @@
     "noFiles": "No files yet",
     "uploadOrLink": "Upload files or link existing videos to get started",
     "files": "files",
-    "selectTeam": "Select Team"
+    "selectTeam": "Select Team",
+    "review": {
+      "comments": "Comments",
+      "fileInfo": "File Info",
+      "addComment": "Add Comment",
+      "commentPlaceholder": "Write a comment...",
+      "captureTimestamp": "Capture Timestamp",
+      "clearTimestamp": "Clear",
+      "noComments": "No comments yet",
+      "deleteComment": "Delete Comment",
+      "reviewStatus": "Review Status",
+      "setStatus": "Set Review Status",
+      "removeStatus": "Remove Status",
+      "pendingReview": "Pending Review",
+      "inReview": "In Review",
+      "feedbackCollected": "Feedback Collected",
+      "approved": "Approved",
+      "version": "Version",
+      "versions": "Versions",
+      "manageVersions": "Manage Versions",
+      "uploadNewVersion": "Upload New Version",
+      "currentVersion": "Current",
+      "uploadedBy": "Uploaded By",
+      "share": "Share",
+      "seekTo": "Click to seek",
+      "timeAgo": {
+        "justNow": "Just now",
+        "minutesAgo": "{{count}} min ago",
+        "hoursAgo": "{{count}}h ago",
+        "daysAgo": "{{count}}d ago",
+        "weeksAgo": "{{count}}w ago",
+        "monthsAgo": "{{count}}mo ago"
+      }
+    }
   }
 }

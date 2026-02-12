@@ -91,6 +91,8 @@ class ProjectFileResponse(BaseModel):
     audio_bitrate_kbps: Optional[int] = None
     audio_channels: Optional[int] = None
     audio_sample_rate: Optional[int] = None
+    review_status: Optional[str] = None
+    current_version: int = 1
     thumbnail_path: Optional[str] = None
     cover_image_path: Optional[str] = None
     uploaded_by: Optional[str] = None
@@ -107,3 +109,61 @@ class LinkVideoRequest(BaseModel):
     """Request body for linking a video to a project"""
 
     video_id: str = Field(..., description="ID of the video to link")
+
+
+class FileVersionResponse(BaseModel):
+    """API response for a file version"""
+    id: str
+    file_id: str
+    version_number: int
+    filename: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    resolution: Optional[str] = None
+    fps: Optional[float] = None
+    video_codec: Optional[str] = None
+    audio_codec: Optional[str] = None
+    video_bitrate_kbps: Optional[int] = None
+    audio_bitrate_kbps: Optional[int] = None
+    audio_channels: Optional[int] = None
+    audio_sample_rate: Optional[int] = None
+    thumbnail_path: Optional[str] = None
+    cover_image_path: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CreateCommentRequest(BaseModel):
+    """Request body for creating a review comment"""
+    content: str = Field(..., min_length=1)
+    timestamp_seconds: Optional[float] = None
+    version_id: Optional[str] = None
+
+
+class CommentResponse(BaseModel):
+    """API response for a review comment"""
+    id: str
+    file_id: str
+    version_id: Optional[str] = None
+    author_id: str
+    author_email: Optional[str] = None
+    content: str
+    timestamp_seconds: Optional[float] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReviewStatusUpdate(BaseModel):
+    """Request body for updating review status"""
+    review_status: Optional[str] = Field(
+        None,
+        pattern="^(pending_review|in_review|feedback_collected|approved)$",
+        description="Set to null to remove status"
+    )
