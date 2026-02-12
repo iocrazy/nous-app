@@ -5,7 +5,8 @@
 -- and include the summary_text field for display in frontend.
 -- ============================================================================
 
-CREATE OR REPLACE VIEW videos_with_tags AS
+DROP VIEW IF EXISTS videos_with_tags;
+CREATE VIEW videos_with_tags AS
 SELECT
     v.*,
     COALESCE(

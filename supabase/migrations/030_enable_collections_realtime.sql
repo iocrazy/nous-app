@@ -13,7 +13,7 @@ BEGIN
     -- Check if collections is already in the publication
     IF NOT EXISTS (
         SELECT 1 FROM pg_publication_tables
-        WHERE publication_name = 'supabase_realtime'
+        WHERE pubname = 'supabase_realtime'
         AND tablename = 'collections'
     ) THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE collections;
