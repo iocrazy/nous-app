@@ -471,6 +471,63 @@ class PointsRepository:
             )
             return []
 
+    async def get_admin_overview(self) -> Dict[str, Any]:
+        """
+        Aggregate system-wide points statistics for admin overview.
+
+        Returns:
+            Dict with total_points_in_system, total_consumed, total_purchased,
+            active_teams_count, total_transactions_count.
+        """
+        try:
+            client = await self._get_client()
+
+            # Fetch all team quotas for balance sum and active count
+            quotas_result = await (
+                client.table(self.TABLE_TEAM_QUOTAS)
+                .select("points_balance")
+                .execute()
+            )
+            quotas = quotas_result.data or []
+            total_points_in_system = sum(q.get("points_balance", 0) for q in quotas)
+            active_teams_count = len(quotas)
+
+            # Fetch all transactions for aggregation
+            txn_result = await (
+                client.table(self.TABLE_TRANSACTIONS)
+                .select("amount,type")
+                .execute()
+            )
+            txns = txn_result.data or []
+            total_transactions_count = len(txns)
+
+            total_consumed = 0
+            total_purchased = 0
+            for txn in txns:
+                amount = txn.get("amount", 0)
+                txn_type = txn.get("type", "")
+                if amount < 0:
+                    total_consumed += abs(amount)
+                if txn_type == "purchase" and amount > 0:
+                    total_purchased += amount
+
+            return {
+                "total_points_in_system": total_points_in_system,
+                "total_consumed": total_consumed,
+                "total_purchased": total_purchased,
+                "active_teams_count": active_teams_count,
+                "total_transactions_count": total_transactions_count,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get admin overview: {e}")
+            return {
+                "total_points_in_system": 0,
+                "total_consumed": 0,
+                "total_purchased": 0,
+                "active_teams_count": 0,
+                "total_transactions_count": 0,
+            }
+
     async def get_usage_stats(self, team_id: str) -> Dict[str, Any]:
         """
         Get aggregated usage statistics for a team.

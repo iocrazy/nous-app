@@ -167,7 +167,14 @@
     "monthlyLimitExceeded": "已超出月度限额。",
     "usageStats": "使用统计",
     "totalConsumed": "总消耗",
-    "totalPurchased": "总购买"
+    "totalPurchased": "总购买",
+    "confirmAction": "确认操作",
+    "actionWillCost": "本次操作将消耗 {{cost}} 积分",
+    "currentBalance": "当前余额：{{balance}} 积分",
+    "remainingAfter": "操作后剩余：{{remaining}} 积分",
+    "confirmAndProceed": "确认并继续",
+    "insufficientForAction": "积分不足，无法执行此操作",
+    "storageUsage": "存储空间"
   },
   "payment": {
     "selectMethod": "选择支付方式",

@@ -337,3 +337,30 @@ async def admin_adjust_points(
     except Exception as e:
         logger.error(f"Failed to adjust points: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust points")
+
+
+@router.get("/admin/overview")
+async def admin_overview(auth: AuthDep):
+    """
+    Admin: get system-wide points overview.
+
+    Returns aggregated statistics including total points in system,
+    total consumed, total purchased, active teams count, and total
+    transactions count.
+
+    Authentication: Bearer Token or API Key (admin only)
+    """
+    is_admin = await _check_admin_role(auth.user_id)
+    if not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: admin role required for this operation",
+        )
+
+    try:
+        repo = PointsRepository()
+        overview = await repo.get_admin_overview()
+        return {"success": True, "data": overview}
+    except Exception as e:
+        logger.error(f"Failed to get admin overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get admin overview")
