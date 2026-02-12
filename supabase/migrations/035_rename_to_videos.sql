@@ -96,7 +96,15 @@ DROP INDEX IF EXISTS idx_douyin_videos_datasize_bytes;
 -- ============================================================================
 -- PHASE 7: Remove from realtime publication
 -- ============================================================================
-ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS douyin_videos;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND tablename = 'douyin_videos'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime DROP TABLE douyin_videos;
+    END IF;
+END $$;
 
 -- ============================================================================
 -- PHASE 8: Drop foreign key constraints on dependent tables
@@ -439,7 +447,8 @@ CREATE POLICY "Manage analysis of owned videos" ON video_analysis
 -- ============================================================================
 
 -- Video statistics view
-CREATE OR REPLACE VIEW video_statistics WITH (security_invoker = true) AS
+DROP VIEW IF EXISTS video_statistics;
+CREATE VIEW video_statistics WITH (security_invoker = true) AS
 SELECT
     COUNT(*) as total_videos,
     COUNT(*) FILTER (WHERE video_download_status = 'completed') as downloaded,
@@ -459,7 +468,8 @@ SELECT
 FROM videos;
 
 -- Daily statistics view
-CREATE OR REPLACE VIEW daily_statistics AS
+DROP VIEW IF EXISTS daily_statistics;
+CREATE VIEW daily_statistics AS
 SELECT
     DATE(created_at) as date,
     COUNT(*) as videos_added,
@@ -469,7 +479,8 @@ GROUP BY DATE(created_at)
 ORDER BY date DESC;
 
 -- Author statistics view
-CREATE OR REPLACE VIEW author_statistics WITH (security_invoker = true) AS
+DROP VIEW IF EXISTS author_statistics;
+CREATE VIEW author_statistics WITH (security_invoker = true) AS
 SELECT
     author,
     COUNT(*) as video_count,
@@ -482,7 +493,8 @@ GROUP BY author
 ORDER BY video_count DESC;
 
 -- Videos with tags view
-CREATE OR REPLACE VIEW videos_with_tags AS
+DROP VIEW IF EXISTS videos_with_tags;
+CREATE VIEW videos_with_tags AS
 SELECT
     v.*,
     COALESCE(
