@@ -119,7 +119,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack';
 
 export interface ApiKey {
   id: number;
@@ -414,4 +414,47 @@ export interface QuotaCheck {
   points_cost: number;
   current_balance: number;
   reason: string | null;
+}
+
+// Project types (MediaTrack)
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_id: string;
+  team_id: string | null;
+  project_type: 'internal' | 'external' | 'personal';
+  project_group: string | null;
+  is_starred: boolean;
+  file_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  filename: string;
+  file_type: string | null;
+  mime_type: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  video_id: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  fps: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  video_bitrate_kbps: number | null;
+  audio_bitrate_kbps: number | null;
+  audio_channels: number | null;
+  audio_sample_rate: number | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  is_trashed: boolean;
+  trashed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
