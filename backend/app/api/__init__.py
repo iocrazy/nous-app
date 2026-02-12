@@ -17,8 +17,8 @@ from app.api.collections_router import router as collections_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.logs_router import router as logs_router
 from app.api.payment_router import router as payment_router
-from app.api.projects_router import router as projects_router
 from app.api.points_router import router as points_router
+from app.api.projects_router import router as projects_router
 from app.api.search_router import router as search_router
 from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router

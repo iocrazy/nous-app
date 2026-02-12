@@ -25,8 +25,8 @@ from app.repositories.video_repository import VideoRepository
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
-from app.services.url_router import URLRouter
 from app.services.points_service import PointsService
+from app.services.url_router import URLRouter
 from app.services.video_service import VideoService
 from app.services.ytdlp_service import YtdlpService
 
