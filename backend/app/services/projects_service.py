@@ -180,7 +180,23 @@ class ProjectsService:
             "notes": notes,
             **metadata,
         }
-        return await self.repo.create_file(file_data)
+        created_file = await self.repo.create_file(file_data)
+
+        # Create V1 version record
+        version_data = {
+            "file_id": created_file["id"],
+            "version_number": 1,
+            "filename": target.name,
+            "file_path": relative_path,
+            "file_size_bytes": len(content),
+            "mime_type": mime,
+            "uploaded_by": user_id,
+            "notes": notes,
+            **metadata,
+        }
+        await self.repo.create_version(version_data)
+
+        return created_file
 
     # ------------------------------------------------------------------ #
     # Link video
@@ -227,6 +243,137 @@ class ProjectsService:
             "cover_image_path": video.get("cover_download_path"),
         }
         return await self.repo.create_file(file_data)
+
+    # ------------------------------------------------------------------ #
+    # File versions
+    # ------------------------------------------------------------------ #
+
+    async def upload_new_version(
+        self,
+        project_id: str,
+        file_id: str,
+        user_id: str,
+        file,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        Upload a new version of an existing file.
+
+        Steps:
+        1. Validate project + file
+        2. Get next version number
+        3. Save file to disk
+        4. Extract metadata if video
+        5. Create version record
+        6. Update current_version + metadata on project_files
+        """
+        project = await self.repo.get_project_by_id(project_id)
+        if not project:
+            raise ValueError("Project not found")
+
+        file_record = await self.repo.get_file_by_id(file_id)
+        if not file_record:
+            raise ValueError("File not found")
+        if file_record.get("project_id") != project_id:
+            raise ValueError("File not found in this project")
+
+        # Get next version number
+        next_version = await self.repo.get_next_version_number(file_id)
+
+        # Save to disk
+        safe_name = self._sanitize_filename(file.filename)
+        save_dir = (
+            Path(settings.DOWNLOAD_PATH)
+            / "mediatrack"
+            / project_id
+            / "versions"
+            / file_id
+        )
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        target = save_dir / f"v{next_version}_{safe_name}"
+        content = await file.read()
+        with open(target, "wb") as f:
+            f.write(content)
+
+        # Classify and extract metadata
+        mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
+        file_type = self._classify_file_type(mime)
+        metadata = {}
+        if file_type == "video":
+            metadata = await self._extract_video_metadata(str(target))
+
+        # Create version record
+        relative_path = f"mediatrack/{project_id}/versions/{file_id}/v{next_version}_{safe_name}"
+        version_data = {
+            "file_id": file_id,
+            "version_number": next_version,
+            "filename": safe_name,
+            "file_path": relative_path,
+            "file_size_bytes": len(content),
+            "mime_type": mime,
+            "uploaded_by": user_id,
+            "notes": notes,
+            **metadata,
+        }
+        version = await self.repo.create_version(version_data)
+
+        # Update project_files with current version and latest metadata
+        update_data = {
+            "current_version": next_version,
+            "file_path": relative_path,
+            "file_size_bytes": len(content),
+            "mime_type": mime,
+            "filename": safe_name,
+            **metadata,
+        }
+        await self.repo.update_file(file_id, update_data)
+
+        return version
+
+    # ------------------------------------------------------------------ #
+    # Review comments
+    # ------------------------------------------------------------------ #
+
+    async def add_comment(
+        self,
+        file_id: str,
+        author_id: str,
+        content: str,
+        timestamp_seconds: Optional[float] = None,
+        version_id: Optional[str] = None,
+    ) -> dict:
+        """Add a review comment to a file."""
+        comment_data = {
+            "file_id": file_id,
+            "author_id": author_id,
+            "content": content,
+        }
+        if timestamp_seconds is not None:
+            comment_data["timestamp_seconds"] = timestamp_seconds
+        if version_id:
+            comment_data["version_id"] = version_id
+        return await self.repo.create_comment(comment_data)
+
+    # ------------------------------------------------------------------ #
+    # Review status
+    # ------------------------------------------------------------------ #
+
+    async def update_review_status(
+        self, project_id: str, file_id: str, user_id: str, review_status: Optional[str]
+    ) -> dict:
+        """Update review status for a file after verifying project ownership."""
+        project = await self.repo.get_project_by_id(project_id)
+        if not project:
+            raise ValueError("Project not found")
+
+        file_record = await self.repo.get_file_by_id(file_id)
+        if not file_record:
+            raise ValueError("File not found")
+        if file_record.get("project_id") != project_id:
+            raise ValueError("File not found in this project")
+
+        return await self.repo.update_review_status(file_id, review_status)
 
     # ------------------------------------------------------------------ #
     # Helpers
