@@ -27,34 +27,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   const fetchProfile = useCallback(async (authUser: User): Promise<UserIdentity | null> => {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('username, avatar_url, role')
-      .eq('id', authUser.id)
-      .single()
+    try {
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .select('username, avatar_url, role')
+        .eq('id', authUser.id)
+        .single()
 
-    if (!profile) return null
+      if (error || !profile) return null
 
-    return {
-      id: authUser.id,
-      email: authUser.email || '',
-      name: profile.username || authUser.email || '',
-      avatar: profile.avatar_url || undefined,
-      role: profile.role,
+      return {
+        id: authUser.id,
+        email: authUser.email || '',
+        name: profile.username || authUser.email || '',
+        avatar: profile.avatar_url || undefined,
+        role: profile.role,
+      }
+    } catch {
+      return null
     }
   }, [])
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      setSession(s)
-      if (s?.user) {
-        const identity = await fetchProfile(s.user)
-        if (identity?.role === 'admin') {
-          setUser(identity)
-        } else {
-          setUser(null)
+    // Supabase JS v2 getSession() uses browser Lock API which can hang;
+    // race against a timeout so the UI is never stuck loading.
+    const timeout = new Promise<null>(res => setTimeout(() => res(null), 5000))
+    const sessionPromise = supabase.auth.getSession()
+      .then(async ({ data: { session: s } }) => {
+        setSession(s)
+        if (s?.user) {
+          try {
+            const identity = await fetchProfile(s.user)
+            if (identity?.role === 'admin') {
+              setUser(identity)
+            } else {
+              setUser(null)
+            }
+          } catch {
+            setUser(null)
+          }
         }
-      }
+        return true
+      })
+      .catch(() => null)
+
+    Promise.race([sessionPromise, timeout]).then(() => {
       setIsLoading(false)
     })
 

@@ -25,6 +25,7 @@ USER_AGENTS:
 # 注意：当 CORS_CREDENTIALS=true 时，不能使用 "*"，必须明确列出允许的域名
 CORS_ORIGINS:
   - "http://localhost:3000"
+  - "http://localhost:3097"
   - "http://localhost:8080"
   - "https://mediahubserver.heygo.cn:88"
   - "https://mediahubserver.heygo.cn"
