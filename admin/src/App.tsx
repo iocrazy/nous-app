@@ -7,6 +7,7 @@ import { Dashboard } from './pages/dashboard'
 import { UserList } from './pages/users'
 import { TeamList } from './pages/teams'
 import { AuditLogList } from './pages/audit-logs'
+import { VideoList } from './pages/videos'
 import { PlaceholderPage } from './pages/placeholder'
 
 export default function App() {
@@ -20,7 +21,7 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="/users" element={<UserList />} />
               <Route path="/teams" element={<TeamList />} />
-              <Route path="/videos" element={<PlaceholderPage title="Videos" />} />
+              <Route path="/videos" element={<VideoList />} />
               <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
               <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
               <Route path="/audit-logs" element={<AuditLogList />} />

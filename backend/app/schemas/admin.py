@@ -170,3 +170,67 @@ class SystemSettingResponse(BaseModel):
 class SystemSettingUpdate(BaseModel):
     """Request to update a system setting."""
     value: Any
+
+
+# ============================================
+# Video Management Schemas
+# ============================================
+
+
+class AdminVideoResponse(BaseModel):
+    """Admin video response with core details."""
+    id: int
+    aweme_id: str
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    video_title: Optional[str] = None
+    video_desc: Optional[str] = None
+    author: Optional[str] = None
+    aweme_type: Optional[str] = None
+    video_download_status: str = "pending"
+    cover_url: Optional[str] = None
+    video_duration: Optional[str] = None
+    video_datasize: Optional[str] = None
+    video_datasize_bytes: int = 0
+    video_digg_count: int = 0
+    video_comment_count: int = 0
+    video_share_count: int = 0
+    error_message: Optional[str] = None
+    download_time: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class AdminVideoListResponse(BaseModel):
+    """Paginated list of admin videos."""
+    items: List[AdminVideoResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminVideoDetailResponse(AdminVideoResponse):
+    """Extended video response with download paths and URLs."""
+    video_original_url: Optional[str] = None
+    video_download_path: Optional[str] = None
+    cover_download_path: Optional[str] = None
+    music_name: Optional[str] = None
+    music_download_status: str = "pending"
+    cover_download_status: str = "pending"
+    video_download_urls: Optional[list] = None
+    video_hashtag_name: Optional[str] = None
+    video_collect_count: int = 0
+    view_count: int = 0
+    storage_size: Optional[int] = None
+    keep_forever: bool = False
+
+
+class AdminVideoStatsResponse(BaseModel):
+    """Video status distribution stats."""
+    total: int = 0
+    completed: int = 0
+    pending: int = 0
+    failed: int = 0
+    downloading: int = 0
+    skipped: int = 0
+    total_storage_bytes: int = 0
