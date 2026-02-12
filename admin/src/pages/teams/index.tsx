@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Table,
   Input,
+  Select,
   Tag,
   Modal,
   Message,
@@ -9,19 +10,23 @@ import {
   Space,
   Typography,
   Button,
+  Dropdown,
+  Menu,
 } from '@arco-design/web-react'
-import { IconDelete, IconUser } from '@arco-design/web-react/icon'
+import { IconDelete, IconUser, IconMore } from '@arco-design/web-react/icon'
 import type { ColumnProps } from '@arco-design/web-react/es/Table'
-import { useTeams, useTeamMembers, useDeleteTeam } from '../../api/endpoints/teams'
+import {
+  useTeams,
+  useTeamMembers,
+  useDeleteTeam,
+  useUpdateMemberRole,
+  useRemoveMember,
+  TEAM_ROLES,
+  ROLE_COLOR_MAP,
+} from '../../api/endpoints/teams'
 import type { Team, TeamMember } from '../../api/endpoints/teams'
 
 const PAGE_SIZE = 20
-
-const memberRoleColorMap: Record<string, string> = {
-  owner: 'purple',
-  admin: 'blue',
-  member: 'default',
-}
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '-'
@@ -32,8 +37,30 @@ function formatDate(dateStr: string | null) {
   })
 }
 
-function ExpandedMembers({ teamId }: { teamId: string }) {
+function ExpandedMembers({ teamId, ownerId }: { teamId: string; ownerId: string }) {
   const { data: members = [], isLoading } = useTeamMembers(teamId)
+  const updateRole = useUpdateMemberRole()
+  const removeMember = useRemoveMember()
+
+  const handleRoleChange = (userId: string, role: string) => {
+    updateRole.mutate(
+      { teamId, userId, role },
+      { onSuccess: () => Message.success('Role updated') },
+    )
+  }
+
+  const handleRemove = (member: TeamMember) => {
+    Modal.confirm({
+      title: 'Remove Member',
+      content: `Are you sure you want to remove "${member.username || member.email}" from this team?`,
+      okButtonProps: { status: 'danger' },
+      onOk: () =>
+        removeMember.mutateAsync(
+          { teamId, userId: member.user_id },
+          { onSuccess: () => Message.success('Member removed') },
+        ),
+    })
+  }
 
   const memberColumns: ColumnProps<TeamMember>[] = [
     {
@@ -52,18 +79,64 @@ function ExpandedMembers({ teamId }: { teamId: string }) {
     {
       title: 'Role',
       dataIndex: 'role',
-      width: 120,
-      render: (role: string) => (
-        <Tag color={memberRoleColorMap[role] || 'default'}>
-          {role.charAt(0).toUpperCase() + role.slice(1)}
-        </Tag>
-      ),
+      width: 160,
+      render: (_: unknown, record: TeamMember) => {
+        if (record.user_id === ownerId) {
+          return (
+            <Tag color={ROLE_COLOR_MAP.owner}>Owner</Tag>
+          )
+        }
+        return (
+          <Select
+            size="small"
+            value={record.role}
+            onChange={(value) => handleRoleChange(record.user_id, value)}
+            disabled={updateRole.isPending}
+            style={{ width: 130 }}
+          >
+            {TEAM_ROLES.map((role) => (
+              <Select.Option key={role} value={role}>
+                {role.charAt(0).toUpperCase() + role.slice(1)}
+              </Select.Option>
+            ))}
+          </Select>
+        )
+      },
     },
     {
       title: 'Joined',
       dataIndex: 'joined_at',
       width: 140,
       render: (value: string) => formatDate(value),
+    },
+    {
+      title: 'Actions',
+      width: 80,
+      align: 'center',
+      render: (_: unknown, record: TeamMember) => {
+        if (record.user_id === ownerId) return null
+        return (
+          <Dropdown
+            droplist={
+              <Menu>
+                <Menu.Item
+                  key="remove"
+                  onClick={() => handleRemove(record)}
+                  style={{ color: 'rgb(var(--danger-6))' }}
+                >
+                  <Space>
+                    <IconDelete />
+                    Remove Member
+                  </Space>
+                </Menu.Item>
+              </Menu>
+            }
+            position="br"
+          >
+            <IconMore style={{ cursor: 'pointer', fontSize: 18 }} />
+          </Dropdown>
+        )
+      },
     },
   ]
 
@@ -196,7 +269,9 @@ export function TeamList() {
           loading={isLoading}
           expandedRowKeys={expandedRowKeys}
           onExpandedRowsChange={(keys) => setExpandedRowKeys(keys as string[])}
-          expandedRowRender={(record: Team) => <ExpandedMembers teamId={record.id} />}
+          expandedRowRender={(record: Team) => (
+            <ExpandedMembers teamId={record.id} ownerId={record.owner_id} />
+          )}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

@@ -24,7 +24,7 @@ class TeamMemberAdd(BaseModel):
 
 class TeamMemberUpdate(BaseModel):
     """Request to update a team member's role."""
-    role: str  # "admin" or "member"
+    role: str  # "admin", "editor", "reviewer", or "viewer"
 
 
 class TeamMemberResponse(BaseModel):

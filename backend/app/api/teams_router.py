@@ -174,10 +174,10 @@ async def update_member_role(
     """Update a team member's role (owner/admin only)."""
     repo = TeamRepository()
 
-    if update.role not in ["admin", "member"]:
+    if update.role not in ["admin", "editor", "reviewer", "viewer"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be 'admin' or 'member'"
+            detail="Role must be 'admin', 'editor', 'reviewer', or 'viewer'"
         )
 
     updated = await repo.update_member_role(team_id, user_id, update.role, auth.user_id)

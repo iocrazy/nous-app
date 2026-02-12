@@ -8,10 +8,13 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.db import get_async_supabase_admin
+from app.core.team_permissions import ASSIGNABLE_ROLES, get_role_info
 from app.schemas.admin import (
     AdminTeamResponse,
     AdminTeamListResponse,
     AdminTeamMemberResponse,
+    AdminUpdateMemberRoleRequest,
+    TeamRoleResponse,
 )
 from app.utils.admin_helpers import (
     create_audit_log,
@@ -28,6 +31,12 @@ router = APIRouter()
 # ============================================
 # Team Endpoints
 # ============================================
+
+
+@router.get("/roles", response_model=list[TeamRoleResponse])
+async def list_team_roles(auth: AdminAuthDep):
+    """Return all team role definitions with their permissions."""
+    return [TeamRoleResponse(**r) for r in get_role_info()]
 
 
 @router.get("", response_model=AdminTeamListResponse)
@@ -229,7 +238,7 @@ async def transfer_team_ownership(
     }).eq("team_id", team_id).eq("user_id", new_owner_id).execute()
 
     await supabase.table("team_members").update({
-        "role": "member",
+        "role": "admin",
     }).eq("team_id", team_id).eq("user_id", old_owner_id).execute()
 
     # Get client IP for audit log
@@ -308,3 +317,119 @@ async def delete_team(
     )
 
     logger.info(f"Team {team_id} ({team['name']}) deleted by admin {auth.user_id}")
+
+
+@router.patch("/{team_id}/members/{user_id}/role", response_model=AdminTeamMemberResponse)
+async def update_member_role(
+    team_id: str,
+    user_id: str,
+    body: AdminUpdateMemberRoleRequest,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """
+    Change a team member's role.
+
+    - Cannot set role to 'owner' (use transfer-ownership instead)
+    - Cannot change the team owner's role
+    """
+    if body.role not in ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Role must be one of: {', '.join(ASSIGNABLE_ROLES)}",
+        )
+
+    supabase = await get_async_supabase_admin()
+
+    # Check team exists and get owner
+    team_result = await supabase.table("teams").select("owner_id").eq("id", team_id).single().execute()
+    if not team_result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    if user_id == team_result.data["owner_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change the team owner's role. Use transfer-ownership instead.",
+        )
+
+    # Check member exists
+    member_result = await supabase.table("team_members").select("*").eq("team_id", team_id).eq("user_id", user_id).single().execute()
+    if not member_result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
+
+    old_role = member_result.data["role"]
+
+    # Update role
+    await supabase.table("team_members").update({"role": body.role}).eq("team_id", team_id).eq("user_id", user_id).execute()
+
+    # Audit log
+    client_ip = request.client.host if request.client else None
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_member_role",
+        target_type="team_member",
+        target_id=f"{team_id}/{user_id}",
+        details={"old_role": old_role, "new_role": body.role},
+        ip_address=client_ip,
+    )
+
+    logger.info(f"Team {team_id} member {user_id} role changed from {old_role} to {body.role} by admin {auth.user_id}")
+
+    # Return updated member
+    email, username = await get_user_info(user_id)
+    return AdminTeamMemberResponse(
+        user_id=str(user_id),
+        email=email,
+        username=username,
+        role=body.role,
+        joined_at=member_result.data["joined_at"],
+    )
+
+
+@router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_member(
+    team_id: str,
+    user_id: str,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """
+    Remove a member from a team.
+
+    - Cannot remove the team owner
+    """
+    supabase = await get_async_supabase_admin()
+
+    # Check team exists and get owner
+    team_result = await supabase.table("teams").select("owner_id").eq("id", team_id).single().execute()
+    if not team_result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    if user_id == team_result.data["owner_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the team owner. Transfer ownership first.",
+        )
+
+    # Check member exists
+    member_result = await supabase.table("team_members").select("role").eq("team_id", team_id).eq("user_id", user_id).single().execute()
+    if not member_result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
+
+    old_role = member_result.data["role"]
+
+    # Delete member
+    await supabase.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
+
+    # Audit log
+    client_ip = request.client.host if request.client else None
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="remove_team_member",
+        target_type="team_member",
+        target_id=f"{team_id}/{user_id}",
+        details={"role": old_role},
+        ip_address=client_ip,
+    )
+
+    logger.info(f"Member {user_id} (role={old_role}) removed from team {team_id} by admin {auth.user_id}")

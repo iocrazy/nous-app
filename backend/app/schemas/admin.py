@@ -59,6 +59,18 @@ class AdminTeamMemberResponse(BaseModel):
     joined_at: datetime
 
 
+class AdminUpdateMemberRoleRequest(BaseModel):
+    """Request to update a team member's role."""
+    role: str
+
+
+class TeamRoleResponse(BaseModel):
+    """Team role definition for API response."""
+    role: str
+    permissions: List[str]
+    is_assignable: bool
+
+
 class AdminTeamResponse(BaseModel):
     """Admin team response with full details."""
     id: str
