@@ -60,6 +60,9 @@ import { ProjectsListView } from './components/ProjectsListView';
 import { ProjectFilesView } from './components/ProjectFilesView';
 import { CreateProjectModal } from './components/CreateProjectModal';
 import { VideoReviewPage } from './components/VideoReviewPage';
+import { BillingView } from './components/BillingView';
+import { MembersView } from './components/MembersView';
+import { ResourcesView } from './components/ResourcesView';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -2592,6 +2595,33 @@ export default function App() {
           <PointsCenter onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
         )}
 
+        {/* VIEW: BILLING */}
+        {view === 'billing' && selectedTeamId && (
+          <BillingView
+            teamId={selectedTeamId}
+            permissions={userPermissions}
+            onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)}
+          />
+        )}
+
+        {/* VIEW: MEMBERS */}
+        {view === 'members' && selectedTeamId && currentTeam && (
+          <MembersView
+            teamId={selectedTeamId}
+            teamName={currentTeam.name}
+            currentUserId={currentUserId || ''}
+            permissions={userPermissions}
+          />
+        )}
+
+        {/* VIEW: RESOURCES */}
+        {view === 'resources' && selectedTeamId && (
+          <ResourcesView
+            teamId={selectedTeamId}
+            onCreateCollection={() => setIsCreateCollectionModalOpen(true)}
+          />
+        )}
+
       </main>
 
       {/* Payment Modal */}
@@ -2602,10 +2632,11 @@ export default function App() {
           onClose={() => setSelectedPaymentPackage(null)}
           onSuccess={() => {
             setSelectedPaymentPackage(null);
-            // Refresh the points view if currently viewing it
-            if (view === 'points') {
+            // Refresh the points or billing view if currently viewing it
+            if (view === 'points' || view === 'billing') {
+              const currentView = view;
               setView('parser');
-              setTimeout(() => setView('points'), 0);
+              setTimeout(() => setView(currentView), 0);
             }
           }}
         />
