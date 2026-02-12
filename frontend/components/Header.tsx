@@ -37,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Storage Usage Bar */}
       <QuotaBar />
 
+
       {/* Notification Bell */}
       <button
         onClick={onNotificationClick}
