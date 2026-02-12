@@ -126,13 +126,15 @@ def extract_audio_task(self, platform_id: str, user_id: str):
             raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
 
         logger.success(f"[AI] Audio extracted: {audio_path}")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Audio extracted: {platform_id}",
-            status="success",
-            aweme_id=platform_id,
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Audio extracted: {platform_id}",
+                status="success",
+                aweme_id=platform_id,
+            )
+        )
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -144,14 +146,16 @@ def extract_audio_task(self, platform_id: str, user_id: str):
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "transcript_status", "failed")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Audio extraction failed: {platform_id}",
-            status="error",
-            aweme_id=platform_id,
-            details={"error": str(e)[:200]},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Audio extraction failed: {platform_id}",
+                status="error",
+                aweme_id=platform_id,
+                details={"error": str(e)[:200]},
+            )
+        )
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
@@ -219,14 +223,16 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         )
 
         logger.success(f"[AI] Transcription complete for {platform_id}")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Transcription completed: {platform_id}",
-            status="success",
-            aweme_id=platform_id,
-            details={"provider": provider_key},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Transcription completed: {platform_id}",
+                status="success",
+                aweme_id=platform_id,
+                details={"provider": provider_key},
+            )
+        )
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -239,14 +245,16 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "transcript_status", "failed")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Transcription failed: {platform_id}",
-            status="error",
-            aweme_id=platform_id,
-            details={"error": str(e)[:200], "provider": provider_key},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Transcription failed: {platform_id}",
+                status="error",
+                aweme_id=platform_id,
+                details={"error": str(e)[:200], "provider": provider_key},
+            )
+        )
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
@@ -319,14 +327,16 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         )
 
         logger.success(f"[AI] Summary generated for {platform_id}")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Summary generated: {platform_id}",
-            status="success",
-            aweme_id=platform_id,
-            details={"model": summary_model},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Summary generated: {platform_id}",
+                status="success",
+                aweme_id=platform_id,
+                details={"model": summary_model},
+            )
+        )
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -338,14 +348,16 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "summary_status", "failed")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"Summary generation failed: {platform_id}",
-            status="error",
-            aweme_id=platform_id,
-            details={"error": str(e)[:200], "model": summary_model},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"Summary generation failed: {platform_id}",
+                status="error",
+                aweme_id=platform_id,
+                details={"error": str(e)[:200], "model": summary_model},
+            )
+        )
         return {"status": "failed", "platform_id": platform_id, "error": str(e)}
 
 
@@ -380,12 +392,14 @@ def chain_ai_pipeline(
         pipeline = chain(*tasks)
         pipeline.apply_async()
         logger.info(f"[AI] Pipeline queued for {platform_id}: {len(tasks)} tasks")
-        run_async(log_user_action(
-            user_id=user_id,
-            action="ai",
-            message=f"AI pipeline started: {platform_id} ({len(tasks)} tasks)",
-            status="pending",
-            aweme_id=platform_id,
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="ai",
+                message=f"AI pipeline started: {platform_id} ({len(tasks)} tasks)",
+                status="pending",
+                aweme_id=platform_id,
+            )
+        )
     else:
         logger.info(f"[AI] No AI tasks to run for {platform_id}")

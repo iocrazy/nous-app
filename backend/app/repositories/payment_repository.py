@@ -59,7 +59,9 @@ class PaymentRepository:
 
             table = await self._get_table()
             result = await table.insert(data).execute()
-            logger.info(f"Created order: {result.data[0]['id'] if result.data else 'unknown'}")
+            logger.info(
+                f"Created order: {result.data[0]['id'] if result.data else 'unknown'}"
+            )
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"Failed to create order: {e}")

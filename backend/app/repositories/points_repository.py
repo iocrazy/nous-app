@@ -214,14 +214,10 @@ class PointsRepository:
                 .eq("team_id", team_id)
                 .execute()
             )
-            logger.info(
-                f"Updated points balance for team {team_id} to {new_balance}"
-            )
+            logger.info(f"Updated points balance for team {team_id} to {new_balance}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(
-                f"Failed to update points balance for {team_id}: {e}"
-            )
+            logger.error(f"Failed to update points balance for {team_id}: {e}")
             raise
 
     async def update_storage_used(
@@ -250,9 +246,7 @@ class PointsRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(
-                f"Failed to update storage used for {team_id}: {e}"
-            )
+            logger.error(f"Failed to update storage used for {team_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -318,9 +312,7 @@ class PointsRepository:
                 )
                 .execute()
             )
-            logger.info(
-                f"Upserted member quota for user {user_id} in team {team_id}"
-            )
+            logger.info(f"Upserted member quota for user {user_id} in team {team_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(
@@ -374,9 +366,7 @@ class PointsRepository:
             )
             raise
 
-    async def get_team_member_quotas(
-        self, team_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_team_member_quotas(self, team_id: str) -> List[Dict[str, Any]]:
         """
         Get all member quotas for a team.
 
@@ -396,9 +386,7 @@ class PointsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to get member quotas for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get member quotas for team {team_id}: {e}")
             return []
 
     # ------------------------------------------------------------------ #
@@ -418,11 +406,7 @@ class PointsRepository:
         """
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_TRANSACTIONS)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_TRANSACTIONS).insert(data).execute()
             logger.info(
                 f"Created transaction for team {data.get('team_id')}: "
                 f"{data.get('type')} {data.get('amount')}"
@@ -455,9 +439,7 @@ class PointsRepository:
         try:
             client = await self._get_client()
             query = (
-                client.table(self.TABLE_TRANSACTIONS)
-                .select("*")
-                .eq("team_id", team_id)
+                client.table(self.TABLE_TRANSACTIONS).select("*").eq("team_id", team_id)
             )
             if type_filter:
                 query = query.eq("type", type_filter)
@@ -466,9 +448,7 @@ class PointsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to get transactions for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get transactions for team {team_id}: {e}")
             return []
 
     async def get_admin_overview(self) -> Dict[str, Any]:
@@ -484,9 +464,7 @@ class PointsRepository:
 
             # Fetch all team quotas for balance sum and active count
             quotas_result = await (
-                client.table(self.TABLE_TEAM_QUOTAS)
-                .select("points_balance")
-                .execute()
+                client.table(self.TABLE_TEAM_QUOTAS).select("points_balance").execute()
             )
             quotas = quotas_result.data or []
             total_points_in_system = sum(q.get("points_balance", 0) for q in quotas)
@@ -494,9 +472,7 @@ class PointsRepository:
 
             # Fetch all transactions for aggregation
             txn_result = await (
-                client.table(self.TABLE_TRANSACTIONS)
-                .select("amount,type")
-                .execute()
+                client.table(self.TABLE_TRANSACTIONS).select("amount,type").execute()
             )
             txns = txn_result.data or []
             total_transactions_count = len(txns)
@@ -578,9 +554,7 @@ class PointsRepository:
                 "by_type": by_type,
             }
         except Exception as e:
-            logger.error(
-                f"Failed to get usage stats for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get usage stats for team {team_id}: {e}")
             return {
                 "total_consumed": 0,
                 "total_purchased": 0,

@@ -77,4 +77,6 @@ async def get_system_status(auth: AuthDep):
 
     except Exception as e:
         logger.error(f"Failed to get system status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get system status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get system status: {str(e)}"
+        )

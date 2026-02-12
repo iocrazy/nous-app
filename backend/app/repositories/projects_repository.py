@@ -95,11 +95,7 @@ class ProjectsRepository:
         """
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_PROJECTS)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_PROJECTS).insert(data).execute()
             logger.info(f"Created project: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
@@ -182,9 +178,7 @@ class ProjectsRepository:
             )
             return result.count or 0
         except Exception as e:
-            logger.error(
-                f"Failed to get file count for project {project_id}: {e}"
-            )
+            logger.error(f"Failed to get file count for project {project_id}: {e}")
             return 0
 
     # ------------------------------------------------------------------ #
@@ -207,9 +201,7 @@ class ProjectsRepository:
         try:
             client = await self._get_client()
             query = (
-                client.table(self.TABLE_FILES)
-                .select("*")
-                .eq("project_id", project_id)
+                client.table(self.TABLE_FILES).select("*").eq("project_id", project_id)
             )
             if not include_trashed:
                 query = query.eq("is_trashed", False)
@@ -217,9 +209,7 @@ class ProjectsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to get files for project {project_id}: {e}"
-            )
+            logger.error(f"Failed to get files for project {project_id}: {e}")
             return []
 
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
@@ -257,11 +247,7 @@ class ProjectsRepository:
         """
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_FILES)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_FILES).insert(data).execute()
             logger.info(
                 f"Created file '{data.get('filename')}' in project {data.get('project_id')}"
             )
@@ -270,9 +256,7 @@ class ProjectsRepository:
             logger.error(f"Failed to create file: {e}")
             raise
 
-    async def update_file(
-        self, file_id: str, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def update_file(self, file_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update an existing file record.
 
@@ -309,12 +293,7 @@ class ProjectsRepository:
         """
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_FILES)
-                .delete()
-                .eq("id", file_id)
-                .execute()
-            )
+            await client.table(self.TABLE_FILES).delete().eq("id", file_id).execute()
             logger.info(f"Deleted file {file_id}")
             return True
         except Exception as e:
@@ -391,11 +370,7 @@ class ProjectsRepository:
         """Create a new file version record."""
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_VERSIONS)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_VERSIONS).insert(data).execute()
             logger.info(
                 f"Created version {data.get('version_number')} for file {data.get('file_id')}"
             )
@@ -417,11 +392,7 @@ class ProjectsRepository:
         """
         try:
             client = await self._get_client()
-            query = (
-                client.table(self.TABLE_COMMENTS)
-                .select("*")
-                .eq("file_id", file_id)
-            )
+            query = client.table(self.TABLE_COMMENTS).select("*").eq("file_id", file_id)
             if version_id:
                 query = query.eq("version_id", version_id)
             query = query.order("timestamp_seconds", desc=False, nullsfirst=False)
@@ -436,11 +407,7 @@ class ProjectsRepository:
         """Create a new review comment."""
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_COMMENTS)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_COMMENTS).insert(data).execute()
             logger.info(f"Created comment on file {data.get('file_id')}")
             return result.data[0] if result.data else {}
         except Exception as e:

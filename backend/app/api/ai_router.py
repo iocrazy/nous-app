@@ -45,7 +45,13 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     # === Points check ===
     points_service = PointsService()
     _admin = await get_async_supabase_admin()
-    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _tm = (
+        await _admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
+    )
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
     _points_cost = 0
     if _team_id:
@@ -80,10 +86,14 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
                     reference_id=platform_id,
                     reason=f"Task dispatch failed: {str(e)[:100]}",
                 )
-                logger.info(f"Refunded {_points_cost} points for failed transcription dispatch")
+                logger.info(
+                    f"Refunded {_points_cost} points for failed transcription dispatch"
+                )
             except Exception as refund_err:
                 logger.error(f"Failed to refund points: {refund_err}")
-        raise HTTPException(status_code=500, detail=f"Failed to queue transcription: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to queue transcription: {str(e)}"
+        )
 
     return {"message": "Transcription queued", "platform_id": platform_id}
 
@@ -98,7 +108,13 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     # === Points check ===
     points_service = PointsService()
     _admin = await get_async_supabase_admin()
-    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _tm = (
+        await _admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
+    )
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
     _points_cost = 0
     if _team_id:
@@ -151,10 +167,14 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
                     reference_id=platform_id,
                     reason=f"Task dispatch failed: {str(e)[:100]}",
                 )
-                logger.info(f"Refunded {_points_cost} points for failed summary dispatch")
+                logger.info(
+                    f"Refunded {_points_cost} points for failed summary dispatch"
+                )
             except Exception as refund_err:
                 logger.error(f"Failed to refund points: {refund_err}")
-        raise HTTPException(status_code=500, detail=f"Failed to queue summary: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to queue summary: {str(e)}"
+        )
 
 
 @router.post("/analyze/{platform_id}")
@@ -168,7 +188,13 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
     # === Points check ===
     points_service = PointsService()
     _admin = await get_async_supabase_admin()
-    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _tm = (
+        await _admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
+    )
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
     _points_cost = 0
     if _team_id:

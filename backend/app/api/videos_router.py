@@ -113,8 +113,15 @@ async def fetch_video(
         # === Points check ===
         points_service = PointsService()
         from app.db.supabase_client import get_async_supabase_admin as _get_admin
+
         _admin = await _get_admin()
-        _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+        _tm = (
+            await _admin.table("team_members")
+            .select("team_id")
+            .eq("user_id", auth.user_id)
+            .limit(1)
+            .execute()
+        )
         _team_id = _tm.data[0]["team_id"] if _tm.data else None
         _points_cost = 0
         if _team_id:
@@ -395,7 +402,7 @@ async def fetch_video(
 
     except HTTPException as he:
         # Refund points on failure (skip 402 which means insufficient balance)
-        if _points_cost > 0 and _team_id and getattr(he, 'status_code', 0) != 402:
+        if _points_cost > 0 and _team_id and getattr(he, "status_code", 0) != 402:
             try:
                 await points_service.refund_points(
                     team_id=_team_id,
@@ -414,7 +421,7 @@ async def fetch_video(
             action="fetch",
             message=f"Failed to fetch video: {request.url[:30]}...",
             status="error",
-            details={"error": he.detail if hasattr(he, 'detail') else str(he)},
+            details={"error": he.detail if hasattr(he, "detail") else str(he)},
         )
         raise
     except Exception as e:
@@ -463,8 +470,15 @@ async def fetch_videos_batch(
     # === Points check ===
     points_service = PointsService()
     from app.db.supabase_client import get_async_supabase_admin as _get_admin
+
     _admin = await _get_admin()
-    _tm = await _admin.table("team_members").select("team_id").eq("user_id", auth.user_id).limit(1).execute()
+    _tm = (
+        await _admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
+    )
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
     _batch_points_cost = 0
     if _team_id:
@@ -633,7 +647,9 @@ async def fetch_videos_batch(
                     reference_type="video_parse_batch",
                     reason=f"Partial batch refund: {len(errors)}/{len(request.urls)} URLs failed",
                 )
-                logger.info(f"Refunded {refund_amount} points for {len(errors)} failed batch URLs")
+                logger.info(
+                    f"Refunded {refund_amount} points for {len(errors)} failed batch URLs"
+                )
             except Exception as refund_err:
                 logger.error(f"Failed to refund batch points: {refund_err}")
 
