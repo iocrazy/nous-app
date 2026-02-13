@@ -111,6 +111,8 @@ const endpoints: EndpointDef[] = [
       { name: 'music_bool', type: 'boolean', required: false, default: 'false', description: 'Download music/audio' },
       { name: 'cover_bool', type: 'boolean', required: false, default: 'true', description: 'Download cover image' },
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously via task queue' },
+      { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach' },
+      { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
     ],
     curl: `curl -X POST "${BASE_URL}/api/v1/videos/fetch" \\
   -H "Content-Type: application/json" \\
@@ -118,7 +120,8 @@ const endpoints: EndpointDef[] = [
   -d '{
     "url": "https://v.douyin.com/xxxxxx/",
     "video_bool": true,
-    "cover_bool": true
+    "cover_bool": true,
+    "tags": ["Music", "Tutorial"]
   }'`,
     response: `{
   "success": true,
@@ -141,6 +144,8 @@ const endpoints: EndpointDef[] = [
       { name: 'music_bool', type: 'boolean', required: false, default: 'false', description: 'Download music/audio' },
       { name: 'cover_bool', type: 'boolean', required: false, default: 'true', description: 'Download cover images' },
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously' },
+      { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach to all videos' },
+      { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
     ],
     curl: `curl -X POST "${BASE_URL}/api/v1/videos/fetch/batch" \\
   -H "Content-Type: application/json" \\
@@ -150,7 +155,8 @@ const endpoints: EndpointDef[] = [
       "https://v.douyin.com/aaaaaa/",
       "https://v.douyin.com/bbbbbb/"
     ],
-    "video_bool": true
+    "video_bool": true,
+    "tags": ["Dance"]
   }'`,
     response: `{
   "success": true,

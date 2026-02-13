@@ -1247,6 +1247,7 @@ export default function App() {
         video_bool: downloadOptions.video,
         music_bool: downloadOptions.audio,
         cover_bool: downloadOptions.cover,
+        tag_ids: selectedTagIds.length > 0 ? selectedTagIds : undefined,
       });
 
       addLog("Backend received the request", 'success');
@@ -1289,16 +1290,10 @@ export default function App() {
         // Show metadata immediately
         setCurrentResult(parsedResult);
 
-        // Add selected tags to the parsed video
-        if (selectedTagIds.length > 0 && response.id) {
-          try {
-            await addTagsToVideo(response.id, selectedTagIds);
-            addLog(`Added ${selectedTagIds.length} tag(s) to video`, 'success');
-            setSelectedTagIds([]);  // Clear after adding
-          } catch (tagError) {
-            console.error("Failed to add tags:", tagError);
-            addLog("Warning: Failed to add tags to video", 'warning');
-          }
+        // Clear selected tags after successful parse (tags attached by backend)
+        if (selectedTagIds.length > 0) {
+          addLog(`Added ${selectedTagIds.length} tag(s) to video`, 'success');
+          setSelectedTagIds([]);
         }
 
         // Check if we have a download task to track
