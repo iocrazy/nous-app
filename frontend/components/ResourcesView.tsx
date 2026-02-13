@@ -1,18 +1,16 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   FolderOpen,
   FolderPlus,
-  File,
-  Film,
-  Image,
-  FileText,
   Loader2,
   Upload,
   Trash2,
-  RotateCcw,
-  X,
-  Tag as TagIcon,
+  LayoutGrid,
+  LayoutList,
+  ChevronDown,
+  Share2,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Folder, ResourceItem, Tag, SmartCollection } from '../types';
 import {
   fetchFolders,
@@ -31,6 +29,8 @@ import {
   fetchSmartFolderResources,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
+import { ResourceCard } from './ResourceCard';
+import { ResourceInfoPanel } from './ResourceInfoPanel';
 
 // ─── Props ─────────────────────────────────────────────
 
@@ -39,41 +39,8 @@ interface ResourcesViewProps {
   scopeId: string;
 }
 
-// ─── Helpers ───────────────────────────────────────────
-
-function formatFileSize(bytes: number | null | undefined): string {
-  if (!bytes) return '--';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '--';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-function fileTypeIcon(mimeType: string | null | undefined) {
-  if (!mimeType) return <File size={24} className="text-zinc-500" />;
-  if (mimeType.startsWith('video/'))
-    return <Film size={24} className="text-indigo-400" />;
-  if (mimeType.startsWith('image/'))
-    return <Image size={24} className="text-emerald-400" />;
-  if (
-    mimeType.startsWith('text/') ||
-    mimeType.includes('pdf') ||
-    mimeType.includes('document')
-  )
-    return <FileText size={24} className="text-amber-400" />;
-  return <File size={24} className="text-zinc-500" />;
-}
+type ActiveTab = 'files' | 'shared' | 'recycle';
+type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 // ─── Folder Tree Item (recursive) ─────────────────────
 
@@ -118,184 +85,34 @@ const FolderTreeItem: React.FC<FolderTreeItemProps> = ({
   );
 };
 
-// ─── Skeleton Card ─────────────────────────────────────
+// ─── Skeleton ─────────────────────────────────────────
 
-const SkeletonCard: React.FC = () => (
-  <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-pulse">
-    <div className="aspect-video bg-zinc-800" />
-    <div className="p-4 space-y-2">
-      <div className="h-4 bg-zinc-800 rounded w-3/4" />
-      <div className="h-3 bg-zinc-800 rounded w-1/2" />
-    </div>
+const SkeletonGrid: React.FC = () => (
+  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+    {Array.from({ length: 8 }).map((_, i) => (
+      <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
+        <div className="h-32 bg-zinc-800" />
+        <div className="p-3 space-y-2">
+          <div className="h-4 bg-zinc-700 rounded w-3/4" />
+          <div className="h-3 bg-zinc-700 rounded w-1/2" />
+        </div>
+      </div>
+    ))}
   </div>
 );
 
-// ─── Resource Card ─────────────────────────────────────
-
-interface ResourceCardProps {
-  item: ResourceItem;
-  showTrashAction?: boolean;
-  showRestoreAction?: boolean;
-  allTags?: Tag[];
-  onTrash?: (resourceId: string) => void;
-  onRestore?: (resourceId: string) => void;
-  onPermanentDelete?: (resourceId: string) => void;
-  onTagsChanged?: () => void;
-}
-
-const ResourceCard: React.FC<ResourceCardProps> = ({
-  item,
-  showTrashAction = true,
-  showRestoreAction = false,
-  allTags = [],
-  onTrash,
-  onRestore,
-  onPermanentDelete,
-  onTagsChanged,
-}) => {
-  const resource = item.resource;
-  const filename = resource?.filename ?? 'Untitled';
-  const mimeType = resource?.mime_type ?? null;
-  const fileSize = resource?.file_size_bytes ?? null;
-  const createdAt = resource?.created_at ?? item.created_at;
-
-  const [tags, setTags] = useState<Array<{ tag: Tag }>>([]);
-  const [showTagPicker, setShowTagPicker] = useState(false);
-
-  // Load tags for this resource
-  useEffect(() => {
-    if (!resource?.id) return;
-    fetchResourceTags(resource.id).then(setTags).catch(() => {});
-  }, [resource?.id]);
-
-  const handleAddTag = async (tagId: string) => {
-    if (!resource?.id) return;
-    try {
-      await addResourceTag(resource.id, tagId);
-      const updated = await fetchResourceTags(resource.id);
-      setTags(updated);
-      onTagsChanged?.();
-    } catch { /* ignore */ }
-  };
-
-  const handleRemoveTag = async (tagId: string) => {
-    if (!resource?.id) return;
-    try {
-      await removeResourceTag(resource.id, tagId);
-      setTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
-      onTagsChanged?.();
-    } catch { /* ignore */ }
-  };
-
-  const assignedTagIds = new Set(tags.map((t) => t.tag?.id).filter(Boolean));
-
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl overflow-hidden transition-all duration-200 group relative">
-      {/* Thumbnail placeholder */}
-      <div className="aspect-video bg-zinc-800 flex items-center justify-center">
-        {fileTypeIcon(mimeType)}
+const SkeletonList: React.FC = () => (
+  <div className="space-y-2">
+    {Array.from({ length: 6 }).map((_, i) => (
+      <div key={i} className="flex items-center gap-4 px-4 py-3 bg-zinc-800/60 border border-zinc-700/30 rounded-xl animate-pulse">
+        <div className="w-10 h-10 bg-zinc-700 rounded-lg" />
+        <div className="flex-1 h-4 bg-zinc-700 rounded w-1/3" />
+        <div className="w-16 h-3 bg-zinc-700 rounded" />
+        <div className="w-20 h-3 bg-zinc-700 rounded" />
       </div>
-      {/* Actions overlay */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {showTrashAction && !showRestoreAction && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowTagPicker(!showTagPicker); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-indigo-900/80 rounded-lg text-zinc-400 hover:text-indigo-400 transition-colors"
-            title="Manage tags"
-          >
-            <TagIcon size={14} />
-          </button>
-        )}
-        {showTrashAction && onTrash && resource && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onTrash(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
-            title="Move to trash"
-          >
-            <Trash2 size={14} />
-          </button>
-        )}
-        {showRestoreAction && onRestore && resource && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onRestore(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-emerald-900/80 rounded-lg text-zinc-400 hover:text-emerald-400 transition-colors"
-            title="Restore"
-          >
-            <RotateCcw size={14} />
-          </button>
-        )}
-        {showRestoreAction && onPermanentDelete && resource && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onPermanentDelete(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
-            title="Delete permanently"
-          >
-            <X size={14} />
-          </button>
-        )}
-      </div>
-      {/* Tag picker popup */}
-      {showTagPicker && (
-        <div className="absolute top-12 right-2 z-10 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-2 w-48 max-h-48 overflow-y-auto">
-          {allTags.length === 0 ? (
-            <p className="text-xs text-zinc-500 p-1">No tags available</p>
-          ) : (
-            allTags.map((tag) => (
-              <button
-                key={tag.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (assignedTagIds.has(tag.id)) {
-                    handleRemoveTag(tag.id);
-                  } else {
-                    handleAddTag(tag.id);
-                  }
-                }}
-                className={`w-full flex items-center gap-2 px-2 py-1 text-xs rounded transition-colors ${
-                  assignedTagIds.has(tag.id)
-                    ? 'bg-indigo-900/30 text-indigo-300'
-                    : 'text-zinc-400 hover:bg-zinc-800'
-                }`}
-              >
-                <span
-                  className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: tag.color || '#6366f1' }}
-                />
-                <span className="truncate">{tag.name}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-      {/* Info */}
-      <div className="p-4">
-        <p className="text-sm font-medium text-zinc-200 group-hover:text-zinc-100 transition-colors truncate">
-          {filename}
-        </p>
-        <p className="text-xs text-zinc-500 mt-1">
-          {formatFileSize(fileSize)} &middot; {formatDate(createdAt)}
-        </p>
-        {/* Tag chips */}
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {tags.map((t) => t.tag && (
-              <span
-                key={t.tag.id}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full"
-                style={{
-                  backgroundColor: (t.tag.color || '#6366f1') + '20',
-                  color: t.tag.color || '#6366f1',
-                }}
-              >
-                {t.tag.name}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+    ))}
+  </div>
+);
 
 // ─── Main Component ────────────────────────────────────
 
@@ -303,6 +120,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   scopeType,
   scopeId,
 }) => {
+  const { t } = useTranslation();
+
+  // Data
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderTree, setFolderTree] = useState<Folder[]>([]);
   const [resources, setResources] = useState<ResourceItem[]>([]);
@@ -323,7 +143,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Recycle bin
-  const [showTrash, setShowTrash] = useState(false);
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
 
   // Tags
@@ -332,6 +151,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Smart folders
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
   const [selectedSmartFolderId, setSelectedSmartFolderId] = useState<string | null>(null);
+
+  // UI state
+  const [activeTab, setActiveTab] = useState<ActiveTab>('files');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortBy, setSortBy] = useState<SortBy>('newest');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Detail panel
+  const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
+  const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
 
   // ─── Load folders on scope change ────────────────────
 
@@ -352,6 +181,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   useEffect(() => {
     setSelectedFolderId(null);
     setSelectedSmartFolderId(null);
+    setActiveTab('files');
+    setSelectedResource(null);
     loadFolders();
     fetchTags().then(setAllTags).catch(() => {});
     fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => {});
@@ -360,27 +191,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Load resources on folder change ─────────────────
 
   useEffect(() => {
+    if (activeTab !== 'files') return;
     let cancelled = false;
 
     const loadResources = async () => {
-      if (showTrash) return; // Trash has its own loading
-
       setLoading(true);
       try {
         let items: ResourceItem[];
-
         if (selectedSmartFolderId) {
-          // Smart folder: query by rules
           const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
-          if (sf) {
-            items = await fetchSmartFolderResources(scopeType, scopeId, sf.rules as any);
-          } else {
-            items = [];
-          }
+          items = sf ? await fetchSmartFolderResources(scopeType, scopeId, sf.rules as any) : [];
         } else {
           items = await fetchResources(scopeType, scopeId, selectedFolderId);
         }
-
         if (!cancelled) setResources(items);
       } catch {
         if (!cancelled) setResources([]);
@@ -390,10 +213,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     };
 
     loadResources();
-    return () => {
-      cancelled = true;
-    };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, smartFolders, showTrash]);
+    return () => { cancelled = true; };
+  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, smartFolders, activeTab]);
+
+  // ─── Load trashed resources ──────────────────────────
+
+  const loadTrashedResources = useCallback(async () => {
+    try {
+      const items = await fetchTrashedResources(scopeType, scopeId);
+      setTrashedResources(items);
+    } catch {
+      setTrashedResources([]);
+    }
+  }, [scopeType, scopeId]);
+
+  useEffect(() => {
+    if (activeTab === 'recycle') {
+      setLoading(true);
+      loadTrashedResources().finally(() => setLoading(false));
+    }
+  }, [activeTab, loadTrashedResources]);
 
   // ─── Focus new folder input ──────────────────────────
 
@@ -408,7 +247,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const handleCreateFolder = async () => {
     const trimmed = newFolderName.trim();
     if (!trimmed || savingFolder) return;
-
     setSavingFolder(true);
     try {
       await createFolder({
@@ -421,13 +259,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setCreatingFolder(false);
       await loadFolders();
     } catch {
-      // Keep input open on error so user can retry
+      // Keep input open on error
     } finally {
       setSavingFolder(false);
     }
   };
 
-  // ─── Upload handler ─────────────────────────────────
+  // ─── Upload handler ──────────────────────────────────
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!files.length || uploading) return;
@@ -446,18 +284,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           },
         );
       }
-      // Reload resources after upload
       const items = await fetchResources(scopeType, scopeId, selectedFolderId);
       setResources(items);
     } catch {
-      // Upload failed — resources stay unchanged
+      // Upload failed
     } finally {
       setUploading(false);
       setUploadProgress(0);
     }
   }, [scopeType, scopeId, selectedFolderId, uploading]);
 
-  // ─── Drag & drop handlers ──────────────────────────
+  // ─── Drag & drop ─────────────────────────────────────
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -472,19 +309,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files.length) {
-      handleUpload(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files);
   }, [handleUpload]);
 
-  // ─── Trash handlers ────────────────────────────────
+  // ─── Trash handlers ──────────────────────────────────
 
   const handleTrash = useCallback(async (resourceId: string) => {
     try {
       await trashResource(resourceId);
       setResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
+      if (selectedResource?.resource?.id === resourceId) setSelectedResource(null);
     } catch { /* ignore */ }
-  }, []);
+  }, [selectedResource]);
 
   const handleRestore = useCallback(async (resourceId: string) => {
     try {
@@ -500,164 +336,288 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } catch { /* ignore */ }
   }, []);
 
-  const loadTrashedResources = useCallback(async () => {
-    try {
-      const items = await fetchTrashedResources(scopeType, scopeId);
-      setTrashedResources(items);
-    } catch {
-      setTrashedResources([]);
-    }
-  }, [scopeType, scopeId]);
+  // ─── Resource selection & detail panel ───────────────
 
+  const handleResourceClick = useCallback((item: ResourceItem) => {
+    if (selectedResource?.id === item.id) {
+      setSelectedResource(null);
+    } else {
+      setSelectedResource(item);
+    }
+  }, [selectedResource]);
+
+  // Load tags when selected resource changes
   useEffect(() => {
-    if (showTrash) {
-      loadTrashedResources();
+    if (!selectedResource?.resource?.id) {
+      setSelectedResourceTags([]);
+      return;
     }
-  }, [showTrash, loadTrashedResources]);
+    fetchResourceTags(selectedResource.resource.id)
+      .then(setSelectedResourceTags)
+      .catch(() => setSelectedResourceTags([]));
+  }, [selectedResource?.resource?.id]);
 
-  // ─── Derive selected folder name ─────────────────────
+  // ESC to close panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedResource(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-  const selectedFolderName = showTrash
-    ? 'Recycle Bin'
-    : selectedSmartFolderId
-      ? smartFolders.find((s) => String(s.id) === selectedSmartFolderId)?.name ?? 'Smart Folder'
-      : selectedFolderId
-        ? folders.find((f) => f.id === selectedFolderId)?.name ?? 'Folder'
-        : 'All Resources';
+  // Clear selection on tab/folder change
+  useEffect(() => {
+    setSelectedResource(null);
+  }, [activeTab, selectedFolderId, selectedSmartFolderId]);
+
+  const handleAddTag = useCallback(async (tagId: string) => {
+    if (!selectedResource?.resource?.id) return;
+    try {
+      await addResourceTag(selectedResource.resource.id, tagId);
+      const updated = await fetchResourceTags(selectedResource.resource.id);
+      setSelectedResourceTags(updated);
+    } catch { /* ignore */ }
+  }, [selectedResource]);
+
+  const handleRemoveTag = useCallback(async (tagId: string) => {
+    if (!selectedResource?.resource?.id) return;
+    try {
+      await removeResourceTag(selectedResource.resource.id, tagId);
+      setSelectedResourceTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
+    } catch { /* ignore */ }
+  }, [selectedResource]);
+
+  // ─── Sort ────────────────────────────────────────────
+
+  const currentItems = activeTab === 'recycle' ? trashedResources : resources;
+
+  const sortedItems = useMemo(() => {
+    const items = [...currentItems];
+    switch (sortBy) {
+      case 'newest':
+        return items.sort((a, b) => new Date(b.resource?.created_at ?? b.created_at).getTime() - new Date(a.resource?.created_at ?? a.created_at).getTime());
+      case 'oldest':
+        return items.sort((a, b) => new Date(a.resource?.created_at ?? a.created_at).getTime() - new Date(b.resource?.created_at ?? b.created_at).getTime());
+      case 'name-az':
+        return items.sort((a, b) => (a.resource?.filename ?? '').localeCompare(b.resource?.filename ?? ''));
+      case 'name-za':
+        return items.sort((a, b) => (b.resource?.filename ?? '').localeCompare(a.resource?.filename ?? ''));
+      case 'largest':
+        return items.sort((a, b) => (b.resource?.file_size_bytes ?? 0) - (a.resource?.file_size_bytes ?? 0));
+      case 'smallest':
+        return items.sort((a, b) => (a.resource?.file_size_bytes ?? 0) - (b.resource?.file_size_bytes ?? 0));
+      default:
+        return items;
+    }
+  }, [currentItems, sortBy]);
+
+  // Sort options
+  const sortOptions: { value: SortBy; label: string }[] = [
+    { value: 'newest', label: t('resources.sortNewest') },
+    { value: 'oldest', label: t('resources.sortOldest') },
+    { value: 'name-az', label: t('resources.sortNameAZ') },
+    { value: 'name-za', label: t('resources.sortNameZA') },
+    { value: 'largest', label: t('resources.sortLargest') },
+    { value: 'smallest', label: t('resources.sortSmallest') },
+  ];
+
+  const currentSortLabel = sortOptions.find((o) => o.value === sortBy)?.label ?? '';
 
   // ─── Render ──────────────────────────────────────────
 
+  const isFilesTab = activeTab === 'files';
+  const isRecycleTab = activeTab === 'recycle';
+  const isSharedTab = activeTab === 'shared';
+
+  const tabs: { key: ActiveTab; label: string; icon: React.ReactNode }[] = [
+    { key: 'files', label: t('resources.files'), icon: <FolderOpen size={14} /> },
+    { key: 'shared', label: t('resources.shared'), icon: <Share2 size={14} /> },
+    { key: 'recycle', label: t('resources.recycleBin'), icon: <Trash2 size={14} /> },
+  ];
+
   return (
     <div className="flex h-full animate-in fade-in duration-300">
-      {/* ── Left panel: Folder tree ── */}
-      <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col py-3">
-        {/* Root item */}
-        <button
-          onClick={() => {
-            setSelectedFolderId(null);
-            setSelectedSmartFolderId(null);
-            setShowTrash(false);
-          }}
-          className={`
-            w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left mx-0
-            ${selectedFolderId === null && !selectedSmartFolderId && !showTrash ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
-          `}
-        >
-          <FolderOpen size={14} className="shrink-0" />
-          <span>All Resources</span>
-        </button>
-
-        {/* Folder list */}
-        <div className="flex-1 overflow-y-auto mt-1 space-y-0.5">
-          {foldersLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 size={16} className="animate-spin text-zinc-500" />
-            </div>
-          ) : (
-            folderTree.map((folder) => (
-              <FolderTreeItem
-                key={folder.id}
-                folder={folder}
-                selectedFolderId={selectedFolderId}
-                onSelect={(id) => {
-                  setSelectedFolderId(id);
-                  setSelectedSmartFolderId(null);
-                  setShowTrash(false);
-                }}
-              />
-            ))
-          )}
-
-          {/* Smart folders */}
-          {smartFolders.length > 0 && (
-            <>
-              <div className="px-3 py-1 mt-2">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium">Smart Folders</span>
-              </div>
-              {smartFolders.map((sf) => (
-                <button
-                  key={sf.id}
-                  onClick={() => {
-                    setSelectedSmartFolderId(String(sf.id));
-                    setSelectedFolderId(null);
-                    setShowTrash(false);
-                  }}
-                  className={`
-                    w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
-                    ${selectedSmartFolderId === String(sf.id) ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
-                  `}
-                >
-                  <span className="shrink-0 text-xs">{sf.icon || '⚡'}</span>
-                  <span className="truncate">{sf.name}</span>
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-
-        {/* New folder input / button */}
-        <div className="mt-2 px-2 space-y-0.5">
-          {creatingFolder ? (
-            <div className="flex items-center gap-1.5">
-              <input
-                ref={newFolderInputRef}
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateFolder();
-                  if (e.key === 'Escape') {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                placeholder="Folder name"
-                disabled={savingFolder}
-                className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-              />
-              {savingFolder && (
-                <Loader2 size={12} className="animate-spin text-zinc-400" />
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={() => setCreatingFolder(true)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 rounded-md transition-colors"
-            >
-              <FolderPlus size={14} />
-              <span>New Folder</span>
-            </button>
-          )}
-
-          {/* Recycle bin */}
+      {/* ── Left panel: Folder tree (only on files tab) ── */}
+      {isFilesTab && (
+        <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col py-3">
+          {/* Root item */}
           <button
             onClick={() => {
-              setShowTrash(!showTrash);
-              if (!showTrash) {
-                setSelectedFolderId(null);
-                setSelectedSmartFolderId(null);
-              }
+              setSelectedFolderId(null);
+              setSelectedSmartFolderId(null);
             }}
             className={`
               w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
-              ${showTrash ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}
+              ${selectedFolderId === null && !selectedSmartFolderId ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
             `}
           >
-            <Trash2 size={14} />
-            <span>Recycle Bin</span>
+            <FolderOpen size={14} className="shrink-0" />
+            <span>{t('resources.allResources')}</span>
           </button>
-        </div>
-      </div>
 
-      {/* ── Right panel: Resource grid ── */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header bar */}
+          {/* Folder list */}
+          <div className="flex-1 overflow-y-auto mt-1 space-y-0.5">
+            {foldersLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 size={16} className="animate-spin text-zinc-500" />
+              </div>
+            ) : (
+              folderTree.map((folder) => (
+                <FolderTreeItem
+                  key={folder.id}
+                  folder={folder}
+                  selectedFolderId={selectedFolderId}
+                  onSelect={(id) => {
+                    setSelectedFolderId(id);
+                    setSelectedSmartFolderId(null);
+                  }}
+                />
+              ))
+            )}
+
+            {/* Smart folders */}
+            {smartFolders.length > 0 && (
+              <>
+                <div className="px-3 py-1 mt-2">
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium">
+                    {t('resources.smartFolders')}
+                  </span>
+                </div>
+                {smartFolders.map((sf) => (
+                  <button
+                    key={sf.id}
+                    onClick={() => {
+                      setSelectedSmartFolderId(String(sf.id));
+                      setSelectedFolderId(null);
+                    }}
+                    className={`
+                      w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
+                      ${selectedSmartFolderId === String(sf.id) ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
+                    `}
+                  >
+                    <span className="shrink-0 text-xs">{sf.icon || '⚡'}</span>
+                    <span className="truncate">{sf.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+
+          {/* New folder */}
+          <div className="mt-2 px-2">
+            {creatingFolder ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  ref={newFolderInputRef}
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreateFolder();
+                    if (e.key === 'Escape') {
+                      setCreatingFolder(false);
+                      setNewFolderName('');
+                    }
+                  }}
+                  placeholder={t('resources.folderName')}
+                  disabled={savingFolder}
+                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                />
+                {savingFolder && (
+                  <Loader2 size={12} className="animate-spin text-zinc-400" />
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => setCreatingFolder(true)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 rounded-md transition-colors"
+              >
+                <FolderPlus size={14} />
+                <span>{t('resources.newFolder')}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Center panel: Main content ── */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Toolbar */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100 truncate">
-            {selectedFolderName}
-          </h2>
+          {/* Left: Tabs */}
+          <div className="flex items-center gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  activeTab === tab.key
+                    ? 'bg-zinc-800 text-zinc-100 font-medium'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Right: Sort + View Toggle + Upload + Count */}
           <div className="flex items-center gap-2">
-            {!showTrash && (
+            {/* Sort dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSortMenu(!showSortMenu)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <span>{currentSortLabel}</span>
+                <ChevronDown size={12} />
+              </button>
+              {showSortMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                    {sortOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                          sortBy === opt.value
+                            ? 'bg-zinc-800 text-indigo-400'
+                            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* View toggle */}
+            <div className="flex bg-zinc-800 rounded-lg p-0.5">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <LayoutList size={14} />
+              </button>
+            </div>
+
+            {/* Upload button (only on files tab) */}
+            {isFilesTab && (
               <>
                 <input
                   ref={fileInputRef}
@@ -684,15 +644,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   ) : (
                     <>
                       <Upload size={14} />
-                      <span>Upload</span>
+                      <span>{t('resources.upload')}</span>
                     </>
                   )}
                 </button>
               </>
             )}
+
+            {/* Count badge */}
             {!loading && (
               <span className="bg-zinc-800 text-zinc-400 rounded-full px-2.5 py-0.5 text-xs font-medium">
-                {showTrash ? trashedResources.length : resources.length}
+                {sortedItems.length}
               </span>
             )}
           </div>
@@ -700,12 +662,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
         {/* Content area */}
         <div
-          className={`flex-1 overflow-y-auto p-6 transition-colors ${dragOver ? 'bg-indigo-900/10 ring-2 ring-inset ring-indigo-500/30' : ''}`}
-          onDragOver={!showTrash ? handleDragOver : undefined}
-          onDragLeave={!showTrash ? handleDragLeave : undefined}
-          onDrop={!showTrash ? handleDrop : undefined}
+          className={`flex-1 overflow-y-auto p-6 transition-colors ${
+            dragOver ? 'bg-indigo-900/10 ring-2 ring-inset ring-indigo-500/30' : ''
+          }`}
+          onDragOver={isFilesTab ? handleDragOver : undefined}
+          onDragLeave={isFilesTab ? handleDragLeave : undefined}
+          onDrop={isFilesTab ? handleDrop : undefined}
         >
-          {/* Upload progress bar */}
+          {/* Upload progress */}
           {uploading && (
             <div className="mb-4">
               <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -717,67 +681,89 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
           )}
 
-          {showTrash ? (
-            /* Recycle bin content */
-            trashedResources.length > 0 ? (
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                {trashedResources.map((item) => (
-                  <ResourceCard
-                    key={item.id}
-                    item={item}
-                    showTrashAction={false}
-                    showRestoreAction={true}
-                    onRestore={handleRestore}
-                    onPermanentDelete={handlePermanentDelete}
-                  />
-                ))}
-              </div>
+          {/* Shared tab placeholder */}
+          {isSharedTab && (
+            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+              <Share2 size={48} className="text-zinc-600 mb-4" />
+              <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
+            </div>
+          )}
+
+          {/* Files / Recycle content */}
+          {!isSharedTab && (
+            loading ? (
+              viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
+            ) : sortedItems.length > 0 ? (
+              viewMode === 'grid' ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {sortedItems.map((item) => (
+                    <ResourceCard
+                      key={item.id}
+                      item={item}
+                      onClick={() => handleResourceClick(item)}
+                      viewMode="grid"
+                      isSelected={selectedResource?.id === item.id}
+                      showRestoreAction={isRecycleTab}
+                      onTrash={isRecycleTab ? undefined : handleTrash}
+                      onRestore={isRecycleTab ? handleRestore : undefined}
+                      onPermanentDelete={isRecycleTab ? handlePermanentDelete : undefined}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {sortedItems.map((item) => (
+                    <ResourceCard
+                      key={item.id}
+                      item={item}
+                      onClick={() => handleResourceClick(item)}
+                      viewMode="list"
+                      isSelected={selectedResource?.id === item.id}
+                      showRestoreAction={isRecycleTab}
+                      onTrash={isRecycleTab ? undefined : handleTrash}
+                      onRestore={isRecycleTab ? handleRestore : undefined}
+                      onPermanentDelete={isRecycleTab ? handlePermanentDelete : undefined}
+                    />
+                  ))}
+                </div>
+              )
             ) : (
+              /* Empty states */
               <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                <Trash2 size={48} className="text-zinc-600 mb-4" />
-                <p className="text-zinc-400 text-sm">Recycle bin is empty</p>
+                {isRecycleTab ? (
+                  <>
+                    <Trash2 size={48} className="text-zinc-600 mb-4" />
+                    <p className="text-zinc-400 text-sm">{t('resources.recycleBinEmpty')}</p>
+                  </>
+                ) : dragOver ? (
+                  <>
+                    <Upload size={48} className="text-indigo-400 mb-4" />
+                    <p className="text-indigo-300 text-sm">{t('resources.dropToUpload')}</p>
+                  </>
+                ) : (
+                  <>
+                    <FolderOpen size={48} className="text-zinc-600 mb-4" />
+                    <p className="text-zinc-400 text-sm">{t('resources.noResources')}</p>
+                    <p className="text-zinc-500 text-xs mt-1">{t('resources.noResourcesHint')}</p>
+                  </>
+                )}
               </div>
             )
-          ) : loading ? (
-            /* Loading skeleton */
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </div>
-          ) : resources.length > 0 ? (
-            /* Resource grid */
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {resources.map((item) => (
-                <ResourceCard
-                  key={item.id}
-                  item={item}
-                  allTags={allTags}
-                  onTrash={handleTrash}
-                />
-              ))}
-            </div>
-          ) : (
-            /* Empty state */
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-              {dragOver ? (
-                <>
-                  <Upload size={48} className="text-indigo-400 mb-4" />
-                  <p className="text-indigo-300 text-sm">Drop files to upload</p>
-                </>
-              ) : (
-                <>
-                  <FolderOpen size={48} className="text-zinc-600 mb-4" />
-                  <p className="text-zinc-400 text-sm">No resources yet</p>
-                  <p className="text-zinc-500 text-xs mt-1">
-                    Drag & drop files or click Upload to add resources
-                  </p>
-                </>
-              )}
-            </div>
           )}
         </div>
       </div>
+
+      {/* ── Right panel: Resource Info ── */}
+      {selectedResource?.resource && (
+        <ResourceInfoPanel
+          resource={selectedResource.resource}
+          allTags={allTags}
+          assignedTags={selectedResourceTags}
+          onClose={() => setSelectedResource(null)}
+          onAddTag={handleAddTag}
+          onRemoveTag={handleRemoveTag}
+        />
+      )}
     </div>
   );
 };
