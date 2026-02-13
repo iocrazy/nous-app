@@ -2,22 +2,14 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
-  Library,
-  LayoutDashboard,
   Settings,
   FolderKanban,
   Layers,
   Users,
-  CreditCard,
   Sparkles,
   ChevronDown,
   FolderOpen,
-  Key,
-  ScrollText,
   ListTodo,
-  Tag,
-  BookOpen,
-  Trash2,
   ArrowLeft,
   Upload,
   MessageSquare,
@@ -26,7 +18,6 @@ import {
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
-import { SmartCollectionsSidebar } from './SmartCollectionsSidebar';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { hasPermission } from '../utils/permissions';
 
@@ -75,42 +66,6 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
 );
 
 // ---------------------------------------------------------------------------
-// Settings submenu item helper
-// ---------------------------------------------------------------------------
-
-interface SettingsSubItemProps {
-  icon: React.ElementType;
-  label: string;
-  tabKey: string;
-  activeView: ViewState;
-  activeTab: string;
-  onSelect: (tab: string) => void;
-}
-
-const SettingsSubItem: React.FC<SettingsSubItemProps> = ({
-  icon: Icon,
-  label,
-  tabKey,
-  activeView,
-  activeTab,
-  onSelect,
-}) => (
-  <button
-    onClick={() => onSelect(tabKey)}
-    className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-      activeView === 'settings' && activeTab === tabKey
-        ? 'text-indigo-400 bg-indigo-500/5'
-        : 'text-zinc-500 hover:text-zinc-300'
-    }`}
-  >
-    <div className="flex items-center gap-2">
-      <Icon size={14} />
-      <span>{label}</span>
-    </div>
-  </button>
-);
-
-// ---------------------------------------------------------------------------
 // Sidebar Props
 // ---------------------------------------------------------------------------
 
@@ -145,20 +100,6 @@ interface SidebarProps {
   onSmartCollectionSelect: (collection: SmartCollection | null) => void;
   onProjectSelect: (project: Project) => void;
 }
-
-// ---------------------------------------------------------------------------
-// Settings submenu (shared across personal & team modes)
-// ---------------------------------------------------------------------------
-
-const SETTINGS_TABS = [
-  { key: 'general', icon: FolderOpen, label: 'General' },
-  { key: 'api', icon: Key, label: 'API Management' },
-  { key: 'logs', icon: ScrollText, label: 'Logs' },
-  { key: 'tasks', icon: ListTodo, label: 'Tasks' },
-  { key: 'tags', icon: Tag, label: 'Tags' },
-  { key: 'ai', icon: Sparkles, label: 'AI' },
-  { key: 'docs', icon: BookOpen, label: 'API Docs' },
-];
 
 // ---------------------------------------------------------------------------
 // Logo
@@ -196,69 +137,31 @@ const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" /
 export const Sidebar: React.FC<SidebarProps> = ({
   mode,
   view,
-  settingsTab,
+  // Props kept for App.tsx compatibility (unused in render after refactor)
+  settingsTab: _settingsTab,
   teams,
   activeTeamId,
   currentTeam,
   permissions,
   userName,
   activeProject,
-  isLibraryOpen,
-  isSettingsOpen,
-  activeSmartCollectionId,
+  isLibraryOpen: _isLibraryOpen,
+  isSettingsOpen: _isSettingsOpen,
+  activeSmartCollectionId: _activeSmartCollectionId,
   onViewChange,
-  onSettingsTabChange,
-  onToggleLibrary,
-  onToggleSettings,
+  onSettingsTabChange: _onSettingsTabChange,
+  onToggleLibrary: _onToggleLibrary,
+  onToggleSettings: _onToggleSettings,
   onTeamChange,
   onCreateTeam,
   onProjectBack,
-  onSmartCollectionSelect,
-  onProjectSelect,
+  onSmartCollectionSelect: _onSmartCollectionSelect,
+  onProjectSelect: _onProjectSelect,
 }) => {
   const { t } = useTranslation();
 
-  // ------- Settings submenu (reused in personal & team modes) -------
-  const renderSettingsMenu = () => (
-    <div className="space-y-1">
-      <SidebarItem
-        icon={Settings}
-        label={t('nav.settings')}
-        active={view === 'settings'}
-        onClick={() => {
-          onToggleSettings();
-          if (!isSettingsOpen) {
-            onViewChange('settings');
-            if (settingsTab === 'api') onSettingsTabChange('general');
-          }
-        }}
-        hasSubmenu
-        isOpen={isSettingsOpen}
-      />
-
-      {isSettingsOpen && (
-        <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-          {SETTINGS_TABS.map((tab) => (
-            <SettingsSubItem
-              key={tab.key}
-              icon={tab.icon}
-              label={tab.label}
-              tabKey={tab.key}
-              activeView={view}
-              activeTab={settingsTab}
-              onSelect={(key) => {
-                onViewChange('settings');
-                onSettingsTabChange(key);
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
   // ===================================================================
-  // PROJECT MODE
+  // PROJECT MODE (unchanged)
   // ===================================================================
   if (mode === 'project') {
     return (
@@ -373,60 +276,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <nav className="flex-1 space-y-2">
-          {/* Team-specific views */}
-          {hasPermission(permissions, 'project.view') && (
-            <SidebarItem
-              icon={FolderKanban}
-              label={t('mediatrack.projects', 'Projects')}
-              active={view === 'mediatrack'}
-              onClick={() => onViewChange('mediatrack')}
-            />
-          )}
-          {hasPermission(permissions, 'resource.view') && (
-            <SidebarItem
-              icon={Layers}
-              label="Resources"
-              active={view === 'resources'}
-              onClick={() => onViewChange('resources')}
-            />
-          )}
+          <SidebarItem
+            icon={Layers}
+            label="Resources"
+            active={view === 'resources'}
+            onClick={() => onViewChange('resources')}
+          />
+          <SidebarItem
+            icon={FolderKanban}
+            label="Projects"
+            active={view === 'mediatrack'}
+            onClick={() => onViewChange('mediatrack')}
+          />
+          <SidebarItem
+            icon={ListTodo}
+            label="Todolist"
+            active={view === 'todolist'}
+            onClick={() => onViewChange('todolist')}
+          />
           {hasPermission(permissions, 'member.view') && (
             <SidebarItem
-              icon={Users}
-              label="Members"
-              active={view === 'members'}
-              onClick={() => onViewChange('members')}
+              icon={Settings}
+              label="Management"
+              active={view === 'management'}
+              onClick={() => onViewChange('management')}
             />
           )}
-          {hasPermission(permissions, 'billing.view') && (
-            <SidebarItem
-              icon={CreditCard}
-              label="Billing"
-              active={view === 'billing'}
-              onClick={() => onViewChange('billing')}
-            />
-          )}
-
-          <Divider />
-
-          {/* Personal views accessible in team context */}
-          <SidebarItem
-            icon={Search}
-            label={t('nav.linkParser')}
-            active={view === 'parser'}
-            onClick={() => onViewChange('parser')}
-          />
-          <SidebarItem
-            icon={Library}
-            label="My Library"
-            active={view === 'library'}
-            onClick={() => onViewChange('library')}
-          />
-
-          <Divider />
-
-          {/* Settings with submenu */}
-          {renderSettingsMenu()}
         </nav>
 
         <VersionFooter />
@@ -459,59 +334,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           active={view === 'parser'}
           onClick={() => onViewChange('parser')}
         />
-
-        {/* Library with submenu */}
-        <div className="space-y-1">
-          <SidebarItem
-            icon={Library}
-            label="Library"
-            active={view === 'library'}
-            onClick={() => {
-              onViewChange('library');
-              if (!isLibraryOpen) {
-                onToggleLibrary();
-              }
-            }}
-            hasSubmenu
-            isOpen={isLibraryOpen}
-          />
-
-          {/* Library Sub-menu - Smart Collections */}
-          {isLibraryOpen && (
-            <div className="ml-9 border-l border-zinc-800 space-y-1 animate-in slide-in-from-left-2 duration-200">
-              <SmartCollectionsSidebar
-                activeCollectionId={activeSmartCollectionId}
-                onSelectCollection={onSmartCollectionSelect}
-                isInline
-              />
-
-              {/* Storage Cleanup */}
-              <button
-                onClick={() => onViewChange('cleanup')}
-                className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
-                  view === 'cleanup'
-                    ? 'text-indigo-400 bg-indigo-500/5'
-                    : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Trash2 size={14} />
-                  <span>Storage Cleanup</span>
-                </div>
-              </button>
-            </div>
-          )}
-        </div>
-
         <SidebarItem
-          icon={LayoutDashboard}
-          label={t('nav.dashboard')}
-          active={view === 'dashboard'}
-          onClick={() => onViewChange('dashboard')}
+          icon={Layers}
+          label="Resources"
+          active={view === 'resources'}
+          onClick={() => onViewChange('resources')}
         />
-
-        {/* Settings with submenu */}
-        {renderSettingsMenu()}
+        <SidebarItem
+          icon={FolderKanban}
+          label="Projects"
+          active={view === 'mediatrack'}
+          onClick={() => onViewChange('mediatrack')}
+        />
+        <SidebarItem
+          icon={ListTodo}
+          label="Todolist"
+          active={view === 'todolist'}
+          onClick={() => onViewChange('todolist')}
+        />
       </nav>
 
       <VersionFooter />
