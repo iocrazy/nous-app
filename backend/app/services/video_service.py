@@ -86,6 +86,9 @@ class VideoService:
 
             logger.success(f"{message}")
 
+            # Auto-create resource record for the resource library (dedup)
+            await VideoService._create_resource_record(platform_id, user_id)
+
             return {
                 "success": True,
                 "message": message,
@@ -367,6 +370,48 @@ class VideoService:
         except* Exception as exc_group:
             for exc in exc_group.exceptions:
                 logger.error(f"下载任务异常: {exc}")
+
+    @staticmethod
+    async def _create_resource_record(platform_id: str, user_id: str = None):
+        """
+        Auto-create a resource record from a downloaded video.
+        Uses dedup logic: if resource with same video_id exists,
+        only creates a resource_item reference (zero-copy).
+        """
+        if not user_id:
+            return
+
+        try:
+            from app.services.resources_service import ResourcesService
+
+            repo = VideoRepository()
+            video = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            if not video:
+                return
+
+            video_id = video.get("id")
+            if not video_id:
+                return
+
+            resources_svc = ResourcesService()
+            await resources_svc.create_from_video(
+                video_id=video_id,
+                user_id=user_id,
+                filename=video.get("title") or "Untitled",
+                file_path=video.get("download_path"),
+                file_size_bytes=video.get("datasize_bytes"),
+                duration_seconds=(
+                    int(video["duration"]) if video.get("duration") else None
+                ),
+                resolution=video.get("resolution"),
+                cover_image_path=video.get("cover_download_path"),
+                scope_type="personal",
+                scope_id=user_id,
+            )
+            logger.info(f"Auto-created resource record for video {platform_id}")
+        except Exception as e:
+            # Non-critical: don't fail the main workflow
+            logger.warning(f"Failed to create resource record for {platform_id}: {e}")
 
     @staticmethod
     async def save_metadata_only(platform_id: str, parsed_data: dict) -> Dict[str, Any]:
