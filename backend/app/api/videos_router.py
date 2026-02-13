@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
@@ -46,6 +46,13 @@ TAGS_LOGS = ["Logs"]  # User action logs
 # ============================================
 
 
+def _coerce_str_to_list(v):
+    """Accept both 'a,b,c' and ['a','b','c']."""
+    if isinstance(v, str):
+        return [s.strip() for s in v.split(",") if s.strip()]
+    return v
+
+
 class VideoFetchRequest(BaseModel):
     """Video fetch request"""
 
@@ -56,6 +63,11 @@ class VideoFetchRequest(BaseModel):
     use_celery: bool = False  # Whether to use Celery async tasks
     tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
     tag_ids: Optional[list[str]] = None  # Existing tag UUIDs
+
+    @field_validator("tags", "tag_ids", mode="before")
+    @classmethod
+    def accept_comma_string(cls, v):
+        return _coerce_str_to_list(v) if v is not None else v
 
 
 class VideoSearchRequest(BaseModel):
@@ -80,6 +92,11 @@ class BatchFetchRequest(BaseModel):
     use_celery: bool = False  # Whether to use Celery async tasks
     tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
     tag_ids: Optional[list[str]] = None  # Existing tag UUIDs
+
+    @field_validator("tags", "tag_ids", mode="before")
+    @classmethod
+    def accept_comma_string(cls, v):
+        return _coerce_str_to_list(v) if v is not None else v
 
 
 async def _resolve_and_attach_tags(
