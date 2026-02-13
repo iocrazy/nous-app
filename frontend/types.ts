@@ -119,7 +119,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'management';
 
 export interface ApiKey {
   id: number;
@@ -232,6 +232,83 @@ export interface CollectionVideo {
   video_id: number;
   added_by: string;
   added_at: string;
+}
+
+// Folder (virtual folder tree)
+export interface Folder {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  scope_type: 'personal' | 'team';
+  scope_id: string;
+  created_by: string;
+  sort_order: number;
+  is_system: boolean;
+  icon: string | null;
+  color: string | null;
+  visibility: 'inherited' | 'restricted';
+  is_trashed: boolean;
+  trashed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // Computed
+  children?: Folder[];
+  resource_count?: number;
+}
+
+// Resource (core resource record)
+export interface Resource {
+  id: string;
+  creator_id: string;
+  source_type: 'web' | 'upload';
+  video_id: string | null;
+  filename: string;
+  file_type: string | null;
+  mime_type: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  current_version: number;
+  is_trashed: boolean;
+  trashed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  tags?: Tag[];
+  folder_name?: string;
+}
+
+// Resource item (resource <-> workspace mapping)
+export interface ResourceItem {
+  id: string;
+  resource_id: string;
+  scope_type: 'personal' | 'team';
+  scope_id: string;
+  folder_id: string | null;
+  added_by: string | null;
+  created_at: string;
+  // Joined
+  resource?: Resource;
+}
+
+// Resource version
+export interface ResourceVersion {
+  id: string;
+  resource_id: string;
+  version_number: number;
+  filename: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  thumbnail_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
 // Notification types
