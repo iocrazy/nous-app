@@ -19,6 +19,8 @@ interface SettingsViewProps {
   activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
+  /** When true, hides the outer wrapper/header for embedding in a modal */
+  embedded?: boolean;
 }
 
 // Default scopes (will be overwritten by backend scopes if available)
@@ -40,7 +42,7 @@ const DEFAULT_SCOPES = [
   'system:read',
 ];
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false }) => {
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -284,13 +286,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* Header */}
+    <div className={embedded ? 'space-y-6' : 'max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500'}>
+
+      {/* Header - hidden in embedded mode */}
+      {!embedded && (
       <div>
          <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
          <p className="text-zinc-400">Manage your application preferences and API access credentials.</p>
       </div>
+      )}
 
       {/* General Settings Tab */}
       {activeTab === 'general' && (

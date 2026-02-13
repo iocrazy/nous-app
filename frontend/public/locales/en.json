@@ -12,10 +12,14 @@
   "sidebar": {
     "personal": "Personal",
     "resources": "Resources",
+    "projects": "Projects",
+    "todolist": "Todolist",
+    "management": "Management",
     "members": "Members",
     "billing": "Billing",
     "files": "Files",
     "allFiles": "All Files",
+    "upload": "Upload",
     "review": "Review",
     "comments": "Comments",
     "status": "Status",
@@ -199,6 +203,20 @@
     "paymentSuccessful": "Payment Successful!",
     "pointsAdded": "{{amount}} points added",
     "orderHistory": "Order History"
+  },
+  "topbar": {
+    "search": "Search (⌘K)",
+    "taskCenter": "Task Center",
+    "transfers": "Transfers",
+    "tasks": "Tasks",
+    "noItems": "No items",
+    "notifications": "Notifications",
+    "noNotifications": "No notifications",
+    "account": "Account",
+    "helpDocs": "Help & Docs"
+  },
+  "plans": {
+    "free": "Free"
   },
   "download": {
     "downloading": "Downloading",

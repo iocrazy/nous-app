@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Users, Settings } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import {
+  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText,
+} from 'lucide-react';
 import { PersonalSettings } from './PersonalSettings';
-import { TeamSettings } from './TeamSettings';
-import { InviteMembersModal } from './InviteMembersModal';
+import { SettingsView } from './SettingsView';
+import { UserSettings, AISettings as AISettingsType } from '../types';
 
-type SettingsTab = 'personal' | 'team';
+type SettingsTab = 'personal' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: SettingsTab;
-  currentTeamId: string | null;
-  currentTeamName?: string;
-  isTeamOwner?: boolean;
   user: {
     id: string;
     name: string;
@@ -22,25 +20,70 @@ interface SettingsModalProps {
     bio?: string;
   };
   onUserUpdated?: () => void;
-  onTeamDeleted?: () => void;
-  onTeamLeft?: () => void;
+  // App settings props (forwarded to SettingsView)
+  settings: UserSettings;
+  onUpdateSettings: (s: UserSettings) => void;
+  aiSettings?: AISettingsType;
+  onSaveAISettings?: (settings: AISettingsType) => void;
 }
+
+// Nav item type
+interface NavItem {
+  id: SettingsTab;
+  label: string;
+  icon: React.ElementType;
+}
+
+interface NavSection {
+  label: string;
+  items: NavItem[];
+}
+
+// Nav sections and items
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: 'ACCOUNT',
+    items: [
+      { id: 'personal', label: 'Personal Settings', icon: User },
+    ],
+  },
+  {
+    label: 'APP SETTINGS',
+    items: [
+      { id: 'general', label: 'General', icon: FolderOpen },
+      { id: 'api', label: 'API Management', icon: Key },
+      { id: 'logs', label: 'Logs', icon: ScrollText },
+      { id: 'tasks', label: 'Tasks', icon: ListTodo },
+      { id: 'tags', label: 'Tags', icon: Tag },
+      { id: 'ai', label: 'AI', icon: Sparkles },
+      { id: 'docs', label: 'API Docs', icon: FileText },
+    ],
+  },
+];
+
+const TAB_LABELS: Record<SettingsTab, string> = {
+  personal: 'Personal Settings',
+  general: 'General',
+  api: 'API Management',
+  logs: 'Logs',
+  tasks: 'Tasks',
+  tags: 'Tags',
+  ai: 'AI',
+  docs: 'API Docs',
+};
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
   initialTab = 'personal',
-  currentTeamId,
-  currentTeamName,
-  isTeamOwner = false,
   user,
   onUserUpdated,
-  onTeamDeleted,
-  onTeamLeft,
+  settings,
+  onUpdateSettings,
+  aiSettings,
+  onSaveAISettings,
 }) => {
-  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -50,7 +93,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isInviteModalOpen) onClose();
+      if (e.key === 'Escape') onClose();
     };
     if (isOpen) {
       document.addEventListener('keydown', handleEsc);
@@ -60,34 +103,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       document.removeEventListener('keydown', handleEsc);
       document.body.style.overflow = '';
     };
-  }, [isOpen, onClose, isInviteModalOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const navItems = [
-    { id: 'personal' as const, label: 'Personal Settings', icon: Settings, section: 'GENERAL SETTINGS' },
-    ...(currentTeamId ? [{ id: 'team' as const, label: 'Team Settings', icon: Users, section: 'GENERAL SETTINGS' }] : []),
-  ];
-
-  const handleTeamDeleted = () => {
-    onClose();
-    onTeamDeleted?.();
-  };
-
-  const handleTeamLeft = () => {
-    onClose();
-    onTeamLeft?.();
-  };
+  // Is it an app-settings tab (rendered by SettingsView)?
+  const isAppSettingsTab = activeTab !== 'personal';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal - Full screen on mobile, constrained on desktop */}
-      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-4xl md:mx-4 h-full md:h-auto md:max-h-[85vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      {/* Modal — wider, fixed height */}
+      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-5xl md:mx-4 h-full md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
-        {/* Mobile Header with Close Button */}
+        {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
@@ -109,20 +140,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Mobile Tab Bar */}
-        <div className="md:hidden flex border-b border-zinc-800 bg-zinc-950/30">
-          {navItems.map((item) => (
+        {/* Mobile Tab Bar (scrollable) */}
+        <div className="md:hidden flex overflow-x-auto border-b border-zinc-800 bg-zinc-950/30">
+          {NAV_SECTIONS.flatMap(s => s.items).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+              className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === item.id
                   ? 'text-white'
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <item.icon size={16} />
-              <span className="truncate">{item.id === 'personal' ? 'Personal' : 'Team'}</span>
+              <item.icon size={14} />
+              <span className="whitespace-nowrap">{item.label}</span>
               {activeTab === item.id && (
                 <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-500 rounded-full" />
               )}
@@ -130,12 +161,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           ))}
         </div>
 
-        {/* Desktop Sidebar - Hidden on mobile */}
-        <div className="hidden md:flex w-56 bg-zinc-950/50 border-r border-zinc-800 flex-col">
-          {/* Sidebar Header */}
+        {/* Desktop Sidebar */}
+        <div className="hidden md:flex w-56 bg-zinc-950/50 border-r border-zinc-800 flex-col flex-shrink-0">
+          {/* User header */}
           <div className="p-4 border-b border-zinc-800">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden flex-shrink-0">
                 {user.avatarUrl ? (
                   <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
@@ -151,45 +182,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Navigation */}
+          {/* Navigation sections */}
           <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
-            <div>
-              <p className="px-3 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
-                General Settings
-              </p>
-              <div className="space-y-0.5">
-                {navItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      activeTab === item.id
-                        ? 'bg-zinc-800 text-white'
-                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
-                    }`}
-                  >
-                    <item.icon size={16} />
-                    {item.label}
-                  </button>
-                ))}
+            {NAV_SECTIONS.map((section) => (
+              <div key={section.label}>
+                <p className="px-3 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+                  {section.label}
+                </p>
+                <div className="space-y-0.5">
+                  {section.items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                        activeTab === item.id
+                          ? 'bg-zinc-800 text-white'
+                          : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
+                      }`}
+                    >
+                      <item.icon size={16} />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ))}
           </nav>
         </div>
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Desktop Header - Hidden on mobile */}
+          {/* Desktop Header */}
           <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-zinc-800">
             <h2 className="text-lg font-semibold text-white">
-              {activeTab === 'personal' ? 'Personal Settings' : (
-                <>
-                  Team Settings
-                  {currentTeamName && (
-                    <span className="text-zinc-500 font-normal ml-2">- {currentTeamName}</span>
-                  )}
-                </>
-              )}
+              {TAB_LABELS[activeTab]}
             </h2>
             <button
               onClick={onClose}
@@ -207,32 +233,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
-            {activeTab === 'team' && currentTeamId && (
-              <TeamSettings
-                teamId={currentTeamId}
-                teamName={currentTeamName || ''}
-                isOwner={isTeamOwner}
-                currentUserId={user.id}
-                currentUserName={user.name}
-                currentUserEmail={user.email}
-                onOpenInviteModal={() => setIsInviteModalOpen(true)}
-                onTeamDeleted={handleTeamDeleted}
-                onTeamLeft={handleTeamLeft}
+            {isAppSettingsTab && (
+              <SettingsView
+                settings={settings}
+                onUpdateSettings={onUpdateSettings}
+                activeTab={activeTab as any}
+                aiSettings={aiSettings}
+                onSaveAISettings={onSaveAISettings}
+                embedded
               />
             )}
           </div>
         </div>
       </div>
-
-      {/* Invite Modal */}
-      {currentTeamId && (
-        <InviteMembersModal
-          isOpen={isInviteModalOpen}
-          onClose={() => setIsInviteModalOpen(false)}
-          teamId={currentTeamId}
-          teamName={currentTeamName || ''}
-        />
-      )}
     </div>
   );
 };
