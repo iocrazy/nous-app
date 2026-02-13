@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
@@ -15,6 +15,7 @@ import {
   MessageSquare,
   CheckCircle2,
   Activity,
+  CreditCard,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -62,6 +63,29 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
         className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
       />
     )}
+  </button>
+);
+
+// ---------------------------------------------------------------------------
+// SidebarSubItem (indented child)
+// ---------------------------------------------------------------------------
+
+const SidebarSubItem: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}> = ({ icon: Icon, label, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`w-full flex items-center gap-3 pl-11 pr-3 py-2 rounded-xl text-sm transition-all duration-200 group ${
+      active
+        ? 'bg-indigo-500/10 text-indigo-400'
+        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+    }`}
+  >
+    <Icon size={16} className={active ? 'text-indigo-400' : 'text-zinc-600 group-hover:text-zinc-400'} />
+    <span>{label}</span>
   </button>
 );
 
@@ -159,6 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onProjectSelect: _onProjectSelect,
 }) => {
   const { t } = useTranslation();
+  const [isManagementOpen, setIsManagementOpen] = useState(view === 'members' || view === 'billing');
 
   // ===================================================================
   // PROJECT MODE (unchanged)
@@ -173,7 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors mb-2"
           >
             <ArrowLeft size={16} />
-            <span>Projects</span>
+            <span>{t('sidebar.backToProjects')}</span>
           </button>
           {currentTeam && (
             <p className="px-1 text-xs text-zinc-500 truncate">{currentTeam.name}</p>
@@ -190,18 +215,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav className="flex-1 space-y-1">
           {/* FILES section */}
           <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-            Files
+            {t('sidebar.files')}
           </p>
           <SidebarItem
             icon={FolderOpen}
-            label="All Files"
+            label={t('sidebar.allFiles')}
             active={view === 'mediatrack'}
             onClick={() => onViewChange('mediatrack')}
           />
           {hasPermission(permissions, 'resource.upload') && (
             <SidebarItem
               icon={Upload}
-              label="Upload"
+              label={t('sidebar.upload')}
               active={false}
               onClick={() => onViewChange('mediatrack')}
             />
@@ -211,17 +236,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* REVIEW section */}
           <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-            Review
+            {t('sidebar.review')}
           </p>
           <SidebarItem
             icon={MessageSquare}
-            label="Comments"
+            label={t('sidebar.comments')}
             active={false}
             onClick={() => onViewChange('mediatrack')}
           />
           <SidebarItem
             icon={CheckCircle2}
-            label="Status"
+            label={t('sidebar.status')}
             active={false}
             onClick={() => onViewChange('mediatrack')}
           />
@@ -231,20 +256,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Bottom section */}
           <SidebarItem
             icon={Users}
-            label="Members"
+            label={t('sidebar.members')}
             active={view === 'members'}
             onClick={() => onViewChange('members')}
           />
           <SidebarItem
             icon={Activity}
-            label="Activity"
+            label={t('sidebar.activity')}
             active={false}
             onClick={() => onViewChange('mediatrack')}
           />
           {hasPermission(permissions, 'project.manage') && (
             <SidebarItem
               icon={Settings}
-              label="Settings"
+              label={t('sidebar.projectSettings')}
               active={view === 'settings'}
               onClick={() => onViewChange('settings')}
             />
@@ -264,7 +289,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
         <Logo />
 
-        <div className="mb-4 px-2">
+        <div className="mb-2">
           <WorkspaceSwitcher
             teams={teams}
             activeTeamId={activeTeamId}
@@ -278,29 +303,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav className="flex-1 space-y-2">
           <SidebarItem
             icon={Layers}
-            label="Resources"
+            label={t('sidebar.resources')}
             active={view === 'resources'}
             onClick={() => onViewChange('resources')}
           />
           <SidebarItem
             icon={FolderKanban}
-            label="Projects"
+            label={t('sidebar.projects')}
             active={view === 'mediatrack'}
             onClick={() => onViewChange('mediatrack')}
           />
           <SidebarItem
             icon={ListTodo}
-            label="Todolist"
+            label={t('sidebar.todolist')}
             active={view === 'todolist'}
             onClick={() => onViewChange('todolist')}
           />
           {hasPermission(permissions, 'member.view') && (
-            <SidebarItem
-              icon={Settings}
-              label="Management"
-              active={view === 'management'}
-              onClick={() => onViewChange('management')}
-            />
+            <>
+              <SidebarItem
+                icon={Settings}
+                label={t('sidebar.management')}
+                active={view === 'members' || view === 'billing'}
+                onClick={() => setIsManagementOpen(!isManagementOpen)}
+                hasSubmenu
+                isOpen={isManagementOpen}
+              />
+              {isManagementOpen && (
+                <div className="space-y-0.5">
+                  <SidebarSubItem
+                    icon={Users}
+                    label={t('sidebar.members')}
+                    active={view === 'members'}
+                    onClick={() => onViewChange('members')}
+                  />
+                  <SidebarSubItem
+                    icon={CreditCard}
+                    label={t('sidebar.billing')}
+                    active={view === 'billing'}
+                    onClick={() => onViewChange('billing')}
+                  />
+                </div>
+              )}
+            </>
           )}
         </nav>
 
@@ -316,7 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
       <Logo />
 
-      <div className="mb-4 px-2">
+      <div className="mb-2">
         <WorkspaceSwitcher
           teams={teams}
           activeTeamId={activeTeamId}
@@ -336,19 +381,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
         <SidebarItem
           icon={Layers}
-          label="Resources"
+          label={t('sidebar.resources')}
           active={view === 'resources'}
           onClick={() => onViewChange('resources')}
         />
         <SidebarItem
           icon={FolderKanban}
-          label="Projects"
+          label={t('sidebar.projects')}
           active={view === 'mediatrack'}
           onClick={() => onViewChange('mediatrack')}
         />
         <SidebarItem
           icon={ListTodo}
-          label="Todolist"
+          label={t('sidebar.todolist')}
           active={view === 'todolist'}
           onClick={() => onViewChange('todolist')}
         />

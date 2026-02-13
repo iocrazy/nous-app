@@ -1,24 +1,15 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  LayoutDashboard, Search, Library, Settings, LogOut,
-  Link as LinkIcon, AlertCircle, Loader2, Sparkles, User, Database,
-  LayoutGrid, LayoutList, ChevronDown, FolderOpen, Folder, Key, Smartphone, X,
-  CloudOff, RefreshCw, Terminal, Activity, CheckCircle2,
-  ListVideo, Wifi, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon, Tag,
-  Layers, Download, Users, Trash2, ScrollText, ListTodo, BarChart3, BookOpen,
-  FolderKanban
+  LayoutDashboard, Search, Library, Settings,
+  Link as LinkIcon, AlertCircle, Loader2, User,
+  LayoutGrid, LayoutList, Folder, Smartphone, X,
+  CloudOff, RefreshCw, Activity, CheckCircle2,
+  ListVideo, HardDrive, ArrowLeft, Check, Music, Video as VideoIcon, Image as ImageIcon,
+  Layers, Download, ScrollText, ListTodo, BarChart3,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from './supabaseClient';
-import { Video, ViewState, UserProfile, UserSettings, Team, Collection, AISettings as AISettingsType, PointPackage, Project, ProjectFile, SidebarMode } from './types';
-import { parseShareLink, parseBatchLinks, FetchResponse } from './services/parserService';
-import { fetchLibrary, fetchLibraryPaginated, fetchVideoByPlatformId, saveItem, updateItem, deleteItem, fetchDashboardStats, DashboardStats, fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from './services/dataService';
-import { fetchMyTeams } from './services/teamService';
-import { fetchNotifications, markAsRead, markAllAsRead, NotificationWithRead } from './services/notificationService';
-import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from './services/collectionService';
-import { addTagsToVideo } from './services/tagsService';
-import { MOCK_LIBRARY } from './constants';
+import { Video, ViewState, PointPackage } from './types';
 import { MediaCard } from './components/MediaCard';
 import { CompactMediaCard } from './components/CompactMediaCard';
 import { StatsChart } from './components/StatsChart';
@@ -28,17 +19,11 @@ import { SettingsView } from './components/SettingsView';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LandingPage } from './components/LandingPage';
 import { AuthOverlay } from './components/AuthOverlay';
-import { Header } from './components/Header';
 import { ParseModeCard } from './components/ParseModeCard';
-import { UserDropdown } from './components/UserDropdown';
 import { ParserTagSelector } from './components/ParserTagSelector';
-import { NotificationPanel } from './components/NotificationPanel';
 import { CreateTeamModal } from './components/CreateTeamModal';
 import { PointsConfirmDialog } from './components/PointsConfirmDialog';
 import { CreateCollectionModal } from './components/CreateCollectionModal';
-import { DownloadProgress, DownloadStatus as ProgressStatus } from './components/DownloadProgress';
-import { useDownloadProgress } from './hooks/useDownloadProgress';
-import { SmartCollectionsSidebar } from './components/SmartCollectionsSidebar';
 import { TasksPanel } from './components/TasksPanel';
 import { LogsPanel } from './components/LogsPanel';
 import { SystemMonitorPanel } from './components/SystemMonitorPanel';
@@ -46,15 +31,10 @@ import { SemanticSearchBar } from './components/SemanticSearchBar';
 import { CleanupSuggestionsView } from './components/CleanupSuggestionsView';
 import { PointsCenter } from './components/PointsCenter';
 import { PaymentModal } from './components/PaymentModal';
-import { SmartCollection } from './services/smartCollectionService';
-import { SearchResult } from './services/searchService';
-import { LibraryTab } from './components/LibraryTabs';
 import { Sidebar } from './components/Sidebar';
-import { resolvePermissions } from './utils/permissions';
-import { fetchTeamMembers } from './services/teamService';
 import { SettingsModal } from './components/SettingsModal';
 import { VideoDetailPanel } from './components/VideoDetailPanel';
-import { getSystemStatus, SystemStatus, getQueueDisplay, getStorageDisplay } from './services/systemService';
+import { getQueueDisplay, getStorageDisplay } from './services/systemService';
 import { ToastProvider } from './components/Toast';
 import { ProjectsListView } from './components/ProjectsListView';
 import { ProjectFilesView } from './components/ProjectFilesView';
@@ -64,1451 +44,92 @@ import { BillingView } from './components/BillingView';
 import { MembersView } from './components/MembersView';
 import { ResourcesView } from './components/ResourcesView';
 import { TopBar } from './components/TopBar';
-
-// --- Types for Monitor ---
-interface LogEntry {
-  id: string;
-  time: string;
-  message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
-}
-
-// --- Sub-components for Cleaner App ---
+import { TaskMonitor } from './components/TaskMonitor';
+import { AuthProvider, useAuth } from './hooks/useAuth';
+import { useTeams } from './hooks/useTeams';
+import { useLibrary } from './hooks/useLibrary';
+import { useParser } from './hooks/useParser';
+import { useNavigation } from './hooks/useNavigation';
 
 
-// --- Task Monitor Component ---
-const TaskMonitor = ({
-  logs,
-  progress,
-  status,
-  systemStatus
-}: {
-  logs: LogEntry[],
-  progress: number,
-  status: string,
-  systemStatus: SystemStatus | null
-}) => {
-  const logsEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
-  return (
-    <div className="mt-8 bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom-2 duration-300">
-      {/* Header / Status Bar */}
-      <div className="bg-zinc-900/80 backdrop-blur-sm border-b border-zinc-800 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-             <div className="relative">
-                {progress === 100 ? (
-                  <div className="w-3 h-3 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
-                ) : (
-                  <div className="w-3 h-3 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"></div>
-                )}
-             </div>
-             <span className="font-mono text-sm text-zinc-200 font-semibold uppercase tracking-wider">
-               {status}
-             </span>
-          </div>
-          <span className="text-xs font-mono text-zinc-500">{progress}%</span>
-        </div>
-        
-        {/* Progress Bar */}
-        <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-           <div 
-             className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300 ease-out relative"
-             style={{ width: `${progress}%` }}
-           >
-              <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite]"></div>
-           </div>
-        </div>
-
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-zinc-800/50">
-           <div className="flex flex-col items-center">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Queue</span>
-              <div className="flex items-center gap-1.5 text-zinc-300">
-                 <ListVideo size={14} className={
-                   systemStatus?.queue.status === 'offline' ? 'text-red-400' :
-                   systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
-                 } />
-                 <span className="font-mono text-xs font-medium">
-                   {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
-                 </span>
-              </div>
-           </div>
-           <div className="flex flex-col items-center border-l border-zinc-800/50">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Network</span>
-              <div className="flex items-center gap-1.5 text-zinc-300">
-                 <Wifi size={14} className={
-                   systemStatus?.network.status === 'active' ? 'text-emerald-400' :
-                   systemStatus?.network.status === 'error' ? 'text-red-400' : 'text-zinc-500'
-                 } />
-                 <span className="font-mono text-xs font-medium">
-                   {systemStatus?.network.speed || '0 B/s'}
-                 </span>
-              </div>
-           </div>
-           <div className="flex flex-col items-center border-l border-zinc-800/50">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Storage</span>
-              <div className="flex items-center gap-1.5 text-zinc-300">
-                 <HardDrive size={14} className={
-                   systemStatus?.storage.status === 'ok' ? 'text-purple-400' :
-                   systemStatus?.storage.status === 'warning' ? 'text-yellow-400' :
-                   systemStatus?.storage.status === 'critical' ? 'text-red-400' : 'text-zinc-500'
-                 } />
-                 <span className="font-mono text-xs font-medium">
-                   {systemStatus ? getStorageDisplay(systemStatus.storage) : '...'}
-                 </span>
-              </div>
-           </div>
-        </div>
-      </div>
-
-      {/* Terminal Log View */}
-      <div className="bg-[#0c0c0e] p-4 h-48 overflow-y-auto font-mono text-xs space-y-1.5 custom-scrollbar">
-        {logs.length === 0 && (
-          <div className="text-zinc-700 italic">Waiting for task logs...</div>
-        )}
-        {logs.map((log) => (
-          <div key={log.id} className="flex gap-3 hover:bg-white/5 p-0.5 rounded px-2 transition-colors">
-            <span className="text-zinc-600 flex-shrink-0">[{log.time}]</span>
-            <span className={`break-all ${
-              log.type === 'error' ? 'text-red-400' :
-              log.type === 'success' ? 'text-green-400' :
-              log.type === 'warning' ? 'text-yellow-400' :
-              'text-zinc-300'
-            }`}>
-              {log.type === 'success' && '✓ '}
-              {log.type === 'error' && '✗ '}
-              {log.message}
-            </span>
-          </div>
-        ))}
-        <div ref={logsEndRef} />
-      </div>
-    </div>
-  );
-};
-
-
-export default function App() {
+function AppInner() {
   const { t } = useTranslation();
-  const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs'>('general');
-  const [urlInput, setUrlInput] = useState('');
+  const {
+    isAuthenticated, currentUserId, showAuthModal, userProfile, userSettings, aiSettings,
+    isProfileModalOpen, setShowAuthModal, setIsProfileModalOpen, setUserProfile, setAISettings,
+    handleLogin, handleLogout, handleUpdateSettings,
+  } = useAuth();
 
-  // Team and Notification State
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
-  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
-  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
-  const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
-  const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsModalInitialTab, setSettingsModalInitialTab] = useState<'personal' | 'team'>('personal');
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
-    const saved = localStorage.getItem('mediahub_library_preferences');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.selectedTeamId || null;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
-  const [collectionVideoIds, setCollectionVideoIds] = useState<string[]>([]);
-  const [isCreateCollectionModalOpen, setIsCreateCollectionModalOpen] = useState(false);
-  const [isLibraryOpen, setIsLibraryOpen] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [userPermissions, setUserPermissions] = useState<string[]>([]);
+  const {
+    teams, setTeams, selectedTeamId, setSelectedTeamId, notifications, setNotifications,
+    currentTeam, userPermissions, isCreateTeamModalOpen, setIsCreateTeamModalOpen,
+    isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
+    handleCreateTeam, handleTeamCreated, handleTeamSettings, handleTeamUpdated,
+    handleTeamDeleted, handleTeamLeft, handleMarkNotificationRead, handleMarkAllNotificationsRead,
+  } = useTeams(isAuthenticated, currentUserId);
 
-  // Library Tab State (new unified library)
-  const [activeLibraryTab, setActiveLibraryTab] = useState<LibraryTab>(() => {
-    const saved = localStorage.getItem('mediahub_library_preferences');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.activeTab || 'my-library';
-      } catch {
-        return 'my-library';
-      }
-    }
-    return 'my-library';
-  });
-
-  // Accordion behavior - close other menus when opening one
-  const toggleLibraryMenu = () => {
-    const newState = !isLibraryOpen;
-    setIsLibraryOpen(newState);
-    if (newState) {
-      setIsSettingsOpen(false);
-    }
-  };
-
-  const toggleSettingsMenu = () => {
-    const newState = !isSettingsOpen;
-    setIsSettingsOpen(newState);
-    if (newState) {
-      setIsLibraryOpen(false);
-    }
-  };
-
-  // Helper: Check if team library is active (for filtering)
-  const isTeamLibraryActive = activeLibraryTab === 'team-library';
-
-  // Get current team based on selectedTeamId
-  const currentTeam = teams.find(t => t.id === selectedTeamId) || null;
-
-  // Sidebar mode: derived from activeTeamId and selectedProject
-  const sidebarMode: SidebarMode = selectedProject && selectedTeamId ? 'project' : selectedTeamId ? 'team' : 'personal';
-
-  // Smart Collections State
-  const [activeSmartCollectionId, setActiveSmartCollectionId] = useState<number | null>(null);
-
-  // Handle tab change (defined early, uses setActiveSmartCollectionId)
-  const handleLibraryTabChange = (tab: LibraryTab) => {
-    setActiveLibraryTab(tab);
-    setActiveCollectionId(null); // Reset collection when switching tabs
-    setActiveSmartCollectionId(null); // Reset smart collection
-  };
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearchActive, setIsSearchActive] = useState(false);
-  const [searchQueryText, setSearchQueryText] = useState('');
-
-  // Parser Configuration State
-  const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
-  const [batchInput, setBatchInput] = useState('');
-  const [downloadOptions, setDownloadOptions] = useState({
-    video: true,
-    audio: false,
-    cover: true
-  });
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  
-  // Parser & Task State
-  const [isParsing, setIsParsing] = useState(false);
-  const [taskStatus, setTaskStatus] = useState('Idle');
-  const [taskProgress, setTaskProgress] = useState(0);
-  const [socketLogs, setSocketLogs] = useState<LogEntry[]>([]);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-
+  // Parser result state (needed for cross-hook realtime update)
   const [currentResult, setCurrentResult] = useState<Video | null>(null);
-  const [batchResults, setBatchResults] = useState<Video[]>([]);
 
-  // Points confirmation dialog state
-  const [pendingAction, setPendingAction] = useState<{
-    type: string;
-    count: number;
-    callback: () => void;
-  } | null>(null);
-
-  // Progressive download state
-  const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
-
-  // Library State
-  const [library, setLibrary] = useState<Video[]>([]);
-  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
-  const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [selectedLibraryItem, setSelectedLibraryItem] = useState<Video | null>(null); // For detail view
-
-  // Infinite scroll pagination state
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMoreData, setHasMoreData] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
-  
-  const [libraryViewMode, setLibraryViewMode] = useState<'grid' | 'list' | 'feed'>(() => {
-    const saved = localStorage.getItem('mediahub_library_preferences');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.viewMode && ['grid', 'list', 'feed'].includes(parsed.viewMode)) {
-          return parsed.viewMode;
-        }
-      } catch {
-        return 'grid';
-      }
-    }
-    return 'grid';
-  });
-
-  // Save library preferences to localStorage (must be after libraryViewMode is defined)
-  useEffect(() => {
-    localStorage.setItem('mediahub_library_preferences', JSON.stringify({
-      activeTab: activeLibraryTab,
-      selectedTeamId,
-      viewMode: libraryViewMode,
-    }));
-  }, [activeLibraryTab, selectedTeamId, libraryViewMode]);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'tasks' | 'logs' | 'monitor'>('overview');
-  const [isDashboardMenuOpen, setIsDashboardMenuOpen] = useState(false);
-
-  // Dashboard Stats State
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
-
-  // User & Settings State - Load from LocalStorage if available
-  const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: 'Demo User',
-    email: 'demo@example.com',
-    avatarUrl: '',
-    plan: 'Free Plan'
-  });
-
-  const [userSettings, setUserSettings] = useState<UserSettings>({
-    downloadPath: '/home/user/downloads/mediahub',
-    supabaseUrl: '',
-    supabaseAnonKey: ''
-  });
-
-  const [aiSettings, setAISettings] = useState<AISettingsType>({
-    ai_enabled: false,
-    auto_transcribe: false,
-    auto_summarize: false,
-    preferred_language: 'auto',
-    providers: {},
-    task_assignment: {
-      transcription: '',
-      summarization: '',
-      visual_analysis: '',
+  const {
+    library, setLibrary, isLoadingLibrary, libraryError, selectedLibraryItem, setSelectedLibraryItem,
+    filteredLibrary, hasMoreData, isLoadingMore, loadMoreRef,
+    libraryViewMode, setLibraryViewMode, activeLibraryTab, setActiveLibraryTab, isTeamLibraryActive,
+    searchQuery, setSearchQuery, searchResults, setSearchResults, isSearchActive, setIsSearchActive,
+    searchQueryText, setSearchQueryText,
+    collections, setCollections, activeCollectionId, setActiveCollectionId, collectionVideoIds,
+    isCreateCollectionModalOpen, setIsCreateCollectionModalOpen, selectedVideoCollectionIds,
+    activeSmartCollectionId, setActiveSmartCollectionId, sharedVideoIds,
+    loadLibraryData, handleLibraryTabChange, handleCreateCollection, handleToggleVideoCollection,
+    handleUpdateLibraryItem, handleDeleteLibraryItem,
+  } = useLibrary({
+    isAuthenticated,
+    selectedTeamId,
+    onVideoRealtimeUpdate: (video) => {
+      setCurrentResult(prev => prev?.platform_id === video.platform_id ? video : prev);
     },
   });
 
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const {
+    view, setView, settingsTab, setSettingsTab,
+    selectedProject, setSelectedProject, reviewFile, setReviewFile,
+    isCreateProjectModalOpen, setIsCreateProjectModalOpen,
+    isLibraryOpen, isSettingsOpen,
+    isMobileMenuOpen, setIsMobileMenuOpen, isMobileSearchOpen, setIsMobileSearchOpen,
+    dashboardSubView, setDashboardSubView, isDashboardMenuOpen, setIsDashboardMenuOpen,
+    dashboardStats, sidebarMode,
+    toggleLibraryMenu, toggleSettingsMenu, hasAutoSelected,
+  } = useNavigation({ isAuthenticated, selectedTeamId });
+
+  const {
+    urlInput, setUrlInput, parserMode, setParserMode, batchInput, setBatchInput,
+    downloadOptions, setDownloadOptions, selectedTagIds, setSelectedTagIds,
+    isParsing, taskStatus, taskProgress, socketLogs, systemStatus,
+    batchResults, error, pendingAction, setPendingAction,
+    downloadTaskId, downloadStatus, downloadPercent, downloadSpeed,
+    handleParse, handleSaveToLibrary, handleBatchSave,
+  } = useParser({
+    loadLibraryData,
+    setLibrary,
+    currentResult,
+    setCurrentResult,
+    isAuthenticated,
+  });
+
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
-
-  // Auth state
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  // Controls the visibility of the login modal when on Landing Page
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
-  // Config loading state
-  const [isConfigLoaded, setIsConfigLoaded] = useState(false);
-
-  // Load frontend config from backend YAML on mount
-  useEffect(() => {
-    const loadFrontendConfig = async () => {
-      try {
-        const config = await fetchFrontendConfig();
-        if (config) {
-          // 如果后端YAML配置了Supabase凭据，使用它们重新初始化客户端
-          if (config.supabase_url && config.supabase_anon_key) {
-            reinitializeSupabaseClient(config.supabase_url, config.supabase_anon_key);
-            setUserSettings(prev => ({
-              ...prev,
-              supabaseUrl: config.supabase_url || '',
-              supabaseAnonKey: config.supabase_anon_key || '',
-              downloadPath: config.default_download_path || prev.downloadPath,
-            }));
-          } else if (config.default_download_path) {
-            setUserSettings(prev => ({
-              ...prev,
-              downloadPath: config.default_download_path || prev.downloadPath,
-            }));
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load frontend config:', err);
-      } finally {
-        setIsConfigLoaded(true);
-      }
-    };
-    loadFrontendConfig();
-  }, []);
-
-  // Check for existing session and listen for auth state changes
-  useEffect(() => {
-    if (!isConfigLoaded) return;
-
-    const supabase = getSupabaseClient();
-    if (!isSupabaseConfigured() || !supabase) return;
-
-    // Update userSettings with Supabase credentials
-    const credentials = getSupabaseCredentials();
-    setUserSettings(prev => ({
-      ...prev,
-      supabaseUrl: credentials.url || prev.supabaseUrl,
-      supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
-    }));
-
-    // Handle session state
-    const handleSession = async (session: { user: { id: string; email?: string | null } } | null) => {
-      if (session?.user) {
-        setUserProfile(prev => ({
-          ...prev,
-          name: session.user.email?.split('@')[0] || 'User',
-          email: session.user.email || '',
-        }));
-        setCurrentUserId(session.user.id);
-        setIsAuthenticated(true);
-
-        // Load user role from user_profiles
-        try {
-          const { data: profile } = await supabase
-            .from('user_profiles')
-            .select('role')
-            .eq('id', session.user.id)
-            .single();
-          if (profile?.role) {
-            setUserProfile(prev => ({ ...prev, role: profile.role }));
-          }
-        } catch (err) {
-          console.debug('Failed to load user role:', err);
-        }
-
-        // Load user settings from Supabase
-        try {
-          const settings = await fetchUserSettings();
-          if (settings) {
-            setUserSettings(prev => ({
-              ...prev,
-              downloadPath: settings.download_path || prev.downloadPath,
-            }));
-          }
-        } catch (err) {
-          console.error('Failed to load user settings:', err);
-        }
-      } else {
-        setIsAuthenticated(false);
-        setCurrentUserId(null);
-      }
-    };
-
-    // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      handleSession(session);
-    });
-
-    // Listen for auth state changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth state changed:', event);
-        if (event === 'SIGNED_OUT') {
-          setIsAuthenticated(false);
-          setCurrentUserId(null);
-          setLibrary([]);
-          setTeams([]);
-          setCollections([]);
-          setNotifications([]);
-        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          handleSession(session);
-        }
-      }
-    );
-
-    // Cleanup subscription on unmount
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [isConfigLoaded]);
-
-  // Fetch Library Data on Mount
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadLibraryData();
-    }
-  }, [isAuthenticated]);
-
-  // Fetch teams, notifications, and collections when user logs in
-  useEffect(() => {
-    if (isAuthenticated) {
-      // Fetch teams
-      fetchMyTeams().then(setTeams).catch(console.error);
-      // Fetch notifications
-      fetchNotifications().then(setNotifications).catch(console.error);
-      // Fetch collections
-      fetchMyCollections().then(setCollections).catch(console.error);
-    }
-  }, [isAuthenticated]);
-
-  // Resolve permissions when team changes
-  useEffect(() => {
-    if (!selectedTeamId || !currentUserId) {
-      setUserPermissions([]);
-      return;
-    }
-    // Check if current user is owner first (fast path)
-    const team = teams.find(t => t.id === selectedTeamId);
-    if (team?.owner_id === currentUserId) {
-      setUserPermissions(resolvePermissions('owner'));
-      return;
-    }
-    // Fetch member role for permission resolution
-    fetchTeamMembers(selectedTeamId).then(members => {
-      const me = members.find(m => m.user_id === currentUserId);
-      setUserPermissions(resolvePermissions(me?.role || 'member'));
-    }).catch(() => setUserPermissions(resolvePermissions('member')));
-  }, [selectedTeamId, currentUserId, teams]);
-
-  // Poll for system status (queue, storage, network)
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const fetchStatus = async () => {
-      try {
-        const status = await getSystemStatus();
-        setSystemStatus(status);
-      } catch (err) {
-        // Silently fail - status is optional
-        console.debug('Failed to fetch system status:', err);
-      }
-    };
-
-    // Fetch immediately
-    fetchStatus();
-
-    // Poll every 30 seconds
-    const interval = setInterval(fetchStatus, 30000);
-
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
-
-  // Lazy-load dashboard stats only when viewing the overview
-  useEffect(() => {
-    if (!isAuthenticated || view !== 'dashboard' || dashboardSubView !== 'overview') return;
-    let cancelled = false;
-
-    const loadStats = async () => {
-      try {
-        const stats = await fetchDashboardStats();
-        if (!cancelled) setDashboardStats(stats);
-      } catch (e) {
-        console.debug('Failed to load dashboard stats:', e);
-      }
-    };
-
-    loadStats();
-    return () => { cancelled = true; };
-  }, [isAuthenticated, view, dashboardSubView]);
-
   // Auto-select first team only on initial load when no preference was saved
-  const hasAutoSelected = useRef(false);
   useEffect(() => {
     if (teams.length > 0 && !selectedTeamId && !hasAutoSelected.current) {
       hasAutoSelected.current = true;
       setSelectedTeamId(teams[0].id);
+      setView('resources');
     }
   }, [teams]);
 
-  // State for team library video IDs (all videos in team collections)
-  const [teamLibraryVideoIds, setTeamLibraryVideoIds] = useState<string[]>([]);
-  // State for all shared video IDs (for showing shared badge in library)
-  const [sharedVideoIds, setSharedVideoIds] = useState<string[]>([]);
-
-  // Function to load collection video IDs
-  const loadCollectionVideos = async (collectionId: string | null) => {
-    if (collectionId) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        const { data } = await supabase
-          .from('video_collections')
-          .select('video_id')
-          .eq('collection_id', parseInt(collectionId));
-
-        if (data) {
-          // Get platform_ids from video_ids
-          const videoIds = data.map(v => v.video_id);
-          if (videoIds.length > 0) {
-            const { data: videos } = await supabase
-              .from('videos')
-              .select('platform_id')
-              .in('id', videoIds);
-            setCollectionVideoIds(videos?.map(v => v.platform_id) || []);
-          } else {
-            setCollectionVideoIds([]);
-          }
-        } else {
-          setCollectionVideoIds([]);
-        }
-      }
-    } else {
-      setCollectionVideoIds([]);
-    }
-  };
-
-  // Load collection video IDs when collection is selected
-  useEffect(() => {
-    loadCollectionVideos(activeCollectionId);
-  }, [activeCollectionId]);
-
-  // Load all team collection video IDs when Team Library is active
-  useEffect(() => {
-    const loadTeamLibraryVideos = async () => {
-      if (isTeamLibraryActive && !activeCollectionId) {
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          // Get all team collections (collections with team_id)
-          const teamCollections = collections.filter(c => c.team_id);
-          if (teamCollections.length === 0) {
-            setTeamLibraryVideoIds([]);
-            return;
-          }
-
-          const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-          const { data } = await supabase
-            .from('video_collections')
-            .select('video_id')
-            .in('collection_id', teamCollectionIds);
-
-          if (data && data.length > 0) {
-            const videoIds = [...new Set(data.map(v => v.video_id))];
-            const { data: videos } = await supabase
-              .from('videos')
-              .select('platform_id')
-              .in('id', videoIds);
-
-            setTeamLibraryVideoIds(videos?.map(v => v.platform_id) || []);
-          } else {
-            setTeamLibraryVideoIds([]);
-          }
-        }
-      } else if (!isTeamLibraryActive) {
-        setTeamLibraryVideoIds([]);
-      }
-    };
-    loadTeamLibraryVideos();
-  }, [isTeamLibraryActive, activeCollectionId, collections]);
-
-  // Function to load all shared video IDs for badge display
-  const loadAllSharedVideos = async (collectionsToCheck: Collection[]) => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !isAuthenticated) {
-      setSharedVideoIds([]);
-      return;
-    }
-
-    // Get all team collections (collections with team_id)
-    const teamCollections = collectionsToCheck.filter(c => c.team_id);
-    if (teamCollections.length === 0) {
-      setSharedVideoIds([]);
-      return;
-    }
-
-    const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-    const { data } = await supabase
-      .from('video_collections')
-      .select('video_id')
-      .in('collection_id', teamCollectionIds);
-
-    if (data && data.length > 0) {
-      const videoIds = [...new Set(data.map(v => v.video_id))];
-      const { data: videos } = await supabase
-        .from('videos')
-        .select('platform_id')
-        .in('id', videoIds);
-
-      setSharedVideoIds(videos?.map(v => v.platform_id) || []);
-    } else {
-      setSharedVideoIds([]);
-    }
-  };
-
-  // Load all shared video IDs for badge display in library (regardless of Team Library mode)
-  useEffect(() => {
-    loadAllSharedVideos(collections);
-  }, [isAuthenticated, collections]);
-
-  // Supabase Realtime 订阅 - 自动同步数据库变化
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
-      return;
-    }
-
-    const channel = supabase
-      .channel('videos_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'videos',
-        },
-        async (payload) => {
-          console.log('Realtime update:', payload.eventType, payload);
-
-          // 获取当前用户 ID
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
-
-          const newRecord = payload.new as Video;
-          const oldRecord = payload.old as Video;
-
-          // 只处理当前用户的数据
-          if (payload.eventType === 'INSERT' && newRecord.user_id === user.id) {
-            setLibrary(prev => {
-              // 避免重复添加
-              if (prev.find(item => item.platform_id === newRecord.platform_id)) {
-                return prev;
-              }
-              return [newRecord, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === user.id) {
-            setLibrary(prev =>
-              prev.map(item =>
-                item.platform_id === newRecord.platform_id ? newRecord : item
-              )
-            );
-            // 如果当前选中的项被更新，也更新它
-            setSelectedLibraryItem(prev =>
-              prev?.platform_id === newRecord.platform_id ? newRecord : prev
-            );
-            // 如果当前解析结果被更新，也更新它
-            setCurrentResult(prev =>
-              prev?.platform_id === newRecord.platform_id ? newRecord : prev
-            );
-          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === user.id) {
-            setLibrary(prev =>
-              prev.filter(item => item.platform_id !== oldRecord.platform_id)
-            );
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
-
-    // 清理订阅
-    return () => {
-      console.log('Unsubscribing from realtime channel');
-      supabase.removeChannel(channel);
-    };
-  }, [isAuthenticated]);
-
-  // Supabase Realtime for collection_videos - 共享集合实时同步
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
-      return;
-    }
-
-    const collectionChannel = supabase
-      .channel('video_collections_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'video_collections',
-        },
-        async (payload) => {
-          console.log('Collection videos realtime update:', payload.eventType, payload);
-
-          // video_collections 表的字段: collection_id (number), video_id (number), added_by, added_at
-          const newRecord = payload.new as { collection_id: number; video_id: number };
-          const oldRecord = payload.old as { collection_id: number; video_id: number };
-
-          const changedCollectionId = newRecord?.collection_id || oldRecord?.collection_id;
-
-          // 如果当前正在查看的集合有变化，重新加载集合视频列表
-          if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
-            loadCollectionVideos(activeCollectionId);
-          }
-
-          // 如果正在查看的视频的集合关系变化，重新加载选中视频的集合列表
-          if (selectedLibraryItem?.platform_id) {
-            fetchVideoCollections(selectedLibraryItem.platform_id)
-              .then(setSelectedVideoCollectionIds)
-              .catch(console.error);
-          }
-
-          // 刷新集合列表以更新 video_count 和 sharedVideoIds
-          fetchMyCollections().then(newCollections => {
-            setCollections(newCollections);
-            // 刷新共享视频ID列表以更新徽章显示
-            loadAllSharedVideos(newCollections);
-          }).catch(console.error);
-        }
-      )
-      .subscribe((status) => {
-        console.log('Collection videos realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('Unsubscribing from collection videos realtime channel');
-      supabase.removeChannel(collectionChannel);
-    };
-  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.platform_id]);
-
-  // Supabase Realtime for video_tags - 标签实时同步
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) {
-      return;
-    }
-
-    const tagsChannel = supabase
-      .channel('video_tags_realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'video_tags',
-        },
-        async (payload) => {
-          console.log('Video tags realtime update:', payload.eventType, payload);
-
-          const newRecord = payload.new as { video_id: string; tag_id: string };
-          const oldRecord = payload.old as { video_id: string; tag_id: string };
-          const videoId = newRecord?.video_id || oldRecord?.video_id;
-
-          if (!videoId) return;
-
-          // Fetch updated video with tags from the view
-          const { data: updatedVideo, error } = await supabase
-            .from('videos_with_tags')
-            .select('*')
-            .eq('id', videoId)
-            .single();
-
-          if (error || !updatedVideo) {
-            console.error('Failed to fetch updated video:', error);
-            return;
-          }
-
-          // Update the video in library state with new tags
-          setLibrary(prev =>
-            prev.map(item =>
-              item.id === videoId ? { ...item, tags: updatedVideo.tags || [] } : item
-            )
-          );
-
-          // Also update selected item if it's the same video
-          setSelectedLibraryItem(prev =>
-            prev?.id === videoId ? { ...prev, tags: updatedVideo.tags || [] } : prev
-          );
-        }
-      )
-      .subscribe((status) => {
-        console.log('Video tags realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('Unsubscribing from video tags realtime channel');
-      supabase.removeChannel(tagsChannel);
-    };
-  }, [isAuthenticated]);
-
-  // Supabase Realtime for user_logs — push new logs into Dashboard Recent Activity
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
-
-    const logsChannel = supabase
-      .channel('dashboard_logs_realtime')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'user_logs' },
-        (payload) => {
-          setDashboardStats(prev => {
-            if (!prev) return prev;
-            const row = payload.new as { message?: string; created_at?: string; status?: string };
-            const newEntry = {
-              message: row.message || '',
-              time: row.created_at
-                ? new Date(row.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-                : '',
-              status: row.status === 'success' ? 'success' as const
-                : row.status === 'error' ? 'error' as const
-                : 'pending' as const,
-            };
-            return { ...prev, recentLogs: [newEntry, ...prev.recentLogs].slice(0, 10) };
-          });
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(logsChannel); };
-  }, [isAuthenticated]);
-
-  // Load collections for selected video
-  useEffect(() => {
-    if (selectedLibraryItem?.platform_id) {
-      loadSelectedVideoCollections(selectedLibraryItem.platform_id);
-    } else {
-      setSelectedVideoCollectionIds([]);
-    }
-  }, [selectedLibraryItem?.platform_id]);
-
-  const handleLogin = (user: { email: string; id: string }) => {
-    setUserProfile(prev => ({
-      ...prev,
-      name: user.email.split('@')[0] || 'User',
-      email: user.email,
-    }));
-    setCurrentUserId(user.id);
-    setIsAuthenticated(true);
-    setShowAuthModal(false);
-  };
-
-  const handleLogout = async () => {
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      await supabase.auth.signOut();
-    }
-    setIsAuthenticated(false);
-    setIsProfileModalOpen(false);
-    setIsUserDropdownOpen(false);
-    setUserProfile({
-      name: 'Demo User',
-      email: 'demo@example.com',
-      avatarUrl: '',
-      plan: 'Free Plan'
-    });
-    // Reset team and notification state
-    setTeams([]);
-    setNotifications([]);
-    setActiveTeamId(null);
-    setCurrentUserId(null);
-    // When logging out, we go back to landing page.
-    // Ensure modal is closed
-    setShowAuthModal(false);
-  };
-
-  // Notification handlers
-  const handleMarkNotificationRead = async (id: string) => {
-    try {
-      await markAsRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
-    }
-  };
-
-  const handleMarkAllNotificationsRead = async () => {
-    try {
-      await markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    } catch (error) {
-      console.error('Failed to mark all notifications as read:', error);
-    }
-  };
-
-  // Team handlers
-  const handleCreateTeam = () => {
-    setIsUserDropdownOpen(false);
-    setIsCreateTeamModalOpen(true);
-  };
-
-  const handleTeamCreated = (team: Team) => {
-    setTeams(prev => [...prev, team]);
-  };
-
-  const handleTeamSettings = (teamId: string) => {
-    setIsUserDropdownOpen(false);
-    setSelectedTeamId(teamId);
-    setSettingsModalInitialTab('team');
-    setIsSettingsModalOpen(true);
-  };
-
-  const handleTeamUpdated = (updatedTeam: Team) => {
-    setTeams(prev => prev.map(t => t.id === updatedTeam.id ? updatedTeam : t));
-  };
-
-  const handleTeamDeleted = (teamId: string) => {
-    setTeams(prev => prev.filter(t => t.id !== teamId));
-    if (selectedTeamId === teamId) {
-      setSelectedTeamId(null);
-    }
-  };
-
-  const handleTeamLeft = (teamId: string) => {
-    setTeams(prev => prev.filter(t => t.id !== teamId));
-    if (selectedTeamId === teamId) {
-      setSelectedTeamId(null);
-    }
-  };
-
-  const handleCreateCollection = async (name: string, teamId: string | null) => {
-    const newCollection = await createCollection(name, teamId || undefined);
-    setCollections(prev => [newCollection, ...prev]);
-  };
-
-  // State for selected video's collection IDs
-  const [selectedVideoCollectionIds, setSelectedVideoCollectionIds] = useState<string[]>([]);
-
-  // Load collections for selected video
-  const loadSelectedVideoCollections = async (awemeId: string) => {
-    try {
-      const collectionIds = await fetchVideoCollections(awemeId);
-      setSelectedVideoCollectionIds(collectionIds);
-    } catch (err) {
-      console.error('Failed to load video collections:', err);
-      setSelectedVideoCollectionIds([]);
-    }
-  };
-
-  // Toggle video in collection
-  const handleToggleVideoCollection = async (collectionId: string) => {
-    if (!selectedLibraryItem?.platform_id) return;
-
-    const awemeId = selectedLibraryItem.platform_id;
-    const isInCollection = selectedVideoCollectionIds.includes(collectionId);
-
-    try {
-      if (isInCollection) {
-        await removeVideoFromCollection(collectionId, awemeId);
-        setSelectedVideoCollectionIds(prev => prev.filter(id => id !== collectionId));
-      } else {
-        await addVideoToCollection(collectionId, awemeId);
-        setSelectedVideoCollectionIds(prev => [...prev, collectionId]);
-      }
-    } catch (err) {
-      console.error('Failed to toggle video collection:', err);
-    }
-  };
-
-  const handleUpdateSettings = async (newSettings: UserSettings) => {
-    // Check if critical DB config changed
-    const dbChanged =
-      newSettings.supabaseUrl !== userSettings.supabaseUrl ||
-      newSettings.supabaseAnonKey !== userSettings.supabaseAnonKey;
-
-    try {
-      // 保存 Supabase 配置到后端 YAML 文件
-      await saveFrontendConfig({
-        supabase_url: newSettings.supabaseUrl || undefined,
-        supabase_anon_key: newSettings.supabaseAnonKey || undefined,
-        default_download_path: newSettings.downloadPath,
-      });
-
-      // Save download_path to Supabase (for per-user settings)
-      if (isAuthenticated && isSupabaseConfigured()) {
-        try {
-          await saveUserSettings({
-            download_path: newSettings.downloadPath
-          });
-        } catch (err) {
-          console.error('Failed to save settings to Supabase:', err);
-        }
-      }
-
-      setUserSettings(newSettings);
-
-      if (dbChanged) {
-        if (confirm("Database configuration changed. Application must reload to apply changes. Reload now?")) {
-          window.location.reload();
-        }
-      } else {
-        alert("Settings saved successfully!");
-      }
-    } catch (err) {
-      console.error('Failed to save settings:', err);
-      alert("Failed to save settings. Please try again.");
-    }
-  };
-
-  const loadLibraryData = async () => {
-    setIsLoadingLibrary(true);
-    setLibraryError(null);
-    // Reset pagination state
-    setCurrentPage(0);
-    setHasMoreData(true);
-    try {
-      let data: Video[];
-      if (isSupabaseConfigured()) {
-        // Load first page with pagination
-        const result = await fetchLibraryPaginated(0);
-        data = result.data;
-        setLibrary(data);
-        setHasMoreData(result.hasMore);
-        setCurrentPage(0);
-        if (data.length === 0) {
-           console.log("Supabase connected but returned no data. You may need to create the 'videos' table.");
-        }
-      } else {
-        // Fallback to mock if not configured
-        data = MOCK_LIBRARY;
-        setLibrary(data);
-        setHasMoreData(false);
-      }
-    } catch (err: any) {
-      console.error("Failed to load library:", err);
-      // Fallback to mock on error (e.g. table doesn't exist yet)
-      setLibrary(MOCK_LIBRARY);
-      setHasMoreData(false);
-      // Display a more useful error message than [object Object]
-      const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-      setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
-    } finally {
-      setIsLoadingLibrary(false);
-    }
-  };
-
-  // Load more library data for infinite scroll
-  const loadMoreLibrary = async () => {
-    if (!hasMoreData || isLoadingMore || !isSupabaseConfigured()) return;
-
-    setIsLoadingMore(true);
-    try {
-      const nextPage = currentPage + 1;
-      const result = await fetchLibraryPaginated(nextPage);
-
-      if (result.data.length > 0) {
-        setLibrary(prev => [...prev, ...result.data]);
-        setCurrentPage(nextPage);
-        setHasMoreData(result.hasMore);
-      } else {
-        setHasMoreData(false);
-      }
-    } catch (err) {
-      console.error("Failed to load more library data:", err);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-  // Intersection Observer for infinite scroll
-  useEffect(() => {
-    if (!loadMoreRef.current) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries;
-        if (entry.isIntersecting && hasMoreData && !isLoadingMore && !isSearchActive) {
-          loadMoreLibrary();
-        }
-      },
-      { threshold: 0.1, rootMargin: '100px' }
-    );
-
-    observer.observe(loadMoreRef.current);
-    return () => observer.disconnect();
-  }, [hasMoreData, isLoadingMore, isSearchActive, currentPage]);
-
-  // Helper to add log with timestamp
-  const addLog = (msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
-    const time = new Date().toLocaleTimeString('en-US', {hour12: false, hour: "numeric", minute: "numeric", second: "numeric"});
-    setSocketLogs(prev => [...prev, {
-      id: Math.random().toString(36).substr(2, 9),
-      time,
-      message: msg,
-      type
-    }]);
-  };
-
-  // Download progress hook for progressive download tracking
-  const {
-    status: downloadStatus,
-    percent: downloadPercent,
-    speed: downloadSpeed,
-  } = useDownloadProgress(downloadTaskId, {
-    onComplete: async () => {
-      addLog("Download completed successfully!", 'success');
-      setTaskProgress(100);
-      setTaskStatus('Completed');
-      // Refresh library to get the updated item with download paths
-      loadLibraryData();
-      // Also refresh currentResult to update video player with download_path
-      if (currentResult?.platform_id) {
-        const updatedVideo = await fetchVideoByPlatformId(currentResult.platform_id);
-        if (updatedVideo) {
-          setCurrentResult(updatedVideo);
-        }
-      }
-    },
-    onError: (error) => {
-      addLog(`Download failed: ${error}`, 'error');
-    },
-  });
-
-  const handleParse = () => {
-    if (parserMode === 'batch') {
-      const links = batchInput.split(/\r?\n/).filter(line => line.trim().length > 0);
-      if (links.length === 0) return;
-      setPendingAction({
-        type: 'video_parse_batch',
-        count: links.length,
-        callback: () => handleBatchParse(),
-      });
-    } else {
-      if (!urlInput) return;
-      setPendingAction({
-        type: 'video_parse',
-        count: 1,
-        callback: () => handleSingleParse(),
-      });
-    }
-  };
-
-  const handleSingleParse = async () => {
-    if (!urlInput) return;
-
-    // Reset State
-    setIsParsing(true);
-    setCurrentResult(null);
-    setError(null);
-    setSocketLogs([]);
-    setTaskProgress(0);
-    setTaskStatus('Initializing');
-    setDownloadTaskId(null); // Reset download task ID
-
-    try {
-      // Step 1: Initialize Connection
-      addLog("Connecting to backend API...");
-      setTaskStatus('Connecting');
-      setTaskProgress(10);
-
-      // Step 2: Call Backend API
-      addLog(`Sending request to parse: ${urlInput.substring(0, 35)}...`);
-      setTaskStatus('Analyzing');
-      setTaskProgress(30);
-
-      const response = await parseShareLink(urlInput, {
-        video_bool: downloadOptions.video,
-        music_bool: downloadOptions.audio,
-        cover_bool: downloadOptions.cover,
-      });
-
-      addLog("Backend received the request", 'success');
-      setTaskProgress(50);
-
-      if (response.success) {
-        addLog(`Video parsed: ${response.title || response.platform_id}`, 'success');
-        if (response.fallback_used) {
-          addLog(`LightHTTP failed, used fallback: ${response.parse_method_name}`, 'warning');
-        } else {
-          addLog(`Parse method: ${response.parse_method_name || 'Unknown'}`, 'info');
-        }
-        addLog(`Author: ${response.author || 'Unknown'}`, 'info');
-
-        // Create result from response data immediately (progressive: show metadata first)
-        const parsedResult: Video = {
-          id: response.id,  // Database ID for tag operations
-          platform_id: response.platform_id,
-          title: response.title,
-          author: response.author,
-          media_type: response.media_type,
-          original_url: response.original_url || urlInput,
-          // URLs
-          video_download_urls: response.video_download_urls || [],
-          cover_urls: response.cover_urls || [],
-          image_download_urls: response.image_download_urls || [],
-          // Stats
-          like_count: response.like_count || 0,
-          comment_count: response.comment_count || 0,
-          share_count: response.share_count || 0,
-          favorite_count: response.favorite_count || 0,
-          // Video info
-          duration: response.duration || "0",
-          published_at: response.published_at,
-          description: response.description,
-          resolution: response.resolution,
-          video_download_status: response.video_download_status as DownloadStatus || DownloadStatus.PENDING,
-        };
-
-        // Show metadata immediately
-        setCurrentResult(parsedResult);
-
-        // Add selected tags to the parsed video
-        if (selectedTagIds.length > 0 && response.id) {
-          try {
-            await addTagsToVideo(response.id, selectedTagIds);
-            addLog(`Added ${selectedTagIds.length} tag(s) to video`, 'success');
-            setSelectedTagIds([]);  // Clear after adding
-          } catch (tagError) {
-            console.error("Failed to add tags:", tagError);
-            addLog("Warning: Failed to add tags to video", 'warning');
-          }
-        }
-
-        // Check if we have a download task to track
-        if (response.download_task_id) {
-          addLog("Download task submitted to background queue", 'info');
-          addLog(`Tracking download progress: ${response.download_task_id}`, 'info');
-          setTaskStatus('Downloading');
-          setTaskProgress(60);
-          // Set download task ID to start progress polling
-          setDownloadTaskId(response.download_task_id);
-        } else {
-          // No download task, complete immediately (e.g., already downloaded or no download needed)
-          setTaskProgress(100);
-          setTaskStatus('Completed');
-          addLog("Task completed successfully!", 'success');
-          // Refresh library to get latest data
-          await loadLibraryData();
-        }
-      } else {
-        throw new Error(response.message || "Parse failed");
-      }
-
-    } catch (err: any) {
-      setError(err.message || "Failed to parse link");
-      addLog(`Error: ${err.message}`, 'error');
-      setTaskStatus('Failed');
-      setTaskProgress(0);
-    } finally {
-      setIsParsing(false);
-    }
-  };
-
-  const handleBatchParse = async () => {
-    const links = batchInput.split(/\r?\n/).filter(line => line.trim().length > 0);
-    if (links.length === 0) return;
-
-    setIsParsing(true);
-    setBatchResults([]);
-    setCurrentResult(null);
-    setError(null);
-    setSocketLogs([]);
-    setTaskProgress(0);
-    setTaskStatus('Batch Mode Active');
-
-    try {
-      addLog(`Starting batch job. Found ${links.length} links to process.`);
-      setTaskProgress(10);
-
-      // Call backend batch API
-      addLog("Sending batch request to backend...");
-      setTaskStatus('Processing Batch');
-
-      const response = await parseBatchLinks(links, {
-        video_bool: downloadOptions.video,
-        music_bool: downloadOptions.audio,
-        cover_bool: downloadOptions.cover,
-      });
-
-      setTaskProgress(50);
-
-      // Log results
-      addLog(`Backend processed ${response.total} links`, 'info');
-      addLog(`Successfully submitted: ${response.submitted}`, 'success');
-
-      if (response.failed > 0) {
-        addLog(`Failed: ${response.failed}`, 'warning');
-        response.errors.forEach((err) => {
-          addLog(`  - ${err.url.substring(0, 30)}...: ${err.error}`, 'error');
-        });
-      }
-
-      // 直接从响应中提取完整数据
-      const batchData: Video[] = [];
-      response.results.forEach((result: any) => {
-        addLog(`  ✓ ${result.platform_id}: ${result.status}`, 'success');
-        if (result.data) {
-          batchData.push(result.data as Video);
-        }
-      });
-
-      setTaskProgress(80);
-
-      // 设置批量结果（直接使用返回的数据）
-      setBatchResults(batchData);
-
-      // 后台刷新 library（Realtime 也会自动同步）
-      loadLibraryData();
-
-      setTaskProgress(100);
-      setTaskStatus('Batch Job Completed');
-      addLog(`Batch processing finished. ${batchData.length}/${response.total} successful.`, 'success');
-
-    } catch (err: any) {
-      setError(err.message || "Batch processing failed");
-      addLog(`Error: ${err.message}`, 'error');
-      setTaskStatus('Failed');
-    } finally {
-      setIsParsing(false);
-    }
-  };
-
-  const handleSaveToLibrary = async (item: Video, silent = false, tagIds?: string[]) => {
-    // Preserve existing notes/tags if they exist, otherwise init as empty
-    const newItem = {
-      ...item,
-      notes: item.notes || '',
-      tags: item.tags || []
-    };
-
-    try {
-      // Optimistic update
-      setLibrary(prev => {
-        // Check if exists
-        if (prev.find(i => i.platform_id === item.platform_id)) return prev;
-        return [newItem, ...prev];
-      });
-
-      if (isSupabaseConfigured()) {
-        const savedItem = await saveItem(newItem);
-
-        // Add selected tags to the saved video
-        const tagsToAdd = tagIds || selectedTagIds;
-        if (tagsToAdd.length > 0 && savedItem.id) {
-          try {
-            await addTagsToVideo(savedItem.id, tagsToAdd);
-            // Clear selected tags after successful save
-            setSelectedTagIds([]);
-          } catch (tagError) {
-            console.error("Failed to add tags:", tagError);
-            // Don't fail the whole save if tag assignment fails
-          }
-        }
-
-        if (!silent) alert("Saved to Cloud Collection!");
-      } else {
-        if (!silent) alert("Saved to Local Collection (Supabase not configured)");
-      }
-    } catch (err) {
-      console.error("Save failed:", err);
-      if (!silent) alert("Failed to save to cloud database.");
-    }
-  };
-
-  const handleBatchSave = async () => {
-    if (batchResults.length === 0) return;
-    
-    let savedCount = 0;
-    for (const item of batchResults) {
-        await handleSaveToLibrary(item, true);
-        savedCount++;
-    }
-    alert(`Successfully saved ${savedCount} items to your library!`);
-  };
-
-  const handleUpdateLibraryItem = async (id: string, updates: Partial<Video>) => {
-    // Optimistic update
-    setLibrary(prev => prev.map(item =>
-      item.platform_id === id ? { ...item, ...updates } : item
-    ));
-
-    try {
-      if (isSupabaseConfigured()) {
-        await updateItem(id, updates);
-      }
-    } catch (err) {
-      console.error("Update failed:", err);
-    }
-  };
-
-  const handleDeleteLibraryItem = async (id: string, deleteFiles: boolean) => {
-    try {
-      if (isSupabaseConfigured()) {
-        await deleteItem(id, deleteFiles);
-        // Remove from library state
-        setLibrary(prev => prev.filter(item => item.platform_id !== id));
-        // Clear selection if this item was selected
-        if (selectedLibraryItem?.platform_id === id) {
-          setSelectedLibraryItem(null);
-        }
-      }
-    } catch (err) {
-      console.error("Delete failed:", err);
-      throw err; // Re-throw to let the UI handle the error
-    }
+  // Auth logout resets non-auth state
+  const handleAuthLogout = async () => {
+    await handleLogout();
   };
 
   const handleMobileLibraryClick = () => {
@@ -1543,58 +164,11 @@ export default function App() {
   };
 
   // Filter and sort library - 默认按添加时间降序（最新在前）
-  const filteredLibrary = React.useMemo(() => {
-    // If semantic search is active, filter by search results
-    if (isSearchActive) {
-      // If search returned no results, return empty array
-      if (searchResults.length === 0) {
-        return [];
-      }
-      const searchAwemeIds = new Set(searchResults.map(r => r.platform_id));
-      return library
-        .filter(item => searchAwemeIds.has(item.platform_id))
-        .sort((a, b) => {
-          // Sort by search relevance (similarity score)
-          const aScore = searchResults.find(r => r.platform_id === a.platform_id)?.similarity_score || 0;
-          const bScore = searchResults.find(r => r.platform_id === b.platform_id)?.similarity_score || 0;
-          return bScore - aScore;
-        });
-    }
-
-    return library
-      .filter(item => {
-        // Filter by specific collection if selected
-        if (activeCollectionId && !collectionVideoIds.includes(item.platform_id)) {
-          return false;
-        }
-        // Filter by team library (all team collections) if active but no specific collection
-        if (isTeamLibraryActive && !activeCollectionId && !teamLibraryVideoIds.includes(item.platform_id)) {
-          return false;
-        }
-        // Mobile search filter - simple text matching
-        if (searchQuery.trim()) {
-          const query = searchQuery.toLowerCase().trim();
-          const title = (item.title || '').toLowerCase();
-          const author = (item.author_nickname || '').toLowerCase();
-          const desc = (item.description || '').toLowerCase();
-          const tags = (item.video_tag || []).join(' ').toLowerCase();
-          return title.includes(query) || author.includes(query) || desc.includes(query) || tags.includes(query);
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        // 按 created_at 降序排序（最新在前）
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds, searchQuery]);
-
   // Calculate main content classes based on view to handle mobile padding
-  // Added md:pt-20 to account for the fixed header on desktop
+  // md:pt-14 accounts for the fixed TopBar (h-14 = 56px)
   const mainContentClass = `flex-1 md:ml-64 w-full ${
     view === 'library'
-      ? 'p-0 md:p-8 md:pt-20 pb-20 md:pb-8' // No padding on mobile library to allow edge-to-edge feed
+      ? 'p-0 md:p-8 md:pt-20 pb-20 md:pb-8'
       : 'p-4 md:p-8 md:pt-20 pb-24 md:pb-8'
   }`;
 
@@ -1630,75 +204,7 @@ export default function App() {
         onClose={() => setIsProfileModalOpen(false)}
         user={userProfile}
         onSave={(updated) => setUserProfile(updated)}
-        onLogout={handleLogout}
-      />
-
-      {/* Header - Desktop Only */}
-      <Header
-        userProfile={{
-          name: userProfile.name,
-          email: userProfile.email,
-          avatarUrl: userProfile.avatarUrl,
-        }}
-        unreadCount={notifications.filter(n => !n.read).length}
-        onNotificationClick={() => setIsNotificationPanelOpen(!isNotificationPanelOpen)}
-        onUserClick={() => setIsUserDropdownOpen(true)}
-        onPointsClick={() => setView('points')}
-      />
-
-      {/* Notification Panel - positioned relative to header */}
-      {isNotificationPanelOpen && (
-        <div className="hidden md:block fixed top-16 right-4 z-50">
-          <NotificationPanel
-            isOpen={isNotificationPanelOpen}
-            onClose={() => setIsNotificationPanelOpen(false)}
-            notifications={notifications.map(n => ({
-              id: n.id,
-              type: n.type,
-              title: n.title,
-              content: n.content || undefined,
-              createdAt: n.created_at,
-              read: n.read,
-            }))}
-            onMarkRead={handleMarkNotificationRead}
-            onMarkAllRead={handleMarkAllNotificationsRead}
-          />
-        </div>
-      )}
-
-      {/* User Dropdown */}
-      <UserDropdown
-        isOpen={isUserDropdownOpen}
-        onClose={() => setIsUserDropdownOpen(false)}
-        user={{
-          name: userProfile.name,
-          email: userProfile.email,
-          avatarUrl: userProfile.avatarUrl,
-        }}
-        teams={teams.map(t => ({
-          id: t.id,
-          name: t.name,
-          isOwner: t.owner_id === currentUserId,
-        }))}
-        activeTeamId={selectedTeamId}
-        onTeamSelect={(teamId) => {
-          setSelectedTeamId(teamId);
-          // Reset collection when switching teams
-          setActiveCollectionId(null);
-        }}
-        onCreateTeam={handleCreateTeam}
-        onTeamSettings={handleTeamSettings}
-        onProfile={() => {
-          setIsUserDropdownOpen(false);
-          setSettingsModalInitialTab('personal');
-          setIsSettingsModalOpen(true);
-        }}
-        onAccount={() => {
-          setIsUserDropdownOpen(false);
-          setSettingsModalInitialTab('personal');
-          setIsSettingsModalOpen(true);
-        }}
-        onLogout={handleLogout}
+        onLogout={handleAuthLogout}
       />
 
       {/* Create Team Modal */}
@@ -1725,32 +231,21 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
-        initialTab={settingsModalInitialTab}
-        currentTeamId={selectedTeamId}
-        currentTeamName={teams.find(t => t.id === selectedTeamId)?.name}
-        isTeamOwner={teams.find(t => t.id === selectedTeamId)?.owner_id === currentUserId}
+        initialTab={settingsModalInitialTab as any}
         user={{
           id: currentUserId || '',
           name: userProfile.name,
           email: userProfile.email,
           avatarUrl: userProfile.avatarUrl,
-          bio: '', // TODO: Add bio to userProfile if needed
+          bio: '',
         }}
         onUserUpdated={() => {
           // Refresh user profile
         }}
-        onTeamDeleted={() => {
-          if (selectedTeamId) {
-            handleTeamDeleted(selectedTeamId);
-          }
-          setIsSettingsModalOpen(false);
-        }}
-        onTeamLeft={() => {
-          if (selectedTeamId) {
-            handleTeamLeft(selectedTeamId);
-          }
-          setIsSettingsModalOpen(false);
-        }}
+        settings={userSettings}
+        onUpdateSettings={handleUpdateSettings}
+        aiSettings={aiSettings}
+        onSaveAISettings={setAISettings}
       />
 
       {/* Create Collection Modal */}
@@ -1931,11 +426,16 @@ export default function App() {
         {/* TopBar */}
         <TopBar
           user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
+          unreadCount={notifications.filter(n => !n.read).length}
           onNavigate={(v, tab) => {
             setView(v as ViewState);
             if (tab) setSettingsTab(tab as any);
           }}
-          onSignOut={handleLogout}
+          onSignOut={handleAuthLogout}
+          onOpenSettings={(tab) => {
+            setSettingsModalInitialTab(tab || 'personal');
+            setIsSettingsModalOpen(true);
+          }}
         />
 
         {/* VIEW: PARSER */}
@@ -2722,5 +1222,13 @@ export default function App() {
       )}
     </div>
     </ToastProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
   );
 }

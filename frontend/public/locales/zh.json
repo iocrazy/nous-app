@@ -12,10 +12,14 @@
   "sidebar": {
     "personal": "个人",
     "resources": "资源库",
+    "projects": "项目",
+    "todolist": "待办事项",
+    "management": "管理",
     "members": "成员",
     "billing": "账单",
     "files": "文件",
     "allFiles": "所有文件",
+    "upload": "上传",
     "review": "审阅",
     "comments": "评论",
     "status": "状态",
@@ -199,6 +203,20 @@
     "paymentSuccessful": "支付成功！",
     "pointsAdded": "已充值 {{amount}} 积分",
     "orderHistory": "订单历史"
+  },
+  "topbar": {
+    "search": "搜索 (⌘K)",
+    "taskCenter": "任务中心",
+    "transfers": "传输",
+    "tasks": "任务",
+    "noItems": "暂无内容",
+    "notifications": "通知",
+    "noNotifications": "暂无通知",
+    "account": "账户",
+    "helpDocs": "帮助与文档"
+  },
+  "plans": {
+    "free": "免费"
   },
   "download": {
     "downloading": "下载中",

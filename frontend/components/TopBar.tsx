@@ -9,6 +9,8 @@ import {
   HelpCircle,
   Inbox,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,8 +18,10 @@ import {
 
 interface TopBarProps {
   user: { name: string; email: string; avatarUrl?: string } | null;
+  unreadCount?: number;
   onNavigate: (view: string, tab?: string) => void;
   onSignOut: () => void;
+  onOpenSettings?: (tab?: string) => void;
 }
 
 type PanelType = 'taskCenter' | 'notifications' | 'avatar' | null;
@@ -101,23 +105,24 @@ const PanelShell: React.FC<{
 // ---------------------------------------------------------------------------
 
 const TaskCenterPanel: React.FC = () => {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<'transfers' | 'tasks'>('transfers');
 
   return (
     <PanelShell className="w-80">
       {/* Tab bar */}
       <div className="flex border-b border-zinc-800">
-        {(['transfers', 'tasks'] as const).map((t) => (
+        {(['transfers', 'tasks'] as const).map((key) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={key}
+            onClick={() => setTab(key)}
             className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
-              tab === t
+              tab === key
                 ? 'text-indigo-400 border-b-2 border-indigo-400'
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {t === 'transfers' ? 'Transfers' : 'Tasks'}
+            {t(`topbar.${key}`)}
           </button>
         ))}
       </div>
@@ -125,7 +130,7 @@ const TaskCenterPanel: React.FC = () => {
       {/* Empty state */}
       <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
         <Inbox size={28} className="mb-2 text-zinc-600" />
-        <span className="text-sm">No items</span>
+        <span className="text-sm">{t('topbar.noItems')}</span>
       </div>
     </PanelShell>
   );
@@ -135,17 +140,20 @@ const TaskCenterPanel: React.FC = () => {
 // Notifications panel
 // ---------------------------------------------------------------------------
 
-const NotificationsPanel: React.FC = () => (
-  <PanelShell className="w-80">
-    <div className="px-4 py-3 border-b border-zinc-800">
-      <span className="text-sm font-semibold text-zinc-200">Notifications</span>
-    </div>
-    <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-      <Bell size={28} className="mb-2 text-zinc-600" />
-      <span className="text-sm">No notifications</span>
-    </div>
-  </PanelShell>
-);
+const NotificationsPanel: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <PanelShell className="w-80">
+      <div className="px-4 py-3 border-b border-zinc-800">
+        <span className="text-sm font-semibold text-zinc-200">{t('topbar.notifications')}</span>
+      </div>
+      <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
+        <Bell size={28} className="mb-2 text-zinc-600" />
+        <span className="text-sm">{t('topbar.noNotifications')}</span>
+      </div>
+    </PanelShell>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Avatar menu
@@ -155,47 +163,51 @@ const AvatarMenu: React.FC<{
   user: { name: string; email: string };
   onNavigate: (view: string, tab?: string) => void;
   onSignOut: () => void;
-}> = ({ user, onNavigate, onSignOut }) => (
-  <PanelShell className="w-56">
-    {/* User info header */}
-    <div className="px-4 py-3 border-b border-zinc-800">
-      <p className="text-sm font-semibold text-zinc-200 truncate">{user.name}</p>
-      <p className="text-xs text-zinc-500 truncate">{user.email}</p>
-    </div>
+  onOpenSettings?: (tab?: string) => void;
+}> = ({ user, onNavigate, onSignOut, onOpenSettings }) => {
+  const { t } = useTranslation();
+  return (
+    <PanelShell className="w-56">
+      {/* User info header */}
+      <div className="px-4 py-3 border-b border-zinc-800">
+        <p className="text-sm font-semibold text-zinc-200 truncate">{user.name}</p>
+        <p className="text-xs text-zinc-500 truncate">{user.email}</p>
+      </div>
 
-    {/* Menu items */}
-    <div className="py-1">
-      <MenuButton
-        icon={User}
-        label="Profile"
-        onClick={() => onNavigate('settings', 'profile')}
-      />
-      <MenuButton
-        icon={Settings}
-        label="Settings"
-        onClick={() => onNavigate('settings', 'general')}
-      />
-    </div>
+      {/* Menu items */}
+      <div className="py-1">
+        <MenuButton
+          icon={User}
+          label={t('user.profile')}
+          onClick={() => onOpenSettings?.('personal')}
+        />
+        <MenuButton
+          icon={Settings}
+          label={t('nav.settings')}
+          onClick={() => onOpenSettings?.('general')}
+        />
+      </div>
 
-    <div className="border-t border-zinc-800" />
+      <div className="border-t border-zinc-800" />
 
-    <div className="py-1">
-      <MenuButton
-        icon={HelpCircle}
-        label="Help & Docs"
-        onClick={() => {
-          /* placeholder */
-        }}
-      />
-    </div>
+      <div className="py-1">
+        <MenuButton
+          icon={HelpCircle}
+          label={t('topbar.helpDocs')}
+          onClick={() => {
+            /* placeholder */
+          }}
+        />
+      </div>
 
-    <div className="border-t border-zinc-800" />
+      <div className="border-t border-zinc-800" />
 
-    <div className="py-1">
-      <MenuButton icon={LogOut} label="Sign Out" onClick={onSignOut} danger />
-    </div>
-  </PanelShell>
-);
+      <div className="py-1">
+        <MenuButton icon={LogOut} label={t('user.signOut')} onClick={onSignOut} danger />
+      </div>
+    </PanelShell>
+  );
+};
 
 const MenuButton: React.FC<{
   icon: React.ElementType;
@@ -252,7 +264,8 @@ const UserAvatar: React.FC<{
 // TopBar
 // ---------------------------------------------------------------------------
 
-export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) => {
+export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings }) => {
+  const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
 
   const taskCenterRef = useRef<HTMLDivElement>(null);
@@ -271,15 +284,15 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) =
   useCloseOnOutsideOrEscape(notificationsRef, openPanel === 'notifications', closeAll);
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
-  // Hardcoded unread count for now
-  const unreadCount = 3;
-
   return (
-    <header className="h-14 border-b border-zinc-800 flex items-center justify-end px-6 gap-2">
+    <header className="fixed top-0 right-0 left-64 h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-6 gap-2">
+      {/* Language Switcher */}
+      <LanguageSwitcher />
+
       {/* Search */}
       <IconButton
-        title="Search (⌘K)"
-        onClick={() => console.log('TODO: Cmd+K search')}
+        title={t('topbar.search')}
+        onClick={() => { /* Cmd+K search — Phase 2+ */ }}
       >
         <Search size={18} />
       </IconButton>
@@ -287,7 +300,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) =
       {/* Task Center */}
       <div ref={taskCenterRef} className="relative">
         <IconButton
-          title="Task Center"
+          title={t('topbar.taskCenter')}
           onClick={() => togglePanel('taskCenter')}
           active={openPanel === 'taskCenter'}
         >
@@ -299,7 +312,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) =
       {/* Notifications */}
       <div ref={notificationsRef} className="relative">
         <IconButton
-          title="Notifications"
+          title={t('topbar.notifications')}
           onClick={() => togglePanel('notifications')}
           active={openPanel === 'notifications'}
           badge={unreadCount}
@@ -312,7 +325,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) =
       {/* Avatar Menu */}
       <div ref={avatarRef} className="relative">
         <button
-          title="Account"
+          title={t('topbar.account')}
           onClick={() => togglePanel('avatar')}
           className="p-1 rounded-lg transition-colors hover:bg-zinc-800"
         >
@@ -322,7 +335,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut }) =
           />
         </button>
         {openPanel === 'avatar' && user && (
-          <AvatarMenu user={user} onNavigate={onNavigate} onSignOut={onSignOut} />
+          <AvatarMenu user={user} onNavigate={onNavigate} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
         )}
       </div>
     </header>
