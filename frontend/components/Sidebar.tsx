@@ -27,7 +27,7 @@ import {
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
 import { SmartCollectionsSidebar } from './SmartCollectionsSidebar';
-import { TeamSwitcher } from './TeamSwitcher';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { hasPermission } from '../utils/permissions';
 
 declare const __APP_VERSION__: string;
@@ -124,6 +124,7 @@ interface SidebarProps {
   activeTeamId: string | null;
   currentTeam: Team | null;
   permissions: string[];
+  userName?: string;
 
   // Project context (for project mode)
   activeProject: Project | null;
@@ -200,6 +201,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTeamId,
   currentTeam,
   permissions,
+  userName,
   activeProject,
   isLibraryOpen,
   isSettingsOpen,
@@ -360,10 +362,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <Logo />
 
         <div className="mb-4 px-2">
-          <TeamSwitcher
+          <WorkspaceSwitcher
             teams={teams}
             activeTeamId={activeTeamId}
             currentTeam={currentTeam}
+            userName={userName}
             onTeamChange={onTeamChange}
             onCreateTeam={onCreateTeam}
           />
@@ -439,10 +442,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <Logo />
 
       <div className="mb-4 px-2">
-        <TeamSwitcher
+        <WorkspaceSwitcher
           teams={teams}
           activeTeamId={activeTeamId}
           currentTeam={null}
+          userName={userName}
           onTeamChange={onTeamChange}
           onCreateTeam={onCreateTeam}
         />
