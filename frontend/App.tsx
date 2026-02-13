@@ -63,6 +63,7 @@ import { VideoReviewPage } from './components/VideoReviewPage';
 import { BillingView } from './components/BillingView';
 import { MembersView } from './components/MembersView';
 import { ResourcesView } from './components/ResourcesView';
+import { TopBar } from './components/TopBar';
 
 // --- Types for Monitor ---
 interface LogEntry {
@@ -594,12 +595,14 @@ export default function App() {
     return () => { cancelled = true; };
   }, [isAuthenticated, view, dashboardSubView]);
 
-  // Auto-select first team if no team is selected
+  // Auto-select first team only on initial load when no preference was saved
+  const hasAutoSelected = useRef(false);
   useEffect(() => {
-    if (teams.length > 0 && !selectedTeamId) {
+    if (teams.length > 0 && !selectedTeamId && !hasAutoSelected.current) {
+      hasAutoSelected.current = true;
       setSelectedTeamId(teams[0].id);
     }
-  }, [teams, selectedTeamId]);
+  }, [teams]);
 
   // State for team library video IDs (all videos in team collections)
   const [teamLibraryVideoIds, setTeamLibraryVideoIds] = useState<string[]>([]);
@@ -1888,6 +1891,7 @@ export default function App() {
         activeTeamId={selectedTeamId}
         currentTeam={currentTeam}
         permissions={userPermissions}
+        userName={userProfile?.name}
         activeProject={selectedProject}
         isLibraryOpen={isLibraryOpen}
         isSettingsOpen={isSettingsOpen}
@@ -1905,7 +1909,7 @@ export default function App() {
           setSelectedProject(null);
           setReviewFile(null);
           if (!teamId) setView('parser');
-          else setView('mediatrack');
+          else setView('resources');
         }}
         onCreateTeam={handleCreateTeam}
         onProjectBack={() => { setSelectedProject(null); setReviewFile(null); }}
@@ -1923,7 +1927,17 @@ export default function App() {
 
       {/* Main Content */}
       <main className={mainContentClass}>
-        
+
+        {/* TopBar */}
+        <TopBar
+          user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
+          onNavigate={(v, tab) => {
+            setView(v as ViewState);
+            if (tab) setSettingsTab(tab as any);
+          }}
+          onSignOut={handleLogout}
+        />
+
         {/* VIEW: PARSER */}
         {view === 'parser' && (
           <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2615,11 +2629,29 @@ export default function App() {
         )}
 
         {/* VIEW: RESOURCES */}
-        {view === 'resources' && selectedTeamId && (
+        {view === 'resources' && (
           <ResourcesView
-            teamId={selectedTeamId}
-            onCreateCollection={() => setIsCreateCollectionModalOpen(true)}
+            scopeType={selectedTeamId ? 'team' : 'personal'}
+            scopeId={selectedTeamId || currentUserId || ''}
           />
+        )}
+
+        {/* VIEW: TODOLIST */}
+        {view === 'todolist' && (
+          <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
+            <ListTodo size={48} className="mb-4 text-zinc-600" />
+            <p className="text-lg font-medium text-zinc-400">Todolist</p>
+            <p className="text-sm mt-1">Coming soon</p>
+          </div>
+        )}
+
+        {/* VIEW: MANAGEMENT */}
+        {view === 'management' && (
+          <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
+            <Settings size={48} className="mb-4 text-zinc-600" />
+            <p className="text-lg font-medium text-zinc-400">Team Management</p>
+            <p className="text-sm mt-1">Coming soon</p>
+          </div>
         )}
 
       </main>
