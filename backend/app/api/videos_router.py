@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
+from app.repositories.tags_repository import TagsRepository
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
@@ -53,6 +54,8 @@ class VideoFetchRequest(BaseModel):
     music_bool: bool = False
     cover_bool: bool = True
     use_celery: bool = False  # Whether to use Celery async tasks
+    tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
+    tag_ids: Optional[list[str]] = None  # Existing tag UUIDs
 
 
 class VideoSearchRequest(BaseModel):
@@ -75,6 +78,30 @@ class BatchFetchRequest(BaseModel):
     music_bool: bool = False
     cover_bool: bool = True
     use_celery: bool = False  # Whether to use Celery async tasks
+    tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
+    tag_ids: Optional[list[str]] = None  # Existing tag UUIDs
+
+
+async def _resolve_and_attach_tags(
+    video_id: str, tag_names: list[str], user_id: str
+) -> list[str]:
+    """Resolve tag names to IDs (auto-create if missing) and attach to video.
+
+    Returns list of attached tag IDs.
+    """
+    repo = TagsRepository()
+    tag_ids = []
+    for name in tag_names:
+        name = name.strip()
+        if not name:
+            continue
+        tag = await repo.get_tag_by_name(name, user_id)
+        if not tag:
+            tag = await repo.create_tag(name=name, user_id=user_id)
+        tag_ids.append(str(tag["id"]))
+    if tag_ids:
+        await repo.bulk_add_tags_to_video(video_id, tag_ids, source="manual")
+    return tag_ids
 
 
 # ============================================
@@ -141,6 +168,8 @@ async def fetch_video(
                 request=request,
                 background_tasks=background_tasks,
                 auth=auth,
+                tags=request.tags,
+                tag_ids=request.tag_ids,
             )
 
         # ==========================================
@@ -274,6 +303,24 @@ async def fetch_video(
                 status_code=500,
                 detail=save_result.get("message", "Failed to save metadata"),
             )
+
+        # Attach tags if provided
+        video_db_id = save_result["id"]
+        if request.tag_ids:
+            try:
+                tags_repo = TagsRepository()
+                await tags_repo.bulk_add_tags_to_video(
+                    video_db_id, request.tag_ids, source="manual"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to attach tag_ids: {e}")
+        if request.tags:
+            try:
+                await _resolve_and_attach_tags(
+                    video_db_id, request.tags, auth.user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to attach tags: {e}")
 
         # Download media files
         download_task_id = None
@@ -546,6 +593,41 @@ async def fetch_videos_batch(
                     background_tasks.add_task(
                         VideoService.process_video, platform_id, parsed_data
                     )
+
+                    # Attach tags after video is saved
+                    if request.tag_ids or request.tags:
+                        async def _attach_tags_after_save(
+                            pid: str,
+                            t_ids: list[str] | None,
+                            t_names: list[str] | None,
+                            uid: str,
+                        ):
+                            """Wait for video to be saved, then attach tags."""
+                            import asyncio
+                            repo = VideoRepository()
+                            for _ in range(10):
+                                video = await repo.get_by_platform_id(pid, user_id=uid)
+                                if video:
+                                    if t_ids:
+                                        tags_repo = TagsRepository()
+                                        await tags_repo.bulk_add_tags_to_video(
+                                            video["id"], t_ids, source="manual"
+                                        )
+                                    if t_names:
+                                        await _resolve_and_attach_tags(
+                                            video["id"], t_names, uid
+                                        )
+                                    return
+                                await asyncio.sleep(1)
+                            logger.warning(f"Timeout attaching tags for {pid}")
+
+                        background_tasks.add_task(
+                            _attach_tags_after_save,
+                            platform_id,
+                            request.tag_ids,
+                            request.tags,
+                            auth.user_id,
+                        )
 
                     # Handle datetime objects to string
                     published_at = parsed_data.get("published_at")
@@ -1030,6 +1112,8 @@ async def _handle_ytdlp_fetch(
     request: VideoFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    tags: Optional[list[str]] = None,
+    tag_ids: Optional[list[str]] = None,
 ) -> dict:
     """
     Handle video fetch for non-Douyin platforms via yt-dlp.
@@ -1073,6 +1157,22 @@ async def _handle_ytdlp_fetch(
             status_code=500,
             detail=save_result.get("message", "Failed to save metadata"),
         )
+
+    # Attach tags if provided
+    ytdlp_video_db_id = save_result["id"]
+    if tag_ids:
+        try:
+            tags_repo = TagsRepository()
+            await tags_repo.bulk_add_tags_to_video(
+                ytdlp_video_db_id, tag_ids, source="manual"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to attach tag_ids: {e}")
+    if tags:
+        try:
+            await _resolve_and_attach_tags(ytdlp_video_db_id, tags, auth.user_id)
+        except Exception as e:
+            logger.warning(f"Failed to attach tags: {e}")
 
     # Step 4: Dispatch download tasks
     download_task_id = None

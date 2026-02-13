@@ -85,6 +85,7 @@ export interface FetchOptions {
   video_bool?: boolean;
   music_bool?: boolean;
   cover_bool?: boolean;
+  tag_ids?: string[];
 }
 
 export interface FetchResponse {
@@ -125,15 +126,20 @@ export const parseShareLink = async (
 ): Promise<FetchResponse> => {
   const apiUrl = getApiUrl();
 
+  const body: Record<string, unknown> = {
+    url,
+    video_bool: options.video_bool ?? true,
+    music_bool: options.music_bool ?? false,
+    cover_bool: options.cover_bool ?? true,
+  };
+  if (options.tag_ids?.length) {
+    body.tag_ids = options.tag_ids;
+  }
+
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify({
-      url,
-      video_bool: options.video_bool ?? true,
-      music_bool: options.music_bool ?? false,
-      cover_bool: options.cover_bool ?? true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -160,15 +166,20 @@ export const parseBatchLinks = async (
 }> => {
   const apiUrl = getApiUrl();
 
+  const batchBody: Record<string, unknown> = {
+    urls,
+    video_bool: options.video_bool ?? true,
+    music_bool: options.music_bool ?? false,
+    cover_bool: options.cover_bool ?? true,
+  };
+  if (options.tag_ids?.length) {
+    batchBody.tag_ids = options.tag_ids;
+  }
+
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch/batch`, {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify({
-      urls,
-      video_bool: options.video_bool ?? true,
-      music_bool: options.music_bool ?? false,
-      cover_bool: options.cover_bool ?? true,
-    }),
+    body: JSON.stringify(batchBody),
   });
 
   if (!response.ok) {
