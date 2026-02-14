@@ -251,7 +251,15 @@
     "statusExpired": "已过期",
     "statusRefunded": "已退款",
     "pricingTable": "定价表",
-    "usageBreakdown": "用量明细"
+    "usageBreakdown": "用量明细",
+    "pointsAdjustment": "积分调整",
+    "adjustAmount": "数量",
+    "adjustAmountHint": "正数增加，负数扣除",
+    "adjustDescription": "说明",
+    "adjustDescriptionPlaceholder": "调整原因...",
+    "adjustSubmit": "调整积分",
+    "adjustSuccess": "已调整 {{amount}} 积分。新余额：{{balance}}",
+    "adjustError": "积分调整失败"
   },
   "members": {
     "title": "成员",

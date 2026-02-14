@@ -251,7 +251,15 @@
     "statusExpired": "Expired",
     "statusRefunded": "Refunded",
     "pricingTable": "Pricing Table",
-    "usageBreakdown": "Usage Breakdown"
+    "usageBreakdown": "Usage Breakdown",
+    "pointsAdjustment": "Points Adjustment",
+    "adjustAmount": "Amount",
+    "adjustAmountHint": "Positive to add, negative to deduct",
+    "adjustDescription": "Description",
+    "adjustDescriptionPlaceholder": "Reason for adjustment...",
+    "adjustSubmit": "Adjust Points",
+    "adjustSuccess": "Adjusted {{amount}} points. New balance: {{balance}}",
+    "adjustError": "Failed to adjust points"
   },
   "members": {
     "title": "Members",
