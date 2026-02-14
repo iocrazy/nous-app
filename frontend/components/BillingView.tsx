@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Coins, Package, CreditCard, HardDrive, TrendingUp, BarChart3, Loader2, MessageSquare } from 'lucide-react';
+import { Coins, Package, CreditCard, HardDrive, TrendingUp, BarChart3, Loader2, MessageSquare, Settings } from 'lucide-react';
 import { TeamQuota, PointTransaction, PointPricing, PointPackage, PaymentOrder } from '../types';
-import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats } from '../services/pointsService';
+import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats, adjustPoints } from '../services/pointsService';
 import { fetchPackages, fetchOrders } from '../services/paymentService';
+import { hasPermission } from '../utils/permissions';
 
 interface BillingViewProps {
   teamId: string;
@@ -43,6 +44,10 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
   const [orders, setOrders] = useState<PaymentOrder[]>([]);
   const [pricing, setPricing] = useState<PointPricing[]>([]);
   const [usageStats, setUsageStats] = useState<any>(null);
+  const [adjustAmount, setAdjustAmount] = useState<number>(0);
+  const [adjustDescription, setAdjustDescription] = useState('');
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustResult, setAdjustResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -66,6 +71,32 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
     };
     loadData();
   }, [teamId]);
+
+  const handleAdjustPoints = async () => {
+    if (!adjustAmount || !adjustDescription.trim()) return;
+    setAdjusting(true);
+    setAdjustResult(null);
+    try {
+      const result = await adjustPoints(teamId, adjustAmount, adjustDescription.trim());
+      setAdjustResult({
+        type: 'success',
+        message: t('billing.adjustSuccess', { amount: adjustAmount, balance: result.new_balance }),
+      });
+      // Refresh balance
+      const updatedBalance = await fetchPointsBalance(teamId).catch(() => null);
+      if (updatedBalance) setBalance(updatedBalance);
+      // Reset form
+      setAdjustAmount(0);
+      setAdjustDescription('');
+    } catch (err: any) {
+      setAdjustResult({
+        type: 'error',
+        message: err.message || t('billing.adjustError'),
+      });
+    } finally {
+      setAdjusting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -282,6 +313,56 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
           </div>
         )}
       </section>
+
+      {/* ── Admin Points Adjustment ─────────────────────── */}
+      {hasPermission(permissions, 'team.manage') && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Settings size={20} className="text-amber-400" />
+            <h2 className="text-lg font-semibold text-zinc-100">{t('billing.pointsAdjustment', 'Points Adjustment')}</h2>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm text-zinc-400 mb-1.5">{t('billing.adjustAmount', 'Amount')}</label>
+                <input
+                  type="number"
+                  value={adjustAmount}
+                  onChange={(e) => setAdjustAmount(Number(e.target.value))}
+                  placeholder="0"
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+                />
+                <p className="text-xs text-zinc-500 mt-1">{t('billing.adjustAmountHint', 'Positive to add, negative to deduct')}</p>
+              </div>
+              <div>
+                <label className="block text-sm text-zinc-400 mb-1.5">{t('billing.adjustDescription', 'Description')}</label>
+                <input
+                  type="text"
+                  value={adjustDescription}
+                  onChange={(e) => setAdjustDescription(e.target.value)}
+                  placeholder={t('billing.adjustDescriptionPlaceholder', 'Reason for adjustment...')}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleAdjustPoints}
+                disabled={adjusting || !adjustAmount || !adjustDescription.trim()}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 text-black font-semibold rounded-lg transition-colors flex items-center gap-2"
+              >
+                {adjusting && <Loader2 size={16} className="animate-spin" />}
+                {t('billing.adjustSubmit', 'Adjust Points')}
+              </button>
+              {adjustResult && (
+                <p className={`text-sm ${adjustResult.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                  {adjustResult.message}
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ── Pricing Table ──────────────────────────────────── */}
       {pricing.length > 0 && (
