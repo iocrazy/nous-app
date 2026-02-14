@@ -10,7 +10,7 @@ folder operations, tagging, and recycle bin.
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -23,6 +23,7 @@ from app.schemas.resources import (
     ResourceUpdate,
 )
 from app.services.resources_service import ResourcesService
+from app.services.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/resources")
 
@@ -37,6 +38,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 @router.post("/upload")
 async def upload_resource(
     auth: AuthDep,
+    background_tasks: BackgroundTasks,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     folder_id: Optional[str] = Query(None),
@@ -57,6 +59,19 @@ async def upload_resource(
             scope_id=scope_id,
             folder_id=folder_id,
         )
+
+        # Trigger thumbnail generation in the background
+        if result.get("file_path") and result.get("mime_type"):
+            thumbnail_svc = ThumbnailService()
+            background_tasks.add_task(
+                thumbnail_svc.generate_thumbnail,
+                resource_id=result["id"],
+                file_path=result["file_path"],
+                mime_type=result.get("mime_type", ""),
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
+
         return {"success": True, "data": result}
     except HTTPException:
         raise
