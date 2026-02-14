@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowLeft, Share2, ChevronDown, MessageSquare, Info } from 'lucide-react';
+import { ArrowLeft, Share2, ChevronDown, MessageSquare, Info, PenTool } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ProjectFile, FileVersion, ReviewStatus } from '../types';
+import { ProjectFile, FileVersion, ReviewStatus, DrawingData } from '../types';
 import { fetchFileVersions, getFileInfo, updateReviewStatus } from '../services/projectsService';
 import { VideoPlayer } from './VideoPlayer';
 import { ReviewCommentsPanel } from './ReviewCommentsPanel';
 import { FileInfoPanel } from './FileInfoPanel';
 import { VersionManagerModal } from './VersionManagerModal';
 import { ReviewStatusDropdown } from './ReviewStatusDropdown';
+import { AnnotationCanvas } from './AnnotationCanvas';
+import { AnnotationToolbar } from './AnnotationToolbar';
 
 interface VideoReviewPageProps {
   projectId: string;
@@ -42,6 +44,16 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
   const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Annotation state
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [annotationTool, setAnnotationTool] = useState<'pen' | 'arrow' | 'rect' | 'circle' | 'text'>('pen');
+  const [annotationColor, setAnnotationColor] = useState('#ef4444');
+  const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(4);
+  const [currentDrawingData, setCurrentDrawingData] = useState<DrawingData | null>(null);
+  const [viewingDrawingData, setViewingDrawingData] = useState<DrawingData | null>(null);
+  const annotationCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
 
   // Load versions on mount
   useEffect(() => {
@@ -104,6 +116,52 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
     await loadVersions();
     await refreshFile();
   };
+
+  // Annotation handlers
+  const handleAnnotateToggle = useCallback(() => {
+    if (isAnnotating) {
+      // Closing annotation mode
+      setIsAnnotating(false);
+      setViewingDrawingData(null);
+    } else {
+      // Pause video when entering annotation mode
+      if (videoRef.current && !videoRef.current.paused) {
+        videoRef.current.pause();
+      }
+      setIsAnnotating(true);
+      setCurrentDrawingData(null);
+      setViewingDrawingData(null);
+    }
+  }, [isAnnotating]);
+
+  const handleAnnotationClose = useCallback(() => {
+    setIsAnnotating(false);
+    setViewingDrawingData(null);
+  }, []);
+
+  const handleDrawingChange = useCallback((data: DrawingData) => {
+    setCurrentDrawingData(data);
+  }, []);
+
+  const handleAnnotationUndo = useCallback(() => {
+    const canvas = document.querySelector('canvas[class*="absolute inset-0"]') as any;
+    if (canvas?.__undo) canvas.__undo();
+  }, []);
+
+  const handleAnnotationClear = useCallback(() => {
+    const canvas = document.querySelector('canvas[class*="absolute inset-0"]') as any;
+    if (canvas?.__clear) canvas.__clear();
+    setCurrentDrawingData(null);
+  }, []);
+
+  const handleViewAnnotation = useCallback((drawingData: DrawingData) => {
+    setViewingDrawingData(drawingData);
+    setIsAnnotating(false);
+  }, []);
+
+  const handleCloseViewAnnotation = useCallback(() => {
+    setViewingDrawingData(null);
+  }, []);
 
   // Determine video source URL
   const videoSrc = selectedVersion?.file_path
@@ -196,15 +254,79 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Left: Video player */}
         <div className="flex-1 min-w-0 flex flex-col bg-black">
-          <div className="flex-1 min-h-0 flex items-center justify-center">
+          <div ref={videoContainerRef} className="flex-1 min-h-0 flex items-center justify-center relative">
             {videoSrc ? (
-              <VideoPlayer
-                src={videoSrc}
-                mimeType={videoMime}
-                onTimeUpdate={setCurrentTime}
-                onDurationChange={setDuration}
-                playerRef={videoRef}
-              />
+              <>
+                <VideoPlayer
+                  src={videoSrc}
+                  mimeType={videoMime}
+                  onTimeUpdate={setCurrentTime}
+                  onDurationChange={setDuration}
+                  playerRef={videoRef}
+                />
+
+                {/* Annotation Canvas overlay (active drawing mode) */}
+                {isAnnotating && (
+                  <>
+                    <AnnotationToolbar
+                      activeTool={annotationTool}
+                      activeColor={annotationColor}
+                      strokeWidth={annotationStrokeWidth}
+                      onToolChange={setAnnotationTool}
+                      onColorChange={setAnnotationColor}
+                      onStrokeWidthChange={setAnnotationStrokeWidth}
+                      onUndo={handleAnnotationUndo}
+                      onClear={handleAnnotationClear}
+                      onClose={handleAnnotationClose}
+                    />
+                    <AnnotationCanvas
+                      width={videoRef.current?.videoWidth || 1920}
+                      height={videoRef.current?.videoHeight || 1080}
+                      isActive={true}
+                      tool={annotationTool}
+                      color={annotationColor}
+                      strokeWidth={annotationStrokeWidth}
+                      onDrawingChange={handleDrawingChange}
+                      onClose={handleAnnotationClose}
+                    />
+                  </>
+                )}
+
+                {/* Viewing existing annotation (read-only) */}
+                {viewingDrawingData && !isAnnotating && (
+                  <>
+                    <AnnotationCanvas
+                      width={viewingDrawingData.width || 1920}
+                      height={viewingDrawingData.height || 1080}
+                      isActive={false}
+                      tool="pen"
+                      color="#ef4444"
+                      strokeWidth={4}
+                      existingDrawing={viewingDrawingData}
+                      onDrawingChange={() => {}}
+                      onClose={handleCloseViewAnnotation}
+                    />
+                    <button
+                      onClick={handleCloseViewAnnotation}
+                      className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-zinc-900/90 backdrop-blur border border-zinc-700 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                    >
+                      {t('annotations.done')}
+                    </button>
+                  </>
+                )}
+
+                {/* Annotate button - shown when not annotating */}
+                {!isAnnotating && !viewingDrawingData && (
+                  <button
+                    onClick={handleAnnotateToggle}
+                    className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900/80 backdrop-blur border border-zinc-700 rounded-lg text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                    title={t('annotations.annotate')}
+                  >
+                    <PenTool size={14} />
+                    {t('annotations.annotate')}
+                  </button>
+                )}
+              </>
             ) : (
               <div className="text-zinc-500 text-sm">No video source available</div>
             )}
@@ -250,6 +372,8 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                 currentUserId={currentUserId}
                 onSeekTo={handleSeekTo}
                 onCommentAdded={() => {}}
+                pendingDrawingData={isAnnotating ? currentDrawingData : null}
+                onViewAnnotation={handleViewAnnotation}
               />
             ) : (
               <FileInfoPanel
