@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, Coins, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { checkQuota } from '../services/pointsService';
@@ -20,6 +21,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [quotaInfo, setQuotaInfo] = useState<QuotaCheck | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,14 +140,24 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
           >
             {t('common.cancel', 'Cancel')}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={isLoading || !!insufficient}
-            className="flex-1 px-4 py-3 text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 disabled:cursor-not-allowed rounded-xl font-medium transition-colors"
-          >
-            {t('points.confirmAndProceed', 'Confirm & Proceed')}
-          </button>
+          {insufficient ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); navigate('/points'); }}
+              className="flex-1 px-4 py-3 text-white bg-amber-500 hover:bg-amber-400 rounded-xl font-medium transition-colors"
+            >
+              {t('points.buyPoints', 'Buy Points')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={isLoading}
+              className="flex-1 px-4 py-3 text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 disabled:cursor-not-allowed rounded-xl font-medium transition-colors"
+            >
+              {t('points.confirmAndProceed', 'Confirm & Proceed')}
+            </button>
+          )}
         </div>
       </div>
     </div>
