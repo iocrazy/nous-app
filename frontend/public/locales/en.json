@@ -320,7 +320,27 @@
     "myResources": "My Resources",
     "downloads": "RipVault",
     "noDownloads": "No downloaded content yet",
-    "noDownloadsHint": "Use Parser to download media and they will appear here"
+    "noDownloadsHint": "Use Parser to download media and they will appear here",
+    "dropToUploadHint": "Release to start uploading",
+    "uploadProgress": "Uploading {{count}} files",
+    "uploadComplete": "Upload complete",
+    "uploadFailed": "Upload failed",
+    "invalidFileType": "Invalid file type",
+    "fileTooLarge": "File too large (max 500 MB)"
+  },
+  "annotations": {
+    "annotate": "Annotate",
+    "pen": "Pen",
+    "arrow": "Arrow",
+    "rectangle": "Rectangle",
+    "circle": "Circle",
+    "text": "Text",
+    "undo": "Undo",
+    "clearAll": "Clear All",
+    "done": "Done",
+    "viewAnnotation": "View Annotation",
+    "strokeWidth": "Stroke Width",
+    "color": "Color"
   },
   "mediatrack": {
     "projects": "Projects",
@@ -393,5 +413,50 @@
         "monthsAgo": "{{count}}mo ago"
       }
     }
+  },
+  "kanban": {
+    "todo": "To Do",
+    "inProgress": "In Progress",
+    "done": "Done",
+    "onHold": "On Hold",
+    "addTask": "Add a task...",
+    "noTasks": "No tasks yet",
+    "taskTypes": {
+      "general": "General",
+      "storyboard": "Storyboard",
+      "script": "Script",
+      "filming": "Filming",
+      "editing": "Editing",
+      "review": "Review"
+    },
+    "dueDate": "Due",
+    "assignee": "Assignee",
+    "overdue": "Overdue"
+  },
+  "shares": {
+    "title": "Share",
+    "createShare": "Create Share",
+    "shareType": "Share Type",
+    "link": "Link",
+    "review": "Review",
+    "presentation": "Presentation",
+    "delivery": "Delivery",
+    "shareName": "Share Name",
+    "shareNamePlaceholder": "Enter a name for this share",
+    "password": "Password Protection",
+    "passwordPlaceholder": "Set a password",
+    "expiration": "Expiration",
+    "allowDownload": "Allow Download",
+    "watermark": "Watermark",
+    "copyLink": "Copy Link",
+    "linkCopied": "Link Copied!",
+    "shareCreated": "Share created successfully",
+    "noShares": "No shares yet",
+    "manageShares": "Manage Shares",
+    "cancelShare": "Cancel Share",
+    "views": "Views",
+    "active": "Active",
+    "expired": "Expired",
+    "cancelled": "Cancelled"
   }
 }

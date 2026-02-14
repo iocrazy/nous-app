@@ -551,6 +551,22 @@ export interface FileVersion {
   created_at: string;
 }
 
+// Annotation / Drawing types
+export interface DrawingData {
+  strokes: Stroke[];
+  width: number;
+  height: number;
+}
+
+export interface Stroke {
+  id: string;
+  tool: 'pen' | 'arrow' | 'rect' | 'circle' | 'text';
+  points: { x: number; y: number }[];
+  color: string;
+  strokeWidth: number;
+  text?: string;  // For text tool
+}
+
 export interface ReviewComment {
   id: string;
   file_id: string;
@@ -559,6 +575,7 @@ export interface ReviewComment {
   author_email?: string;
   content: string;
   timestamp_seconds: number | null;
+  drawing_data?: DrawingData | null;
   created_at: string;
   updated_at: string;
 }
@@ -591,4 +608,28 @@ export interface ProjectFile {
   current_version: number;
   created_at: string;
   updated_at: string;
+}
+
+// Share types
+export type ShareType = 'link' | 'review' | 'presentation' | 'delivery';
+export type ShareStatus = 'active' | 'expired' | 'cancelled';
+
+export interface Share {
+  id: string;
+  resource_id: string | null;
+  project_file_id: string | null;
+  folder_id: string | null;
+  version_id: string | null;
+  share_type: ShareType;
+  shared_by: string;
+  share_name: string;
+  share_code: string;
+  password: string | null;
+  allow_download: boolean;
+  expires_at: string | null;
+  max_views: number | null;
+  view_count: number;
+  watermark: boolean;
+  status: ShareStatus;
+  created_at: string;
 }

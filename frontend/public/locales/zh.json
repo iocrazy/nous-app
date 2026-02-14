@@ -320,7 +320,27 @@
     "myResources": "我的资源",
     "downloads": "RipVault",
     "noDownloads": "暂无下载内容",
-    "noDownloadsHint": "使用解析器下载媒体后会显示在这里"
+    "noDownloadsHint": "使用解析器下载媒体后会显示在这里",
+    "dropToUploadHint": "松开即可开始上传",
+    "uploadProgress": "正在上传 {{count}} 个文件",
+    "uploadComplete": "上传完成",
+    "uploadFailed": "上传失败",
+    "invalidFileType": "不支持的文件类型",
+    "fileTooLarge": "文件过大（最大 500 MB）"
+  },
+  "annotations": {
+    "annotate": "标注",
+    "pen": "画笔",
+    "arrow": "箭头",
+    "rectangle": "矩形",
+    "circle": "圆形",
+    "text": "文字",
+    "undo": "撤销",
+    "clearAll": "清除全部",
+    "done": "完成",
+    "viewAnnotation": "查看标注",
+    "strokeWidth": "线条粗细",
+    "color": "颜色"
   },
   "mediatrack": {
     "projects": "项目",
@@ -393,5 +413,50 @@
         "monthsAgo": "{{count}}个月前"
       }
     }
+  },
+  "kanban": {
+    "todo": "待办",
+    "inProgress": "进行中",
+    "done": "已完成",
+    "onHold": "暂停",
+    "addTask": "添加任务...",
+    "noTasks": "暂无任务",
+    "taskTypes": {
+      "general": "常规",
+      "storyboard": "分镜",
+      "script": "脚本",
+      "filming": "拍摄",
+      "editing": "剪辑",
+      "review": "审阅"
+    },
+    "dueDate": "截止",
+    "assignee": "负责人",
+    "overdue": "已逾期"
+  },
+  "shares": {
+    "title": "分享",
+    "createShare": "创建分享",
+    "shareType": "分享类型",
+    "link": "链接",
+    "review": "审阅",
+    "presentation": "演示",
+    "delivery": "交付",
+    "shareName": "分享名称",
+    "shareNamePlaceholder": "输入分享名称",
+    "password": "密码保护",
+    "passwordPlaceholder": "设置密码",
+    "expiration": "有效期",
+    "allowDownload": "允许下载",
+    "watermark": "水印",
+    "copyLink": "复制链接",
+    "linkCopied": "链接已复制！",
+    "shareCreated": "分享创建成功",
+    "noShares": "暂无分享",
+    "manageShares": "管理分享",
+    "cancelShare": "取消分享",
+    "views": "浏览次数",
+    "active": "活跃",
+    "expired": "已过期",
+    "cancelled": "已取消"
   }
 }
