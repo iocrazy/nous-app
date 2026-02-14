@@ -11,13 +11,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
 import { useLibrary } from '../hooks/useLibrary';
-import { useParser } from '../hooks/useParser';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
 import { UserProfileModal } from './UserProfileModal';
 import { CreateTeamModal } from './CreateTeamModal';
-import { PointsConfirmDialog } from './PointsConfirmDialog';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
@@ -93,19 +91,6 @@ export function AppLayout() {
   } = useLibrary({
     isAuthenticated: true,
     selectedTeamId,
-  });
-
-  // Parser state (for PointsConfirmDialog pendingAction)
-  const [currentResult, setCurrentResult] = useState<import('../types').Video | null>(null);
-
-  const {
-    pendingAction, setPendingAction,
-  } = useParser({
-    loadLibraryData,
-    setLibrary,
-    currentResult,
-    setCurrentResult,
-    isAuthenticated: true,
   });
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
@@ -185,19 +170,6 @@ export function AppLayout() {
         isOpen={isCreateTeamModalOpen}
         onClose={() => setIsCreateTeamModalOpen(false)}
         onTeamCreated={handleTeamCreated}
-      />
-
-      {/* Points Confirmation Dialog */}
-      <PointsConfirmDialog
-        isOpen={pendingAction !== null}
-        actionType={pendingAction?.type ?? 'video_parse'}
-        actionCount={pendingAction?.count ?? 1}
-        onConfirm={() => {
-          const cb = pendingAction?.callback;
-          setPendingAction(null);
-          cb?.();
-        }}
-        onClose={() => setPendingAction(null)}
       />
 
       {/* Settings Modal */}
