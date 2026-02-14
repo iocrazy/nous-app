@@ -14,6 +14,10 @@ import {
   Zap,
   Star,
   FolderPlus,
+  CheckCircle2,
+  XCircle,
+  X,
+  UploadCloud,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
@@ -38,6 +42,34 @@ import {
 import { fetchTags } from '../services/tagsService';
 import { ResourceCard } from './ResourceCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
+
+// ─── Upload constants ────────────────────────────────────
+
+const BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.bat', '.cmd', '.msi', '.scr', '.pif', '.com',
+  '.sh', '.bash', '.ps1', '.vbs', '.wsf', '.jar',
+]);
+
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+
+interface UploadFileProgress {
+  id: string;
+  filename: string;
+  percent: number;
+  status: 'uploading' | 'complete' | 'error';
+  error?: string;
+}
+
+function validateFile(file: File): string | null {
+  const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+  if (BLOCKED_EXTENSIONS.has(ext)) {
+    return 'invalidFileType';
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return 'fileTooLarge';
+  }
+  return null;
+}
 
 // ─── Props ─────────────────────────────────────────────
 
@@ -156,6 +188,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Per-file upload tracking
+  const [fileUploadProgress, setFileUploadProgress] = useState<UploadFileProgress[]>([]);
+  const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const dragCounterRef = useRef(0);
 
   // Recycle bin
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
@@ -299,45 +336,136 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!files.length || uploading) return;
+
+    // Validate files and build initial progress entries
+    const validFiles: File[] = [];
+    const initialProgress: UploadFileProgress[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const validationError = validateFile(file);
+      const id = `${Date.now()}-${i}`;
+
+      if (validationError) {
+        initialProgress.push({
+          id,
+          filename: file.name,
+          percent: 0,
+          status: 'error',
+          error: t(`resources.${validationError}`),
+        });
+      } else {
+        validFiles.push(file);
+        initialProgress.push({
+          id,
+          filename: file.name,
+          percent: 0,
+          status: 'uploading',
+        });
+      }
+    }
+
+    if (validFiles.length === 0 && initialProgress.length > 0) {
+      // All files failed validation — show errors briefly
+      setFileUploadProgress(initialProgress);
+      setShowUploadPanel(true);
+      return;
+    }
+
+    setFileUploadProgress(initialProgress);
+    setShowUploadPanel(true);
     setUploading(true);
     setUploadProgress(0);
-    try {
-      for (let i = 0; i < files.length; i++) {
+
+    let completedCount = 0;
+    // Map valid files to their progress entry IDs
+    const validFileEntryIds = initialProgress
+      .filter((p) => p.status === 'uploading')
+      .map((p) => p.id);
+
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const entryId = validFileEntryIds[i];
+
+      try {
         await uploadResource(
-          files[i],
+          file,
           scopeType,
           scopeId,
           selectedFolderId,
           (progress) => {
-            const overall = Math.round(((i + progress / 100) / files.length) * 100);
+            // Update per-file progress
+            setFileUploadProgress((prev) =>
+              prev.map((p) => p.id === entryId ? { ...p, percent: progress } : p)
+            );
+            // Update overall progress
+            const overall = Math.round(((completedCount + progress / 100) / validFiles.length) * 100);
             setUploadProgress(overall);
           },
         );
+
+        completedCount++;
+        setFileUploadProgress((prev) =>
+          prev.map((p) => p.id === entryId ? { ...p, percent: 100, status: 'complete' } : p)
+        );
+      } catch {
+        setFileUploadProgress((prev) =>
+          prev.map((p) => p.id === entryId
+            ? { ...p, status: 'error', error: t('resources.uploadFailed') }
+            : p
+          )
+        );
       }
+    }
+
+    // Refresh resource list
+    try {
       const items = await fetchResources(scopeType, scopeId, selectedFolderId);
       setResources(items);
-    } catch {
-      // Upload failed
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  }, [scopeType, scopeId, selectedFolderId, uploading]);
+    } catch { /* ignore */ }
 
-  // ─── Drag & drop ─────────────────────────────────────
+    setUploading(false);
+    setUploadProgress(0);
+
+    // Auto-dismiss panel after a delay if all succeeded
+    const allDone = completedCount === validFiles.length;
+    if (allDone) {
+      setTimeout(() => {
+        setFileUploadProgress([]);
+        setShowUploadPanel(false);
+      }, 3000);
+    }
+  }, [scopeType, scopeId, selectedFolderId, uploading, t]);
+
+  // ─── Drag & drop (robust nested-element handling) ────
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes('Files')) {
+      setDragOver(true);
+    }
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(true);
+    e.stopPropagation();
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(false);
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setDragOver(false);
+    }
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
     setDragOver(false);
     if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files);
   }, [handleUpload]);
@@ -756,14 +884,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
         {/* Content area */}
         <div
-          className={`flex-1 overflow-y-auto p-6 transition-colors ${
-            dragOver ? 'bg-indigo-900/10 ring-2 ring-inset ring-indigo-500/30' : ''
-          }`}
+          className="flex-1 overflow-y-auto p-6 relative"
+          onDragEnter={canUpload ? handleDragEnter : undefined}
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
           onDrop={canUpload ? handleDrop : undefined}
         >
-          {/* Upload progress */}
+          {/* ── Drag-and-drop overlay ── */}
+          {dragOver && canUpload && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
+              <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
+              <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
+              <p className="text-sm text-zinc-400 mt-1">{t('resources.dropToUploadHint')}</p>
+            </div>
+          )}
+
+          {/* Upload progress bar (overall) */}
           {uploading && (
             <div className="mb-4">
               <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -829,11 +965,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     <Trash2 size={48} className="text-zinc-600 mb-4" />
                     <p className="text-zinc-400 text-sm">{t('resources.recycleBinEmpty')}</p>
                   </>
-                ) : dragOver ? (
-                  <>
-                    <Upload size={48} className="text-indigo-400 mb-4" />
-                    <p className="text-indigo-300 text-sm">{t('resources.dropToUpload')}</p>
-                  </>
                 ) : (
                   <>
                     <FolderOpen size={48} className="text-zinc-600 mb-4" />
@@ -859,6 +990,82 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onAddTag={handleAddTag}
           onRemoveTag={handleRemoveTag}
         />
+      )}
+
+      {/* ── Floating upload progress panel ── */}
+      {showUploadPanel && fileUploadProgress.length > 0 && (
+        <div className="fixed bottom-4 right-4 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+            <p className="text-sm font-medium text-white">
+              {uploading
+                ? t('resources.uploadProgress', { count: fileUploadProgress.filter((f) => f.status === 'uploading').length })
+                : fileUploadProgress.every((f) => f.status === 'complete')
+                  ? t('resources.uploadComplete')
+                  : t('resources.uploadProgress', { count: fileUploadProgress.length })
+              }
+            </p>
+            <button
+              onClick={() => {
+                if (!uploading) {
+                  setFileUploadProgress([]);
+                  setShowUploadPanel(false);
+                }
+              }}
+              className={`p-1 rounded transition-colors ${
+                uploading
+                  ? 'text-zinc-600 cursor-not-allowed'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+              disabled={uploading}
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* File list */}
+          <div className="max-h-60 overflow-y-auto p-3 space-y-3">
+            {fileUploadProgress.map((item) => (
+              <div key={item.id}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-zinc-400 truncate max-w-[200px]">{item.filename}</span>
+                  <span className="shrink-0 ml-2">
+                    {item.status === 'complete' && (
+                      <CheckCircle2 size={14} className="text-emerald-400" />
+                    )}
+                    {item.status === 'error' && (
+                      <span className="flex items-center gap-1 text-red-400">
+                        <XCircle size={14} />
+                        <span>{item.error}</span>
+                      </span>
+                    )}
+                    {item.status === 'uploading' && (
+                      <span className="text-zinc-500">{item.percent}%</span>
+                    )}
+                  </span>
+                </div>
+                {item.status === 'uploading' && (
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                      style={{ width: `${item.percent}%` }}
+                    />
+                  </div>
+                )}
+                {item.status === 'complete' && (
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full w-full" />
+                  </div>
+                )}
+                {item.status === 'error' && (
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-red-500 rounded-full w-full" />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
