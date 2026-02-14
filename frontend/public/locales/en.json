@@ -404,6 +404,13 @@
       "uploadedBy": "Uploaded By",
       "share": "Share",
       "seekTo": "Click to seek",
+      "stepBackward": "Previous Frame",
+      "stepForward": "Next Frame",
+      "compareVersions": "Compare",
+      "exitCompare": "Exit Compare",
+      "selectVersionToCompare": "Select a version to compare",
+      "versionLabel": "Version {{number}}",
+      "syncedPlayback": "Synced Playback",
       "timeAgo": {
         "justNow": "Just now",
         "minutesAgo": "{{count}} min ago",
