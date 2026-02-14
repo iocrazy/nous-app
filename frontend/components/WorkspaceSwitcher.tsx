@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, Check, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Team } from '../types';
@@ -33,6 +34,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   onCreateTeam,
 }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -58,6 +60,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
 
   const handleSelect = (teamId: string | null) => {
     onTeamChange(teamId);
+    // Navigate to default route for workspace type
+    navigate(teamId ? '/resources' : '/parser');
     setIsOpen(false);
   };
 
@@ -67,8 +71,11 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   };
 
   const isPersonal = activeTeamId === null;
+  const capitalizedName = userName
+    ? userName.charAt(0).toUpperCase() + userName.slice(1)
+    : '';
   const displayName = isPersonal
-    ? (userName ? `${userName}'s workspace` : (t('sidebar.personal') || 'Personal'))
+    ? (capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal'))
     : (currentTeam?.name || 'Team');
   const activeColor = isPersonal ? 'bg-zinc-600' : getTeamColor(currentTeam?.name || 'T');
   const activeInitial = isPersonal
@@ -114,7 +121,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                 </span>
               </div>
               <span className="text-sm text-zinc-200 truncate flex-1 text-left">
-                {userName ? `${userName}'s workspace` : (t('sidebar.personal') || 'Personal')}
+                {capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal')}
               </span>
               {isPersonal && (
                 <Check size={14} className="text-indigo-400 flex-shrink-0" />
