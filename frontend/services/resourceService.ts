@@ -138,7 +138,7 @@ export async function uploadResource(
 
   // Build headers without Content-Type (browser sets multipart boundary)
   const headers: Record<string, string> = {};
-  const authHeaders = getAuthHeaders();
+  const authHeaders = await getAuthHeaders();
   Object.entries(authHeaders).forEach(([k, v]) => {
     if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
   });
@@ -189,7 +189,7 @@ export async function trashResource(resourceId: string): Promise<void> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to trash resource');
 }
@@ -198,7 +198,7 @@ export async function restoreResource(resourceId: string): Promise<void> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/restore`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to restore resource');
 }
@@ -207,7 +207,7 @@ export async function permanentDeleteResource(resourceId: string): Promise<void>
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/permanent`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to permanently delete resource');
 }
@@ -221,7 +221,7 @@ export async function fetchTrashedResources(
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
   const response = await fetch(`${apiUrl}/api/v1/resources/trash?${params}`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch trashed resources');
   const json = await response.json();
@@ -233,7 +233,7 @@ export async function fetchTrashedResources(
 export async function fetchResourceTags(resourceId: string) {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch resource tags');
   const json = await response.json();
@@ -244,7 +244,7 @@ export async function addResourceTag(resourceId: string, tagId: string) {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ tag_id: tagId }),
   });
   if (!response.ok) throw new Error('Failed to add tag');
@@ -256,9 +256,26 @@ export async function removeResourceTag(resourceId: string, tagId: string) {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags/${tagId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to remove tag');
+}
+
+// ─── Downloaded Resources (from Parser) ─────────────
+
+export async function fetchDownloadedResources(
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+): Promise<ResourceItem[]> {
+  const { data, error } = await supabase
+    .from('resource_items')
+    .select('*, resource:resources!inner(*)')
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('resource.source_type', 'web')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
 }
 
 // ─── Smart Folders ───────────────────────────────────────

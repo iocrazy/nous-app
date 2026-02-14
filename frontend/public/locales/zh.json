@@ -305,7 +305,13 @@
     "noResourcesHint": "拖放文件或点击上传按钮添加资源",
     "recycleBinEmpty": "回收站为空",
     "dropToUpload": "拖放文件以上传",
-    "sharedComingSoon": "共享资源功能即将推出"
+    "sharedComingSoon": "共享资源功能即将推出",
+    "sharedManagement": "分享管理",
+    "quickAccess": "快速访问",
+    "myResources": "我的资源",
+    "downloads": "RipVault",
+    "noDownloads": "暂无下载内容",
+    "noDownloadsHint": "使用解析器下载媒体后会显示在这里"
   },
   "mediatrack": {
     "projects": "项目",
