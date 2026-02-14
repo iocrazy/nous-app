@@ -1225,6 +1225,25 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- SECTION 16: Fix handle_new_user() search_path
+-- The function references public.user_profiles but supabase_auth_admin's
+-- search_path is 'auth' only, causing "relation does not exist" errors.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.user_profiles (id, username, role)
+    VALUES (
+        NEW.id,
+        COALESCE(NEW.raw_user_meta_data->>'username', NEW.email),
+        'user'
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- ============================================================================
 -- VERIFICATION QUERIES (run manually after migration)
 -- ============================================================================
 -- SELECT generate_snowflake_id();  -- should return BIGINT
