@@ -264,6 +264,52 @@ def update_system_status():
 
 
 @shared_task
+def reset_monthly_quotas():
+    """
+    Reset monthly quota usage for all members.
+
+    Sets points_used_this_month to 0 and advances reset_at to the 1st of next month.
+    Runs on the 1st of every month at 00:00.
+    """
+    logger.info("[Celery Beat] Starting monthly quota reset...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _reset():
+            supabase = await get_async_supabase_admin()
+
+            # Calculate next month's reset date
+            now = datetime.now()
+            if now.month == 12:
+                next_reset = datetime(now.year + 1, 1, 1)
+            else:
+                next_reset = datetime(now.year, now.month + 1, 1)
+
+            response = (
+                await supabase.table("member_quotas")
+                .update({
+                    "points_used_this_month": 0,
+                    "reset_at": next_reset.isoformat(),
+                    "updated_at": now.isoformat(),
+                })
+                .gte("points_used_this_month", 0)  # match all rows
+                .execute()
+            )
+            return response.data
+
+        rows = run_async(_reset())
+        count = len(rows) if rows else 0
+
+        logger.success(f"[Celery Beat] Monthly quota reset complete: {count} rows reset")
+        return {"status": "success", "count": count}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Monthly quota reset failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def health_check():
     """
     Health check task

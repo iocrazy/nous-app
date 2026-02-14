@@ -7,6 +7,7 @@ Celery 应用初始化模块
 """
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -64,6 +65,10 @@ celery_app.conf.update(
         "update-system-status-30s": {
             "task": "app.tasks.scheduled_tasks.update_system_status",
             "schedule": 30.0,  # 每 30 秒执行一次
+        },
+        "reset-monthly-quotas": {
+            "task": "app.tasks.scheduled_tasks.reset_monthly_quotas",
+            "schedule": crontab(minute=0, hour=0, day_of_month=1),
         },
     },
 )
