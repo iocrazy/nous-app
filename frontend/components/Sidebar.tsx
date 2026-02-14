@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Activity,
   CreditCard,
+  Coins,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -439,6 +440,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label={t('sidebar.todolist')}
           active={currentView === 'todolist'}
           onClick={() => handleNav('todolist')}
+        />
+
+        <Divider />
+
+        <SidebarItem
+          icon={Coins}
+          label={t('sidebar.points')}
+          active={currentView === 'points'}
+          onClick={() => handleNav('points')}
         />
       </nav>
 
