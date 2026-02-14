@@ -5,6 +5,7 @@ import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendC
 
 interface AuthState {
   isAuthenticated: boolean;
+  isAuthLoading: boolean;
   currentUserId: string | null;
   showAuthModal: boolean;
   isConfigLoaded: boolean;
@@ -62,6 +63,7 @@ export function AuthProvider({
   onLogout?: () => void;
 }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
@@ -105,7 +107,10 @@ export function AuthProvider({
     if (!isConfigLoaded) return;
 
     const supabase = getSupabaseClient();
-    if (!isSupabaseConfigured() || !supabase) return;
+    if (!isSupabaseConfigured() || !supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
 
     const credentials = getSupabaseCredentials();
     setUserSettings(prev => ({
@@ -156,6 +161,7 @@ export function AuthProvider({
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       handleSession(session);
+      setIsAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -239,6 +245,7 @@ export function AuthProvider({
 
   const value: AuthContextValue = {
     isAuthenticated,
+    isAuthLoading,
     currentUserId,
     showAuthModal,
     isConfigLoaded,

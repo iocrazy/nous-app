@@ -32,9 +32,9 @@ interface TeamContextValue {
 const TeamContext = createContext<TeamContextValue | null>(null);
 
 export function TeamProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, currentUserId } = useAuth();
+  const { isAuthenticated, isAuthLoading, currentUserId } = useAuth();
 
-  const teamState = useTeams(isAuthenticated, currentUserId);
+  const teamState = useTeams(isAuthenticated, isAuthLoading, currentUserId);
 
   return (
     <TeamContext.Provider value={teamState}>
