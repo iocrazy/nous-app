@@ -119,7 +119,7 @@ export const getCleanupData = async (
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/data?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -147,7 +147,7 @@ export const getCleanupSuggestions = async (
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/suggestions?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -166,7 +166,7 @@ export const getCleanupStats = async (): Promise<CleanupStats> => {
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/stats`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -185,7 +185,7 @@ export const getStorageBreakdown = async (): Promise<StorageBreakdown> => {
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/storage`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -207,7 +207,7 @@ export const takeCleanupAction = async (
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/action`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ action }),
   });
 
@@ -230,7 +230,7 @@ export const batchCleanupAction = async (
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/batch`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ video_ids: videoIds, action }),
   });
 
@@ -250,7 +250,7 @@ export const markKeepForever = async (videoId: number): Promise<CleanupActionRes
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/keep`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -269,7 +269,7 @@ export const unmarkKeepForever = async (videoId: number): Promise<CleanupActionR
 
   const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/keep`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

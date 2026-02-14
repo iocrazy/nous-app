@@ -43,7 +43,7 @@ export const triggerTranscription = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/transcribe/${platformId}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -61,7 +61,7 @@ export const getTranscript = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/transcript/${platformId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -89,7 +89,7 @@ export const triggerSummary = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/summarize/${platformId}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -107,7 +107,7 @@ export const getSummary = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/summary/${platformId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -134,7 +134,7 @@ export const triggerVisualAnalysis = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/analyze/${platformId}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -152,7 +152,7 @@ export const getAISettings = async (): Promise<AISettings> => {
 
   const response = await fetch(`${apiUrl}/api/v1/ai/settings`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -184,7 +184,7 @@ export const saveAISettings = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/settings`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(backendPayload),
   });
 
@@ -202,7 +202,7 @@ export const testAIConnection = async (
 
   const response = await fetch(`${apiUrl}/api/v1/ai/test-connection`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ provider_key: provider, ...config }),
   });
 

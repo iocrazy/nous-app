@@ -148,7 +148,7 @@ export const LogsPanel: React.FC = () => {
       params.append('page_size', pageSize.toString());
 
       const response = await fetch(`${apiUrl}/api/v1/logs?${params}`, {
-        headers: getAuthHeaders(),
+        headers: await getAuthHeaders(),
       });
 
       if (!response.ok) {
@@ -242,7 +242,7 @@ export const LogsPanel: React.FC = () => {
       if (search) params.append('search', search);
 
       const response = await fetch(`${apiUrl}/api/v1/logs/export?${params}`, {
-        headers: getAuthHeaders(),
+        headers: await getAuthHeaders(),
       });
 
       if (!response.ok) {

@@ -66,7 +66,7 @@ export const semanticSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/semantic`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       query,
       limit,
@@ -95,7 +95,7 @@ export const hybridSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/hybrid`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       query,
       limit,
@@ -131,7 +131,7 @@ export const findSimilarVideos = async (
     `${apiUrl}/api/v1/search/similar/${videoId}?${params}`,
     {
       method: 'GET',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
     }
   );
 
@@ -162,7 +162,7 @@ export const quickSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/quick?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

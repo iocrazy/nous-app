@@ -1,6 +1,6 @@
 
 import { Video, DownloadStatus } from '../types';
-import { getSupabaseClient } from '../supabaseClient';
+import { getSupabaseAccessToken } from '../supabaseClient';
 
 // API config
 const getApiUrl = (): string => {
@@ -23,51 +23,21 @@ const getApiKey = (): string | null => {
   return null;
 };
 
-// Get auth token from Supabase session in localStorage
-const getAuthToken = (): string | null => {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      // Derive the expected key from the Supabase client URL
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        // Supabase JS stores session as sb-{host-part}-auth-token
-        // e.g. https://sb-mediahub.heygo.cn:88 → sb-sb-mediahub-auth-token
-        const url = new URL((supabase as any).supabaseUrl);
-        const hostPrefix = url.hostname.split('.')[0];
-        const expectedKey = `sb-${hostPrefix}-auth-token`;
-        const session = window.localStorage.getItem(expectedKey);
-        if (session) {
-          const parsed = JSON.parse(session);
-          if (parsed?.access_token) return parsed.access_token;
-        }
-      }
-
-      // Fallback: find any matching key
-      const keys = Object.keys(window.localStorage).filter(k =>
-        k.startsWith('sb-') && k.endsWith('-auth-token')
-      );
-      if (keys.length > 0) {
-        const session = window.localStorage.getItem(keys[0]);
-        if (session) {
-          const parsed = JSON.parse(session);
-          return parsed?.access_token || null;
-        }
-      }
-    }
-  } catch (e) {
-    console.error('Failed to get auth token:', e);
-  }
+// Get auth token via Supabase getSession() — triggers auto-refresh if expired
+const getAuthToken = async (): Promise<string | null> => {
+  const token = await getSupabaseAccessToken();
+  if (token) return token;
   return null;
 };
 
-// Build request headers
-const buildHeaders = (): HeadersInit => {
+// Build request headers (async — ensures fresh token via Supabase session)
+const buildHeaders = async (): Promise<HeadersInit> => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
 
   const apiKey = getApiKey();
-  const authToken = getAuthToken();
+  const authToken = await getAuthToken();
 
   if (apiKey) {
     headers['X-API-Key'] = apiKey;
@@ -127,7 +97,7 @@ export const parseShareLink = async (
 
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers: await buildHeaders(),
     body: JSON.stringify({
       url,
       video_bool: options.video_bool ?? true,
@@ -162,7 +132,7 @@ export const parseBatchLinks = async (
 
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch/batch`, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers: await buildHeaders(),
     body: JSON.stringify({
       urls,
       video_bool: options.video_bool ?? true,
@@ -196,7 +166,7 @@ export const fetchVideosFromApi = async (
     `${apiUrl}/api/v1/videos?skip=${skip}&limit=${limit}`,
     {
       method: 'GET',
-      headers: buildHeaders(),
+      headers: await buildHeaders(),
     }
   );
 
@@ -227,7 +197,7 @@ export const fetchStatistics = async (): Promise<{
 
   const response = await fetch(`${apiUrl}/api/v1/videos/statistics`, {
     method: 'GET',
-    headers: buildHeaders(),
+    headers: await buildHeaders(),
   });
 
   if (!response.ok) {
@@ -249,7 +219,7 @@ export const retryDownload = async (platformId: string): Promise<{
 
   const response = await fetch(`${apiUrl}/api/v1/videos/retry/${platformId}`, {
     method: 'POST',
-    headers: buildHeaders(),
+    headers: await buildHeaders(),
   });
 
   if (!response.ok) {
