@@ -4,7 +4,7 @@ import { NotificationWithRead, fetchNotifications, markAsRead, markAllAsRead } f
 import { fetchMyTeams, fetchTeamMembers } from '../services/teamService';
 import { resolvePermissions } from '../utils/permissions';
 
-export function useTeams(isAuthenticated: boolean, currentUserId: string | null) {
+export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, currentUserId: string | null) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
@@ -35,15 +35,15 @@ export function useTeams(isAuthenticated: boolean, currentUserId: string | null)
     }
   }, [isAuthenticated]);
 
-  // Reset on logout
+  // Reset on logout (skip while auth is still loading to preserve localStorage state)
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated && !isAuthLoading) {
       setTeams([]);
       setNotifications([]);
       setSelectedTeamId(null);
       setUserPermissions([]);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isAuthLoading]);
 
   // Resolve permissions when team changes
   useEffect(() => {
