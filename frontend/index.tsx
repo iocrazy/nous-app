@@ -1,8 +1,11 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
+import { RouterProvider } from 'react-router-dom';
 import './index.css';
 import './i18n';
-import App from './App';
+import { router } from './router';
+import { AuthProvider } from './contexts/AuthContext';
+import { TeamProvider } from './contexts/TeamContext';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 
 // Loading component for i18n lazy loading
@@ -24,7 +27,11 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <Suspense fallback={<LoadingFallback />}>
-      <App />
+      <AuthProvider>
+        <TeamProvider>
+          <RouterProvider router={router} />
+        </TeamProvider>
+      </AuthProvider>
       <PWAUpdatePrompt />
     </Suspense>
   </React.StrictMode>
