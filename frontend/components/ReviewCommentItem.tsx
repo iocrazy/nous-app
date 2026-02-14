@@ -1,13 +1,14 @@
 import React from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, PenTool } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ReviewComment } from '../types';
+import { ReviewComment, DrawingData } from '../types';
 
 interface ReviewCommentItemProps {
   comment: ReviewComment;
   currentUserId: string;
   onSeekTo: (seconds: number) => void;
   onDelete: (commentId: string) => void;
+  onViewAnnotation?: (drawingData: DrawingData) => void;
 }
 
 const AVATAR_COLORS = [
@@ -85,6 +86,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
   currentUserId,
   onSeekTo,
   onDelete,
+  onViewAnnotation,
 }) => {
   const { t } = useTranslation();
   const isOwn = comment.author_id === currentUserId;
@@ -131,6 +133,17 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
         <p className="text-sm text-zinc-300 whitespace-pre-wrap break-words">
           {comment.content}
         </p>
+
+        {/* View Annotation button */}
+        {comment.drawing_data && comment.drawing_data.strokes && comment.drawing_data.strokes.length > 0 && onViewAnnotation && (
+          <button
+            onClick={() => onViewAnnotation(comment.drawing_data!)}
+            className="inline-flex items-center gap-1 mt-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors"
+          >
+            <PenTool className="w-3 h-3" />
+            {t('annotations.viewAnnotation')}
+          </button>
+        )}
       </div>
     </div>
   );

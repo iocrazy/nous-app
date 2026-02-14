@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, Send, X, Loader2, MessageSquare } from 'lucide-react';
+import { Clock, Send, X, Loader2, MessageSquare, PenTool } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ReviewComment } from '../types';
+import { ReviewComment, DrawingData } from '../types';
 import { fetchComments, addComment, deleteComment } from '../services/projectsService';
 import { ReviewCommentItem } from './ReviewCommentItem';
 
@@ -13,6 +13,8 @@ interface ReviewCommentsPanelProps {
   currentUserId: string;
   onSeekTo: (seconds: number) => void;
   onCommentAdded: () => void;
+  pendingDrawingData?: DrawingData | null;
+  onViewAnnotation?: (drawingData: DrawingData) => void;
 }
 
 const formatTimestamp = (seconds: number): string => {
@@ -29,6 +31,8 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
   currentUserId,
   onSeekTo,
   onCommentAdded,
+  pendingDrawingData,
+  onViewAnnotation,
 }) => {
   const { t } = useTranslation();
   const [comments, setComments] = useState<ReviewComment[]>([]);
@@ -59,10 +63,13 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
 
     setIsSubmitting(true);
     try {
+      // Include drawing data if annotations were made
+      const hasDrawing = pendingDrawingData && pendingDrawingData.strokes.length > 0;
       await addComment(projectId, fileId, {
         content: trimmed,
         timestamp_seconds: capturedTime,
         version_id: versionId ?? null,
+        drawing_data: hasDrawing ? pendingDrawingData : null,
       });
       setContent('');
       setCapturedTime(null);
@@ -123,6 +130,12 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
               <Clock className="w-3.5 h-3.5" />
               {t('mediatrack.review.captureTimestamp')}
             </button>
+            {pendingDrawingData && pendingDrawingData.strokes.length > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300">
+                <PenTool className="w-3 h-3" />
+                {pendingDrawingData.strokes.length} annotation{pendingDrawingData.strokes.length !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
           <button
             onClick={handleSubmit}
@@ -158,6 +171,7 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
                 currentUserId={currentUserId}
                 onSeekTo={onSeekTo}
                 onDelete={handleDelete}
+                onViewAnnotation={onViewAnnotation}
               />
             ))}
           </div>

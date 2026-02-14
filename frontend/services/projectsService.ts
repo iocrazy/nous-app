@@ -191,7 +191,7 @@ export const fetchComments = async (projectId: string, fileId: string, versionId
 export const addComment = async (
   projectId: string,
   fileId: string,
-  data: { content: string; timestamp_seconds?: number | null; version_id?: string | null }
+  data: { content: string; timestamp_seconds?: number | null; version_id?: string | null; drawing_data?: any | null }
 ): Promise<ReviewComment> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments`, {
