@@ -125,7 +125,7 @@ async def fetch_video(
         _team_id = _tm.data[0]["team_id"] if _tm.data else None
         _points_cost = 0
         if _team_id:
-            await points_service.ensure_team_quota(_team_id)
+            await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
             points_result = await points_service.check_and_consume(
                 team_id=_team_id,
                 user_id=auth.user_id,
@@ -482,7 +482,7 @@ async def fetch_videos_batch(
     _team_id = _tm.data[0]["team_id"] if _tm.data else None
     _batch_points_cost = 0
     if _team_id:
-        await points_service.ensure_team_quota(_team_id)
+        await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
             user_id=auth.user_id,
