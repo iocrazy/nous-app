@@ -8,10 +8,11 @@ file management, and video linking.
 Requires authentication (JWT or API Key).
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.repositories.projects_repository import ProjectsRepository
@@ -457,3 +458,116 @@ async def update_review_status(
     except Exception as e:
         logger.error(f"Failed to update review status for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update review status")
+
+
+# ============================================
+# Task endpoints (Kanban board)
+# ============================================
+
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    task_type: Optional[str] = "general"
+    assignee_id: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = "todo"
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    task_type: Optional[str] = None
+    assignee_id: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+@router.get("/{project_id}/tasks")
+async def list_tasks(project_id: str, auth: AuthDep):
+    """List all tasks for a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        result = await sb.table("project_tasks").select("*").eq(
+            "project_id", project_id
+        ).order("sort_order").execute()
+        return {"success": True, "data": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to list tasks for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list tasks")
+
+
+@router.post("/{project_id}/tasks")
+async def create_task(project_id: str, data: TaskCreate, auth: AuthDep):
+    """Create a new task in a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        insert_data: Dict[str, Any] = {
+            "project_id": project_id,
+            "title": data.title,
+            "created_by": auth.user_id,
+        }
+        if data.description is not None:
+            insert_data["description"] = data.description
+        if data.task_type is not None:
+            insert_data["task_type"] = data.task_type
+        if data.assignee_id is not None:
+            insert_data["assignee_id"] = data.assignee_id
+        if data.due_date is not None:
+            insert_data["due_date"] = data.due_date
+        if data.status is not None:
+            insert_data["status"] = data.status
+
+        result = await sb.table("project_tasks").insert(insert_data).execute()
+        task = result.data[0] if result.data else None
+        return {"success": True, "data": task}
+    except Exception as e:
+        logger.error(f"Failed to create task in project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create task")
+
+
+@router.put("/{project_id}/tasks/{task_id}")
+async def update_task(project_id: str, task_id: str, data: TaskUpdate, auth: AuthDep):
+    """Update a task."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        update_data = data.model_dump(exclude_none=True)
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        result = await sb.table("project_tasks").update(update_data).eq(
+            "id", task_id
+        ).eq("project_id", project_id).execute()
+
+        task = result.data[0] if result.data else None
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"success": True, "data": task}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update task")
+
+
+@router.delete("/{project_id}/tasks/{task_id}")
+async def delete_task(project_id: str, task_id: str, auth: AuthDep):
+    """Delete a task."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        await sb.table("project_tasks").delete().eq(
+            "id", task_id
+        ).eq("project_id", project_id).execute()
+        return {"success": True, "message": "Task deleted"}
+    except Exception as e:
+        logger.error(f"Failed to delete task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete task")
