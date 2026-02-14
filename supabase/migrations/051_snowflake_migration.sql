@@ -6,6 +6,91 @@
 -- Depends on: 050_snowflake_id_infrastructure.sql (generate_snowflake_id function)
 
 -- ============================================================================
+-- SECTION 0: Drop ALL RLS policies on affected tables
+-- Must happen FIRST so we can drop columns, alter types, and drop functions.
+-- ============================================================================
+
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  -- Drop all policies on tables that will have structural changes
+  FOR r IN (
+    SELECT schemaname, tablename, policyname
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename IN (
+        'teams', 'team_members', 'notifications', 'team_invites',
+        'projects', 'project_files', 'file_versions', 'review_comments',
+        'project_members', 'project_tasks', 'task_assets',
+        'project_workflows', 'shares', 'share_views',
+        'resources', 'resource_items', 'resource_tags', 'resource_versions',
+        'folders', 'team_quotas', 'member_quotas',
+        'point_transactions', 'orders', 'team_plans'
+      )
+  ) LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', r.policyname, r.schemaname, r.tablename);
+  END LOOP;
+
+  -- Conditionally drop policies on collections (may not exist)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'collections') THEN
+    FOR r IN (SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'collections') LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON collections', r.policyname);
+    END LOOP;
+  END IF;
+
+  -- Conditionally drop policies on video_collections
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'video_collections') THEN
+    FOR r IN (SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'video_collections') LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON video_collections', r.policyname);
+    END LOOP;
+  END IF;
+
+  -- Conditionally drop tag policies (if scope_id column exists)
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'tags' AND column_name = 'scope_id'
+  ) THEN
+    FOR r IN (SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tags') LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON tags', r.policyname);
+    END LOOP;
+  END IF;
+END $$;
+
+-- Drop helper function (all dependent policies are now gone)
+DROP FUNCTION IF EXISTS get_user_team_ids(UUID);
+
+-- ============================================================================
+-- SECTION 0B: Remove affected tables from supabase_realtime publication
+-- Tables with REPLICA IDENTITY DEFAULT (PK-based) will fail UPDATE after PK drop.
+-- Remove them now, re-add at the end with REPLICA IDENTITY FULL.
+-- ============================================================================
+
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN (
+    SELECT schemaname, tablename
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename IN (
+        'teams', 'team_members', 'notifications', 'team_invites',
+        'projects', 'project_files', 'file_versions', 'review_comments',
+        'project_members', 'project_tasks', 'task_assets',
+        'project_workflows', 'shares', 'share_views',
+        'resources', 'resource_items', 'resource_tags', 'resource_versions',
+        'folders', 'team_quotas', 'member_quotas',
+        'point_transactions', 'orders', 'team_plans',
+        'collections', 'video_collections'
+      )
+  ) LOOP
+    EXECUTE format('ALTER PUBLICATION supabase_realtime DROP TABLE %I.%I', r.schemaname, r.tablename);
+  END LOOP;
+END $$;
+
+-- ============================================================================
 -- SECTION 1: Add new_id BIGINT columns and populate with Snowflake IDs
 -- ============================================================================
 
@@ -185,158 +270,108 @@ DROP INDEX IF EXISTS idx_point_transactions_new_id;
 DROP INDEX IF EXISTS idx_orders_new_id;
 
 -- ============================================================================
--- SECTION 6: Convert FK columns to BIGINT using new_id mapping
+-- SECTION 6: Convert FK columns to BIGINT using add/update/drop/rename
+-- PostgreSQL does NOT support ALTER TYPE ... USING (SELECT ...) with subqueries.
+-- Instead: add _new column, UPDATE FROM join, drop old, rename.
 -- ============================================================================
 
--- ---- Referencing teams(id) ----
+DO $$
+DECLARE
+  conv JSONB;
+  tbl TEXT;
+  col TEXT;
+  ref_tbl TEXT;
+BEGIN
+  FOR conv IN SELECT * FROM jsonb_array_elements('[
+    {"t":"team_members",      "c":"team_id",         "r":"teams"},
+    {"t":"notifications",     "c":"team_id",         "r":"teams"},
+    {"t":"team_invites",      "c":"team_id",         "r":"teams"},
+    {"t":"projects",          "c":"team_id",         "r":"teams"},
+    {"t":"team_quotas",       "c":"team_id",         "r":"teams"},
+    {"t":"member_quotas",     "c":"team_id",         "r":"teams"},
+    {"t":"point_transactions","c":"team_id",         "r":"teams"},
+    {"t":"orders",            "c":"team_id",         "r":"teams"},
+    {"t":"project_workflows", "c":"team_id",         "r":"teams"},
+    {"t":"team_plans",        "c":"team_id",         "r":"teams"},
+    {"t":"project_files",     "c":"project_id",      "r":"projects"},
+    {"t":"project_tasks",     "c":"project_id",      "r":"projects"},
+    {"t":"project_members",   "c":"project_id",      "r":"projects"},
+    {"t":"file_versions",     "c":"file_id",         "r":"project_files"},
+    {"t":"review_comments",   "c":"file_id",         "r":"project_files"},
+    {"t":"task_assets",       "c":"file_id",         "r":"project_files"},
+    {"t":"shares",            "c":"project_file_id", "r":"project_files"},
+    {"t":"review_comments",   "c":"version_id",      "r":"file_versions"},
+    {"t":"shares",            "c":"version_id",      "r":"file_versions"},
+    {"t":"resource_items",    "c":"resource_id",     "r":"resources"},
+    {"t":"resource_tags",     "c":"resource_id",     "r":"resources"},
+    {"t":"resource_versions", "c":"resource_id",     "r":"resources"},
+    {"t":"shares",            "c":"resource_id",     "r":"resources"},
+    {"t":"task_assets",       "c":"resource_id",     "r":"resources"},
+    {"t":"folders",           "c":"parent_id",       "r":"folders"},
+    {"t":"resource_items",    "c":"folder_id",       "r":"folders"},
+    {"t":"shares",            "c":"folder_id",       "r":"folders"},
+    {"t":"share_views",       "c":"share_id",        "r":"shares"},
+    {"t":"review_comments",   "c":"share_id",        "r":"shares"},
+    {"t":"task_assets",       "c":"task_id",         "r":"project_tasks"}
+  ]'::jsonb)
+  LOOP
+    tbl := conv->>'t';
+    col := conv->>'c';
+    ref_tbl := conv->>'r';
 
-ALTER TABLE team_members
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
+    -- Add new BIGINT column
+    EXECUTE format('ALTER TABLE %I ADD COLUMN %I BIGINT', tbl, col || '_new');
 
-ALTER TABLE notifications
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
+    -- Populate via JOIN (NULLs stay NULL naturally)
+    EXECUTE format(
+      'UPDATE %I x SET %I = r.new_id FROM %I r WHERE r.id = x.%I',
+      tbl, col || '_new', ref_tbl, col
+    );
 
-ALTER TABLE team_invites
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
+    -- Drop old UUID column
+    EXECUTE format('ALTER TABLE %I DROP COLUMN %I', tbl, col);
 
-ALTER TABLE projects
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
+    -- Rename new column to original name
+    EXECUTE format('ALTER TABLE %I RENAME COLUMN %I TO %I', tbl, col || '_new', col);
+  END LOOP;
 
-ALTER TABLE team_quotas
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
-ALTER TABLE member_quotas
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
-ALTER TABLE point_transactions
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
-ALTER TABLE orders
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
-ALTER TABLE project_workflows
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
-ALTER TABLE team_plans
-  ALTER COLUMN team_id TYPE BIGINT
-  USING (SELECT t.new_id FROM teams t WHERE t.id = team_id);
-
--- Handle collections table if it exists
-DO $$ BEGIN
+  -- Handle collections.team_id conditionally
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'collections' AND column_name = 'team_id'
   ) THEN
-    EXECUTE 'ALTER TABLE collections ALTER COLUMN team_id TYPE BIGINT
-      USING (SELECT t.new_id FROM teams t WHERE t.id = team_id)';
+    EXECUTE 'ALTER TABLE collections ADD COLUMN team_id_new BIGINT';
+    EXECUTE 'UPDATE collections x SET team_id_new = r.new_id FROM teams r WHERE r.id = x.team_id';
+    EXECUTE 'ALTER TABLE collections DROP COLUMN team_id';
+    EXECUTE 'ALTER TABLE collections RENAME COLUMN team_id_new TO team_id';
   END IF;
 END $$;
 
--- ---- Referencing projects(id) ----
+-- ============================================================================
+-- SECTION 6B: Restore NOT NULL on FK columns that were originally NOT NULL
+-- ============================================================================
 
-ALTER TABLE project_files
-  ALTER COLUMN project_id TYPE BIGINT
-  USING (SELECT p.new_id FROM projects p WHERE p.id = project_id);
-
-ALTER TABLE project_tasks
-  ALTER COLUMN project_id TYPE BIGINT
-  USING (SELECT p.new_id FROM projects p WHERE p.id = project_id);
-
-ALTER TABLE project_members
-  ALTER COLUMN project_id TYPE BIGINT
-  USING (SELECT p.new_id FROM projects p WHERE p.id = project_id);
-
--- ---- Referencing project_files(id) ----
-
-ALTER TABLE file_versions
-  ALTER COLUMN file_id TYPE BIGINT
-  USING (SELECT pf.new_id FROM project_files pf WHERE pf.id = file_id);
-
-ALTER TABLE review_comments
-  ALTER COLUMN file_id TYPE BIGINT
-  USING (SELECT pf.new_id FROM project_files pf WHERE pf.id = file_id);
-
-ALTER TABLE task_assets
-  ALTER COLUMN file_id TYPE BIGINT
-  USING (SELECT pf.new_id FROM project_files pf WHERE pf.id = file_id);
-
-ALTER TABLE shares
-  ALTER COLUMN project_file_id TYPE BIGINT
-  USING (SELECT pf.new_id FROM project_files pf WHERE pf.id = project_file_id);
-
--- ---- Referencing file_versions(id) ----
-
-ALTER TABLE review_comments
-  ALTER COLUMN version_id TYPE BIGINT
-  USING (SELECT fv.new_id FROM file_versions fv WHERE fv.id = version_id);
-
-ALTER TABLE shares
-  ALTER COLUMN version_id TYPE BIGINT
-  USING (SELECT fv.new_id FROM file_versions fv WHERE fv.id = version_id);
-
--- ---- Referencing resources(id) ----
-
-ALTER TABLE resource_items
-  ALTER COLUMN resource_id TYPE BIGINT
-  USING (SELECT r.new_id FROM resources r WHERE r.id = resource_id);
-
-ALTER TABLE resource_tags
-  ALTER COLUMN resource_id TYPE BIGINT
-  USING (SELECT r.new_id FROM resources r WHERE r.id = resource_id);
-
-ALTER TABLE resource_versions
-  ALTER COLUMN resource_id TYPE BIGINT
-  USING (SELECT r.new_id FROM resources r WHERE r.id = resource_id);
-
-ALTER TABLE shares
-  ALTER COLUMN resource_id TYPE BIGINT
-  USING (SELECT r.new_id FROM resources r WHERE r.id = resource_id);
-
-ALTER TABLE task_assets
-  ALTER COLUMN resource_id TYPE BIGINT
-  USING (SELECT r.new_id FROM resources r WHERE r.id = resource_id);
-
--- ---- Referencing folders(id) ----
-
-ALTER TABLE folders
-  ALTER COLUMN parent_id TYPE BIGINT
-  USING (SELECT f.new_id FROM folders f WHERE f.id = parent_id);
-
-ALTER TABLE resource_items
-  ALTER COLUMN folder_id TYPE BIGINT
-  USING (SELECT f.new_id FROM folders f WHERE f.id = folder_id);
-
-ALTER TABLE shares
-  ALTER COLUMN folder_id TYPE BIGINT
-  USING (SELECT f.new_id FROM folders f WHERE f.id = folder_id);
-
--- ---- Referencing shares(id) ----
-
-ALTER TABLE share_views
-  ALTER COLUMN share_id TYPE BIGINT
-  USING (SELECT s.new_id FROM shares s WHERE s.id = share_id);
-
-ALTER TABLE review_comments
-  ALTER COLUMN share_id TYPE BIGINT
-  USING (SELECT s.new_id FROM shares s WHERE s.id = share_id);
-
--- ---- Referencing project_tasks(id) ----
-
-ALTER TABLE task_assets
-  ALTER COLUMN task_id TYPE BIGINT
-  USING (SELECT pt.new_id FROM project_tasks pt WHERE pt.id = task_id);
+ALTER TABLE team_invites      ALTER COLUMN team_id      SET NOT NULL;
+ALTER TABLE member_quotas     ALTER COLUMN team_id      SET NOT NULL;
+ALTER TABLE point_transactions ALTER COLUMN team_id     SET NOT NULL;
+ALTER TABLE orders            ALTER COLUMN team_id      SET NOT NULL;
+ALTER TABLE project_workflows ALTER COLUMN team_id      SET NOT NULL;
+ALTER TABLE team_plans        ALTER COLUMN team_id      SET NOT NULL;
+ALTER TABLE project_files     ALTER COLUMN project_id   SET NOT NULL;
+ALTER TABLE project_tasks     ALTER COLUMN project_id   SET NOT NULL;
+ALTER TABLE project_members   ALTER COLUMN project_id   SET NOT NULL;
+ALTER TABLE file_versions     ALTER COLUMN file_id      SET NOT NULL;
+ALTER TABLE review_comments   ALTER COLUMN file_id      SET NOT NULL;
+ALTER TABLE resource_items    ALTER COLUMN resource_id  SET NOT NULL;
+ALTER TABLE resource_versions ALTER COLUMN resource_id  SET NOT NULL;
+ALTER TABLE share_views       ALTER COLUMN share_id     SET NOT NULL;
+ALTER TABLE task_assets       ALTER COLUMN task_id      SET NOT NULL;
+-- team_members.team_id, resource_tags.resource_id, team_quotas.team_id
+-- are part of composite PKs and will get NOT NULL from ADD PRIMARY KEY
 
 -- ============================================================================
 -- SECTION 7: Convert polymorphic columns to TEXT
+-- (Runs BEFORE Section 8 so we can still use teams.id UUID for lookups)
 -- ============================================================================
 
 -- folders.scope_id: UUID → TEXT, then update team scope values
@@ -504,7 +539,7 @@ ALTER TABLE notifications
 ALTER TABLE team_invites
   ADD CONSTRAINT team_invites_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
 ALTER TABLE projects
-  ADD CONSTRAINT projects_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
+  ADD CONSTRAINT projects_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL;
 ALTER TABLE team_quotas
   ADD CONSTRAINT team_quotas_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
 ALTER TABLE member_quotas
@@ -517,6 +552,16 @@ ALTER TABLE project_workflows
   ADD CONSTRAINT project_workflows_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
 ALTER TABLE team_plans
   ADD CONSTRAINT team_plans_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
+
+-- ---- collections.team_id → teams(id) (conditional) ----
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'collections' AND column_name = 'team_id'
+  ) THEN
+    EXECUTE 'ALTER TABLE collections ADD CONSTRAINT collections_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL';
+  END IF;
+END $$;
 
 -- ---- project_id → projects(id) ----
 ALTER TABLE project_files
@@ -640,12 +685,10 @@ DO $$ BEGIN
 END $$;
 
 -- ============================================================================
--- SECTION 13: Update functions
+-- SECTION 13: Recreate helper functions
 -- ============================================================================
 
 -- get_user_team_ids: now returns SETOF BIGINT (team_members.team_id is BIGINT)
-DROP FUNCTION IF EXISTS get_user_team_ids(UUID);
-
 CREATE OR REPLACE FUNCTION get_user_team_ids(p_user_id UUID)
 RETURNS SETOF BIGINT
 LANGUAGE SQL
@@ -654,6 +697,8 @@ STABLE
 AS $$
   SELECT DISTINCT team_id FROM team_members WHERE user_id = p_user_id;
 $$;
+
+GRANT EXECUTE ON FUNCTION get_user_team_ids(UUID) TO authenticated;
 
 -- get_user_team_ids_text: returns SETOF TEXT for scope_id comparisons
 CREATE OR REPLACE FUNCTION get_user_team_ids_text(p_user_id UUID)
@@ -665,41 +710,275 @@ AS $$
   SELECT DISTINCT team_id::text FROM team_members WHERE user_id = p_user_id;
 $$;
 
+GRANT EXECUTE ON FUNCTION get_user_team_ids_text(UUID) TO authenticated;
+
 -- ============================================================================
--- SECTION 14: Update RLS policies for scope_id columns (TEXT type)
+-- SECTION 14: Recreate ALL RLS policies
 -- ============================================================================
 
--- ---- folders: drop all, recreate with TEXT comparisons ----
-DO $$
-DECLARE r RECORD;
-BEGIN
-  FOR r IN (
-    SELECT policyname FROM pg_policies
-    WHERE tablename = 'folders' AND schemaname = 'public'
-  ) LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON folders', r.policyname);
-  END LOOP;
-END $$;
+-- ---- teams (from 009 + 010) ----
+CREATE POLICY "Users can view teams they belong to" ON teams
+  FOR SELECT USING (
+    owner_id = auth.uid()
+    OR id IN (SELECT get_user_team_ids(auth.uid()))
+  );
+CREATE POLICY "Users can create teams" ON teams
+  FOR INSERT WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "Owners can update their teams" ON teams
+  FOR UPDATE USING (owner_id = auth.uid());
+CREATE POLICY "Owners can delete their teams" ON teams
+  FOR DELETE USING (owner_id = auth.uid());
 
-CREATE POLICY "Users can read own folders"
-  ON folders FOR SELECT
+-- ---- team_members (from 010) ----
+CREATE POLICY "Members can view team members" ON team_members
+  FOR SELECT USING (
+    team_id IN (SELECT get_user_team_ids(auth.uid()))
+  );
+CREATE POLICY "Users can add themselves or owners can add" ON team_members
+  FOR INSERT WITH CHECK (
+    user_id = auth.uid()
+    OR team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+CREATE POLICY "Users can leave or owners can remove" ON team_members
+  FOR DELETE USING (
+    user_id = auth.uid()
+    OR team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+
+-- ---- notifications (from 010) ----
+CREATE POLICY "Users can view relevant notifications" ON notifications
+  FOR SELECT USING (
+    type = 'system'
+    OR team_id IN (SELECT get_user_team_ids(auth.uid()))
+  );
+CREATE POLICY "Team owners can create team notifications" ON notifications
+  FOR INSERT WITH CHECK (
+    type = 'team' AND
+    team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+
+-- ---- team_invites (from 022) ----
+CREATE POLICY "Team members can view invites" ON team_invites
+  FOR SELECT USING (
+    team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid())
+  );
+CREATE POLICY "Team owners can create invites" ON team_invites
+  FOR INSERT WITH CHECK (
+    team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+CREATE POLICY "Team owners can update invites" ON team_invites
+  FOR UPDATE USING (
+    team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+CREATE POLICY "Team owners can delete invites" ON team_invites
+  FOR DELETE USING (
+    team_id IN (SELECT id FROM teams WHERE owner_id = auth.uid())
+  );
+
+-- ---- projects (from 042) ----
+CREATE POLICY "Users can read own projects" ON projects
+  FOR SELECT USING (
+    owner_id = auth.uid()
+    OR team_id IN (SELECT get_user_team_ids(auth.uid()))
+  );
+CREATE POLICY "Users can create projects" ON projects
+  FOR INSERT WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "Owners can update projects" ON projects
+  FOR UPDATE USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
+CREATE POLICY "Owners can delete projects" ON projects
+  FOR DELETE USING (owner_id = auth.uid());
+CREATE POLICY "Service role full access on projects" ON projects
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- project_files (from 042) ----
+CREATE POLICY "Users can read project files" ON project_files
+  FOR SELECT USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can create project files" ON project_files
+  FOR INSERT WITH CHECK (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can update project files" ON project_files
+  FOR UPDATE
+  USING (project_id IN (SELECT id FROM projects))
+  WITH CHECK (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can delete project files" ON project_files
+  FOR DELETE USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Service role full access on project_files" ON project_files
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- file_versions (from 043) ----
+CREATE POLICY "Users can read file versions" ON file_versions
+  FOR SELECT USING (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Users can create file versions" ON file_versions
+  FOR INSERT WITH CHECK (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Users can update file versions" ON file_versions
+  FOR UPDATE
   USING (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  )
+  WITH CHECK (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Users can delete file versions" ON file_versions
+  FOR DELETE USING (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Service role full access on file_versions" ON file_versions
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- review_comments (from 043) ----
+CREATE POLICY "Users can read review comments" ON review_comments
+  FOR SELECT USING (
+    file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Users can create review comments" ON review_comments
+  FOR INSERT WITH CHECK (
+    author_id = auth.uid()
+    AND file_id IN (
+      SELECT pf.id FROM project_files pf
+      WHERE pf.project_id IN (SELECT id FROM projects)
+    )
+  );
+CREATE POLICY "Authors can update own review comments" ON review_comments
+  FOR UPDATE USING (author_id = auth.uid())
+  WITH CHECK (author_id = auth.uid());
+CREATE POLICY "Authors can delete own review comments" ON review_comments
+  FOR DELETE USING (author_id = auth.uid());
+CREATE POLICY "Service role full access on review_comments" ON review_comments
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- project_workflows (from 047) ----
+CREATE POLICY "Team members can read workflows" ON project_workflows
+  FOR SELECT USING (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Team members can create workflows" ON project_workflows
+  FOR INSERT WITH CHECK (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Team members can update workflows" ON project_workflows
+  FOR UPDATE
+  USING (team_id IN (SELECT get_user_team_ids(auth.uid())))
+  WITH CHECK (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Team members can delete workflows" ON project_workflows
+  FOR DELETE USING (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Service role full access on project_workflows" ON project_workflows
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- project_members (from 047) ----
+CREATE POLICY "Users can read project members" ON project_members
+  FOR SELECT USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can add project members" ON project_members
+  FOR INSERT WITH CHECK (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can update project members" ON project_members
+  FOR UPDATE
+  USING (project_id IN (SELECT id FROM projects))
+  WITH CHECK (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can remove project members" ON project_members
+  FOR DELETE USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Service role full access on project_members" ON project_members
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- project_tasks (from 047) ----
+CREATE POLICY "Users can read project tasks" ON project_tasks
+  FOR SELECT USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can create project tasks" ON project_tasks
+  FOR INSERT WITH CHECK (
+    created_by = auth.uid()
+    AND project_id IN (SELECT id FROM projects)
+  );
+CREATE POLICY "Users can update project tasks" ON project_tasks
+  FOR UPDATE
+  USING (project_id IN (SELECT id FROM projects))
+  WITH CHECK (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Users can delete project tasks" ON project_tasks
+  FOR DELETE USING (project_id IN (SELECT id FROM projects));
+CREATE POLICY "Service role full access on project_tasks" ON project_tasks
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- task_assets (from 047) ----
+CREATE POLICY "Users can read task assets" ON task_assets
+  FOR SELECT USING (task_id IN (SELECT id FROM project_tasks));
+CREATE POLICY "Users can create task assets" ON task_assets
+  FOR INSERT WITH CHECK (
+    added_by = auth.uid()
+    AND task_id IN (SELECT id FROM project_tasks)
+  );
+CREATE POLICY "Users can delete task assets" ON task_assets
+  FOR DELETE USING (task_id IN (SELECT id FROM project_tasks));
+CREATE POLICY "Service role full access on task_assets" ON task_assets
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- shares (from 046) ----
+CREATE POLICY "Users can read own shares" ON shares
+  FOR SELECT USING (
+    shared_by = auth.uid()
+    OR status = 'active'
+  );
+CREATE POLICY "Users can create shares" ON shares
+  FOR INSERT WITH CHECK (shared_by = auth.uid());
+CREATE POLICY "Users can update own shares" ON shares
+  FOR UPDATE USING (shared_by = auth.uid())
+  WITH CHECK (shared_by = auth.uid());
+CREATE POLICY "Users can delete own shares" ON shares
+  FOR DELETE USING (shared_by = auth.uid());
+CREATE POLICY "Service role full access on shares" ON shares
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- share_views (from 046) ----
+CREATE POLICY "Users can read share views" ON share_views
+  FOR SELECT USING (share_id IN (SELECT id FROM shares));
+CREATE POLICY "Anyone can create share views" ON share_views
+  FOR INSERT WITH CHECK (true);
+CREATE POLICY "Viewers can update own share views" ON share_views
+  FOR UPDATE USING (viewer_id = auth.uid())
+  WITH CHECK (viewer_id = auth.uid());
+CREATE POLICY "Service role full access on share_views" ON share_views
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- folders (from 044, scope_id now TEXT) ----
+CREATE POLICY "Users can read own folders" ON folders
+  FOR SELECT USING (
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
   );
-
-CREATE POLICY "Users can create folders"
-  ON folders FOR INSERT
-  WITH CHECK (
+CREATE POLICY "Users can create folders" ON folders
+  FOR INSERT WITH CHECK (
     created_by = auth.uid()
     AND (
       (scope_type = 'personal' AND scope_id = auth.uid()::text)
       OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
     )
   );
-
-CREATE POLICY "Users can update own scope folders"
-  ON folders FOR UPDATE
+CREATE POLICY "Users can update own scope folders" ON folders
+  FOR UPDATE
   USING (
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
@@ -708,100 +987,240 @@ CREATE POLICY "Users can update own scope folders"
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
   );
-
-CREATE POLICY "Users can delete own scope folders"
-  ON folders FOR DELETE
-  USING (
+CREATE POLICY "Users can delete own scope folders" ON folders
+  FOR DELETE USING (
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
   );
-
-CREATE POLICY "Service role full access on folders"
-  ON folders FOR ALL
-  USING (auth.role() = 'service_role')
+CREATE POLICY "Service role full access on folders" ON folders
+  FOR ALL USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 
--- ---- resource_items: drop all, recreate with TEXT comparisons ----
-DO $$
-DECLARE r RECORD;
-BEGIN
-  FOR r IN (
-    SELECT policyname FROM pg_policies
-    WHERE tablename = 'resource_items' AND schemaname = 'public'
-  ) LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON resource_items', r.policyname);
-  END LOOP;
-END $$;
+-- ---- resources (from 044, subquery uses resource_items with TEXT scope_id) ----
+CREATE POLICY "Users can read own resources" ON resources
+  FOR SELECT USING (
+    creator_id = auth.uid()
+    OR id IN (
+      SELECT resource_id FROM resource_items
+      WHERE (scope_type = 'personal' AND scope_id = auth.uid()::text)
+         OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
+    )
+  );
+CREATE POLICY "Users can create resources" ON resources
+  FOR INSERT WITH CHECK (creator_id = auth.uid());
+CREATE POLICY "Creators can update resources" ON resources
+  FOR UPDATE USING (creator_id = auth.uid())
+  WITH CHECK (creator_id = auth.uid());
+CREATE POLICY "Creators can delete resources" ON resources
+  FOR DELETE USING (creator_id = auth.uid());
+CREATE POLICY "Service role full access on resources" ON resources
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "Users can read resource items in scope"
-  ON resource_items FOR SELECT
-  USING (
+-- ---- resource_items (from 044, scope_id now TEXT) ----
+CREATE POLICY "Users can read resource items in scope" ON resource_items
+  FOR SELECT USING (
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
   );
-
-CREATE POLICY "Users can create resource items"
-  ON resource_items FOR INSERT
-  WITH CHECK (
+CREATE POLICY "Users can create resource items" ON resource_items
+  FOR INSERT WITH CHECK (
     added_by = auth.uid()
     AND (
       (scope_type = 'personal' AND scope_id = auth.uid()::text)
       OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
     )
   );
-
-CREATE POLICY "Users can delete resource items in scope"
-  ON resource_items FOR DELETE
-  USING (
+CREATE POLICY "Users can delete resource items in scope" ON resource_items
+  FOR DELETE USING (
     (scope_type = 'personal' AND scope_id = auth.uid()::text)
     OR (scope_type = 'team' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid())))
   );
-
-CREATE POLICY "Service role full access on resource_items"
-  ON resource_items FOR ALL
-  USING (auth.role() = 'service_role')
+CREATE POLICY "Service role full access on resource_items" ON resource_items
+  FOR ALL USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 
--- ---- tags: update if scope_id column exists ----
-DO $$
-DECLARE r RECORD;
-BEGIN
+-- ---- resource_tags (from 045) ----
+CREATE POLICY "Users can read resource tags" ON resource_tags
+  FOR SELECT USING (resource_id IN (SELECT id FROM resources));
+CREATE POLICY "Users can create resource tags" ON resource_tags
+  FOR INSERT WITH CHECK (
+    tagged_by = auth.uid()
+    AND resource_id IN (SELECT id FROM resources)
+  );
+CREATE POLICY "Users can delete own resource tags" ON resource_tags
+  FOR DELETE USING (tagged_by = auth.uid());
+CREATE POLICY "Service role full access on resource_tags" ON resource_tags
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- resource_versions (from 044) ----
+CREATE POLICY "Users can read resource versions" ON resource_versions
+  FOR SELECT USING (resource_id IN (SELECT id FROM resources));
+CREATE POLICY "Users can create resource versions" ON resource_versions
+  FOR INSERT WITH CHECK (
+    uploaded_by = auth.uid()
+    AND resource_id IN (SELECT id FROM resources)
+  );
+CREATE POLICY "Service role full access on resource_versions" ON resource_versions
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- team_quotas (from 041) ----
+CREATE POLICY "Team members can read team quota" ON team_quotas
+  FOR SELECT USING (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Service role full access on team_quotas" ON team_quotas
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- member_quotas (from 041) ----
+CREATE POLICY "Members can read own quota" ON member_quotas
+  FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Owner or admin can read all team member quotas" ON member_quotas
+  FOR SELECT USING (
+    team_id IN (
+      SELECT team_id FROM team_members
+      WHERE user_id = auth.uid() AND role IN ('owner', 'admin')
+    )
+  );
+CREATE POLICY "Service role full access on member_quotas" ON member_quotas
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- point_transactions (from 041) ----
+CREATE POLICY "Team members can read team transactions" ON point_transactions
+  FOR SELECT USING (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Service role full access on point_transactions" ON point_transactions
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- orders (from 041) ----
+CREATE POLICY "Users can read own orders" ON orders
+  FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Owner or admin can read team orders" ON orders
+  FOR SELECT USING (
+    team_id IN (
+      SELECT team_id FROM team_members
+      WHERE user_id = auth.uid() AND role IN ('owner', 'admin')
+    )
+  );
+CREATE POLICY "Service role full access on orders" ON orders
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- team_plans (from 048) ----
+CREATE POLICY "Team members can read team plan" ON team_plans
+  FOR SELECT USING (team_id IN (SELECT get_user_team_ids(auth.uid())));
+CREATE POLICY "Service role full access on team_plans" ON team_plans
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- ---- collections (conditional, from 009 + 010) ----
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'collections') THEN
+    EXECUTE 'CREATE POLICY "Users can view their collections" ON collections
+      FOR SELECT USING (
+        owner_id = auth.uid()
+        OR team_id IN (SELECT get_user_team_ids(auth.uid()))
+      )';
+    EXECUTE 'CREATE POLICY "Users can create collections" ON collections
+      FOR INSERT WITH CHECK (owner_id = auth.uid())';
+    EXECUTE 'CREATE POLICY "Users can update collections" ON collections
+      FOR UPDATE USING (
+        owner_id = auth.uid()
+        OR team_id IN (SELECT get_user_team_ids(auth.uid()))
+      )';
+    EXECUTE 'CREATE POLICY "Owners can delete collections" ON collections
+      FOR DELETE USING (owner_id = auth.uid())';
+  END IF;
+END $$;
+
+-- ---- video_collections (conditional, from 010) ----
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'video_collections') THEN
+    EXECUTE 'CREATE POLICY "Collection members can view videos" ON video_collections
+      FOR SELECT USING (
+        collection_id IN (
+          SELECT id FROM collections WHERE
+            owner_id = auth.uid() OR
+            team_id IN (SELECT get_user_team_ids(auth.uid()))
+        )
+      )';
+    EXECUTE 'CREATE POLICY "Collection members can add videos" ON video_collections
+      FOR INSERT WITH CHECK (
+        collection_id IN (
+          SELECT id FROM collections WHERE
+            owner_id = auth.uid() OR
+            team_id IN (SELECT get_user_team_ids(auth.uid()))
+        )
+      )';
+    EXECUTE 'CREATE POLICY "Collection members can remove videos" ON video_collections
+      FOR DELETE USING (
+        collection_id IN (
+          SELECT id FROM collections WHERE
+            owner_id = auth.uid() OR
+            team_id IN (SELECT get_user_team_ids(auth.uid()))
+        )
+      )';
+  END IF;
+END $$;
+
+-- ---- tags (conditional, enhanced with scope_id checks) ----
+DO $$ BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'tags' AND column_name = 'scope_id'
   ) THEN
-    -- Drop all existing tag policies
-    FOR r IN (
-      SELECT policyname FROM pg_policies
-      WHERE tablename = 'tags' AND schemaname = 'public'
-    ) LOOP
-      EXECUTE format('DROP POLICY IF EXISTS %I ON tags', r.policyname);
-    END LOOP;
-
-    -- Recreate with TEXT comparisons
     EXECUTE 'CREATE POLICY "System tags visible to all" ON tags
       FOR SELECT USING (type = ''system'' OR type = ''time'')';
-
     EXECUTE 'CREATE POLICY "User tags visible to owner" ON tags
       FOR SELECT USING (user_id = auth.uid())';
-
     EXECUTE 'CREATE POLICY "Team tags visible to members" ON tags
       FOR SELECT USING (
         scope_type = ''team'' AND scope_id IN (SELECT get_user_team_ids_text(auth.uid()))
       )';
-
     EXECUTE 'CREATE POLICY "Users can create own tags" ON tags
       FOR INSERT WITH CHECK (user_id = auth.uid() AND type = ''user'')';
-
     EXECUTE 'CREATE POLICY "Users can update own tags" ON tags
       FOR UPDATE USING (user_id = auth.uid() AND type = ''user'')';
-
     EXECUTE 'CREATE POLICY "Users can delete own tags" ON tags
       FOR DELETE USING (user_id = auth.uid() AND type = ''user'')';
-
     EXECUTE 'CREATE POLICY "Service role full access on tags" ON tags
       FOR ALL USING (auth.role() = ''service_role'')
       WITH CHECK (auth.role() = ''service_role'')';
+  END IF;
+END $$;
+
+-- ============================================================================
+-- SECTION 15: Re-add tables to supabase_realtime publication
+-- Set REPLICA IDENTITY FULL on all affected tables (safest for Supabase Realtime).
+-- ============================================================================
+
+DO $$
+DECLARE
+  tbl TEXT;
+BEGIN
+  -- Tables that were in the publication before migration
+  FOR tbl IN SELECT unnest(ARRAY[
+    'teams', 'team_members', 'notifications', 'team_invites',
+    'projects', 'project_files', 'file_versions', 'review_comments',
+    'project_members', 'project_tasks', 'project_workflows',
+    'shares', 'folders', 'resources', 'resource_items'
+  ]) LOOP
+    EXECUTE format('ALTER TABLE %I REPLICA IDENTITY FULL', tbl);
+    EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', tbl);
+  END LOOP;
+
+  -- Conditional: collections
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'collections') THEN
+    EXECUTE 'ALTER TABLE collections REPLICA IDENTITY FULL';
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE collections';
+  END IF;
+
+  -- Conditional: video_collections
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'video_collections') THEN
+    EXECUTE 'ALTER TABLE video_collections REPLICA IDENTITY FULL';
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE video_collections';
   END IF;
 END $$;
 
