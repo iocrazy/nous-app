@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward } from 'lucide-react';
 import Hls from 'hls.js';
 
 interface VideoPlayerProps {
   src: string;
   mimeType?: string;
+  fps?: number;
   onTimeUpdate: (seconds: number) => void;
   onDurationChange: (seconds: number) => void;
   playerRef: React.RefObject<HTMLVideoElement | null>;
@@ -17,9 +18,19 @@ const formatTime = (seconds: number): string => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+const formatTimeWithFrames = (seconds: number, fps: number): string => {
+  if (!isFinite(seconds) || isNaN(seconds)) return '00:00.00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  const fractional = seconds % 1;
+  const frameInSecond = Math.floor(fractional * fps);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${frameInSecond.toString().padStart(2, '0')}`;
+};
+
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   src,
   mimeType,
+  fps = 30,
   onTimeUpdate,
   onDurationChange,
   playerRef,
@@ -37,7 +48,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
 
+  const effectiveFps = fps || 30;
   const isHls = src.endsWith('.m3u8');
+
+  // Frame stepping
+  const stepFrame = useCallback((direction: 1 | -1, count: number = 1) => {
+    if (!playerRef.current) return;
+    const video = playerRef.current;
+    if (!video.paused) return;
+    const frameDuration = 1 / effectiveFps;
+    const newTime = Math.max(0, Math.min(video.duration, video.currentTime + direction * count * frameDuration));
+    video.currentTime = newTime;
+    setCurrentTime(newTime);
+    onTimeUpdate(newTime);
+  }, [playerRef, effectiveFps, onTimeUpdate]);
 
   // Attach or detach HLS / native source
   useEffect(() => {
@@ -143,6 +167,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [playerRef, onTimeUpdate, onDurationChange]);
 
+  // Keyboard shortcuts for frame stepping
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const video = playerRef.current;
+      if (!video || !video.paused) return;
+
+      // Ignore if user is typing in an input/textarea
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        stepFrame(-1, e.shiftKey ? 10 : 1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        stepFrame(1, e.shiftKey ? 10 : 1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [playerRef, stepFrame]);
+
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
     setShowControls(true);
@@ -230,6 +277,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, []);
 
   const seekProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const frameNumber = Math.floor((currentTime || 0) * effectiveFps);
 
   return (
     <div
@@ -297,7 +345,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
 
         {/* Bottom controls row */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* Frame step backward - only when paused */}
+          {!isPlaying && (
+            <button
+              onClick={() => stepFrame(-1)}
+              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              aria-label="Previous Frame"
+              title="Previous Frame (Left Arrow)"
+            >
+              <SkipBack size={14} />
+            </button>
+          )}
+
           {/* Play / Pause */}
           <button
             onClick={togglePlayPause}
@@ -306,6 +366,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           >
             {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
           </button>
+
+          {/* Frame step forward - only when paused */}
+          {!isPlaying && (
+            <button
+              onClick={() => stepFrame(1)}
+              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              aria-label="Next Frame"
+              title="Next Frame (Right Arrow)"
+            >
+              <SkipForward size={14} />
+            </button>
+          )}
 
           {/* Volume */}
           <div className="flex items-center gap-1 group/vol">
@@ -329,9 +401,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           </div>
 
-          {/* Time display */}
+          {/* Time display with frame number */}
           <span className="text-xs font-mono text-zinc-300 select-none ml-1">
-            {formatTime(currentTime)} / {formatTime(duration)}
+            {isPlaying ? (
+              <>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </>
+            ) : (
+              <>
+                {formatTimeWithFrames(currentTime, effectiveFps)}{' '}
+                <span className="text-zinc-500">[F{frameNumber}]</span>
+                {' / '}
+                {formatTime(duration)}
+              </>
+            )}
           </span>
 
           {/* Spacer */}

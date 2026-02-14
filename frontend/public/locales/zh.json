@@ -404,6 +404,13 @@
       "uploadedBy": "上传者",
       "share": "分享",
       "seekTo": "点击跳转",
+      "stepBackward": "上一帧",
+      "stepForward": "下一帧",
+      "compareVersions": "对比",
+      "exitCompare": "退出对比",
+      "selectVersionToCompare": "选择要对比的版本",
+      "versionLabel": "版本 {{number}}",
+      "syncedPlayback": "同步播放",
       "timeAgo": {
         "justNow": "刚刚",
         "minutesAgo": "{{count}}分钟前",
