@@ -305,7 +305,13 @@
     "noResourcesHint": "Drag & drop files or click Upload to add resources",
     "recycleBinEmpty": "Recycle bin is empty",
     "dropToUpload": "Drop files to upload",
-    "sharedComingSoon": "Shared resources coming soon"
+    "sharedComingSoon": "Shared resources coming soon",
+    "sharedManagement": "Shared",
+    "quickAccess": "Quick Access",
+    "myResources": "My Resources",
+    "downloads": "RipVault",
+    "noDownloads": "No downloaded content yet",
+    "noDownloadsHint": "Use Parser to download media and they will appear here"
   },
   "mediatrack": {
     "projects": "Projects",
