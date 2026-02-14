@@ -470,6 +470,7 @@ class PointsService:
         self,
         team_id: str,
         grant_free_points: bool = True,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Ensure a team has a quota record. If no record exists, create one
@@ -507,7 +508,7 @@ class PointsService:
             await self.repo.create_transaction(
                 {
                     "team_id": team_id,
-                    "user_id": None,
+                    "user_id": user_id,
                     "amount": initial_balance,
                     "balance_after": initial_balance,
                     "type": "gift",
