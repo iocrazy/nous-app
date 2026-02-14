@@ -342,6 +342,7 @@ class ProjectsService:
         content: str,
         timestamp_seconds: Optional[float] = None,
         version_id: Optional[str] = None,
+        drawing_data: Optional[dict] = None,
     ) -> dict:
         """Add a review comment to a file."""
         comment_data = {
@@ -353,6 +354,8 @@ class ProjectsService:
             comment_data["timestamp_seconds"] = timestamp_seconds
         if version_id:
             comment_data["version_id"] = version_id
+        if drawing_data:
+            comment_data["drawing_data"] = drawing_data
         return await self.repo.create_comment(comment_data)
 
     # ------------------------------------------------------------------ #
