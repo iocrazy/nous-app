@@ -403,6 +403,7 @@ async def add_comment(
             content=data.content,
             timestamp_seconds=data.timestamp_seconds,
             version_id=data.version_id,
+            drawing_data=data.drawing_data,
         )
         return {"success": True, "data": result}
     except HTTPException:

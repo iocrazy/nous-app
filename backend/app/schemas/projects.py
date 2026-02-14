@@ -143,6 +143,7 @@ class CreateCommentRequest(BaseModel):
     content: str = Field(..., min_length=1)
     timestamp_seconds: Optional[float] = None
     version_id: Optional[str] = None
+    drawing_data: Optional[dict] = None
 
 
 class CommentResponse(BaseModel):
@@ -155,6 +156,7 @@ class CommentResponse(BaseModel):
     author_email: Optional[str] = None
     content: str
     timestamp_seconds: Optional[float] = None
+    drawing_data: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
