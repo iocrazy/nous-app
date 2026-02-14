@@ -25,7 +25,8 @@
     "status": "Status",
     "activity": "Activity",
     "backToProjects": "Projects",
-    "projectSettings": "Project Settings"
+    "projectSettings": "Project Settings",
+    "points": "Points"
   },
   "user": {
     "profile": "Profile",
