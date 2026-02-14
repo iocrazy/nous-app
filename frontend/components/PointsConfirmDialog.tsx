@@ -43,7 +43,8 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const insufficient = error != null || (quotaInfo && !quotaInfo.allowed);
+  const hasError = error != null && quotaInfo == null;
+  const insufficient = quotaInfo != null && !quotaInfo.allowed;
   const cost = quotaInfo?.points_cost ?? 0;
   const balance = quotaInfo?.current_balance ?? 0;
   const remaining = balance - cost;
@@ -79,6 +80,14 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
             <div className="flex items-center justify-center py-6">
               <div className="w-5 h-5 rounded-full border-2 border-zinc-600 border-t-indigo-400 animate-spin" />
               <span className="ml-2 text-sm text-zinc-400">{t('common.loading', 'Loading...')}</span>
+            </div>
+          ) : hasError ? (
+            /* API connection error — show error, allow proceeding */
+            <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+              <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
+              <span className="text-sm text-amber-400">
+                {error}
+              </span>
             </div>
           ) : (
             <>
