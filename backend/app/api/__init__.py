@@ -21,6 +21,7 @@ from app.api.points_router import router as points_router
 from app.api.projects_router import router as projects_router
 from app.api.resources_router import router as resources_router
 from app.api.search_router import router as search_router
+from app.api.shares_router import router as shares_router
 from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
@@ -73,3 +74,5 @@ api_router.include_router(router=payment_router, tags=["Payment"])
 api_router.include_router(router=projects_router, tags=["MediaTrack"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])
+
+api_router.include_router(router=shares_router, tags=["Shares"])
