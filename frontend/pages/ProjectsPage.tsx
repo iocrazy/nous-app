@@ -1,20 +1,44 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { FolderOpen, KanbanSquare } from 'lucide-react';
 import { Project, ProjectFile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useTeamContext } from '../contexts/TeamContext';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilesView } from '../components/ProjectFilesView';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
+import { KanbanBoard } from '../components/KanbanBoard';
+
+type ProjectTab = 'files' | 'tasks';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { projectId, fileId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
+  const { selectedTeamId } = useTeamContext();
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
+
+  // Read active tab from URL query params, default to 'files'
+  const activeTab: ProjectTab = (searchParams.get('tab') as ProjectTab) || 'files';
+
+  const setActiveTab = (tab: ProjectTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'files') {
+        next.delete('tab');
+      } else {
+        next.set('tab', tab);
+      }
+      return next;
+    });
+  };
 
   // If reviewing a file
   if (reviewFile && selectedProject) {
@@ -31,21 +55,54 @@ export function ProjectsPage() {
     );
   }
 
-  // If viewing project files
+  // If viewing a project (files or tasks)
   if (selectedProject) {
     return (
       <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <ProjectFilesView
-          project={selectedProject}
-          onBack={() => {
-            setSelectedProject(null);
-            navigate('/projects');
-          }}
-          onFileReview={(file) => {
-            setReviewFile(file);
-            navigate(`/projects/${selectedProject.id}/review/${file.id}`);
-          }}
-        />
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 mb-4 bg-zinc-900/50 border border-zinc-800 rounded-xl p-1 w-fit">
+          <button
+            onClick={() => setActiveTab('files')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              activeTab === 'files'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+            }`}
+          >
+            <FolderOpen size={16} />
+            {t('sidebar.files')}
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              activeTab === 'tasks'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+            }`}
+          >
+            <KanbanSquare size={16} />
+            {t('topbar.tasks')}
+          </button>
+        </div>
+
+        {activeTab === 'files' ? (
+          <ProjectFilesView
+            project={selectedProject}
+            onBack={() => {
+              setSelectedProject(null);
+              navigate('/projects');
+            }}
+            onFileReview={(file) => {
+              setReviewFile(file);
+              navigate(`/projects/${selectedProject.id}/review/${file.id}`);
+            }}
+          />
+        ) : (
+          <KanbanBoard
+            projectId={selectedProject.id}
+            teamId={selectedTeamId || undefined}
+          />
+        )}
       </div>
     );
   }
