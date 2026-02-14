@@ -357,20 +357,7 @@ export function AppLayout() {
         isSettingsOpen={isSettingsOpen}
         activeSmartCollectionId={activeSmartCollectionId}
         onViewChange={(v) => {
-          const viewToPath: Record<string, string> = {
-            parser: '/parser',
-            library: '/library',
-            dashboard: '/dashboard',
-            settings: '/settings',
-            cleanup: '/cleanup',
-            mediatrack: '/projects',
-            points: '/points',
-            billing: '/billing',
-            members: '/members',
-            resources: '/resources',
-            todolist: '/todolist',
-          };
-          navigate(viewToPath[v] || '/parser');
+          // Side effects only — Sidebar handles navigation directly via useNavigate
           if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
         }}
         onSettingsTabChange={(tab) => setSettingsTab(tab as any)}
@@ -404,23 +391,6 @@ export function AppLayout() {
         <TopBar
           user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
           unreadCount={notifications.filter(n => !n.read).length}
-          onNavigate={(v, tab) => {
-            const viewToPath: Record<string, string> = {
-              parser: '/parser',
-              library: '/library',
-              dashboard: '/dashboard',
-              settings: '/settings',
-              cleanup: '/cleanup',
-              mediatrack: '/projects',
-              points: '/points',
-              billing: '/billing',
-              members: '/members',
-              resources: '/resources',
-              todolist: '/todolist',
-            };
-            navigate(viewToPath[v] || '/parser');
-            if (tab) setSettingsTab(tab as any);
-          }}
           onSignOut={handleAuthLogout}
           onOpenSettings={(tab) => {
             setSettingsModalInitialTab(tab || 'personal');

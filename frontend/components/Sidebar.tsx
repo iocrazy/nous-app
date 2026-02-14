@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
@@ -95,7 +96,7 @@ const SidebarSubItem: React.FC<{
 
 interface SidebarProps {
   mode: SidebarMode;
-  view: ViewState;
+  view?: ViewState;
   settingsTab: string;
 
   // Team context
@@ -114,7 +115,7 @@ interface SidebarProps {
   activeSmartCollectionId: number | null;
 
   // Callbacks
-  onViewChange: (view: string) => void;
+  onViewChange?: (view: string) => void;
   onSettingsTabChange: (tab: string) => void;
   onToggleLibrary: () => void;
   onToggleSettings: () => void;
@@ -155,12 +156,44 @@ const VersionFooter: React.FC = () => (
 const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" />;
 
 // ---------------------------------------------------------------------------
+// URL ↔ ViewState mapping (local to avoid circular dep with AppLayout)
+// ---------------------------------------------------------------------------
+
+const VIEW_PATH_MAP: Record<string, string> = {
+  parser: '/parser',
+  library: '/library',
+  dashboard: '/dashboard',
+  settings: '/settings',
+  cleanup: '/cleanup',
+  mediatrack: '/projects',
+  points: '/points',
+  billing: '/billing',
+  members: '/members',
+  resources: '/resources',
+  todolist: '/todolist',
+};
+
+function viewFromPathname(pathname: string): ViewState {
+  if (pathname.startsWith('/library')) return 'library';
+  if (pathname.startsWith('/dashboard')) return 'dashboard';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/cleanup')) return 'cleanup';
+  if (pathname.startsWith('/projects')) return 'mediatrack';
+  if (pathname.startsWith('/points')) return 'points';
+  if (pathname.startsWith('/billing')) return 'billing';
+  if (pathname.startsWith('/members')) return 'members';
+  if (pathname.startsWith('/resources')) return 'resources';
+  if (pathname.startsWith('/todolist')) return 'todolist';
+  return 'parser';
+}
+
+// ---------------------------------------------------------------------------
 // Main Sidebar export
 // ---------------------------------------------------------------------------
 
 export const Sidebar: React.FC<SidebarProps> = ({
   mode,
-  view,
+  view: _view,
   // Props kept for App.tsx compatibility (unused in render after refactor)
   settingsTab: _settingsTab,
   teams,
@@ -183,7 +216,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onProjectSelect: _onProjectSelect,
 }) => {
   const { t } = useTranslation();
-  const [isManagementOpen, setIsManagementOpen] = useState(view === 'members' || view === 'billing');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const currentView = viewFromPathname(location.pathname);
+
+  // Navigate via URL and notify parent for side effects
+  const handleNav = (viewKey: string) => {
+    navigate(VIEW_PATH_MAP[viewKey] || '/parser');
+    onViewChange?.(viewKey);
+  };
+
+  const [isManagementOpen, setIsManagementOpen] = useState(currentView === 'members' || currentView === 'billing');
 
   // ===================================================================
   // PROJECT MODE (unchanged)
@@ -220,15 +263,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SidebarItem
             icon={FolderOpen}
             label={t('sidebar.allFiles')}
-            active={view === 'mediatrack'}
-            onClick={() => onViewChange('mediatrack')}
+            active={currentView === 'mediatrack'}
+            onClick={() => handleNav('mediatrack')}
           />
           {hasPermission(permissions, 'resource.upload') && (
             <SidebarItem
               icon={Upload}
               label={t('sidebar.upload')}
               active={false}
-              onClick={() => onViewChange('mediatrack')}
+              onClick={() => handleNav('mediatrack')}
             />
           )}
 
@@ -242,13 +285,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon={MessageSquare}
             label={t('sidebar.comments')}
             active={false}
-            onClick={() => onViewChange('mediatrack')}
+            onClick={() => handleNav('mediatrack')}
           />
           <SidebarItem
             icon={CheckCircle2}
             label={t('sidebar.status')}
             active={false}
-            onClick={() => onViewChange('mediatrack')}
+            onClick={() => handleNav('mediatrack')}
           />
 
           <Divider />
@@ -257,21 +300,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SidebarItem
             icon={Users}
             label={t('sidebar.members')}
-            active={view === 'members'}
-            onClick={() => onViewChange('members')}
+            active={currentView === 'members'}
+            onClick={() => handleNav('members')}
           />
           <SidebarItem
             icon={Activity}
             label={t('sidebar.activity')}
             active={false}
-            onClick={() => onViewChange('mediatrack')}
+            onClick={() => handleNav('mediatrack')}
           />
           {hasPermission(permissions, 'project.manage') && (
             <SidebarItem
               icon={Settings}
               label={t('sidebar.projectSettings')}
-              active={view === 'settings'}
-              onClick={() => onViewChange('settings')}
+              active={currentView === 'settings'}
+              onClick={() => handleNav('settings')}
             />
           )}
         </nav>
@@ -304,27 +347,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SidebarItem
             icon={Layers}
             label={t('sidebar.resources')}
-            active={view === 'resources'}
-            onClick={() => onViewChange('resources')}
+            active={currentView === 'resources'}
+            onClick={() => handleNav('resources')}
           />
           <SidebarItem
             icon={FolderKanban}
             label={t('sidebar.projects')}
-            active={view === 'mediatrack'}
-            onClick={() => onViewChange('mediatrack')}
+            active={currentView === 'mediatrack'}
+            onClick={() => handleNav('mediatrack')}
           />
           <SidebarItem
             icon={ListTodo}
             label={t('sidebar.todolist')}
-            active={view === 'todolist'}
-            onClick={() => onViewChange('todolist')}
+            active={currentView === 'todolist'}
+            onClick={() => handleNav('todolist')}
           />
           {hasPermission(permissions, 'member.view') && (
             <>
               <SidebarItem
                 icon={Settings}
                 label={t('sidebar.management')}
-                active={view === 'members' || view === 'billing'}
+                active={currentView === 'members' || currentView === 'billing'}
                 onClick={() => setIsManagementOpen(!isManagementOpen)}
                 hasSubmenu
                 isOpen={isManagementOpen}
@@ -334,14 +377,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <SidebarSubItem
                     icon={Users}
                     label={t('sidebar.members')}
-                    active={view === 'members'}
-                    onClick={() => onViewChange('members')}
+                    active={currentView === 'members'}
+                    onClick={() => handleNav('members')}
                   />
                   <SidebarSubItem
                     icon={CreditCard}
                     label={t('sidebar.billing')}
-                    active={view === 'billing'}
-                    onClick={() => onViewChange('billing')}
+                    active={currentView === 'billing'}
+                    onClick={() => handleNav('billing')}
                   />
                 </div>
               )}
@@ -376,26 +419,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <SidebarItem
           icon={Search}
           label={t('nav.linkParser')}
-          active={view === 'parser'}
-          onClick={() => onViewChange('parser')}
+          active={currentView === 'parser'}
+          onClick={() => handleNav('parser')}
         />
         <SidebarItem
           icon={Layers}
           label={t('sidebar.resources')}
-          active={view === 'resources'}
-          onClick={() => onViewChange('resources')}
+          active={currentView === 'resources'}
+          onClick={() => handleNav('resources')}
         />
         <SidebarItem
           icon={FolderKanban}
           label={t('sidebar.projects')}
-          active={view === 'mediatrack'}
-          onClick={() => onViewChange('mediatrack')}
+          active={currentView === 'mediatrack'}
+          onClick={() => handleNav('mediatrack')}
         />
         <SidebarItem
           icon={ListTodo}
           label={t('sidebar.todolist')}
-          active={view === 'todolist'}
-          onClick={() => onViewChange('todolist')}
+          active={currentView === 'todolist'}
+          onClick={() => handleNav('todolist')}
         />
       </nav>
 
