@@ -66,7 +66,7 @@ export const getAnalysisStatus = async (videoId: number): Promise<AnalysisStatus
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/status/${videoId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -85,7 +85,7 @@ export const getVideoAnalysis = async (videoId: number): Promise<VideoAnalysisRe
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/video/${videoId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -107,7 +107,7 @@ export const analyzeVideo = async (
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/analyze/${videoId}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ force_reanalyze: forceReanalyze }),
   });
 
@@ -131,7 +131,7 @@ export const batchAnalyze = async (
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/batch`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       video_ids: videoIds,
       limit,
@@ -155,7 +155,7 @@ export const getAnalysisStats = async (): Promise<AnalysisStats> => {
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/stats`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -174,7 +174,7 @@ export const getSuggestedTags = async (videoId: number): Promise<string[]> => {
 
   const response = await fetch(`${apiUrl}/api/v1/analysis/video/${videoId}/suggested-tags`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

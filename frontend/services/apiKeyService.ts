@@ -79,7 +79,7 @@ export interface UpdateApiKeyRequest {
 export async function getAvailableScopes(): Promise<ApiKeyScopeInfo[]> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys/scopes`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -99,7 +99,7 @@ export async function listApiKeys(includeRevoked: boolean = false): Promise<ApiK
 
   const response = await fetch(url.toString(), {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -118,7 +118,7 @@ export async function listApiKeys(includeRevoked: boolean = false): Promise<ApiK
 export async function createApiKey(request: CreateApiKeyRequest): Promise<ApiKeyCreateResponse> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(request),
   });
 
@@ -136,7 +136,7 @@ export async function createApiKey(request: CreateApiKeyRequest): Promise<ApiKey
 export async function getApiKey(keyId: string): Promise<ApiKeyResponse> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -153,7 +153,7 @@ export async function getApiKey(keyId: string): Promise<ApiKeyResponse> {
 export async function updateApiKey(keyId: string, request: UpdateApiKeyRequest): Promise<ApiKeyResponse> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
     method: 'PATCH',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(request),
   });
 
@@ -171,7 +171,7 @@ export async function updateApiKey(keyId: string, request: UpdateApiKeyRequest):
 export async function deleteApiKey(keyId: string): Promise<void> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -186,7 +186,7 @@ export async function deleteApiKey(keyId: string): Promise<void> {
 export async function revokeApiKey(keyId: string): Promise<void> {
   const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}/revoke`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

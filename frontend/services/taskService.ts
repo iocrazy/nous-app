@@ -53,7 +53,7 @@ export interface QueueStats {
 export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -69,7 +69,7 @@ export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse>
 export const cancelTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -93,7 +93,7 @@ export const getActiveTasks = async (queue?: string, limit: number = 100): Promi
 
   const response = await fetch(`${API_BASE}/api/v1/tasks/?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -113,7 +113,7 @@ export const getWorkerStats = async (): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/stats/workers`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -133,7 +133,7 @@ export const getQueueStats = async (): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/stats/queues`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -293,7 +293,7 @@ export interface DownloadProgressResponse {
 export const getDownloadProgress = async (taskId: string): Promise<DownloadProgressResponse> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}/progress`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -393,7 +393,7 @@ export const getTaskManagerTasks = async (
 
   const response = await fetch(`${API_BASE}/api/v1/download-tasks?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -409,7 +409,7 @@ export const getTaskManagerTasks = async (
 export const getTaskManagerStats = async (): Promise<TaskManagerStats> => {
   const response = await fetch(`${API_BASE}/api/v1/download-tasks/stats`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -429,7 +429,7 @@ export const retryFailedTask = async (platformId: string, force: boolean = false
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}/retry?force=${force}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -450,7 +450,7 @@ export const retryAllFailedTasks = async (force: boolean = false): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/download-tasks/retry-all?force=${force}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -469,7 +469,7 @@ export const deleteTaskManagerTask = async (platformId: string): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -488,7 +488,7 @@ export const cleanupCompletedTasks = async (keepRecent: number = 100): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/download-tasks/cleanup?keep_recent=${keepRecent}`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

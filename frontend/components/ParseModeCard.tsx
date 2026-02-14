@@ -23,7 +23,7 @@ export const ParseModeCard: React.FC<ParseModeCardProps> = ({ onModeChange }) =>
     try {
       const response = await fetch(`${API_BASE}/api/v1/settings/parse-mode`, {
         method: 'GET',
-        headers: getAuthHeaders(),
+        headers: await getAuthHeaders(),
       });
 
       if (response.ok) {
@@ -45,7 +45,7 @@ export const ParseModeCard: React.FC<ParseModeCardProps> = ({ onModeChange }) =>
       const response = await fetch(`${API_BASE}/api/v1/settings/parse-mode`, {
         method: 'PUT',
         headers: {
-          ...getAuthHeaders(),
+          ...await getAuthHeaders(),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ mode: newMode }),

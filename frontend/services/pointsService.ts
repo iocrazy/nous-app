@@ -24,7 +24,7 @@ export const fetchPointsBalance = async (teamId?: string): Promise<TeamQuota> =>
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -58,7 +58,7 @@ export const fetchPointsTransactions = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -81,7 +81,7 @@ export const fetchPointsPricing = async (): Promise<PointPricing[]> => {
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -108,7 +108,7 @@ export const fetchUsageStats = async (teamId?: string): Promise<any> => {
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -140,7 +140,7 @@ export const checkQuota = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

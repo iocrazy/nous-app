@@ -18,7 +18,7 @@ export const fetchProjects = async (params?: { type?: string; starred?: boolean 
   const qs = searchParams.toString();
   const url = `${apiUrl}/api/v1/projects${qs ? '?' + qs : ''}`;
 
-  const response = await fetch(url, { headers: getAuthHeaders() });
+  const response = await fetch(url, { headers: await getAuthHeaders() });
   if (!response.ok) throw new Error('Failed to fetch projects');
   const json = await response.json();
   return json.data || [];
@@ -28,7 +28,7 @@ export const createProject = async (data: { name: string; description?: string; 
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!response.ok) {
@@ -43,7 +43,7 @@ export const updateProject = async (id: string, data: Partial<Project>): Promise
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${id}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to update project');
@@ -55,7 +55,7 @@ export const deleteProject = async (id: string): Promise<void> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${id}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to delete project');
 };
@@ -64,7 +64,7 @@ export const fetchProjectFiles = async (projectId: string, includeTrashed?: bool
   const apiUrl = getApiUrl();
   const qs = includeTrashed ? '?include_trashed=true' : '';
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files${qs}`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch files');
   const json = await response.json();
@@ -78,7 +78,7 @@ export const uploadFile = async (projectId: string, file: File, notes?: string):
 
   // Build headers without Content-Type (let browser set multipart boundary)
   const headers: Record<string, string> = {};
-  const authHeaders = getAuthHeaders();
+  const authHeaders = await getAuthHeaders();
   Object.entries(authHeaders).forEach(([k, v]) => {
     if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
   });
@@ -98,7 +98,7 @@ export const linkVideoToProject = async (projectId: string, videoId: string): Pr
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/link-video`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ video_id: videoId }),
   });
   if (!response.ok) throw new Error('Failed to link video');
@@ -109,7 +109,7 @@ export const linkVideoToProject = async (projectId: string, videoId: string): Pr
 export const getFileInfo = async (projectId: string, fileId: string): Promise<ProjectFile> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to get file info');
   const json = await response.json();
@@ -120,7 +120,7 @@ export const updateFile = async (projectId: string, fileId: string, data: Partia
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to update file');
@@ -132,7 +132,7 @@ export const deleteFile = async (projectId: string, fileId: string): Promise<voi
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to delete file');
 };
@@ -144,7 +144,7 @@ export const deleteFile = async (projectId: string, fileId: string): Promise<voi
 export const fetchFileVersions = async (projectId: string, fileId: string): Promise<FileVersion[]> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/versions`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch versions');
   const json = await response.json();
@@ -157,7 +157,7 @@ export const uploadNewVersion = async (projectId: string, fileId: string, file: 
   formData.append('file', file);
 
   const headers: Record<string, string> = {};
-  const authHeaders = getAuthHeaders();
+  const authHeaders = await getAuthHeaders();
   Object.entries(authHeaders).forEach(([k, v]) => {
     if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
   });
@@ -181,7 +181,7 @@ export const fetchComments = async (projectId: string, fileId: string, versionId
   const apiUrl = getApiUrl();
   const qs = versionId ? `?version_id=${versionId}` : '';
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments${qs}`, {
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch comments');
   const json = await response.json();
@@ -196,7 +196,7 @@ export const addComment = async (
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to add comment');
@@ -208,7 +208,7 @@ export const deleteComment = async (projectId: string, fileId: string, commentId
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments/${commentId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to delete comment');
 };
@@ -221,7 +221,7 @@ export const updateReviewStatus = async (projectId: string, fileId: string, stat
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/review-status`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({ review_status: status }),
   });
   if (!response.ok) throw new Error('Failed to update review status');

@@ -53,7 +53,7 @@ export const fetchTags = async (): Promise<Tag[]> => {
 
   const response = await fetch(`${apiUrl}/api/v1/tags`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -73,7 +73,7 @@ export const createTag = async (tag: TagCreate): Promise<Tag> => {
 
   const response = await fetch(`${apiUrl}/api/v1/tags`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(tag),
   });
 
@@ -93,7 +93,7 @@ export const updateTag = async (tagId: number, updates: TagUpdate): Promise<Tag>
 
   const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(updates),
   });
 
@@ -113,7 +113,7 @@ export const deleteTag = async (tagId: number): Promise<void> => {
 
   const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -130,7 +130,7 @@ export const getVideoTags = async (videoId: string): Promise<Tag[]> => {
 
   const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -154,7 +154,7 @@ export const addTagsToVideo = async (videoId: string, tagIds: string[]): Promise
   for (const tagId of tagIds) {
     const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ tag_id: tagId }),
     });
 
@@ -177,7 +177,7 @@ export const removeTagFromVideo = async (videoId: string, tagId: string): Promis
 
   const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags/${tagId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -208,7 +208,7 @@ export const getVideosByTag = async (
 
   const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}/videos?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -243,7 +243,7 @@ export const fetchTagStatistics = async (limit: number = 10): Promise<TagStatist
 
   const response = await fetch(`${apiUrl}/api/v1/tags/statistics?limit=${limit}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

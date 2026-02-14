@@ -48,7 +48,7 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/system/status`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
