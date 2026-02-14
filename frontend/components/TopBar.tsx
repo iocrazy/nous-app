@@ -19,7 +19,7 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 interface TopBarProps {
   user: { name: string; email: string; avatarUrl?: string } | null;
   unreadCount?: number;
-  onNavigate: (view: string, tab?: string) => void;
+  onNavigate?: (view: string, tab?: string) => void;
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
 }
@@ -161,10 +161,9 @@ const NotificationsPanel: React.FC = () => {
 
 const AvatarMenu: React.FC<{
   user: { name: string; email: string };
-  onNavigate: (view: string, tab?: string) => void;
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
-}> = ({ user, onNavigate, onSignOut, onOpenSettings }) => {
+}> = ({ user, onSignOut, onOpenSettings }) => {
   const { t } = useTranslation();
   return (
     <PanelShell className="w-56">
@@ -335,7 +334,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           />
         </button>
         {openPanel === 'avatar' && user && (
-          <AvatarMenu user={user} onNavigate={onNavigate} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
+          <AvatarMenu user={user} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
         )}
       </div>
     </header>
