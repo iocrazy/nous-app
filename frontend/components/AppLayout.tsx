@@ -364,12 +364,11 @@ export function AppLayout() {
         onToggleLibrary={toggleLibraryMenu}
         onToggleSettings={toggleSettingsMenu}
         onTeamChange={(teamId) => {
+          // Side effects only — WorkspaceSwitcher handles navigation directly
           setSelectedTeamId(teamId);
           setActiveCollectionId(null);
           setSelectedProject(null);
           setReviewFile(null);
-          if (!teamId) navigate('/parser');
-          else navigate('/resources');
         }}
         onCreateTeam={handleCreateTeam}
         onProjectBack={() => { setSelectedProject(null); setReviewFile(null); }}

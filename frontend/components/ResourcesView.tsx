@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   FolderOpen,
-  FolderPlus,
   Loader2,
   Upload,
   Trash2,
@@ -9,8 +9,14 @@ import {
   LayoutList,
   ChevronDown,
   Share2,
+  Download,
+  Plus,
+  Zap,
+  Star,
+  FolderPlus,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { RipVaultView } from './RipVaultView';
 import { Folder, ResourceItem, Tag, SmartCollection } from '../types';
 import {
   fetchFolders,
@@ -22,6 +28,7 @@ import {
   restoreResource,
   permanentDeleteResource,
   fetchTrashedResources,
+  fetchDownloadedResources,
   fetchResourceTags,
   addResourceTag,
   removeResourceTag,
@@ -39,7 +46,7 @@ interface ResourcesViewProps {
   scopeId: string;
 }
 
-type ActiveTab = 'files' | 'shared' | 'recycle';
+type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
 type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 // ─── Folder Tree Item (recursive) ─────────────────────
@@ -121,12 +128,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   scopeId,
 }) => {
   const { t } = useTranslation();
+  const { section, folderId: urlFolderId, smartFolderId: urlSmartFolderId } = useParams();
+  const navigate = useNavigate();
+
+  // URL-driven state
+  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId
+    ? 'resources'
+    : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
+  const selectedFolderId = urlFolderId ?? null;
+  const selectedSmartFolderId = urlSmartFolderId ?? null;
 
   // Data
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folderTree, setFolderTree] = useState<Folder[]>([]);
   const [resources, setResources] = useState<ResourceItem[]>([]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [foldersLoading, setFoldersLoading] = useState(true);
 
@@ -145,15 +160,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Recycle bin
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
 
+  // Downloads (parser-created resources)
+  const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
+
   // Tags
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
   // Smart folders
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
-  const [selectedSmartFolderId, setSelectedSmartFolderId] = useState<string | null>(null);
-
-  // UI state
-  const [activeTab, setActiveTab] = useState<ActiveTab>('files');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -179,9 +193,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   }, [scopeType, scopeId]);
 
   useEffect(() => {
-    setSelectedFolderId(null);
-    setSelectedSmartFolderId(null);
-    setActiveTab('files');
+    // State resets for folder/view/smart folder handled by URL navigation
     setSelectedResource(null);
     loadFolders();
     fetchTags().then(setAllTags).catch(() => {});
@@ -191,7 +203,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Load resources on folder change ─────────────────
 
   useEffect(() => {
-    if (activeTab !== 'files') return;
+    if (sidebarView !== 'resources') return;
     let cancelled = false;
 
     const loadResources = async () => {
@@ -214,7 +226,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     loadResources();
     return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, smartFolders, activeTab]);
+  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, smartFolders, sidebarView]);
 
   // ─── Load trashed resources ──────────────────────────
 
@@ -228,11 +240,29 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   }, [scopeType, scopeId]);
 
   useEffect(() => {
-    if (activeTab === 'recycle') {
+    if (sidebarView === 'recycle') {
       setLoading(true);
       loadTrashedResources().finally(() => setLoading(false));
     }
-  }, [activeTab, loadTrashedResources]);
+  }, [sidebarView, loadTrashedResources]);
+
+  // ─── Load downloaded resources ─────────────────────
+
+  const loadDownloadedResources = useCallback(async () => {
+    try {
+      const items = await fetchDownloadedResources(scopeType, scopeId);
+      setDownloadedResources(items);
+    } catch {
+      setDownloadedResources([]);
+    }
+  }, [scopeType, scopeId]);
+
+  useEffect(() => {
+    if (sidebarView === 'downloads') {
+      setLoading(true);
+      loadDownloadedResources().finally(() => setLoading(false));
+    }
+  }, [sidebarView, loadDownloadedResources]);
 
   // ─── Focus new folder input ──────────────────────────
 
@@ -366,10 +396,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Clear selection on tab/folder change
+  // Clear selection on view/folder change
   useEffect(() => {
     setSelectedResource(null);
-  }, [activeTab, selectedFolderId, selectedSmartFolderId]);
+  }, [sidebarView, selectedFolderId, selectedSmartFolderId]);
 
   const handleAddTag = useCallback(async (tagId: string) => {
     if (!selectedResource?.resource?.id) return;
@@ -390,7 +420,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // ─── Sort ────────────────────────────────────────────
 
-  const currentItems = activeTab === 'recycle' ? trashedResources : resources;
+  const currentItems = sidebarView === 'recycle'
+    ? trashedResources
+    : sidebarView === 'downloads'
+      ? downloadedResources
+      : resources;
 
   const sortedItems = useMemo(() => {
     const items = [...currentItems];
@@ -426,141 +460,201 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // ─── Render ──────────────────────────────────────────
 
-  const isFilesTab = activeTab === 'files';
-  const isRecycleTab = activeTab === 'recycle';
-  const isSharedTab = activeTab === 'shared';
+  const isResourcesView = sidebarView === 'resources';
+  const isRecycleView = sidebarView === 'recycle';
+  const isSharedView = sidebarView === 'shared';
+  const isDownloadsView = sidebarView === 'downloads';
+  const canUpload = isResourcesView;
 
-  const tabs: { key: ActiveTab; label: string; icon: React.ReactNode }[] = [
-    { key: 'files', label: t('resources.files'), icon: <FolderOpen size={14} /> },
-    { key: 'shared', label: t('resources.shared'), icon: <Share2 size={14} /> },
-    { key: 'recycle', label: t('resources.recycleBin'), icon: <Trash2 size={14} /> },
-  ];
+  const sidebarItemClass = (active: boolean) =>
+    `w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left ${
+      active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+    }`;
 
   return (
     <div className="flex h-full animate-in fade-in duration-300">
-      {/* ── Left panel: Folder tree (only on files tab) ── */}
-      {isFilesTab && (
-        <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col py-3">
-          {/* Root item */}
+      {/* ── Left panel: Unified sidebar navigation ── */}
+      <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col py-3">
+        {/* Navigation */}
+        <div className="flex-1 overflow-y-auto space-y-0.5 px-1">
+          {/* ── Top section: Shared / Quick Access / Recycle Bin ── */}
+          <button
+            onClick={() => navigate('/resources/shared')}
+            className={sidebarItemClass(isSharedView)}
+          >
+            <Share2 size={14} className="shrink-0" />
+            <span>{t('resources.sharedManagement')}</span>
+          </button>
+
           <button
             onClick={() => {
-              setSelectedFolderId(null);
-              setSelectedSmartFolderId(null);
+              // TODO: Quick Access view
             }}
-            className={`
-              w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
-              ${selectedFolderId === null && !selectedSmartFolderId ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
-            `}
+            className={sidebarItemClass(false)}
+          >
+            <Star size={14} className="shrink-0" />
+            <span>{t('resources.quickAccess')}</span>
+          </button>
+
+          <button
+            onClick={() => navigate('/resources/recycle')}
+            className={sidebarItemClass(isRecycleView)}
+          >
+            <Trash2 size={14} className="shrink-0" />
+            <span>{t('resources.recycleBin')}</span>
+          </button>
+
+          {/* ── Divider ── */}
+          <div className="mx-2 my-2 border-t border-zinc-800" />
+
+          {/* ── Main section: All Resources / RipVault / My Resources ── */}
+          <button
+            onClick={() => navigate('/resources')}
+            className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
           >
             <FolderOpen size={14} className="shrink-0" />
             <span>{t('resources.allResources')}</span>
           </button>
 
-          {/* Folder list */}
-          <div className="flex-1 overflow-y-auto mt-1 space-y-0.5">
-            {foldersLoading ? (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 size={16} className="animate-spin text-zinc-500" />
-              </div>
-            ) : (
-              folderTree.map((folder) => (
-                <FolderTreeItem
-                  key={folder.id}
-                  folder={folder}
-                  selectedFolderId={selectedFolderId}
-                  onSelect={(id) => {
-                    setSelectedFolderId(id);
-                    setSelectedSmartFolderId(null);
-                  }}
-                />
-              ))
-            )}
+          {/* RipVault — personal mode only */}
+          {scopeType === 'personal' && (
+            <button
+              onClick={() => navigate('/resources/downloads')}
+              className={sidebarItemClass(isDownloadsView)}
+            >
+              <Download size={14} className="shrink-0" />
+              <span>{t('resources.downloads')}</span>
+            </button>
+          )}
 
-            {/* Smart folders */}
-            {smartFolders.length > 0 && (
-              <>
-                <div className="px-3 py-1 mt-2">
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium">
-                    {t('resources.smartFolders')}
-                  </span>
-                </div>
-                {smartFolders.map((sf) => (
-                  <button
-                    key={sf.id}
-                    onClick={() => {
-                      setSelectedSmartFolderId(String(sf.id));
-                      setSelectedFolderId(null);
-                    }}
-                    className={`
-                      w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
-                      ${selectedSmartFolderId === String(sf.id) ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
-                    `}
-                  >
-                    <span className="shrink-0 text-xs">{sf.icon || '⚡'}</span>
-                    <span className="truncate">{sf.name}</span>
-                  </button>
-                ))}
-              </>
-            )}
+          {/* My Resources with ➕ */}
+          <div className="flex items-center justify-between pr-1">
+            <button
+              onClick={() => navigate('/resources')}
+              className={sidebarItemClass(false)}
+              style={{ pointerEvents: 'none' }}
+            >
+              <FolderPlus size={14} className="shrink-0" />
+              <span>{t('resources.myResources')}</span>
+            </button>
+            <button
+              onClick={() => {
+                navigate('/resources');
+                setCreatingFolder(true);
+              }}
+              className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+              title={t('resources.newFolder')}
+            >
+              <Plus size={14} />
+            </button>
           </div>
 
-          {/* New folder */}
-          <div className="mt-2 px-2">
-            {creatingFolder ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  ref={newFolderInputRef}
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreateFolder();
-                    if (e.key === 'Escape') {
-                      setCreatingFolder(false);
-                      setNewFolderName('');
-                    }
-                  }}
-                  placeholder={t('resources.folderName')}
-                  disabled={savingFolder}
-                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                />
-                {savingFolder && (
-                  <Loader2 size={12} className="animate-spin text-zinc-400" />
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={() => setCreatingFolder(true)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 rounded-md transition-colors"
-              >
-                <FolderPlus size={14} />
-                <span>{t('resources.newFolder')}</span>
-              </button>
-            )}
+          {/* Folder tree (nested under My Resources) */}
+          {foldersLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 size={16} className="animate-spin text-zinc-500" />
+            </div>
+          ) : (
+            folderTree.map((folder) => (
+              <FolderTreeItem
+                key={folder.id}
+                folder={folder}
+                selectedFolderId={isResourcesView ? selectedFolderId : null}
+                onSelect={(id) => navigate(`/resources/folder/${id}`)}
+              />
+            ))
+          )}
+
+          {/* Inline new folder input */}
+          {creatingFolder && (
+            <div className="flex items-center gap-1.5 px-2 py-1">
+              <input
+                ref={newFolderInputRef}
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateFolder();
+                  if (e.key === 'Escape') {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                  }
+                }}
+                onBlur={() => {
+                  if (!newFolderName.trim()) {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                  }
+                }}
+                placeholder={t('resources.folderName')}
+                disabled={savingFolder}
+                className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+              />
+              {savingFolder && (
+                <Loader2 size={12} className="animate-spin text-zinc-400" />
+              )}
+            </div>
+          )}
+
+          {/* ── Divider ── */}
+          <div className="mx-2 my-2 border-t border-zinc-800" />
+
+          {/* ── Smart Folders with ➕ ── */}
+          <div className="flex items-center justify-between pr-1">
+            <button
+              onClick={() => {
+                if (smartFolders.length > 0) {
+                  navigate(`/resources/smart/${smartFolders[0].id}`);
+                }
+              }}
+              className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId)}
+            >
+              <Zap size={14} className="shrink-0" />
+              <span>{t('resources.smartFolders')}</span>
+            </button>
+            <button
+              className="p-1 text-zinc-600 hover:text-zinc-400 rounded transition-colors shrink-0"
+              title="Coming soon"
+              disabled
+            >
+              <Plus size={14} />
+            </button>
           </div>
+
+          {/* Smart folder items (nested) */}
+          {smartFolders.map((sf) => (
+            <button
+              key={sf.id}
+              onClick={() => navigate(`/resources/smart/${sf.id}`)}
+              className={sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}
+              style={{ paddingLeft: '12px' }}
+            >
+              <Zap size={14} className="shrink-0" />
+              <span className="truncate">{sf.name}</span>
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* ── Center panel: Main content ── */}
       <div className="flex-1 min-w-0 flex flex-col">
+        {isDownloadsView ? (
+          <RipVaultView />
+        ) : (
+        <>
         {/* Toolbar */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
-          {/* Left: Tabs */}
-          <div className="flex items-center gap-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  activeTab === tab.key
-                    ? 'bg-zinc-800 text-zinc-100 font-medium'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-                }`}
-              >
-                {tab.icon}
-                <span>{tab.label}</span>
-              </button>
-            ))}
+          {/* Left: Current view title */}
+          <div className="text-sm font-medium text-zinc-300">
+            {isSharedView && t('resources.sharedManagement')}
+            {isRecycleView && t('resources.recycleBin')}
+            {isResourcesView && (
+              selectedSmartFolderId
+                ? smartFolders.find((s) => String(s.id) === selectedSmartFolderId)?.name ?? t('resources.allResources')
+                : selectedFolderId
+                  ? folders.find((f) => f.id === selectedFolderId)?.name ?? t('resources.allResources')
+                  : t('resources.allResources')
+            )}
           </div>
 
           {/* Right: Sort + View Toggle + Upload + Count */}
@@ -616,8 +710,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </button>
             </div>
 
-            {/* Upload button (only on files tab) */}
-            {isFilesTab && (
+            {/* Upload button (only on resources view) */}
+            {canUpload && (
               <>
                 <input
                   ref={fileInputRef}
@@ -665,9 +759,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           className={`flex-1 overflow-y-auto p-6 transition-colors ${
             dragOver ? 'bg-indigo-900/10 ring-2 ring-inset ring-indigo-500/30' : ''
           }`}
-          onDragOver={isFilesTab ? handleDragOver : undefined}
-          onDragLeave={isFilesTab ? handleDragLeave : undefined}
-          onDrop={isFilesTab ? handleDrop : undefined}
+          onDragOver={canUpload ? handleDragOver : undefined}
+          onDragLeave={canUpload ? handleDragLeave : undefined}
+          onDrop={canUpload ? handleDrop : undefined}
         >
           {/* Upload progress */}
           {uploading && (
@@ -681,16 +775,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
           )}
 
-          {/* Shared tab placeholder */}
-          {isSharedTab && (
+          {/* Shared view placeholder */}
+          {isSharedView && (
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
               <Share2 size={48} className="text-zinc-600 mb-4" />
               <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
             </div>
           )}
 
-          {/* Files / Recycle content */}
-          {!isSharedTab && (
+          {/* Resources / Recycle / Downloads content */}
+          {!isSharedView && (
             loading ? (
               viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
             ) : sortedItems.length > 0 ? (
@@ -703,10 +797,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       onClick={() => handleResourceClick(item)}
                       viewMode="grid"
                       isSelected={selectedResource?.id === item.id}
-                      showRestoreAction={isRecycleTab}
-                      onTrash={isRecycleTab ? undefined : handleTrash}
-                      onRestore={isRecycleTab ? handleRestore : undefined}
-                      onPermanentDelete={isRecycleTab ? handlePermanentDelete : undefined}
+                      showRestoreAction={isRecycleView}
+                      onTrash={isRecycleView ? undefined : handleTrash}
+                      onRestore={isRecycleView ? handleRestore : undefined}
+                      onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
                     />
                   ))}
                 </div>
@@ -719,10 +813,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       onClick={() => handleResourceClick(item)}
                       viewMode="list"
                       isSelected={selectedResource?.id === item.id}
-                      showRestoreAction={isRecycleTab}
-                      onTrash={isRecycleTab ? undefined : handleTrash}
-                      onRestore={isRecycleTab ? handleRestore : undefined}
-                      onPermanentDelete={isRecycleTab ? handlePermanentDelete : undefined}
+                      showRestoreAction={isRecycleView}
+                      onTrash={isRecycleView ? undefined : handleTrash}
+                      onRestore={isRecycleView ? handleRestore : undefined}
+                      onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
                     />
                   ))}
                 </div>
@@ -730,7 +824,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             ) : (
               /* Empty states */
               <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                {isRecycleTab ? (
+                {isRecycleView ? (
                   <>
                     <Trash2 size={48} className="text-zinc-600 mb-4" />
                     <p className="text-zinc-400 text-sm">{t('resources.recycleBinEmpty')}</p>
@@ -751,6 +845,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             )
           )}
         </div>
+        </>
+        )}
       </div>
 
       {/* ── Right panel: Resource Info ── */}
