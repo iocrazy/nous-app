@@ -2,6 +2,25 @@
 
 本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
+## Worktree 端口隔离
+
+**重要**：本项目使用 git worktree 多分支并行开发，每个 worktree 有独立端口。
+
+**启动前必读**：检查当前 worktree 根目录的 `.worktree.env` 文件获取端口分配：
+- `FRONTEND_PORT` — 前端 dev server 端口
+- `BACKEND_PORT` — 后端 FastAPI 端口
+- `REDIS_DB` — Celery Redis 数据库编号
+
+端口已自动写入 `frontend/.env.local` 和 `backend/.env`，无需手动配置。
+
+**管理工具**：`scripts/worktree-manager.sh`
+```bash
+./scripts/worktree-manager.sh list              # 查看所有 worktree 端口分配
+./scripts/worktree-manager.sh create <branch>   # 创建新 worktree（自动分配端口）
+./scripts/worktree-manager.sh destroy <name>    # 销毁 worktree（释放端口）
+./scripts/worktree-manager.sh init              # 为当前目录初始化端口配置
+```
+
 ## 开发规范
 
 ### UI 语言规范

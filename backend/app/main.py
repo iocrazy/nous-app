@@ -155,9 +155,12 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # 添加CORS中间件
+# allow_origin_regex 匹配所有 localhost 端口，无需逐个配置
+# allow_origins 保留生产域名列表
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"^http://localhost:\d+$",
     allow_credentials=settings.CORS_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
