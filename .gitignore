@@ -256,6 +256,8 @@ cache/
 
 # Git worktrees
 .worktrees/
+.worktree.env
+.worktree-registry.json
 backend/.celery/
 
 # MCP
