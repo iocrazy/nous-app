@@ -31,6 +31,12 @@ function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 function getFileIcon(mimeType: string | null | undefined) {
   if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
@@ -122,8 +128,22 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       className={`relative bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden ${selectedRing}`}
     >
       {/* Thumbnail */}
-      <div className={`h-32 flex items-center justify-center ${bg}`}>
-        <IconComponent size={40} className={`${color} opacity-60 group-hover:opacity-100 transition-opacity`} />
+      <div className={`relative h-32 flex items-center justify-center ${bg}`}>
+        {resource?.thumbnail_path ? (
+          <img
+            src={resource.thumbnail_path}
+            alt={filename}
+            className="w-full h-full object-cover rounded-t-lg"
+            loading="lazy"
+          />
+        ) : (
+          <IconComponent size={40} className={`${color} opacity-60 group-hover:opacity-100 transition-opacity`} />
+        )}
+        {mimeType?.startsWith('video/') && resource?.duration_seconds != null && (
+          <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
+            {formatDuration(resource.duration_seconds)}
+          </span>
+        )}
       </div>
       {/* Actions overlay */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
