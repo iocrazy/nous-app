@@ -43,16 +43,21 @@ import {
   addResourceTag,
   removeResourceTag,
   fetchSmartFolders,
-  fetchSmartFolderResources,
+  fetchSmartFolderResults,
+  createSmartFolder,
+  updateSmartFolder,
+  deleteSmartFolder,
   renameFolder,
   renameResource,
 } from '../services/resourceService';
+import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { ResourceCard } from './ResourceCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
+import { SmartFolderEditor } from './SmartFolderEditor';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -283,6 +288,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameFolderValue, setRenameFolderValue] = useState('');
 
+  // Smart folder editor
+  const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
+  const [editingSmartFolder, setEditingSmartFolder] = useState<SmartCollection | null>(null);
+
   // ─── Derived view flags ──────────────────────────────
 
   const isResourcesView = sidebarView === 'resources';
@@ -330,8 +339,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       try {
         let items: ResourceItem[];
         if (selectedSmartFolderId) {
-          const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
-          items = sf ? await fetchSmartFolderResources(scopeType, scopeId, sf.rules as any) : [];
+          items = await fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId);
         } else {
           items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
         }
@@ -345,7 +353,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     loadResources();
     return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, smartFolders, sidebarView]);
+  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
 
   // ─── Load trashed resources ──────────────────────────
 
@@ -790,6 +798,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       ];
     }
 
+    if ((contextMenu.type as string) === 'smartFolder') {
+      const sf = contextMenu.target as unknown as SmartCollection;
+      return [
+        {
+          label: t('smartFolder.editSmartFolder'),
+          icon: <Pencil size={14} />,
+          onClick: () => setEditingSmartFolder(sf),
+        },
+        {
+          label: t('smartFolder.deleteSmartFolder'),
+          icon: <Trash2 size={14} />,
+          onClick: () => handleDeleteSmartFolder(sf),
+          danger: true,
+          divider: true,
+        },
+      ];
+    }
+
     // Empty area
     return [
       {
@@ -816,7 +842,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         divider: true,
       },
     ];
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, scopeType, scopeId, selectedFolderId, loadFolders]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders]);
 
   // ─── Rename handlers ─────────────────────────────────
 
@@ -855,6 +881,37 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } catch { /* ignore */ }
     setRenamingFolderId(null);
   }, [renamingFolderId, renameFolderValue, loadFolders]);
+
+  // ─── Smart Folder CRUD ──────────────────────────────
+
+  const handleCreateSmartFolder = useCallback(async (name: string, rules: SmartFolderRules) => {
+    await createSmartFolder(name, scopeType, scopeId, rules);
+    const updated = await fetchSmartFolders(scopeType, scopeId);
+    setSmartFolders(updated);
+    setShowSmartFolderEditor(false);
+    // Navigate to the newly created smart folder
+    const newest = updated[updated.length - 1];
+    if (newest) navigate(resPath(`/resources/smart/${newest.id}`));
+  }, [scopeType, scopeId, navigate, resPath]);
+
+  const handleEditSmartFolder = useCallback(async (name: string, rules: SmartFolderRules) => {
+    if (!editingSmartFolder) return;
+    await updateSmartFolder(String(editingSmartFolder.id), { name, rules });
+    const updated = await fetchSmartFolders(scopeType, scopeId);
+    setSmartFolders(updated);
+    setEditingSmartFolder(null);
+  }, [editingSmartFolder, scopeType, scopeId]);
+
+  const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
+    if (!confirm(t('smartFolder.confirmDelete'))) return;
+    await deleteSmartFolder(String(sf.id));
+    const updated = await fetchSmartFolders(scopeType, scopeId);
+    setSmartFolders(updated);
+    // If we're viewing the deleted folder, go back to resources root
+    if (selectedSmartFolderId === String(sf.id)) {
+      navigate(resPath('/resources'));
+    }
+  }, [scopeType, scopeId, selectedSmartFolderId, navigate, resPath, t]);
 
   // ─── Breadcrumb ───────────────────────────────────────
 
@@ -1260,8 +1317,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </button>
             <button
               className="p-1 text-zinc-600 hover:text-zinc-400 rounded transition-colors shrink-0"
-              title="Coming soon"
-              disabled
+              title={t('smartFolder.createTitle')}
+              onClick={(e) => { e.stopPropagation(); setShowSmartFolderEditor(true); }}
             >
               <Plus size={14} />
             </button>
@@ -1272,11 +1329,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             <button
               key={sf.id}
               onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
-              className={sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
+              }}
+              className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
               style={{ paddingLeft: '12px' }}
             >
               <Zap size={14} className="shrink-0" />
-              <span className="truncate">{sf.name}</span>
+              <span className="truncate flex-1">{sf.name}</span>
+              <span
+                className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingSmartFolder(sf);
+                }}
+                title={t('smartFolder.editSmartFolder')}
+              >
+                <Pencil size={12} />
+              </span>
             </button>
           ))}
         </div>
@@ -1610,6 +1682,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             ))}
           </div>
         </div>
+      )}
+
+      {/* ── Smart Folder Editor (Create) ── */}
+      {showSmartFolderEditor && (
+        <SmartFolderEditor
+          onSave={handleCreateSmartFolder}
+          onClose={() => setShowSmartFolderEditor(false)}
+        />
+      )}
+
+      {/* ── Smart Folder Editor (Edit) ── */}
+      {editingSmartFolder && (
+        <SmartFolderEditor
+          initialName={editingSmartFolder.name}
+          initialRules={editingSmartFolder.smart_rules as SmartFolderRules | undefined}
+          onSave={handleEditSmartFolder}
+          onClose={() => setEditingSmartFolder(null)}
+        />
       )}
     </div>
   );

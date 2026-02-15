@@ -111,7 +111,8 @@
     "success": "成功",
     "search": "搜索",
     "create": "创建",
-    "creating": "创建中..."
+    "creating": "创建中...",
+    "saving": "保存中..."
   },
   "parser": {
     "title": "媒体解析",
@@ -346,6 +347,55 @@
     "fileDetail": "文件详情",
     "versions": "版本历史",
     "location": "位置"
+  },
+  "smartFolder": {
+    "createTitle": "创建智能文件夹",
+    "editTitle": "编辑智能文件夹",
+    "name": "名称",
+    "namePlaceholder": "例如：最近的视频",
+    "matchPrefix": "匹配",
+    "matchAll": "全部",
+    "matchAny": "任意",
+    "matchMiddle": "以下条件为",
+    "matchTrue": "符合",
+    "matchFalse": "不符合",
+    "addCondition": "添加条件",
+    "removeCondition": "移除条件",
+    "editSmartFolder": "编辑智能文件夹",
+    "deleteSmartFolder": "删除智能文件夹",
+    "confirmDelete": "确定删除此智能文件夹？",
+    "fields": {
+      "filename": "文件名",
+      "fileType": "文件类型",
+      "sourceType": "来源",
+      "mimeType": "MIME 类型",
+      "fileSize": "文件大小",
+      "createdAt": "创建日期",
+      "duration": "时长",
+      "resolution": "分辨率",
+      "tags": "标签"
+    },
+    "ops": {
+      "equals": "等于",
+      "contains": "包含",
+      "startsWith": "开头是",
+      "greaterThan": "大于",
+      "lessThan": "小于",
+      "gte": "≥",
+      "lte": "≤",
+      "notContains": "不包含"
+    },
+    "fileTypes": {
+      "video": "视频",
+      "audio": "音频",
+      "image": "图片",
+      "document": "文档",
+      "other": "其他"
+    },
+    "sourceTypes": {
+      "upload": "上传",
+      "web": "网页（Parser）"
+    }
   },
   "annotations": {
     "annotate": "标注",
