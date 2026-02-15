@@ -4,12 +4,14 @@ import { useTeamContext } from '../contexts/TeamContext';
 
 export function ResourcesPage() {
   const { currentUserId } = useAuth();
-  const { selectedTeamId } = useTeamContext();
+  const { selectedTeamId, personalTeamId } = useTeamContext();
+
+  const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
 
   return (
     <ResourcesView
-      scopeType={selectedTeamId ? 'team' : 'personal'}
-      scopeId={selectedTeamId || currentUserId || ''}
+      scopeType={isPersonal ? 'personal' : 'team'}
+      scopeId={isPersonal ? (currentUserId || '') : (selectedTeamId || '')}
     />
   );
 }
