@@ -29,9 +29,10 @@ export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId 
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
 
   // Sidebar mode: personal team is still a team record (is_personal=true)
+  // Gate 'team' on personalTeamId being loaded to avoid flash on refresh
   const sidebarMode: SidebarMode = selectedProject && selectedTeamId ? 'project'
     : (personalTeamId && selectedTeamId === personalTeamId) ? 'personal'
-    : selectedTeamId ? 'team'
+    : (personalTeamId && selectedTeamId) ? 'team'
     : 'personal';
 
   // Accordion behavior
