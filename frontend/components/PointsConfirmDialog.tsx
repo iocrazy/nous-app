@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { X, Coins, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { checkQuota } from '../services/pointsService';
@@ -22,6 +22,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { teamId } = useParams();
   const [quotaInfo, setQuotaInfo] = useState<QuotaCheck | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +144,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
           {insufficient ? (
             <button
               type="button"
-              onClick={() => { onClose(); navigate('/points'); }}
+              onClick={() => { onClose(); navigate(teamId ? `/t/${teamId}/points` : '/points'); }}
               className="flex-1 px-4 py-3 text-white bg-amber-500 hover:bg-amber-400 rounded-xl font-medium transition-colors"
             >
               {t('points.buyPoints', 'Buy Points')}

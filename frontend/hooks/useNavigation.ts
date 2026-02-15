@@ -6,9 +6,10 @@ import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 interface UseNavigationParams {
   isAuthenticated: boolean;
   selectedTeamId: string | null;
+  personalTeamId: string | null;
 }
 
-export function useNavigation({ isAuthenticated, selectedTeamId }: UseNavigationParams) {
+export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId }: UseNavigationParams) {
   const [view, setView] = useState<ViewState>('parser');
   const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs'>('general');
 
@@ -27,8 +28,11 @@ export function useNavigation({ isAuthenticated, selectedTeamId }: UseNavigation
   // Dashboard Stats
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
 
-  // Sidebar mode
-  const sidebarMode: SidebarMode = selectedProject && selectedTeamId ? 'project' : selectedTeamId ? 'team' : 'personal';
+  // Sidebar mode: personal team is still a team record (is_personal=true)
+  const sidebarMode: SidebarMode = selectedProject && selectedTeamId ? 'project'
+    : (personalTeamId && selectedTeamId === personalTeamId) ? 'personal'
+    : selectedTeamId ? 'team'
+    : 'personal';
 
   // Accordion behavior
   const toggleLibraryMenu = () => {

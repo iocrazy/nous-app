@@ -7,6 +7,8 @@ import { NotificationWithRead } from '../services/notificationService';
 interface TeamContextValue {
   teams: Team[];
   setTeams: React.Dispatch<React.SetStateAction<Team[]>>;
+  personalTeamId: string | null;
+  teamsLoading: boolean;
   selectedTeamId: string | null;
   setSelectedTeamId: React.Dispatch<React.SetStateAction<string | null>>;
   notifications: NotificationWithRead[];

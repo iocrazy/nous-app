@@ -7,6 +7,7 @@ import { Team } from '../types';
 interface WorkspaceSwitcherProps {
   teams: Team[];
   activeTeamId: string | null;
+  personalTeamId: string | null;
   currentTeam: Team | null;
   userName?: string;
   onTeamChange: (teamId: string | null) => void;
@@ -28,6 +29,7 @@ function getTeamColor(name: string): string {
 export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   teams,
   activeTeamId,
+  personalTeamId,
   currentTeam,
   userName,
   onTeamChange,
@@ -60,8 +62,14 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
 
   const handleSelect = (teamId: string | null) => {
     onTeamChange(teamId);
-    // Navigate to default route for workspace type
-    navigate(teamId ? '/resources' : '/parser');
+    // Navigate to team-scoped URL
+    if (teamId) {
+      const isPersonal = teamId === personalTeamId;
+      const defaultView = isPersonal ? 'parser' : 'resources';
+      navigate(`/t/${teamId}/${defaultView}`);
+    } else {
+      navigate('/parser');
+    }
     setIsOpen(false);
   };
 
@@ -70,7 +78,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     setIsOpen(false);
   };
 
-  const isPersonal = activeTeamId === null;
+  const isPersonal = personalTeamId ? activeTeamId === personalTeamId : activeTeamId === null;
   const capitalizedName = userName
     ? userName.charAt(0).toUpperCase() + userName.slice(1)
     : '';
@@ -110,7 +118,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           <div className="py-1">
             {/* Personal workspace */}
             <button
-              onClick={() => handleSelect(null)}
+              onClick={() => handleSelect(personalTeamId)}
               className={`flex items-center gap-2.5 w-full px-3 py-2 transition-colors ${
                 isPersonal ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40'
               }`}
