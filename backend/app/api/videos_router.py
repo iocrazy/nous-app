@@ -286,7 +286,18 @@ async def fetch_video(
 
         # Download media files
         download_task_id = None
-        need_download = request.video_bool or request.music_bool or request.cover_bool
+        dedup_hit = save_result.get("dedup_hit", False)
+        # If dedup hit, video download is already done; only need music/cover
+        need_download_video = request.video_bool and not dedup_hit
+        need_download = need_download_video or request.music_bool or request.cover_bool
+
+        if dedup_hit:
+            # Auto-create resource record immediately for dedup hits
+            background_tasks.add_task(
+                VideoService._create_resource_record_sync,
+                platform_id,
+                auth.user_id,
+            )
 
         if need_download:
             # Try Celery, fallback to FastAPI background tasks if unavailable
@@ -302,7 +313,7 @@ async def fetch_video(
                 download_task = download_media_task.delay(
                     platform_id=platform_id,
                     user_id=auth.user_id,
-                    download_video=request.video_bool,
+                    download_video=need_download_video,
                     download_music=request.music_bool,
                     download_cover=request.cover_bool,
                     media_type=media_type,
@@ -319,14 +330,14 @@ async def fetch_video(
 
                 # Add download tasks based on type
                 if int(media_type) in (0, 4, 61):  # Video types
-                    if request.video_bool:
+                    if need_download_video:
                         background_tasks.add_task(
                             DownloaderService.download_video_by_platform_id,
                             platform_id,
                             user_id=auth.user_id,
                         )
                 elif int(media_type) in (2, 68):  # Image types
-                    if request.video_bool:
+                    if need_download_video:
                         background_tasks.add_task(
                             DownloaderService.download_images_by_platform_id,
                             platform_id,
@@ -399,9 +410,12 @@ async def fetch_video(
             "original_url": parsed_data.get("original_url"),
             "resolution": parsed_data.get("resolution"),
             # Download status
-            "video_download_status": parsed_data.get(
-                "video_download_status", "PENDING"
+            "video_download_status": (
+                "COMPLETED" if dedup_hit else parsed_data.get(
+                    "video_download_status", "PENDING"
+                )
             ),
+            "dedup_hit": dedup_hit,
             # Download task ID (for frontend progress polling)
             "download_task_id": download_task_id,
         }

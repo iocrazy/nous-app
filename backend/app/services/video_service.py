@@ -12,6 +12,7 @@ from typing import Any, Dict
 from loguru import logger
 
 from app.core.enums import DownloadStatus
+from app.core.utils import Utils
 from app.repositories.video_repository import VideoRepository
 from app.schemas.video import VideoCreate
 from app.services.downloader import DownloaderService
@@ -457,10 +458,43 @@ class VideoService:
             # Check if already exists
             existing_video = await repo.get_by_platform_id(platform_id, user_id=user_id)
 
+            # Cross-user dedup check: reuse files if another user already downloaded
+            dedup_hit = False
+            if need_download_video:
+                global_video = await repo.get_downloaded_by_platform_id(platform_id)
+                if global_video and global_video.get("download_path"):
+                    from pathlib import Path as _Path
+
+                    file_full_path = (
+                        _Path(Utils.get_download_base_path())
+                        / global_video["download_path"]
+                    )
+                    if file_full_path.exists():
+                        # Reuse existing file — zero-copy dedup
+                        data_dict["download_path"] = global_video["download_path"]
+                        data_dict["video_download_status"] = (
+                            DownloadStatus.COMPLETED.value
+                        )
+                        data_dict["storage_size"] = global_video.get(
+                            "storage_size", 0
+                        )
+                        if global_video.get("cover_download_path"):
+                            data_dict["cover_download_path"] = global_video[
+                                "cover_download_path"
+                            ]
+                            data_dict["cover_download_status"] = (
+                                DownloadStatus.COMPLETED.value
+                            )
+                        need_download_video = False
+                        dedup_hit = True
+                        logger.info(
+                            f"[Dedup] Reusing existing download for {platform_id}"
+                        )
+
             # Set download status to PENDING (waiting for Celery task to download)
             if need_download_video:
                 data_dict["video_download_status"] = DownloadStatus.PENDING.value
-            else:
+            elif not dedup_hit:
                 data_dict["video_download_status"] = DownloadStatus.SKIPPED.value
 
             if need_download_music:
@@ -472,10 +506,13 @@ class VideoService:
             if existing_video:
                 # Update existing record
                 video_id = existing_video.get("id")
+                exclude_keys = ["download_duration"]
+                if not dedup_hit:
+                    exclude_keys.append("download_path")
                 update_data = {
                     k: v
                     for k, v in data_dict.items()
-                    if k not in ["download_path", "download_duration"]
+                    if k not in exclude_keys
                 }
                 await repo.update(platform_id, update_data)
                 message = f"媒体 {platform_id}_{title} 元数据已更新"
@@ -492,6 +529,7 @@ class VideoService:
                 "message": message,
                 "platform_id": platform_id,
                 "id": video_id,  # Database ID for tag operations
+                "dedup_hit": dedup_hit,
             }
 
         except Exception as e:
