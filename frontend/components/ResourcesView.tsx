@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
+import { usePermission } from '../hooks/usePermission';
 import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
   fetchFolders,
@@ -58,6 +59,7 @@ import { ResourceInfoPanel } from './ResourceInfoPanel';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
+import { ShareModal } from './ShareModal';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -292,13 +294,30 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartCollection | null>(null);
 
+  // Share target (for ShareModal)
+  const [shareTarget, setShareTarget] = useState<{
+    resourceId?: string;
+    folderId?: string;
+    libraryId?: string;
+  } | null>(null);
+
+  // ─── Permission check ────────────────────────────────
+
+  const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
+  const permObjectId = selectedLibraryId ?? selectedFolderId ?? null;
+  const { canDo } = usePermission(
+    scopeType === 'team' ? permObjectType : null,
+    scopeType === 'team' ? permObjectId : null,
+    scopeType === 'team' ? (teamId ?? null) : null,
+  );
+
   // ─── Derived view flags ──────────────────────────────
 
   const isResourcesView = sidebarView === 'resources';
   const isRecycleView = sidebarView === 'recycle';
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
-  const canUpload = isResourcesView;
+  const canUpload = isResourcesView && canDo('upload');
 
   // ─── Load folders on scope change ────────────────────
 
@@ -701,7 +720,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       const item = contextMenu.target as ResourceItem;
       const resourceId = item.resource?.id;
       const filePath = item.resource?.file_path;
-      return [
+      const items: ContextMenuItem[] = [
         {
           label: t('resources.openInNewTab'),
           icon: <ExternalLink size={14} />,
@@ -710,7 +729,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           },
           disabled: !filePath,
         },
-        {
+      ];
+      if (canDo('download')) {
+        items.push({
           label: t('resources.downloadOriginal'),
           icon: <Download size={14} />,
           onClick: () => {
@@ -724,8 +745,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             }
           },
           disabled: !filePath,
-        },
-        {
+        });
+      }
+      if (canDo('update')) {
+        items.push({
           label: t('resources.rename'),
           icon: <Pencil size={14} />,
           onClick: () => {
@@ -735,20 +758,35 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             }
           },
           divider: true,
-        },
-        {
+        });
+      }
+      if (canDo('copy')) {
+        items.push({
           label: t('resources.copyTo'),
           icon: <Copy size={14} />,
           onClick: () => {},
           disabled: true,
-        },
-        {
+        });
+      }
+      if (canDo('move')) {
+        items.push({
           label: t('resources.moveTo'),
           icon: <Move size={14} />,
           onClick: () => {},
           disabled: true,
-        },
-        {
+        });
+      }
+      if (canDo('share')) {
+        items.push({
+          label: t('resources.share'),
+          icon: <Share2 size={14} />,
+          onClick: () => {
+            setShareTarget({ resourceId: item.resource?.id });
+          },
+        });
+      }
+      if (canDo('delete')) {
+        items.push({
           label: t('resources.moveToTrash'),
           icon: <Trash2 size={14} />,
           onClick: () => {
@@ -756,13 +794,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           },
           danger: true,
           divider: true,
-        },
-      ];
+        });
+      }
+      return items;
     }
 
     if (contextMenu.type === 'folder') {
       const folder = contextMenu.target as Folder;
-      return [
+      const items: ContextMenuItem[] = [
         {
           label: t('resources.open'),
           icon: <FolderOpen size={14} />,
@@ -774,15 +813,28 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             }
           },
         },
-        {
+      ];
+      if (canDo('update')) {
+        items.push({
           label: t('resources.rename'),
           icon: <Pencil size={14} />,
           onClick: () => {
             setRenamingFolderId(folder.id);
             setRenameFolderValue(folder.name);
           },
-        },
-        {
+        });
+      }
+      if (canDo('share')) {
+        items.push({
+          label: t('resources.share'),
+          icon: <Share2 size={14} />,
+          onClick: () => {
+            setShareTarget({ folderId: folder.id });
+          },
+        });
+      }
+      if (canDo('delete')) {
+        items.push({
           label: t('resources.moveToTrash'),
           icon: <Trash2 size={14} />,
           onClick: async () => {
@@ -794,8 +846,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           },
           danger: true,
           divider: true,
-        },
-      ];
+        });
+      }
+      return items;
     }
 
     if ((contextMenu.type as string) === 'smartFolder') {
@@ -817,32 +870,36 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
 
     // Empty area
-    return [
-      {
-        label: t('resources.uploadFile'),
-        icon: <Upload size={14} />,
-        onClick: () => fileInputRef.current?.click(),
-      },
-      {
-        label: t('resources.newFolder'),
-        icon: <FolderPlus size={14} />,
-        onClick: () => setCreatingFolder(true),
-      },
-      {
-        label: t('resources.refresh'),
-        icon: <RefreshCw size={14} />,
-        onClick: async () => {
-          setLoading(true);
-          try {
-            const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-            setResources(items);
-          } catch { /* ignore */ }
-          setLoading(false);
+    const emptyItems: ContextMenuItem[] = [];
+    if (canDo('upload')) {
+      emptyItems.push(
+        {
+          label: t('resources.uploadFile'),
+          icon: <Upload size={14} />,
+          onClick: () => fileInputRef.current?.click(),
         },
-        divider: true,
+        {
+          label: t('resources.newFolder'),
+          icon: <FolderPlus size={14} />,
+          onClick: () => setCreatingFolder(true),
+        },
+      );
+    }
+    emptyItems.push({
+      label: t('resources.refresh'),
+      icon: <RefreshCw size={14} />,
+      onClick: async () => {
+        setLoading(true);
+        try {
+          const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+          setResources(items);
+        } catch { /* ignore */ }
+        setLoading(false);
       },
-    ];
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders]);
+      divider: true,
+    });
+    return emptyItems;
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders, canDo]);
 
   // ─── Rename handlers ─────────────────────────────────
 
@@ -1699,6 +1756,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           initialRules={editingSmartFolder.smart_rules as SmartFolderRules | undefined}
           onSave={handleEditSmartFolder}
           onClose={() => setEditingSmartFolder(null)}
+        />
+      )}
+
+      {/* ── Share Modal ── */}
+      {shareTarget && (
+        <ShareModal
+          isOpen={true}
+          onClose={() => setShareTarget(null)}
+          resourceId={shareTarget.resourceId}
+          folderId={shareTarget.folderId}
         />
       )}
     </div>

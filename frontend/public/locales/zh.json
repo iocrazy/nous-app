@@ -346,7 +346,10 @@
     "noPreview": "暂不支持预览",
     "fileDetail": "文件详情",
     "versions": "版本历史",
-    "location": "位置"
+    "location": "位置",
+    "share": "分享",
+    "shareFile": "分享文件",
+    "shareFolder": "分享文件夹"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
