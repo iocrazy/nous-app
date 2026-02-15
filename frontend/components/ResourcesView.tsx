@@ -18,10 +18,11 @@ import {
   XCircle,
   X,
   UploadCloud,
+  BookOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
-import { Folder, ResourceItem, Tag, SmartCollection } from '../types';
+import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
   fetchFolders,
   buildFolderTree,
@@ -39,6 +40,7 @@ import {
   fetchSmartFolders,
   fetchSmartFolderResources,
 } from '../services/resourceService';
+import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { ResourceCard } from './ResourceCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
@@ -160,16 +162,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   scopeId,
 }) => {
   const { t } = useTranslation();
-  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId } = useParams();
+  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
   const resPath = (path: string) => teamId ? `/t/${teamId}${path}` : path;
 
   // URL-driven state
-  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId
+  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
     : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
+  const selectedLibraryId = urlLibraryId ?? null;
 
   // Data
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -204,6 +207,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Tags
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
+  // Libraries (team mode)
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [creatingLibrary, setCreatingLibrary] = useState(false);
+  const [newLibraryName, setNewLibraryName] = useState('');
+  const [savingLibrary, setSavingLibrary] = useState(false);
+  const newLibraryInputRef = useRef<HTMLInputElement>(null);
+
   // Smart folders
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -219,7 +229,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const loadFolders = useCallback(async () => {
     setFoldersLoading(true);
     try {
-      const allFolders = await fetchFolders(scopeType, scopeId);
+      const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
       setFolders(allFolders);
       setFolderTree(buildFolderTree(allFolders));
     } catch {
@@ -228,7 +238,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } finally {
       setFoldersLoading(false);
     }
-  }, [scopeType, scopeId]);
+  }, [scopeType, scopeId, selectedLibraryId]);
 
   useEffect(() => {
     // State resets for folder/view/smart folder handled by URL navigation
@@ -236,6 +246,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     loadFolders();
     fetchTags().then(setAllTags).catch(() => {});
     fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => {});
+    // Load libraries in team mode
+    if (scopeType === 'team') {
+      fetchLibraries(scopeId).then(setLibraries).catch(() => setLibraries([]));
+    }
   }, [loadFolders, scopeType, scopeId]);
 
   // ─── Load resources on folder change ─────────────────
@@ -252,7 +266,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
           items = sf ? await fetchSmartFolderResources(scopeType, scopeId, sf.rules as any) : [];
         } else {
-          items = await fetchResources(scopeType, scopeId, selectedFolderId);
+          items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
         }
         if (!cancelled) setResources(items);
       } catch {
@@ -264,7 +278,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     loadResources();
     return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, smartFolders, sidebarView]);
+  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, smartFolders, sidebarView]);
 
   // ─── Load trashed resources ──────────────────────────
 
@@ -302,13 +316,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [sidebarView, loadDownloadedResources]);
 
-  // ─── Focus new folder input ──────────────────────────
+  // ─── Focus new folder/library input ─────────────────
 
   useEffect(() => {
     if (creatingFolder && newFolderInputRef.current) {
       newFolderInputRef.current.focus();
     }
   }, [creatingFolder]);
+
+  useEffect(() => {
+    if (creatingLibrary && newLibraryInputRef.current) {
+      newLibraryInputRef.current.focus();
+    }
+  }, [creatingLibrary]);
 
   // ─── Create folder handler ───────────────────────────
 
@@ -330,6 +350,25 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       // Keep input open on error
     } finally {
       setSavingFolder(false);
+    }
+  };
+
+  // ─── Create library handler ─────────────────────────
+
+  const handleCreateLibrary = async () => {
+    const trimmed = newLibraryName.trim();
+    if (!trimmed || savingLibrary) return;
+    setSavingLibrary(true);
+    try {
+      const lib = await createLibrary({ name: trimmed, scope_id: scopeId });
+      setNewLibraryName('');
+      setCreatingLibrary(false);
+      setLibraries((prev) => [...prev, lib]);
+      navigate(resPath(`/resources/library/${lib.id}`));
+    } catch {
+      // Keep input open on error
+    } finally {
+      setSavingLibrary(false);
     }
   };
 
@@ -525,10 +564,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Clear selection on view/folder change
+  // Clear selection on view/folder/library change
   useEffect(() => {
     setSelectedResource(null);
-  }, [sidebarView, selectedFolderId, selectedSmartFolderId]);
+  }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
 
   const handleAddTag = useCallback(async (tagId: string) => {
     if (!selectedResource?.resource?.id) return;
@@ -636,93 +675,222 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* ── Divider ── */}
           <div className="mx-2 my-2 border-t border-zinc-800" />
 
-          {/* ── Main section: All Resources / RipVault / My Resources ── */}
-          <button
-            onClick={() => navigate(resPath('/resources'))}
-            className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
-          >
-            <FolderOpen size={14} className="shrink-0" />
-            <span>{t('resources.allResources')}</span>
-          </button>
+          {/* ── Main section: Team Libraries / Personal Resources ── */}
+          {scopeType === 'team' ? (
+            <>
+              {/* Team Libraries with ➕ */}
+              <div className="flex items-center justify-between pr-1">
+                <span className="px-3 py-1.5 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                  {t('resources.teamLibraries')}
+                </span>
+                <button
+                  onClick={() => setCreatingLibrary(true)}
+                  className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+                  title={t('resources.newLibrary')}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
 
-          {/* RipVault — personal mode only */}
-          {scopeType === 'personal' && (
-            <button
-              onClick={() => navigate(resPath('/resources/downloads'))}
-              className={sidebarItemClass(isDownloadsView)}
-            >
-              <Download size={14} className="shrink-0" />
-              <span>{t('resources.downloads')}</span>
-            </button>
-          )}
+              {/* Library list */}
+              {libraries.map((lib) => (
+                <button
+                  key={lib.id}
+                  onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
+                  className={sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}
+                >
+                  <BookOpen size={14} className="shrink-0" />
+                  <span className="truncate">{lib.name}</span>
+                </button>
+              ))}
 
-          {/* My Resources with ➕ */}
-          <div className="flex items-center justify-between pr-1">
-            <button
-              onClick={() => navigate(resPath('/resources'))}
-              className={sidebarItemClass(false)}
-              style={{ pointerEvents: 'none' }}
-            >
-              <FolderPlus size={14} className="shrink-0" />
-              <span>{t('resources.myResources')}</span>
-            </button>
-            <button
-              onClick={() => {
-                navigate(resPath('/resources'));
-                setCreatingFolder(true);
-              }}
-              className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
-              title={t('resources.newFolder')}
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-
-          {/* Folder tree (nested under My Resources) */}
-          {foldersLoading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 size={16} className="animate-spin text-zinc-500" />
-            </div>
-          ) : (
-            folderTree.map((folder) => (
-              <FolderTreeItem
-                key={folder.id}
-                folder={folder}
-                selectedFolderId={isResourcesView ? selectedFolderId : null}
-                onSelect={(id) => navigate(resPath(`/resources/folder/${id}`))}
-              />
-            ))
-          )}
-
-          {/* Inline new folder input */}
-          {creatingFolder && (
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <input
-                ref={newFolderInputRef}
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateFolder();
-                  if (e.key === 'Escape') {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                onBlur={() => {
-                  if (!newFolderName.trim()) {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                placeholder={t('resources.folderName')}
-                disabled={savingFolder}
-                className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-              />
-              {savingFolder && (
-                <Loader2 size={12} className="animate-spin text-zinc-400" />
+              {/* Inline new library input */}
+              {creatingLibrary && (
+                <div className="flex items-center gap-1.5 px-2 py-1">
+                  <input
+                    ref={newLibraryInputRef}
+                    type="text"
+                    value={newLibraryName}
+                    onChange={(e) => setNewLibraryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateLibrary();
+                      if (e.key === 'Escape') {
+                        setCreatingLibrary(false);
+                        setNewLibraryName('');
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!newLibraryName.trim()) {
+                        setCreatingLibrary(false);
+                        setNewLibraryName('');
+                      }
+                    }}
+                    placeholder={t('resources.libraryName')}
+                    disabled={savingLibrary}
+                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  />
+                  {savingLibrary && (
+                    <Loader2 size={12} className="animate-spin text-zinc-400" />
+                  )}
+                </div>
               )}
-            </div>
+
+              {/* Folder tree for selected library */}
+              {selectedLibraryId && (
+                <>
+                  {/* Create folder button inside library */}
+                  <div className="flex items-center justify-between pr-1 mt-1">
+                    <button
+                      onClick={() => navigate(resPath(`/resources/library/${selectedLibraryId}`))}
+                      className={sidebarItemClass(isResourcesView && selectedLibraryId !== null && !selectedFolderId)}
+                      style={{ paddingLeft: '12px' }}
+                    >
+                      <FolderOpen size={14} className="shrink-0" />
+                      <span>{t('resources.allFiles')}</span>
+                    </button>
+                    <button
+                      onClick={() => setCreatingFolder(true)}
+                      className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+                      title={t('resources.newFolder')}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+
+                  {foldersLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 size={16} className="animate-spin text-zinc-500" />
+                    </div>
+                  ) : (
+                    folderTree.map((folder) => (
+                      <FolderTreeItem
+                        key={folder.id}
+                        folder={folder}
+                        selectedFolderId={isResourcesView ? selectedFolderId : null}
+                        onSelect={(id) => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${id}`))}
+                        depth={1}
+                      />
+                    ))
+                  )}
+
+                  {/* Inline new folder input */}
+                  {creatingFolder && (
+                    <div className="flex items-center gap-1.5 px-2 py-1">
+                      <input
+                        ref={newFolderInputRef}
+                        type="text"
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleCreateFolder();
+                          if (e.key === 'Escape') {
+                            setCreatingFolder(false);
+                            setNewFolderName('');
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!newFolderName.trim()) {
+                            setCreatingFolder(false);
+                            setNewFolderName('');
+                          }
+                        }}
+                        placeholder={t('resources.folderName')}
+                        disabled={savingFolder}
+                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                      />
+                      {savingFolder && (
+                        <Loader2 size={12} className="animate-spin text-zinc-400" />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {libraries.length === 0 && !creatingLibrary && (
+                <div className="px-3 py-4 text-center">
+                  <p className="text-xs text-zinc-500">{t('resources.noLibraries')}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Personal mode: RipVault + My Resources */}
+              <button
+                onClick={() => navigate(resPath('/resources/downloads'))}
+                className={sidebarItemClass(isDownloadsView)}
+              >
+                <Download size={14} className="shrink-0" />
+                <span>{t('resources.downloads')}</span>
+              </button>
+
+              {/* My Resources with ➕ */}
+              <div className="flex items-center justify-between pr-1">
+                <button
+                  onClick={() => navigate(resPath('/resources'))}
+                  className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
+                >
+                  <FolderOpen size={14} className="shrink-0" />
+                  <span>{t('resources.myResources')}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    navigate(resPath('/resources'));
+                    setCreatingFolder(true);
+                  }}
+                  className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+                  title={t('resources.newFolder')}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+
+              {/* Folder tree */}
+              {foldersLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 size={16} className="animate-spin text-zinc-500" />
+                </div>
+              ) : (
+                folderTree.map((folder) => (
+                  <FolderTreeItem
+                    key={folder.id}
+                    folder={folder}
+                    selectedFolderId={isResourcesView ? selectedFolderId : null}
+                    onSelect={(id) => navigate(resPath(`/resources/folder/${id}`))}
+                  />
+                ))
+              )}
+
+              {/* Inline new folder input */}
+              {creatingFolder && (
+                <div className="flex items-center gap-1.5 px-2 py-1">
+                  <input
+                    ref={newFolderInputRef}
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateFolder();
+                      if (e.key === 'Escape') {
+                        setCreatingFolder(false);
+                        setNewFolderName('');
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!newFolderName.trim()) {
+                        setCreatingFolder(false);
+                        setNewFolderName('');
+                      }
+                    }}
+                    placeholder={t('resources.folderName')}
+                    disabled={savingFolder}
+                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  />
+                  {savingFolder && (
+                    <Loader2 size={12} className="animate-spin text-zinc-400" />
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {/* ── Divider ── */}
@@ -781,8 +949,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               selectedSmartFolderId
                 ? smartFolders.find((s) => String(s.id) === selectedSmartFolderId)?.name ?? t('resources.allResources')
                 : selectedFolderId
-                  ? folders.find((f) => f.id === selectedFolderId)?.name ?? t('resources.allResources')
-                  : t('resources.allResources')
+                  ? folders.find((f) => f.id === selectedFolderId)?.name ?? t('resources.allFiles')
+                  : selectedLibraryId
+                    ? libraries.find((l) => String(l.id) === selectedLibraryId)?.name ?? t('resources.allFiles')
+                    : scopeType === 'personal' ? t('resources.myResources') : t('resources.allFiles')
             )}
           </div>
 

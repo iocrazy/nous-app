@@ -65,6 +65,8 @@ export const router = createBrowserRouter([
           { path: 'resources/:section', element: <ResourcesPage /> },
           { path: 'resources/folder/:folderId', element: <ResourcesPage /> },
           { path: 'resources/smart/:smartFolderId', element: <ResourcesPage /> },
+          { path: 'resources/library/:libraryId', element: <ResourcesPage /> },
+          { path: 'resources/library/:libraryId/folder/:folderId', element: <ResourcesPage /> },
           { path: 'projects', element: <ProjectsPage /> },
           { path: 'projects/:projectId', element: <ProjectsPage /> },
           { path: 'projects/:projectId/review/:fileId', element: <ProjectsPage /> },

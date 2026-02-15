@@ -326,7 +326,12 @@
     "uploadComplete": "上传完成",
     "uploadFailed": "上传失败",
     "invalidFileType": "不支持的文件类型",
-    "fileTooLarge": "文件过大（最大 500 MB）"
+    "fileTooLarge": "文件过大（最大 500 MB）",
+    "teamLibraries": "资源库",
+    "newLibrary": "新建资源库",
+    "libraryName": "资源库名称",
+    "noLibraries": "暂无资源库，点击 + 创建。",
+    "allFiles": "全部文件"
   },
   "annotations": {
     "annotate": "标注",

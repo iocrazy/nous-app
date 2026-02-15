@@ -15,15 +15,24 @@ const getApiUrl = (): string => {
 
 export async function fetchFolders(
   scopeType: 'personal' | 'team',
-  scopeId: string
+  scopeId: string,
+  libraryId?: string | null
 ): Promise<Folder[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('folders')
     .select('*')
     .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
-    .eq('is_trashed', false)
-    .order('sort_order', { ascending: true });
+    .eq('is_trashed', false);
+
+  if (libraryId) {
+    query = query.eq('library_id', libraryId);
+  } else if (scopeType === 'team') {
+    // Team mode without library: show nothing (libraries are the entry point)
+    query = query.is('library_id', null);
+  }
+
+  const { data, error } = await query.order('sort_order', { ascending: true });
 
   if (error) throw error;
   return data || [];
@@ -89,7 +98,8 @@ export function buildFolderTree(folders: Folder[]): Folder[] {
 export async function fetchResources(
   scopeType: 'personal' | 'team',
   scopeId: string,
-  folderId?: string | null
+  folderId?: string | null,
+  libraryId?: string | null
 ): Promise<ResourceItem[]> {
   let query = supabase
     .from('resource_items')
@@ -101,6 +111,12 @@ export async function fetchResources(
     query = query.eq('folder_id', folderId);
   } else {
     query = query.is('folder_id', null);
+  }
+
+  if (libraryId) {
+    query = query.eq('library_id', libraryId);
+  } else if (scopeType === 'team') {
+    query = query.is('library_id', null);
   }
 
   const { data, error } = await query.order('created_at', { ascending: false });
