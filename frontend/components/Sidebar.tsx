@@ -10,7 +10,6 @@ import {
   Sparkles,
   ChevronDown,
   FolderOpen,
-  Library,
   ListTodo,
   ArrowLeft,
   Upload,
@@ -431,12 +430,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label={t('nav.linkParser')}
           active={currentView === 'parser'}
           onClick={() => handleNav('parser')}
-        />
-        <SidebarItem
-          icon={Library}
-          label={t('sidebar.library')}
-          active={currentView === 'library'}
-          onClick={() => handleNav('library')}
         />
         <SidebarItem
           icon={Layers}
