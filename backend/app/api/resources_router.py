@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -263,6 +263,60 @@ async def get_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to get resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get resource")
+
+
+@router.get("/{resource_id}/file")
+async def serve_resource_file(
+    resource_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Query(None),
+):
+    """Serve the actual file for preview/download.
+
+    Supports auth via:
+    - Authorization header (Bearer token)
+    - X-API-Key header
+    - ?token= query parameter (for <video>, <img>, <iframe> src)
+    """
+    from app.core.deps import get_auth
+
+    try:
+        # Accept token as query parameter for HTML element src usage
+        effective_auth = authorization
+        if not effective_auth and not x_api_key and token:
+            effective_auth = f"Bearer {token}"
+
+        auth = await get_auth(request, effective_auth, x_api_key)
+
+        repo = ResourcesRepository()
+        resource = await repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        file_path = resource.get("file_path")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="No file available")
+
+        # Resolve full path from DOWNLOAD_PATH base
+        from app.core.config import settings
+
+        full_path = Path(settings.DOWNLOAD_PATH) / file_path
+
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail="File not found on disk")
+
+        return FileResponse(
+            path=str(full_path),
+            filename=resource.get("filename", "download"),
+            media_type=resource.get("mime_type", "application/octet-stream"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve file for resource {resource_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
 @router.patch("/{resource_id}")

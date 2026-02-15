@@ -15,6 +15,7 @@ import { MembersPage } from './pages/MembersPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { TodolistPage } from './pages/TodolistPage';
 import { PlayerPage } from './pages/PlayerPage';
+import { ResourceDetailPage } from './pages/ResourceDetailPage';
 
 export const router = createBrowserRouter([
   {
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
       { path: 'dashboard', element: <RedirectToTeam view="dashboard" /> },
       { path: 'dashboard/:subview', element: <RedirectToTeam view="dashboard" /> },
       { path: 'resources', element: <RedirectToTeam view="resources" /> },
+      { path: 'resources/file/:resourceId', element: <RedirectToTeam view="resources" /> },
       { path: 'resources/:section', element: <RedirectToTeam view="resources" /> },
       { path: 'projects', element: <RedirectToTeam view="projects" /> },
       { path: 'projects/:projectId', element: <RedirectToTeam view="projects" /> },
@@ -62,6 +64,7 @@ export const router = createBrowserRouter([
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'dashboard/:subview', element: <DashboardPage /> },
           { path: 'resources', element: <ResourcesPage /> },
+          { path: 'resources/file/:resourceId', element: <ResourceDetailPage /> },
           { path: 'resources/:section', element: <ResourcesPage /> },
           { path: 'resources/folder/:folderId', element: <ResourcesPage /> },
           { path: 'resources/smart/:smartFolderId', element: <ResourcesPage /> },
