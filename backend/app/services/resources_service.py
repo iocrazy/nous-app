@@ -252,6 +252,24 @@ class ResourcesService:
     # Soft delete / restore
     # ------------------------------------------------------------------ #
 
+    async def remove_from_library(
+        self,
+        resource_id: str,
+        user_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> bool:
+        """
+        Remove a resource from the user's library by deleting their
+        resource_item. The DB trigger auto-trashes the resource if this
+        was the last reference (orphan detection).
+        """
+        item = await self.repo.get_resource_item(resource_id, scope_type, scope_id)
+        if not item:
+            raise ValueError("Resource not found in this scope")
+
+        return await self.repo.delete_resource_item(item["id"])
+
     async def trash_resource(self, resource_id: str, user_id: str) -> dict:
         resource = await self.repo.get_resource_by_id(resource_id)
         if not resource:
@@ -286,7 +304,69 @@ class ResourcesService:
         if resource["creator_id"] != user_id:
             raise PermissionError("Only the creator can delete this resource")
 
+        self._delete_physical_files(resource)
         return await self.repo.delete_resource(resource_id)
+
+    async def cleanup_expired_trash(self, older_than_days: int = 30) -> int:
+        """
+        Permanently delete trashed resources older than N days.
+        Removes physical files and database records.
+        Returns count of cleaned-up resources.
+        """
+        expired = await self.repo.get_expired_trashed_resources(older_than_days)
+        cleaned = 0
+
+        for resource in expired:
+            try:
+                self._delete_physical_files(resource)
+                await self.repo.delete_resource(resource["id"])
+                cleaned += 1
+            except Exception as e:
+                logger.error(
+                    f"Failed to cleanup resource {resource['id']}: {e}"
+                )
+
+        if cleaned:
+            logger.info(f"Cleaned up {cleaned} expired trashed resources")
+        return cleaned
+
+    def _delete_physical_files(self, resource: dict) -> None:
+        """Delete physical files for a resource from disk."""
+        import shutil
+
+        base = Path(settings.DOWNLOAD_PATH)
+        file_path = resource.get("file_path")
+
+        if file_path:
+            full_path = base / file_path
+            # If file is in a dedicated directory (resources/web/{platform}/{id}/),
+            # remove the entire directory
+            parent = full_path.parent
+            if parent != base and parent.exists() and parent.name != base.name:
+                try:
+                    shutil.rmtree(parent)
+                    logger.info(f"Deleted directory: {parent}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to delete directory {parent}: {e}")
+
+            # Otherwise delete individual files
+            if full_path.exists():
+                try:
+                    full_path.unlink()
+                    logger.info(f"Deleted file: {full_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete file {full_path}: {e}")
+
+        cover_path = resource.get("cover_image_path")
+        if cover_path:
+            cover_full = base / cover_path
+            if cover_full.exists():
+                try:
+                    cover_full.unlink()
+                    logger.info(f"Deleted cover: {cover_full}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete cover {cover_full}: {e}")
 
     # ------------------------------------------------------------------ #
     # Move resource to folder

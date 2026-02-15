@@ -70,5 +70,9 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.reset_monthly_quotas",
             "schedule": crontab(minute=0, hour=0, day_of_month=1),
         },
+        "cleanup-trashed-resources-daily": {
+            "task": "app.tasks.scheduled_tasks.cleanup_trashed_resources",
+            "schedule": 86400.0,  # 每天执行一次
+        },
     },
 )

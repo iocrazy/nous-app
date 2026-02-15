@@ -376,3 +376,21 @@ def health_check():
         logger.warning(f"[Celery Beat] Health check found issues: {checks}")
 
     return result
+
+
+@shared_task
+def cleanup_trashed_resources():
+    """Permanently delete trashed resources older than 30 days."""
+    logger.info("[Celery Beat] Starting trashed resource cleanup...")
+    try:
+        from app.services.resources_service import ResourcesService
+
+        svc = ResourcesService()
+        cleaned = run_async(svc.cleanup_expired_trash(older_than_days=30))
+        logger.success(
+            f"[Celery Beat] Trashed resource cleanup done: {cleaned} deleted"
+        )
+        return {"status": "success", "cleaned": cleaned}
+    except Exception as e:
+        logger.error(f"[Celery Beat] Trashed resource cleanup failed: {e}")
+        return {"status": "error", "error": str(e)}

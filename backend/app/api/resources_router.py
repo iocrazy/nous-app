@@ -159,19 +159,31 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 
 
 @router.delete("/{resource_id}")
-async def delete_resource(resource_id: str, auth: AuthDep):
-    """Soft-delete a resource (move to trash)."""
+async def delete_resource(
+    resource_id: str,
+    auth: AuthDep,
+    scope_type: str = Query(..., pattern="^(personal|team)$"),
+    scope_id: str = Query(...),
+):
+    """Remove a resource from the user's library.
+
+    Deletes the resource_item reference. If this was the last reference,
+    the DB trigger auto-trashes the parent resource (orphan GC).
+    """
     try:
         svc = ResourcesService()
-        result = await svc.trash_resource(resource_id, auth.user_id)
-        return {"success": True, "data": result}
+        await svc.remove_from_library(
+            resource_id=resource_id,
+            user_id=auth.user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        return {"success": True, "message": "Resource removed from library"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete resource {resource_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete resource")
+        logger.error(f"Failed to remove resource {resource_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove resource")
 
 
 @router.post("/{resource_id}/restore")
