@@ -8,9 +8,11 @@ folder operations, tagging, and recycle bin.
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -21,6 +23,8 @@ from app.schemas.resources import (
     ResourceMoveRequest,
     ResourceTagRequest,
     ResourceUpdate,
+    SmartFolderCreate,
+    SmartFolderUpdate,
 )
 from app.services.resources_service import ResourcesService
 from app.services.thumbnail_service import ThumbnailService
@@ -115,6 +119,134 @@ async def list_trashed_resources(
     except Exception as e:
         logger.error(f"Failed to list trashed resources: {e}")
         raise HTTPException(status_code=500, detail="Failed to list trashed resources")
+
+
+# ============================================
+# Smart Folder endpoints
+# ============================================
+
+
+@router.post("/smart-folders")
+async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
+    """Create a smart folder with rule-based filtering."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.create_smart_folder(
+            {
+                "name": data.name,
+                "scope_type": data.scope_type,
+                "scope_id": data.scope_id,
+                "created_by": auth.user_id,
+                "is_smart": True,
+                "smart_rules": data.rules.model_dump(),
+                "icon": data.icon,
+                "color": data.color,
+            }
+        )
+        return {"success": True, "data": folder}
+    except Exception as e:
+        logger.error(f"Failed to create smart folder: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create smart folder")
+
+
+@router.get("/smart-folders")
+async def list_smart_folders(
+    auth: AuthDep,
+    scope_type: str = Query(..., pattern="^(personal|team)$"),
+    scope_id: str = Query(...),
+):
+    """List smart folders in a scope."""
+    try:
+        repo = ResourcesRepository()
+        folders = await repo.get_smart_folders(scope_type, scope_id)
+        return {"success": True, "data": folders}
+    except Exception as e:
+        logger.error(f"Failed to list smart folders: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list smart folders")
+
+
+@router.patch("/smart-folders/{folder_id}")
+async def update_smart_folder(
+    folder_id: str, data: SmartFolderUpdate, auth: AuthDep
+):
+    """Update a smart folder's name, rules, icon, or color."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Smart folder not found")
+        if not folder.get("is_smart"):
+            raise HTTPException(
+                status_code=400, detail="Folder is not a smart folder"
+            )
+
+        update_data = data.model_dump(exclude_none=True)
+        # Convert rules Pydantic model to dict for JSONB storage
+        if "rules" in update_data:
+            update_data["smart_rules"] = update_data.pop("rules")
+
+        result = await repo.update_folder(folder_id, update_data)
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update smart folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update smart folder")
+
+
+@router.delete("/smart-folders/{folder_id}")
+async def delete_smart_folder(folder_id: str, auth: AuthDep):
+    """Delete a smart folder."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Smart folder not found")
+        if not folder.get("is_smart"):
+            raise HTTPException(
+                status_code=400, detail="Folder is not a smart folder"
+            )
+
+        await repo.delete_folder(folder_id)
+        return {"success": True, "message": "Smart folder deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete smart folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete smart folder")
+
+
+@router.get("/smart-folders/{folder_id}/results")
+async def smart_folder_results(
+    folder_id: str,
+    auth: AuthDep,
+    scope_type: str = Query(..., pattern="^(personal|team)$"),
+    scope_id: str = Query(...),
+):
+    """Execute smart folder rules and return matching resources."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Smart folder not found")
+        if not folder.get("is_smart"):
+            raise HTTPException(
+                status_code=400, detail="Folder is not a smart folder"
+            )
+
+        rules = folder.get("smart_rules")
+        if not rules or not rules.get("conditions"):
+            return {"success": True, "data": []}
+
+        items = await repo.execute_smart_rules(scope_type, scope_id, rules)
+        return {"success": True, "data": items}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to execute smart folder {folder_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to execute smart folder rules"
+        )
 
 
 @router.get("/{resource_id}")
