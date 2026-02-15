@@ -15,6 +15,7 @@ from app.api.api_key_router import router as api_key_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.frontend_config_router import router as frontend_config_router
+from app.api.libraries_router import router as libraries_router
 from app.api.logs_router import router as logs_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
@@ -76,3 +77,5 @@ api_router.include_router(router=projects_router, tags=["MediaTrack"])
 api_router.include_router(router=resources_router, tags=["Resources"])
 
 api_router.include_router(router=shares_router, tags=["Shares"])
+
+api_router.include_router(router=libraries_router, tags=["Libraries"])
