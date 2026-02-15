@@ -188,6 +188,61 @@ class ResourcesRepository:
             logger.error(f"Failed to update resource_item {item_id}: {e}")
             raise
 
+    async def delete_resource_item(self, item_id: str) -> bool:
+        """Delete a resource_item by ID. The DB trigger will auto-trash
+        the parent resource if this was the last reference."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_ITEMS)
+                .delete()
+                .eq("id", item_id)
+                .execute()
+            )
+            logger.info(f"Deleted resource_item {item_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete resource_item {item_id}: {e}")
+            raise
+
+    async def count_resource_items(self, resource_id: str) -> int:
+        """Count how many resource_items reference a given resource."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_ITEMS)
+                .select("id", count="exact")
+                .eq("resource_id", resource_id)
+                .execute()
+            )
+            return result.count or 0
+        except Exception as e:
+            logger.error(f"Failed to count items for resource {resource_id}: {e}")
+            return 0
+
+    async def get_expired_trashed_resources(
+        self, older_than_days: int = 30
+    ) -> List[Dict[str, Any]]:
+        """Find trashed resources older than N days for permanent cleanup."""
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=older_than_days)
+            ).isoformat()
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_RESOURCES)
+                .select("id, file_path, cover_image_path")
+                .eq("is_trashed", True)
+                .lt("trashed_at", cutoff)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get expired trashed resources: {e}")
+            return []
+
     async def get_trashed_resources(
         self, scope_type: str, scope_id: str
     ) -> List[Dict[str, Any]]:
