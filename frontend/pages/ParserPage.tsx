@@ -12,7 +12,6 @@ import { CompactMediaCard } from '../components/CompactMediaCard';
 import { ParseModeCard } from '../components/ParseModeCard';
 import { ParserTagSelector } from '../components/ParserTagSelector';
 import { TaskMonitor } from '../components/TaskMonitor';
-import { PointsConfirmDialog } from '../components/PointsConfirmDialog';
 import { useAuth } from '../contexts/AuthContext';
 import { useLibrary } from '../hooks/useLibrary';
 import { useParser } from '../hooks/useParser';
@@ -37,7 +36,6 @@ export function ParserPage() {
     isParsing, taskStatus, taskProgress, socketLogs, systemStatus,
     batchResults, error,
     downloadTaskId, downloadStatus, downloadPercent, downloadSpeed,
-    pendingAction, setPendingAction,
     handleParse, handleSaveToLibrary, handleBatchSave,
   } = useParser({
     loadLibraryData,
@@ -337,18 +335,6 @@ export function ParserPage() {
         </div>
       )}
 
-      {/* Points Confirmation Dialog */}
-      <PointsConfirmDialog
-        isOpen={pendingAction !== null}
-        actionType={pendingAction?.type ?? 'video_parse'}
-        actionCount={pendingAction?.count ?? 1}
-        onConfirm={() => {
-          const cb = pendingAction?.callback;
-          setPendingAction(null);
-          cb?.();
-        }}
-        onClose={() => setPendingAction(null)}
-      />
     </div>
   );
 }
