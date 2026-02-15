@@ -326,7 +326,12 @@
     "uploadComplete": "Upload complete",
     "uploadFailed": "Upload failed",
     "invalidFileType": "Invalid file type",
-    "fileTooLarge": "File too large (max 500 MB)"
+    "fileTooLarge": "File too large (max 500 MB)",
+    "teamLibraries": "Libraries",
+    "newLibrary": "New Library",
+    "libraryName": "Library name",
+    "noLibraries": "No libraries yet. Create one to get started.",
+    "allFiles": "All Files"
   },
   "annotations": {
     "annotate": "Annotate",
