@@ -340,25 +340,90 @@ export async function fetchDownloadedResources(
 
 // ─── Smart Folders ───────────────────────────────────────
 
+export interface SmartFolderCondition {
+  field: string;
+  op: string;
+  value: string;
+}
+
+export interface SmartFolderRules {
+  operator: 'AND' | 'OR';
+  match: boolean;
+  conditions: SmartFolderCondition[];
+}
+
 export async function fetchSmartFolders(
   scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<SmartCollection[]> {
-  const { data, error } = await supabase
-    .from('smart_collections')
-    .select('*')
-    .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId)
-    .eq('is_active', true)
-    .order('name', { ascending: true });
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
+  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders?${params}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch smart folders');
+  const json = await response.json();
+  return json.data || [];
+}
 
-  if (error) throw error;
-  return data || [];
+export async function createSmartFolder(
+  name: string,
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+  rules: SmartFolderRules,
+): Promise<SmartCollection> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ name, scope_type: scopeType, scope_id: scopeId, rules }),
+  });
+  if (!response.ok) throw new Error('Failed to create smart folder');
+  const json = await response.json();
+  return json.data;
+}
+
+export async function updateSmartFolder(
+  folderId: string,
+  update: { name?: string; rules?: SmartFolderRules },
+): Promise<SmartCollection> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}`, {
+    method: 'PATCH',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(update),
+  });
+  if (!response.ok) throw new Error('Failed to update smart folder');
+  const json = await response.json();
+  return json.data;
+}
+
+export async function deleteSmartFolder(folderId: string): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to delete smart folder');
+}
+
+export async function fetchSmartFolderResults(
+  folderId: string,
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+): Promise<ResourceItem[]> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
+  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}/results?${params}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch smart folder results');
+  const json = await response.json();
+  return json.data || [];
 }
 
 /**
- * Query resources matching a smart folder's rules.
- * Builds Supabase filters from JSONB rules.
+ * Query resources matching a smart folder's rules (client-side fallback).
  */
 export async function fetchSmartFolderResources(
   scopeType: 'personal' | 'team',
@@ -371,7 +436,6 @@ export async function fetchSmartFolderResources(
     .eq('scope_type', scopeType)
     .eq('scope_id', scopeId);
 
-  // Apply conditions
   for (const cond of (rules.conditions || [])) {
     const col = `resource.${cond.field}`;
     switch (cond.operator) {

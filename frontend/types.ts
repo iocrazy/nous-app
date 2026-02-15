@@ -368,19 +368,25 @@ export interface Tag {
 
 // Smart Collections
 export interface SmartCollection {
-  id: number;
+  id: number | string;
   name: string;
-  description: string | null;
-  icon: string | null;
-  color: string | null;
-  rules: CollectionRules;
-  is_preset: boolean;
-  is_active: boolean;
-  sort_by: string;
-  sort_order: 'asc' | 'desc';
-  video_count: number;
-  created_at: string;
-  updated_at: string;
+  description?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  rules?: CollectionRules;
+  smart_rules?: {
+    operator: 'AND' | 'OR';
+    match: boolean;
+    conditions: Array<{ field: string; op: string; value: string }>;
+  };
+  is_preset?: boolean;
+  is_active?: boolean;
+  is_smart?: boolean;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  video_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CollectionCondition {

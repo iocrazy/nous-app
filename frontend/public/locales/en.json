@@ -111,7 +111,8 @@
     "success": "Success",
     "search": "Search",
     "create": "Create",
-    "creating": "Creating..."
+    "creating": "Creating...",
+    "saving": "Saving..."
   },
   "parser": {
     "title": "Media Parser",
@@ -346,6 +347,55 @@
     "fileDetail": "File Detail",
     "versions": "Versions",
     "location": "Location"
+  },
+  "smartFolder": {
+    "createTitle": "Create Smart Folder",
+    "editTitle": "Edit Smart Folder",
+    "name": "Name",
+    "namePlaceholder": "e.g. Recent Videos",
+    "matchPrefix": "Match",
+    "matchAll": "all",
+    "matchAny": "any",
+    "matchMiddle": "of the following are",
+    "matchTrue": "true",
+    "matchFalse": "false",
+    "addCondition": "Add condition",
+    "removeCondition": "Remove condition",
+    "editSmartFolder": "Edit Smart Folder",
+    "deleteSmartFolder": "Delete Smart Folder",
+    "confirmDelete": "Delete this smart folder?",
+    "fields": {
+      "filename": "Filename",
+      "fileType": "File Type",
+      "sourceType": "Source",
+      "mimeType": "MIME Type",
+      "fileSize": "File Size",
+      "createdAt": "Date Created",
+      "duration": "Duration",
+      "resolution": "Resolution",
+      "tags": "Tags"
+    },
+    "ops": {
+      "equals": "equals",
+      "contains": "contains",
+      "startsWith": "starts with",
+      "greaterThan": "greater than",
+      "lessThan": "less than",
+      "gte": "≥",
+      "lte": "≤",
+      "notContains": "does not contain"
+    },
+    "fileTypes": {
+      "video": "Video",
+      "audio": "Audio",
+      "image": "Image",
+      "document": "Document",
+      "other": "Other"
+    },
+    "sourceTypes": {
+      "upload": "Upload",
+      "web": "Web (Parser)"
+    }
   },
   "annotations": {
     "annotate": "Annotate",
