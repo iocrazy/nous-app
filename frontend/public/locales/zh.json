@@ -331,7 +331,21 @@
     "newLibrary": "新建资源库",
     "libraryName": "资源库名称",
     "noLibraries": "暂无资源库，点击 + 创建。",
-    "allFiles": "全部文件"
+    "allFiles": "全部文件",
+    "open": "打开",
+    "openInNewTab": "在新标签打开",
+    "downloadOriginal": "下载原文件",
+    "rename": "重命名",
+    "copyTo": "复制到",
+    "moveTo": "移动到",
+    "refresh": "刷新",
+    "uploadFile": "上传文件",
+    "itemCount": "{{count}} 项",
+    "download": "下载",
+    "noPreview": "暂不支持预览",
+    "fileDetail": "文件详情",
+    "versions": "版本历史",
+    "location": "位置"
   },
   "annotations": {
     "annotate": "标注",

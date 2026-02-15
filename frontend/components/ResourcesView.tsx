@@ -19,6 +19,11 @@ import {
   X,
   UploadCloud,
   BookOpen,
+  ExternalLink,
+  Pencil,
+  Copy,
+  Move,
+  RefreshCw,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
@@ -39,11 +44,15 @@ import {
   removeResourceTag,
   fetchSmartFolders,
   fetchSmartFolderResources,
+  renameFolder,
+  renameResource,
 } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { ResourceCard } from './ResourceCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
+import { ContextMenu, ContextMenuItem } from './ContextMenu';
+import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -89,6 +98,12 @@ interface FolderTreeItemProps {
   folder: Folder;
   selectedFolderId: string | null;
   onSelect: (id: string) => void;
+  onContextMenu?: (e: React.MouseEvent, folder: Folder) => void;
+  renamingFolderId?: string | null;
+  renameFolderValue?: string;
+  onRenameFolderChange?: (value: string) => void;
+  onRenameFolderConfirm?: () => void;
+  onRenameFolderCancel?: () => void;
   depth?: number;
 }
 
@@ -96,14 +111,22 @@ const FolderTreeItem: React.FC<FolderTreeItemProps> = ({
   folder,
   selectedFolderId,
   onSelect,
+  onContextMenu,
+  renamingFolderId,
+  renameFolderValue,
+  onRenameFolderChange,
+  onRenameFolderConfirm,
+  onRenameFolderCancel,
   depth = 0,
 }) => {
   const isSelected = selectedFolderId === folder.id;
+  const isRenaming = renamingFolderId === folder.id;
 
   return (
     <>
       <button
         onClick={() => onSelect(folder.id)}
+        onContextMenu={(e) => onContextMenu?.(e, folder)}
         className={`
           w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
           ${isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
@@ -111,7 +134,23 @@ const FolderTreeItem: React.FC<FolderTreeItemProps> = ({
         style={{ paddingLeft: `${12 + depth * 16}px` }}
       >
         <FolderOpen size={14} className="shrink-0" />
-        <span className="truncate">{folder.name}</span>
+        {isRenaming ? (
+          <input
+            autoFocus
+            value={renameFolderValue ?? ''}
+            onChange={(e) => onRenameFolderChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') onRenameFolderConfirm?.();
+              if (e.key === 'Escape') onRenameFolderCancel?.();
+            }}
+            onBlur={() => onRenameFolderCancel?.()}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 min-w-0 bg-zinc-900 border border-indigo-500 rounded px-1.5 py-0 text-xs text-zinc-200 focus:outline-none"
+          />
+        ) : (
+          <span className="truncate">{folder.name}</span>
+        )}
       </button>
       {folder.children?.map((child) => (
         <FolderTreeItem
@@ -119,6 +158,12 @@ const FolderTreeItem: React.FC<FolderTreeItemProps> = ({
           folder={child}
           selectedFolderId={selectedFolderId}
           onSelect={onSelect}
+          onContextMenu={onContextMenu}
+          renamingFolderId={renamingFolderId}
+          renameFolderValue={renameFolderValue}
+          onRenameFolderChange={onRenameFolderChange}
+          onRenameFolderConfirm={onRenameFolderConfirm}
+          onRenameFolderCancel={onRenameFolderCancel}
           depth={depth + 1}
         />
       ))}
@@ -223,6 +268,28 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
   const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'file' | 'folder' | 'empty';
+    target?: ResourceItem | Folder;
+  } | null>(null);
+
+  // Rename state
+  const [renamingResourceId, setRenamingResourceId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameFolderValue, setRenameFolderValue] = useState('');
+
+  // ─── Derived view flags ──────────────────────────────
+
+  const isResourcesView = sidebarView === 'resources';
+  const isRecycleView = sidebarView === 'recycle';
+  const isSharedView = sidebarView === 'shared';
+  const isDownloadsView = sidebarView === 'downloads';
+  const canUpload = isResourcesView;
 
   // ─── Load folders on scope change ────────────────────
 
@@ -537,12 +604,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Resource selection & detail panel ───────────────
 
   const handleResourceClick = useCallback((item: ResourceItem) => {
+    // Navigate to detail page for primary click action
+    if (item.resource?.id) {
+      navigate(resPath(`/resources/file/${item.resource.id}`));
+      return;
+    }
+    // Fallback: toggle info panel
     if (selectedResource?.id === item.id) {
       setSelectedResource(null);
     } else {
       setSelectedResource(item);
     }
-  }, [selectedResource]);
+  }, [navigate, resPath, selectedResource]);
 
   // Load tags when selected resource changes
   useEffect(() => {
@@ -586,6 +659,276 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } catch { /* ignore */ }
   }, [selectedResource]);
 
+  // ─── Context menu handlers ─────────────────────────
+
+  const handleFileContextMenu = useCallback((e: React.MouseEvent, item: ResourceItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'file', target: item });
+  }, []);
+
+  const handleFolderContextMenu = useCallback((e: React.MouseEvent, folder: Folder) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'folder', target: folder });
+  }, []);
+
+  const handleEmptyAreaContextMenu = useCallback((e: React.MouseEvent) => {
+    // Only trigger on the content area itself, not on children
+    if (e.target === e.currentTarget) {
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, type: 'empty' });
+    }
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Build context menu items based on type
+  const contextMenuItems = useMemo((): ContextMenuItem[] => {
+    if (!contextMenu) return [];
+
+    if (contextMenu.type === 'file') {
+      const item = contextMenu.target as ResourceItem;
+      const resourceId = item.resource?.id;
+      const filePath = item.resource?.file_path;
+      return [
+        {
+          label: t('resources.openInNewTab'),
+          icon: <ExternalLink size={14} />,
+          onClick: () => {
+            if (filePath) window.open(filePath, '_blank');
+          },
+          disabled: !filePath,
+        },
+        {
+          label: t('resources.downloadOriginal'),
+          icon: <Download size={14} />,
+          onClick: () => {
+            if (filePath) {
+              const a = document.createElement('a');
+              a.href = filePath;
+              a.download = item.resource?.filename ?? 'download';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }
+          },
+          disabled: !filePath,
+        },
+        {
+          label: t('resources.rename'),
+          icon: <Pencil size={14} />,
+          onClick: () => {
+            if (resourceId) {
+              setRenamingResourceId(item.id);
+              setRenameValue(item.resource?.filename ?? '');
+            }
+          },
+          divider: true,
+        },
+        {
+          label: t('resources.copyTo'),
+          icon: <Copy size={14} />,
+          onClick: () => {},
+          disabled: true,
+        },
+        {
+          label: t('resources.moveTo'),
+          icon: <Move size={14} />,
+          onClick: () => {},
+          disabled: true,
+        },
+        {
+          label: t('resources.moveToTrash'),
+          icon: <Trash2 size={14} />,
+          onClick: () => {
+            if (resourceId) handleTrash(resourceId);
+          },
+          danger: true,
+          divider: true,
+        },
+      ];
+    }
+
+    if (contextMenu.type === 'folder') {
+      const folder = contextMenu.target as Folder;
+      return [
+        {
+          label: t('resources.open'),
+          icon: <FolderOpen size={14} />,
+          onClick: () => {
+            if (selectedLibraryId) {
+              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+            } else {
+              navigate(resPath(`/resources/folder/${folder.id}`));
+            }
+          },
+        },
+        {
+          label: t('resources.rename'),
+          icon: <Pencil size={14} />,
+          onClick: () => {
+            setRenamingFolderId(folder.id);
+            setRenameFolderValue(folder.name);
+          },
+        },
+        {
+          label: t('resources.moveToTrash'),
+          icon: <Trash2 size={14} />,
+          onClick: async () => {
+            try {
+              const { trashFolder } = await import('../services/resourceService');
+              await trashFolder(folder.id);
+              await loadFolders();
+            } catch { /* ignore */ }
+          },
+          danger: true,
+          divider: true,
+        },
+      ];
+    }
+
+    // Empty area
+    return [
+      {
+        label: t('resources.uploadFile'),
+        icon: <Upload size={14} />,
+        onClick: () => fileInputRef.current?.click(),
+      },
+      {
+        label: t('resources.newFolder'),
+        icon: <FolderPlus size={14} />,
+        onClick: () => setCreatingFolder(true),
+      },
+      {
+        label: t('resources.refresh'),
+        icon: <RefreshCw size={14} />,
+        onClick: async () => {
+          setLoading(true);
+          try {
+            const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+            setResources(items);
+          } catch { /* ignore */ }
+          setLoading(false);
+        },
+        divider: true,
+      },
+    ];
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, scopeType, scopeId, selectedFolderId, loadFolders]);
+
+  // ─── Rename handlers ─────────────────────────────────
+
+  const handleRenameResourceConfirm = useCallback(async () => {
+    if (!renamingResourceId || !renameValue.trim()) {
+      setRenamingResourceId(null);
+      return;
+    }
+    const item = resources.find((r) => r.id === renamingResourceId);
+    if (!item?.resource?.id) {
+      setRenamingResourceId(null);
+      return;
+    }
+    try {
+      await renameResource(item.resource.id, renameValue.trim());
+      // Update local state
+      setResources((prev) =>
+        prev.map((r) =>
+          r.id === renamingResourceId && r.resource
+            ? { ...r, resource: { ...r.resource, filename: renameValue.trim() } }
+            : r
+        )
+      );
+    } catch { /* ignore */ }
+    setRenamingResourceId(null);
+  }, [renamingResourceId, renameValue, resources]);
+
+  const handleRenameFolderConfirm = useCallback(async () => {
+    if (!renamingFolderId || !renameFolderValue.trim()) {
+      setRenamingFolderId(null);
+      return;
+    }
+    try {
+      await renameFolder(renamingFolderId, renameFolderValue.trim());
+      await loadFolders();
+    } catch { /* ignore */ }
+    setRenamingFolderId(null);
+  }, [renamingFolderId, renameFolderValue, loadFolders]);
+
+  // ─── Breadcrumb ───────────────────────────────────────
+
+  const breadcrumbSegments = useMemo((): BreadcrumbSegment[] => {
+    if (isSharedView) return [{ label: t('resources.sharedManagement') }];
+    if (isRecycleView) return [{ label: t('resources.recycleBin') }];
+    if (isDownloadsView) return [{ label: t('resources.downloads') }];
+
+    if (selectedSmartFolderId) {
+      const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
+      return [
+        { label: t('resources.smartFolders'), onClick: () => {} },
+        { label: sf?.name ?? '' },
+      ];
+    }
+
+    if (scopeType === 'team' && selectedLibraryId) {
+      const lib = libraries.find((l) => String(l.id) === selectedLibraryId);
+      const libName = lib?.name ?? t('resources.allFiles');
+      const segments: BreadcrumbSegment[] = [];
+
+      segments.push({
+        label: libName,
+        onClick: selectedFolderId ? () => navigate(resPath(`/resources/library/${selectedLibraryId}`)) : undefined,
+      });
+
+      if (selectedFolderId) {
+        const folder = folders.find((f) => f.id === selectedFolderId);
+        // Build ancestor chain
+        const chain: Folder[] = [];
+        let current = folder;
+        while (current) {
+          chain.unshift(current);
+          current = current.parent_id ? folders.find((f) => f.id === current!.parent_id) : undefined;
+        }
+        chain.forEach((f, idx) => {
+          const isLast = idx === chain.length - 1;
+          segments.push({
+            label: f.name,
+            onClick: isLast ? undefined : () => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${f.id}`)),
+          });
+        });
+      }
+
+      return segments;
+    }
+
+    // Personal mode
+    const segments: BreadcrumbSegment[] = [];
+    segments.push({
+      label: t('resources.myResources'),
+      onClick: selectedFolderId ? () => navigate(resPath('/resources')) : undefined,
+    });
+
+    if (selectedFolderId) {
+      const folder = folders.find((f) => f.id === selectedFolderId);
+      const chain: Folder[] = [];
+      let current = folder;
+      while (current) {
+        chain.unshift(current);
+        current = current.parent_id ? folders.find((f) => f.id === current!.parent_id) : undefined;
+      }
+      chain.forEach((f, idx) => {
+        const isLast = idx === chain.length - 1;
+        segments.push({
+          label: f.name,
+          onClick: isLast ? undefined : () => navigate(resPath(`/resources/folder/${f.id}`)),
+        });
+      });
+    }
+
+    return segments;
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, t, navigate, resPath]);
+
   // ─── Sort ────────────────────────────────────────────
 
   const currentItems = sidebarView === 'recycle'
@@ -627,12 +970,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const currentSortLabel = sortOptions.find((o) => o.value === sortBy)?.label ?? '';
 
   // ─── Render ──────────────────────────────────────────
-
-  const isResourcesView = sidebarView === 'resources';
-  const isRecycleView = sidebarView === 'recycle';
-  const isSharedView = sidebarView === 'shared';
-  const isDownloadsView = sidebarView === 'downloads';
-  const canUpload = isResourcesView;
 
   const sidebarItemClass = (active: boolean) =>
     `w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left ${
@@ -768,6 +1105,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                         folder={folder}
                         selectedFolderId={isResourcesView ? selectedFolderId : null}
                         onSelect={(id) => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${id}`))}
+                        onContextMenu={handleFolderContextMenu}
+                        renamingFolderId={renamingFolderId}
+                        renameFolderValue={renameFolderValue}
+                        onRenameFolderChange={setRenameFolderValue}
+                        onRenameFolderConfirm={handleRenameFolderConfirm}
+                        onRenameFolderCancel={() => setRenamingFolderId(null)}
                         depth={1}
                       />
                     ))
@@ -856,6 +1199,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     folder={folder}
                     selectedFolderId={isResourcesView ? selectedFolderId : null}
                     onSelect={(id) => navigate(resPath(`/resources/folder/${id}`))}
+                    onContextMenu={handleFolderContextMenu}
+                    renamingFolderId={renamingFolderId}
+                    renameFolderValue={renameFolderValue}
+                    onRenameFolderChange={setRenameFolderValue}
+                    onRenameFolderConfirm={handleRenameFolderConfirm}
+                    onRenameFolderCancel={() => setRenamingFolderId(null)}
                   />
                 ))
               )}
@@ -940,116 +1289,117 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         ) : (
         <>
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
-          {/* Left: Current view title */}
-          <div className="text-sm font-medium text-zinc-300">
-            {isSharedView && t('resources.sharedManagement')}
-            {isRecycleView && t('resources.recycleBin')}
-            {isResourcesView && (
-              selectedSmartFolderId
-                ? smartFolders.find((s) => String(s.id) === selectedSmartFolderId)?.name ?? t('resources.allResources')
-                : selectedFolderId
-                  ? folders.find((f) => f.id === selectedFolderId)?.name ?? t('resources.allFiles')
-                  : selectedLibraryId
-                    ? libraries.find((l) => String(l.id) === selectedLibraryId)?.name ?? t('resources.allFiles')
-                    : scopeType === 'personal' ? t('resources.myResources') : t('resources.allFiles')
+        <div className="px-6 py-3 border-b border-zinc-800 space-y-2">
+          {/* Row 1: Breadcrumb + item count */}
+          <div className="flex items-center justify-between">
+            <Breadcrumb segments={breadcrumbSegments} />
+            {!loading && (
+              <span className="text-xs text-zinc-500">
+                {t('resources.itemCount', { count: sortedItems.length })}
+              </span>
             )}
           </div>
 
-          {/* Right: Sort + View Toggle + Upload + Count */}
-          <div className="flex items-center gap-2">
-            {/* Sort dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowSortMenu(!showSortMenu)}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                <span>{currentSortLabel}</span>
-                <ChevronDown size={12} />
-              </button>
-              {showSortMenu && (
+          {/* Row 2: Sort + View Toggle + Upload + New Folder */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {/* Sort dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSortMenu(!showSortMenu)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <span>{currentSortLabel}</span>
+                  <ChevronDown size={12} />
+                </button>
+                {showSortMenu && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
+                    <div className="absolute left-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                      {sortOptions.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
+                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                            sortBy === opt.value
+                              ? 'bg-zinc-800 text-indigo-400'
+                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* View toggle */}
+              <div className="flex bg-zinc-800 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <LayoutGrid size={14} />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <LayoutList size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Upload button (only on resources view) */}
+              {canUpload && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
-                    {sortOptions.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
-                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
-                          sortBy === opt.value
-                            ? 'bg-zinc-800 text-indigo-400'
-                            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.length) {
+                        handleUpload(e.target.files);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg transition-colors"
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>{uploadProgress}%</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={14} />
+                        <span>{t('resources.upload')}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* New Folder button */}
+                  <button
+                    onClick={() => setCreatingFolder(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"
+                  >
+                    <FolderPlus size={14} />
+                    <span>{t('resources.newFolder')}</span>
+                  </button>
                 </>
               )}
             </div>
-
-            {/* View toggle */}
-            <div className="flex bg-zinc-800 rounded-lg p-0.5">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <LayoutGrid size={14} />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <LayoutList size={14} />
-              </button>
-            </div>
-
-            {/* Upload button (only on resources view) */}
-            {canUpload && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files?.length) {
-                      handleUpload(e.target.files);
-                      e.target.value = '';
-                    }
-                  }}
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg transition-colors"
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>{uploadProgress}%</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} />
-                      <span>{t('resources.upload')}</span>
-                    </>
-                  )}
-                </button>
-              </>
-            )}
-
-            {/* Count badge */}
-            {!loading && (
-              <span className="bg-zinc-800 text-zinc-400 rounded-full px-2.5 py-0.5 text-xs font-medium">
-                {sortedItems.length}
-              </span>
-            )}
           </div>
         </div>
 
@@ -1060,6 +1410,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
           onDrop={canUpload ? handleDrop : undefined}
+          onContextMenu={canUpload ? handleEmptyAreaContextMenu : undefined}
         >
           {/* ── Drag-and-drop overlay ── */}
           {dragOver && canUpload && (
@@ -1108,6 +1459,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       onTrash={isRecycleView ? undefined : handleTrash}
                       onRestore={isRecycleView ? handleRestore : undefined}
                       onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                      onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
+                      renaming={renamingResourceId === item.id}
+                      renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                      onRenameChange={setRenameValue}
+                      onRenameConfirm={handleRenameResourceConfirm}
+                      onRenameCancel={() => setRenamingResourceId(null)}
                     />
                   ))}
                 </div>
@@ -1124,6 +1481,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       onTrash={isRecycleView ? undefined : handleTrash}
                       onRestore={isRecycleView ? handleRestore : undefined}
                       onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                      onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
+                      renaming={renamingResourceId === item.id}
+                      renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                      onRenameChange={setRenameValue}
+                      onRenameConfirm={handleRenameResourceConfirm}
+                      onRenameCancel={() => setRenamingResourceId(null)}
                     />
                   ))}
                 </div>
@@ -1160,6 +1523,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onClose={() => setSelectedResource(null)}
           onAddTag={handleAddTag}
           onRemoveTag={handleRemoveTag}
+        />
+      )}
+
+      {/* ── Context Menu ── */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={closeContextMenu}
         />
       )}
 

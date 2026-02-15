@@ -12,6 +12,12 @@ interface ResourceCardProps {
   onTrash?: (resourceId: string) => void;
   onRestore?: (resourceId: string) => void;
   onPermanentDelete?: (resourceId: string) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
+  renaming?: boolean;
+  renameValue?: string;
+  onRenameChange?: (value: string) => void;
+  onRenameConfirm?: () => void;
+  onRenameCancel?: () => void;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -55,6 +61,12 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   onTrash,
   onRestore,
   onPermanentDelete,
+  onContextMenu,
+  renaming = false,
+  renameValue = '',
+  onRenameChange,
+  onRenameConfirm,
+  onRenameCancel,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -70,15 +82,31 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     return (
       <div
         onClick={onClick}
+        onContextMenu={onContextMenu}
         className={`flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group ${selectedRing}`}
       >
         <div className={`p-2 rounded-lg ${bg} flex-shrink-0`}>
           <IconComponent size={18} className={color} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors">
-            {filename}
-          </p>
+          {renaming ? (
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => onRenameChange?.(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onRenameConfirm?.();
+                if (e.key === 'Escape') onRenameCancel?.();
+              }}
+              onBlur={() => onRenameCancel?.()}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+            />
+          ) : (
+            <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors">
+              {filename}
+            </p>
+          )}
         </div>
         <div className="text-xs text-zinc-500 flex-shrink-0">
           {formatFileSize(fileSize)}
@@ -125,6 +153,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`relative bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden ${selectedRing}`}
     >
       {/* Thumbnail */}
@@ -177,9 +206,24 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       </div>
       {/* Info */}
       <div className="p-3">
-        <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors font-medium">
-          {filename}
-        </p>
+        {renaming ? (
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => onRenameChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onRenameConfirm?.();
+              if (e.key === 'Escape') onRenameCancel?.();
+            }}
+            onBlur={() => onRenameCancel?.()}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+          />
+        ) : (
+          <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors font-medium">
+            {filename}
+          </p>
+        )}
         <div className="flex items-center justify-between mt-2 text-xs text-zinc-500">
           <span>{formatFileSize(fileSize)}</span>
           <span>{formatDate(createdAt)}</span>
