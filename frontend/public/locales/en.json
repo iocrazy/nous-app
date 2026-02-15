@@ -26,7 +26,8 @@
     "activity": "Activity",
     "backToProjects": "Projects",
     "projectSettings": "Project Settings",
-    "points": "Points"
+    "points": "Points",
+    "library": "Library"
   },
   "user": {
     "profile": "Profile",
