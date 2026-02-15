@@ -236,11 +236,27 @@ export interface CollectionVideo {
   added_at: string;
 }
 
+// Library (team-scoped resource library)
+export interface Library {
+  id: string;
+  name: string;
+  scope_type: 'team';
+  scope_id: string;
+  created_by: string;
+  icon: string | null;
+  color: string | null;
+  sort_order: number;
+  visibility: 'inherited' | 'restricted';
+  created_at: string;
+  updated_at: string;
+}
+
 // Folder (virtual folder tree)
 export interface Folder {
   id: string;
   name: string;
   parent_id: string | null;
+  library_id: string | null;
   scope_type: 'personal' | 'team';
   scope_id: string;
   created_by: string;
@@ -249,6 +265,8 @@ export interface Folder {
   icon: string | null;
   color: string | null;
   visibility: 'inherited' | 'restricted';
+  is_smart: boolean;
+  smart_rules: Record<string, unknown> | null;
   is_trashed: boolean;
   trashed_at: string | null;
   created_at: string;
@@ -290,6 +308,7 @@ export interface ResourceItem {
   scope_type: 'personal' | 'team';
   scope_id: string;
   folder_id: string | null;
+  library_id: string | null;
   added_by: string | null;
   created_at: string;
   // Joined
