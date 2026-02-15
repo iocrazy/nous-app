@@ -414,6 +414,13 @@ class VideoService:
             logger.warning(f"Failed to create resource record for {platform_id}: {e}")
 
     @staticmethod
+    def _create_resource_record_sync(platform_id: str, user_id: str):
+        """Sync wrapper for use in FastAPI background_tasks or Celery tasks"""
+        import asyncio
+
+        asyncio.run(VideoService._create_resource_record(platform_id, user_id))
+
+    @staticmethod
     async def save_metadata_only(platform_id: str, parsed_data: dict) -> Dict[str, Any]:
         """
         Save video metadata only to database (no downloads)

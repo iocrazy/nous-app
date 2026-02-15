@@ -346,6 +346,12 @@ async def fetch_video(
                         platform_id,
                         user_id=auth.user_id,
                     )
+                # Auto-create resource record after background downloads
+                background_tasks.add_task(
+                    VideoService._create_resource_record_sync,
+                    platform_id,
+                    auth.user_id,
+                )
                 logger.info(f"FastAPI background download tasks added: {platform_id}")
 
         # Log action
@@ -1216,6 +1222,9 @@ async def _handle_ytdlp_fetch(
                         await DownloaderService.download_cover_by_platform_id(
                             platform_id, user_id=user_id
                         )
+
+                    # Auto-create resource record
+                    await VideoService._create_resource_record(platform_id, user_id)
 
                 except Exception as e:
                     logger.error(f"[yt-dlp] Background download failed: {e}")

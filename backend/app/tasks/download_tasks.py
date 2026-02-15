@@ -241,6 +241,18 @@ def download_media_task(
                     )
                 )
 
+                # Auto-create resource record (dedup-aware)
+                try:
+                    from app.services.video_service import VideoService
+
+                    run_async(
+                        VideoService._create_resource_record(platform_id, user_id)
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[Celery] Failed to create resource record for {platform_id}: {e}"
+                    )
+
                 # Chain AI pipeline if user has auto-transcribe enabled
                 _maybe_chain_ai_pipeline(platform_id, user_id)
 
@@ -262,6 +274,17 @@ def download_media_task(
         task_manager.complete_task(platform_id)
         tracker.complete()
         logger.success(f"[Celery] Download task completed (no video): {platform_id}")
+
+        # Auto-create resource record (dedup-aware)
+        try:
+            from app.services.video_service import VideoService
+
+            run_async(VideoService._create_resource_record(platform_id, user_id))
+        except Exception as e:
+            logger.warning(
+                f"[Celery] Failed to create resource record for {platform_id}: {e}"
+            )
+
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -483,6 +506,16 @@ def download_ytdlp_task(
 
         task_manager.complete_task(platform_id)
         logger.success(f"[Celery/yt-dlp] Download task completed: {platform_id}")
+
+        # Auto-create resource record (dedup-aware)
+        try:
+            from app.services.video_service import VideoService
+
+            run_async(VideoService._create_resource_record(platform_id, user_id))
+        except Exception as e:
+            logger.warning(
+                f"[Celery/yt-dlp] Failed to create resource record for {platform_id}: {e}"
+            )
 
         # Log success
         run_async(
