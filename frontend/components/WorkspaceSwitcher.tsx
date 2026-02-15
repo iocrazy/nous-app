@@ -78,7 +78,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     setIsOpen(false);
   };
 
-  const isPersonal = personalTeamId ? activeTeamId === personalTeamId : activeTeamId === null;
+  // Default to personal while personalTeamId is loading to avoid "Team" flash
+  const isPersonal = personalTeamId ? activeTeamId === personalTeamId : true;
   const capitalizedName = userName
     ? userName.charAt(0).toUpperCase() + userName.slice(1)
     : '';
