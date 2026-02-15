@@ -160,8 +160,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   scopeId,
 }) => {
   const { t } = useTranslation();
-  const { section, folderId: urlFolderId, smartFolderId: urlSmartFolderId } = useParams();
+  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId } = useParams();
   const navigate = useNavigate();
+  const resPath = (path: string) => teamId ? `/t/${teamId}${path}` : path;
 
   // URL-driven state
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId
@@ -607,7 +608,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         <div className="flex-1 overflow-y-auto space-y-0.5 px-1">
           {/* ── Top section: Shared / Quick Access / Recycle Bin ── */}
           <button
-            onClick={() => navigate('/resources/shared')}
+            onClick={() => navigate(resPath('/resources/shared'))}
             className={sidebarItemClass(isSharedView)}
           >
             <Share2 size={14} className="shrink-0" />
@@ -625,7 +626,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           </button>
 
           <button
-            onClick={() => navigate('/resources/recycle')}
+            onClick={() => navigate(resPath('/resources/recycle'))}
             className={sidebarItemClass(isRecycleView)}
           >
             <Trash2 size={14} className="shrink-0" />
@@ -637,7 +638,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
           {/* ── Main section: All Resources / RipVault / My Resources ── */}
           <button
-            onClick={() => navigate('/resources')}
+            onClick={() => navigate(resPath('/resources'))}
             className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
           >
             <FolderOpen size={14} className="shrink-0" />
@@ -647,7 +648,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* RipVault — personal mode only */}
           {scopeType === 'personal' && (
             <button
-              onClick={() => navigate('/resources/downloads')}
+              onClick={() => navigate(resPath('/resources/downloads'))}
               className={sidebarItemClass(isDownloadsView)}
             >
               <Download size={14} className="shrink-0" />
@@ -658,7 +659,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* My Resources with ➕ */}
           <div className="flex items-center justify-between pr-1">
             <button
-              onClick={() => navigate('/resources')}
+              onClick={() => navigate(resPath('/resources'))}
               className={sidebarItemClass(false)}
               style={{ pointerEvents: 'none' }}
             >
@@ -667,7 +668,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </button>
             <button
               onClick={() => {
-                navigate('/resources');
+                navigate(resPath('/resources'));
                 setCreatingFolder(true);
               }}
               className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
@@ -688,7 +689,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 key={folder.id}
                 folder={folder}
                 selectedFolderId={isResourcesView ? selectedFolderId : null}
-                onSelect={(id) => navigate(`/resources/folder/${id}`)}
+                onSelect={(id) => navigate(resPath(`/resources/folder/${id}`))}
               />
             ))
           )}
@@ -732,7 +733,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             <button
               onClick={() => {
                 if (smartFolders.length > 0) {
-                  navigate(`/resources/smart/${smartFolders[0].id}`);
+                  navigate(resPath(`/resources/smart/${smartFolders[0].id}`));
                 }
               }}
               className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId)}
@@ -753,7 +754,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {smartFolders.map((sf) => (
             <button
               key={sf.id}
-              onClick={() => navigate(`/resources/smart/${sf.id}`)}
+              onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
               className={sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}
               style={{ paddingLeft: '12px' }}
             >

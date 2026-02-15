@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Library, LayoutDashboard, User,
   LayoutList, LayoutGrid, Smartphone, ListTodo,
@@ -22,20 +22,23 @@ import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
 
 // ---------------------------------------------------------------------------
-// Map URL pathname → ViewState for backward compat with Sidebar highlight
+// Map URL pathname → ViewState
+// Supports both /t/:teamId/:view and legacy /:view patterns
 // ---------------------------------------------------------------------------
 
 export function pathnameToView(pathname: string): ViewState {
-  if (pathname.startsWith('/library')) return 'library';
-  if (pathname.startsWith('/dashboard')) return 'dashboard';
-  if (pathname.startsWith('/settings')) return 'settings';
-  if (pathname.startsWith('/cleanup')) return 'cleanup';
-  if (pathname.startsWith('/projects')) return 'mediatrack';
-  if (pathname.startsWith('/points')) return 'points';
-  if (pathname.startsWith('/billing')) return 'billing';
-  if (pathname.startsWith('/members')) return 'members';
-  if (pathname.startsWith('/resources')) return 'resources';
-  if (pathname.startsWith('/todolist')) return 'todolist';
+  // Strip /t/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/t\/[^/]+/, '');
+  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/dashboard')) return 'dashboard';
+  if (stripped.startsWith('/settings')) return 'settings';
+  if (stripped.startsWith('/cleanup')) return 'cleanup';
+  if (stripped.startsWith('/projects')) return 'mediatrack';
+  if (stripped.startsWith('/points')) return 'points';
+  if (stripped.startsWith('/billing')) return 'billing';
+  if (stripped.startsWith('/members')) return 'members';
+  if (stripped.startsWith('/resources')) return 'resources';
+  if (stripped.startsWith('/todolist')) return 'todolist';
   return 'parser';
 }
 
@@ -47,6 +50,7 @@ export function AppLayout() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { teamId: urlTeamId } = useParams();
 
   const {
     currentUserId, userProfile, userSettings, aiSettings,
@@ -55,12 +59,19 @@ export function AppLayout() {
   } = useAuth();
 
   const {
-    teams, selectedTeamId, setSelectedTeamId, notifications,
+    teams, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
     currentTeam, userPermissions, isCreateTeamModalOpen, setIsCreateTeamModalOpen,
     isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
     handleCreateTeam, handleTeamCreated, handleTeamUpdated,
     handleMarkNotificationRead, handleMarkAllNotificationsRead,
   } = useTeamContext();
+
+  // Sync teamId from URL to context
+  useEffect(() => {
+    if (urlTeamId && urlTeamId !== selectedTeamId) {
+      setSelectedTeamId(urlTeamId);
+    }
+  }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
   const view = pathnameToView(location.pathname);
 
@@ -75,7 +86,7 @@ export function AppLayout() {
     isDashboardMenuOpen, setIsDashboardMenuOpen,
     sidebarMode,
     toggleLibraryMenu, toggleSettingsMenu,
-  } = useNavigation({ isAuthenticated: true, selectedTeamId });
+  } = useNavigation({ isAuthenticated: true, selectedTeamId, personalTeamId });
 
   const {
     library, setLibrary,
@@ -107,6 +118,12 @@ export function AppLayout() {
       : 'p-4 md:p-8 md:pt-20 pb-24 md:pb-8'
   }`;
 
+  // Helper: build team-scoped path
+  const teamPath = (path: string) => {
+    const tid = urlTeamId || selectedTeamId || personalTeamId;
+    return tid ? `/t/${tid}${path}` : path;
+  };
+
   // Mobile nav handlers
   const handleMobileNavClick = (targetView: ViewState) => {
     const viewToPath: Record<string, string> = {
@@ -122,7 +139,7 @@ export function AppLayout() {
       members: '/members',
       todolist: '/todolist',
     };
-    navigate(viewToPath[targetView] || '/parser');
+    navigate(teamPath(viewToPath[targetView] || '/parser'));
     setIsMobileMenuOpen(false);
     setIsDashboardMenuOpen(false);
   };
@@ -136,7 +153,7 @@ export function AppLayout() {
         setIsMobileMenuOpen(!isMobileMenuOpen);
       }
     } else {
-      navigate('/library');
+      navigate(teamPath('/library'));
       setSelectedLibraryItem(null);
       setIsMobileMenuOpen(false);
     }
@@ -146,7 +163,7 @@ export function AppLayout() {
     if (view === 'dashboard') {
       setIsDashboardMenuOpen(!isDashboardMenuOpen);
     } else {
-      navigate('/dashboard');
+      navigate(teamPath('/dashboard'));
       setIsDashboardMenuOpen(false);
     }
     setIsMobileMenuOpen(false);
@@ -321,6 +338,7 @@ export function AppLayout() {
         settingsTab={settingsTab}
         teams={teams}
         activeTeamId={selectedTeamId}
+        personalTeamId={personalTeamId}
         currentTeam={currentTeam}
         permissions={userPermissions}
         userName={userProfile?.name}
@@ -336,8 +354,7 @@ export function AppLayout() {
         onToggleLibrary={toggleLibraryMenu}
         onToggleSettings={toggleSettingsMenu}
         onTeamChange={(teamId) => {
-          // Side effects only — WorkspaceSwitcher handles navigation directly
-          setSelectedTeamId(teamId);
+          // WorkspaceSwitcher navigates via URL; just reset local state
           setActiveCollectionId(null);
           setSelectedProject(null);
           setReviewFile(null);
@@ -349,7 +366,7 @@ export function AppLayout() {
           setSearchResults([]);
           setSearchQueryText('');
           setActiveSmartCollectionId(collection?.id || null);
-          navigate('/library');
+          navigate(teamPath('/library'));
           setActiveCollectionId(null);
           setActiveLibraryTab('my-library');
         }}
@@ -392,7 +409,7 @@ export function AppLayout() {
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);
-          navigate('/projects/' + project.id);
+          navigate(teamPath('/projects/' + project.id));
         }}
       />
     </div>

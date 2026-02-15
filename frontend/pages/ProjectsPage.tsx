@@ -16,7 +16,7 @@ type ProjectTab = 'files' | 'tasks';
 export function ProjectsPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { projectId, fileId } = useParams();
+  const { teamId, projectId, fileId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId } = useTeamContext();
@@ -48,7 +48,7 @@ export function ProjectsPage() {
         file={reviewFile}
         onBack={() => {
           setReviewFile(null);
-          navigate(`/projects/${selectedProject.id}`);
+          navigate(teamId ? `/t/${teamId}/projects/${selectedProject.id}` : `/projects/${selectedProject.id}`);
         }}
         currentUserId={currentUserId || ''}
       />
@@ -90,11 +90,11 @@ export function ProjectsPage() {
             project={selectedProject}
             onBack={() => {
               setSelectedProject(null);
-              navigate('/projects');
+              navigate(teamId ? `/t/${teamId}/projects` : '/projects');
             }}
             onFileReview={(file) => {
               setReviewFile(file);
-              navigate(`/projects/${selectedProject.id}/review/${file.id}`);
+              navigate(teamId ? `/t/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
             }}
           />
         ) : (
@@ -114,7 +114,7 @@ export function ProjectsPage() {
         <ProjectsListView
           onProjectSelect={(project) => {
             setSelectedProject(project);
-            navigate(`/projects/${project.id}`);
+            navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
           }}
           onCreateProject={() => setIsCreateProjectModalOpen(true)}
         />
@@ -125,7 +125,7 @@ export function ProjectsPage() {
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);
-          navigate(`/projects/${project.id}`);
+          navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
         }}
       />
     </>

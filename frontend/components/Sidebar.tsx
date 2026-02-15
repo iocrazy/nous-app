@@ -103,6 +103,7 @@ interface SidebarProps {
   // Team context
   teams: Team[];
   activeTeamId: string | null;
+  personalTeamId: string | null;
   currentTeam: Team | null;
   permissions: string[];
   userName?: string;
@@ -175,16 +176,18 @@ const VIEW_PATH_MAP: Record<string, string> = {
 };
 
 function viewFromPathname(pathname: string): ViewState {
-  if (pathname.startsWith('/library')) return 'library';
-  if (pathname.startsWith('/dashboard')) return 'dashboard';
-  if (pathname.startsWith('/settings')) return 'settings';
-  if (pathname.startsWith('/cleanup')) return 'cleanup';
-  if (pathname.startsWith('/projects')) return 'mediatrack';
-  if (pathname.startsWith('/points')) return 'points';
-  if (pathname.startsWith('/billing')) return 'billing';
-  if (pathname.startsWith('/members')) return 'members';
-  if (pathname.startsWith('/resources')) return 'resources';
-  if (pathname.startsWith('/todolist')) return 'todolist';
+  // Strip /t/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/t\/[^/]+/, '');
+  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/dashboard')) return 'dashboard';
+  if (stripped.startsWith('/settings')) return 'settings';
+  if (stripped.startsWith('/cleanup')) return 'cleanup';
+  if (stripped.startsWith('/projects')) return 'mediatrack';
+  if (stripped.startsWith('/points')) return 'points';
+  if (stripped.startsWith('/billing')) return 'billing';
+  if (stripped.startsWith('/members')) return 'members';
+  if (stripped.startsWith('/resources')) return 'resources';
+  if (stripped.startsWith('/todolist')) return 'todolist';
   return 'parser';
 }
 
@@ -199,6 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   settingsTab: _settingsTab,
   teams,
   activeTeamId,
+  personalTeamId,
   currentTeam,
   permissions,
   userName,
@@ -223,7 +227,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Navigate via URL and notify parent for side effects
   const handleNav = (viewKey: string) => {
-    navigate(VIEW_PATH_MAP[viewKey] || '/parser');
+    const basePath = VIEW_PATH_MAP[viewKey] || '/parser';
+    const path = activeTeamId ? `/t/${activeTeamId}${basePath}` : basePath;
+    navigate(path);
     onViewChange?.(viewKey);
   };
 
@@ -337,6 +343,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <WorkspaceSwitcher
             teams={teams}
             activeTeamId={activeTeamId}
+            personalTeamId={personalTeamId}
             currentTeam={currentTeam}
             userName={userName}
             onTeamChange={onTeamChange}
@@ -409,7 +416,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <WorkspaceSwitcher
           teams={teams}
           activeTeamId={activeTeamId}
-          currentTeam={null}
+          personalTeamId={personalTeamId}
+          currentTeam={currentTeam}
           userName={userName}
           onTeamChange={onTeamChange}
           onCreateTeam={onCreateTeam}
