@@ -117,6 +117,38 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Video 
 // Keep old name as alias
 export const fetchVideoByAwemeId = fetchVideoByPlatformId;
 
+/**
+ * Fetch a single video by display_id (Snowflake ID for URL-friendly access)
+ */
+export const fetchVideoByDisplayId = async (displayId: string): Promise<Video | null> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) {
+    return null;
+  }
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data, error } = await supabase
+      .from(VIEW_NAME)
+      .select('*')
+      .eq('display_id', displayId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Failed to fetch video by display_id:', error);
+      return null;
+    }
+
+    return data as Video | null;
+  } catch (e) {
+    console.error('Error fetching video by display_id:', e);
+    return null;
+  }
+};
+
 /** Pagination config */
 const PAGE_SIZE = 100;
 const LOCAL_CACHE_SIZE = 500;

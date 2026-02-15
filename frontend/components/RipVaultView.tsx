@@ -8,7 +8,10 @@ import {
   Download,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { useLibrary } from '../hooks/useLibrary';
+import { useTeamContext } from '../contexts/TeamContext';
+import { Video } from '../types';
 import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
@@ -16,7 +19,15 @@ import { SemanticSearchBar } from './SemanticSearchBar';
 
 export const RipVaultView: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { selectedTeamId } = useTeamContext();
   const loadMoreSentinel = useRef<HTMLDivElement>(null);
+
+  const handleItemClick = (item: Video) => {
+    if (!item.display_id) return;
+    const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+    navigate(`${teamPath}/player/${item.display_id}?from=downloads`);
+  };
 
   const {
     library,
@@ -32,8 +43,6 @@ export const RipVaultView: React.FC = () => {
     isSearchActive,
     setIsSearchActive,
     setSearchQueryText,
-    selectedLibraryItem,
-    setSelectedLibraryItem,
     sharedVideoIds,
     loadLibraryData,
     handleUpdateLibraryItem,
@@ -147,9 +156,7 @@ export const RipVaultView: React.FC = () => {
                   <CompactMediaCard
                     key={item.platform_id}
                     data={item}
-                    onClick={() => setSelectedLibraryItem(
-                      selectedLibraryItem?.platform_id === item.platform_id ? null : item
-                    )}
+                    onClick={() => handleItemClick(item)}
                     isShared={sharedVideoIds.includes(item.platform_id)}
                   />
                 ))}
@@ -161,9 +168,7 @@ export const RipVaultView: React.FC = () => {
               <LibraryTable
                 data={filteredLibrary}
                 onUpdate={handleUpdateLibraryItem}
-                onItemClick={(item) => setSelectedLibraryItem(
-                  selectedLibraryItem?.platform_id === item.platform_id ? null : item
-                )}
+                onItemClick={(item) => handleItemClick(item)}
               />
             )}
 

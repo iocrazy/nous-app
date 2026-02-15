@@ -13,6 +13,7 @@ export type AIStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skip
 export interface Video {
   // Video Identity
   id?: string;  // UUID primary key
+  display_id?: string;  // Snowflake BIGINT for URL-friendly ID
   platform_id: string;
   user_id?: string;
 
