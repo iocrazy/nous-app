@@ -7,6 +7,7 @@ Data access layer for the resource library: resources, resource_items,
 resource_versions, and folders. Uses async Supabase admin client.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -225,8 +226,6 @@ class ResourcesRepository:
     ) -> List[Dict[str, Any]]:
         """Find trashed resources older than N days for permanent cleanup."""
         try:
-            from datetime import datetime, timedelta, timezone
-
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=older_than_days)
             ).isoformat()
@@ -447,3 +446,246 @@ class ResourcesRepository:
         except Exception as e:
             logger.error(f"Failed to get tags for resource {resource_id}: {e}")
             return []
+
+    # ------------------------------------------------------------------ #
+    # Smart Folders
+    # ------------------------------------------------------------------ #
+
+    async def get_smart_folders(
+        self, scope_type: str, scope_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get all smart folders for a scope."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_FOLDERS)
+                .select("*")
+                .eq("scope_type", scope_type)
+                .eq("scope_id", scope_id)
+                .eq("is_smart", True)
+                .eq("is_trashed", False)
+                .order("sort_order", desc=False)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get smart folders: {e}")
+            return []
+
+    async def create_smart_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a folder with is_smart=true."""
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_FOLDERS).insert(data).execute()
+            logger.info(f"Created smart folder: {data.get('name')}")
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create smart folder: {e}")
+            raise
+
+    async def execute_smart_rules(
+        self, scope_type: str, scope_id: str, rules: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute smart folder rules against resource_items + resources.
+
+        Build a Supabase PostgREST query from the JSONB rules:
+        - For fields on resources table: use resource.{field} in the join
+        - For tags: use a subquery on resource_tags
+        - For relative dates: compute the absolute date
+        - Apply AND/OR logic
+        - Apply match/exclude logic
+        """
+        try:
+            client = await self._get_client()
+            conditions = rules.get("conditions", [])
+            operator = rules.get("operator", "AND")
+            match = rules.get("match", True)
+
+            # Separate tag conditions from resource conditions
+            tag_conditions = [c for c in conditions if c["field"] == "tags"]
+            resource_conditions = [c for c in conditions if c["field"] != "tags"]
+
+            # Base query: resource_items with joined resources
+            query = (
+                client.table(self.TABLE_ITEMS)
+                .select("*, resource:resources!inner(*)")
+                .eq("scope_type", scope_type)
+                .eq("scope_id", scope_id)
+                .eq("resource.is_trashed", False)
+            )
+
+            if operator == "AND":
+                # Apply each resource condition as a filter
+                for cond in resource_conditions:
+                    query = self._apply_condition(query, cond)
+            else:
+                # OR: use .or_() with PostgREST format
+                if resource_conditions:
+                    or_parts = []
+                    for cond in resource_conditions:
+                        part = self._condition_to_postgrest(cond)
+                        if part:
+                            or_parts.append(part)
+                    if or_parts:
+                        query = query.or_(
+                            ",".join(or_parts), reference_table="resources"
+                        )
+
+            result = await query.order("created_at", desc=True).execute()
+            items = result.data or []
+
+            # Post-filter for tag conditions (tags live in resource_tags table)
+            if tag_conditions:
+                items = await self._filter_by_tags(
+                    items, tag_conditions, operator, client
+                )
+
+            # Apply match/exclude logic
+            if not match:
+                # Exclude mode: get ALL items and subtract the matched set
+                all_query = (
+                    client.table(self.TABLE_ITEMS)
+                    .select("*, resource:resources!inner(*)")
+                    .eq("scope_type", scope_type)
+                    .eq("scope_id", scope_id)
+                    .eq("resource.is_trashed", False)
+                    .order("created_at", desc=True)
+                )
+                all_result = await all_query.execute()
+                all_items = all_result.data or []
+                matched_ids = {item["id"] for item in items}
+                items = [item for item in all_items if item["id"] not in matched_ids]
+
+            return items
+        except Exception as e:
+            logger.error(f"Failed to execute smart rules: {e}")
+            return []
+
+    def _apply_condition(self, query, cond: Dict[str, Any]):
+        """Apply a single condition as a PostgREST filter (AND mode)."""
+        field = cond["field"]
+        op = cond["op"]
+        value = self._resolve_value(cond["value"])
+
+        col = f"resource.{field}"
+
+        if op == "eq":
+            return query.eq(col, value)
+        elif op == "contains":
+            return query.ilike(col, f"%{value}%")
+        elif op == "starts_with":
+            return query.ilike(col, f"{value}%")
+        elif op == "gt":
+            return query.gt(col, value)
+        elif op == "lt":
+            return query.lt(col, value)
+        elif op == "gte":
+            return query.gte(col, value)
+        elif op == "lte":
+            return query.lte(col, value)
+        elif op == "in":
+            return query.in_(col, value.split(","))
+        return query
+
+    def _condition_to_postgrest(self, cond: Dict[str, Any]) -> Optional[str]:
+        """Convert a condition to PostgREST OR filter string."""
+        field = cond["field"]
+        op = cond["op"]
+        value = self._resolve_value(cond["value"])
+
+        if op == "eq":
+            return f"{field}.eq.{value}"
+        elif op == "contains":
+            return f"{field}.ilike.%{value}%"
+        elif op == "starts_with":
+            return f"{field}.ilike.{value}%"
+        elif op == "gt":
+            return f"{field}.gt.{value}"
+        elif op == "lt":
+            return f"{field}.lt.{value}"
+        elif op == "gte":
+            return f"{field}.gte.{value}"
+        elif op == "lte":
+            return f"{field}.lte.{value}"
+        elif op == "in":
+            vals = value.replace(",", '","')
+            return f'{field}.in.("{vals}")'
+        return None
+
+    def _resolve_value(self, value: str) -> str:
+        """Resolve relative dates like 'relative:-7d' to absolute ISO dates."""
+        if isinstance(value, str) and value.startswith("relative:"):
+            offset_str = value.split(":")[1]
+            # Parse -7d, -30d, -1h, etc.
+            unit = offset_str[-1]
+            amount = int(offset_str[:-1])
+            now = datetime.now(timezone.utc)
+            if unit == "d":
+                target = now + timedelta(days=amount)
+            elif unit == "h":
+                target = now + timedelta(hours=amount)
+            elif unit == "m":
+                target = now + timedelta(minutes=amount)
+            else:
+                target = now + timedelta(days=amount)
+            return target.isoformat()
+        return value
+
+    async def _filter_by_tags(
+        self,
+        items: List[Dict[str, Any]],
+        tag_conditions: List[Dict[str, Any]],
+        operator: str,
+        client,
+    ) -> List[Dict[str, Any]]:
+        """Post-filter items by tag conditions using resource_tags table."""
+        if not items:
+            return items
+
+        # Get resource IDs from items
+        resource_ids = list(
+            {item.get("resource_id") for item in items if item.get("resource_id")}
+        )
+        if not resource_ids:
+            return []
+
+        # Fetch all tags for these resources
+        tag_result = (
+            await client.table(self.TABLE_RESOURCE_TAGS)
+            .select("resource_id, tag:tags(name)")
+            .in_("resource_id", resource_ids)
+            .execute()
+        )
+        tag_data = tag_result.data or []
+
+        # Build resource_id -> set of tag names
+        resource_tags: Dict[str, set] = {}
+        for row in tag_data:
+            rid = row["resource_id"]
+            tag_name = row.get("tag", {}).get("name", "")
+            if rid not in resource_tags:
+                resource_tags[rid] = set()
+            resource_tags[rid].add(tag_name.lower())
+
+        # Apply tag conditions
+        def matches_tags(resource_id: str) -> bool:
+            tags = resource_tags.get(resource_id, set())
+            results = []
+            for cond in tag_conditions:
+                tag_value = cond["value"].lower()
+                if cond["op"] == "contains":
+                    results.append(tag_value in tags)
+                elif cond["op"] == "not_contains":
+                    results.append(tag_value not in tags)
+                else:
+                    results.append(False)
+            if operator == "AND":
+                return all(results)
+            return any(results)
+
+        return [
+            item
+            for item in items
+            if matches_tags(item.get("resource_id", ""))
+        ]

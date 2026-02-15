@@ -4,10 +4,10 @@
 Resource library validation schemas.
 
 Pydantic models for resource upload, CRUD, version management,
-folder operations, and tag binding.
+folder operations, tag binding, and smart folder rules.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +58,54 @@ class ResourceTagRequest(BaseModel):
     """Request body for tagging a resource."""
 
     tag_id: str = Field(..., description="Tag ID to associate")
+
+
+# ─── Smart Folders ───────────────────────────────────────
+
+class SmartFolderCondition(BaseModel):
+    """A single rule condition for a smart folder."""
+
+    field: str = Field(
+        ...,
+        description=(
+            "Field to match: filename, file_type, tags, file_size_bytes, "
+            "created_at, duration_seconds, resolution, source_type, mime_type"
+        ),
+    )
+    op: str = Field(
+        ...,
+        description=(
+            "Operator: eq, contains, starts_with, gt, lt, gte, lte, in, not_contains"
+        ),
+    )
+    value: str = Field(..., description="Value to match against")
+
+
+class SmartFolderRules(BaseModel):
+    """Rule set for a smart folder (Eagle-style)."""
+
+    operator: str = Field(
+        "AND", pattern="^(AND|OR)$", description="Logical operator: AND or OR"
+    )
+    match: bool = Field(True, description="True to match, False to exclude")
+    conditions: List[SmartFolderCondition]
+
+
+class SmartFolderCreate(BaseModel):
+    """Request body for creating a smart folder."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    scope_type: str = Field(..., pattern="^(personal|team)$")
+    scope_id: str = Field(..., description="User ID or team ID")
+    rules: SmartFolderRules
+    icon: Optional[str] = Field(None, max_length=50)
+    color: Optional[str] = Field(None, max_length=20)
+
+
+class SmartFolderUpdate(BaseModel):
+    """Request body for updating a smart folder."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    rules: Optional[SmartFolderRules] = None
+    icon: Optional[str] = Field(None, max_length=50)
+    color: Optional[str] = Field(None, max_length=20)
