@@ -195,7 +195,7 @@ class VideoRepository:
                 )
                 .eq("platform_id", platform_id)
                 .eq("video_download_status", DownloadStatus.COMPLETED.value)
-                .not_("download_path", "is", "null")
+                .not_.is_("download_path", "null")
                 .limit(1)
                 .execute()
             )
