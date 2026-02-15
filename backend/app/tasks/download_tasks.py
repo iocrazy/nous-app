@@ -444,7 +444,13 @@ def download_ytdlp_task(
 
         results = {"video": None, "music": None, "cover": None}
 
-        storage_dir, relative_month = Utils.create_download_folder()
+        # Detect platform from URL for structured path
+        from app.services.url_router import URLRouter
+
+        detected_platform, _ = URLRouter.detect_platform(url)
+        storage_dir, relative_prefix = Utils.create_web_resource_path(
+            detected_platform, platform_id
+        )
 
         repo_class = VideoRepository
 
@@ -463,7 +469,7 @@ def download_ytdlp_task(
                 import os
 
                 file_name = os.path.basename(result["file_path"])
-                relative_path = f"{relative_month}/{file_name}"
+                relative_path = f"{relative_prefix}/{file_name}"
                 repo = repo_class()
                 run_async(
                     repo.mark_video_as_downloaded(

@@ -184,6 +184,27 @@ class Utils:
             raise ValueError(f"创建下载文件夹失败: {e}") from e
 
     @classmethod
+    def create_web_resource_path(cls, platform: str, external_id: str) -> tuple[Path, str]:
+        """
+        Create storage path for Parser downloads (design doc §3.2).
+
+        Path structure: {DOWNLOAD_PATH}/resources/web/{platform}/{external_id}/
+
+        Args:
+            platform: Source platform (e.g. 'douyin', 'bilibili')
+            external_id: Platform-specific content ID (= platform_id)
+
+        Returns:
+            tuple[Path, str]: (full_path, relative_path_prefix)
+            e.g. (/Volumes/.../resources/web/douyin/12345/, resources/web/douyin/12345)
+        """
+        base_path = cls.get_download_base_path()
+        relative = f"resources/web/{platform}/{external_id}"
+        full_path = Path(base_path) / relative
+        os.makedirs(full_path, exist_ok=True)
+        return full_path, relative
+
+    @classmethod
     def concat_hashtag_name(cls, aweme_detail) -> str:
         """拼接标签名称"""
         text_extra = aweme_detail.get("text_extra", [])
