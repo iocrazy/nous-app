@@ -850,6 +850,7 @@ class DownloaderService:
                 result.error = f"找不到视频数据: {platform_id}"
                 return result
 
+            video_title = video_data.get("title", "undefined")
             logger.info(f"准备下载视频 {platform_id} 的封面")
 
             # Set platform-appropriate Referer for CDN compatibility

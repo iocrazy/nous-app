@@ -394,6 +394,21 @@ class VideoService:
             if not video_id:
                 return
 
+            # Parse duration string ("MM:SS" or "HH:MM:SS" or plain seconds)
+            duration_seconds = None
+            dur = video.get("duration")
+            if dur:
+                try:
+                    parts = str(dur).split(":")
+                    if len(parts) == 3:
+                        duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                    elif len(parts) == 2:
+                        duration_seconds = int(parts[0]) * 60 + int(parts[1])
+                    else:
+                        duration_seconds = int(parts[0])
+                except (ValueError, IndexError):
+                    pass
+
             resources_svc = ResourcesService()
             await resources_svc.create_from_video(
                 video_id=video_id,
@@ -401,9 +416,7 @@ class VideoService:
                 filename=video.get("title") or "Untitled",
                 file_path=video.get("download_path"),
                 file_size_bytes=video.get("datasize_bytes"),
-                duration_seconds=(
-                    int(video["duration"]) if video.get("duration") else None
-                ),
+                duration_seconds=duration_seconds,
                 resolution=video.get("resolution"),
                 cover_image_path=video.get("cover_download_path"),
                 scope_type="personal",
