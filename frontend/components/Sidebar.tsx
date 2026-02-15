@@ -188,6 +188,7 @@ function viewFromPathname(pathname: string): ViewState {
   if (stripped.startsWith('/members')) return 'members';
   if (stripped.startsWith('/resources')) return 'resources';
   if (stripped.startsWith('/todolist')) return 'todolist';
+  if (stripped.startsWith('/player')) return 'resources';
   return 'parser';
 }
 

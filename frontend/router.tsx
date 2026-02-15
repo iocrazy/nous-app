@@ -14,6 +14,7 @@ import { BillingPage } from './pages/BillingPage';
 import { MembersPage } from './pages/MembersPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { TodolistPage } from './pages/TodolistPage';
+import { PlayerPage } from './pages/PlayerPage';
 
 export const router = createBrowserRouter([
   {
@@ -42,6 +43,7 @@ export const router = createBrowserRouter([
       { path: 'billing', element: <RedirectToTeam view="billing" /> },
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
+      { path: 'player/:displayId', element: <RedirectToTeam view="player" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
@@ -72,6 +74,7 @@ export const router = createBrowserRouter([
           { path: 'members', element: <MembersPage /> },
           { path: 'billing', element: <BillingPage /> },
           { path: 'todolist', element: <TodolistPage /> },
+          { path: 'player/:displayId', element: <PlayerPage /> },
         ],
       },
 
