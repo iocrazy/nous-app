@@ -16,6 +16,7 @@ export const fetchMyTeams = async (): Promise<Team[]> => {
     .from('teams')
     .select('*')
     .in('id', teamIds)
+    .eq('is_personal', false)
     .order('created_at', { ascending: false });
 
   if (error) throw error;

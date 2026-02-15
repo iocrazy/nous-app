@@ -185,6 +185,7 @@ export interface Team {
   name: string;
   owner_id: string;
   invite_code: string;
+  is_personal?: boolean;
   created_at: string;
 }
 

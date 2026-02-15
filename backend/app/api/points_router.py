@@ -79,6 +79,22 @@ async def _auto_create_personal_team(user_id: str) -> str:
     """
     client = await get_async_supabase_admin()
 
+    # Check if personal team already exists (prevent duplicates)
+    existing = (
+        await client.table("teams")
+        .select("id")
+        .eq("owner_id", user_id)
+        .eq("is_personal", True)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        team_id = str(existing.data[0]["id"])
+        logger.info(f"Found existing personal team {team_id} for user {user_id}")
+        svc = PointsService()
+        await svc.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
+        return team_id
+
     # Get username for team name
     username = "User"
     try:
@@ -120,6 +136,7 @@ async def _auto_create_personal_team(user_id: str) -> str:
                 "name": f"{username}'s Workspace",
                 "owner_id": user_id,
                 "invite_code": invite_code,
+                "is_personal": True,
             }
         )
         .execute()
