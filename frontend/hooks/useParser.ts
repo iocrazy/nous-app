@@ -37,13 +37,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   const [batchResults, setBatchResults] = useState<Video[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Points confirmation
-  const [pendingAction, setPendingAction] = useState<{
-    type: string;
-    count: number;
-    callback: () => void;
-  } | null>(null);
-
   // Download tracking
   const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
 
@@ -101,18 +94,10 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     if (parserMode === 'batch') {
       const links = batchInput.split(/\r?\n/).filter(line => line.trim().length > 0);
       if (links.length === 0) return;
-      setPendingAction({
-        type: 'video_parse_batch',
-        count: links.length,
-        callback: () => handleBatchParse(),
-      });
+      handleBatchParse();
     } else {
       if (!urlInput) return;
-      setPendingAction({
-        type: 'video_parse',
-        count: 1,
-        callback: () => handleSingleParse(),
-      });
+      handleSingleParse();
     }
   };
 
@@ -318,9 +303,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     isParsing, taskStatus, taskProgress,
     socketLogs, systemStatus,
     batchResults, error,
-
-    // Points
-    pendingAction, setPendingAction,
 
     // Download
     downloadTaskId, downloadStatus, downloadPercent, downloadSpeed,
