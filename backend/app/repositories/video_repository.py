@@ -175,6 +175,35 @@ class VideoRepository:
             logger.error(f"删除视频记录失败: {e}")
             return False
 
+    async def get_downloaded_by_platform_id(
+        self, platform_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find a downloaded video by platform_id across all users (for dedup).
+        Uses admin client to bypass RLS.
+
+        Returns:
+            Video record with download info, or None
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select(
+                    "id, download_path, storage_size, cover_download_path, "
+                    "source_platform, external_id"
+                )
+                .eq("platform_id", platform_id)
+                .eq("video_download_status", DownloadStatus.COMPLETED.value)
+                .not_("download_path", "is", "null")
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"查找已下载视频失败: {e}")
+            return None
+
     async def check_video_existence(self, platform_id: str) -> bool:
         """检查视频是否存在"""
         result = await self.get_by_platform_id(platform_id)
