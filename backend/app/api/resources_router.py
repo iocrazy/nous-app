@@ -17,6 +17,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.permission_service import PermissionService
 from app.schemas.resources import (
     FolderCreate,
     FolderUpdate,
@@ -32,6 +33,33 @@ from app.services.thumbnail_service import ThumbnailService
 router = APIRouter(prefix="/resources")
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
+
+
+# ============================================
+# Permission endpoints
+# ============================================
+
+
+@router.get("/permissions")
+async def get_effective_permissions(
+    auth: AuthDep,
+    object_type: str = Query(..., pattern="^(folder|library|resource|project)$"),
+    object_id: str = Query(...),
+    team_id: str = Query(...),
+):
+    """Get the effective role and capabilities for the current user on an object."""
+    try:
+        svc = PermissionService()
+        result = await svc.get_effective_role(
+            user_id=auth.user_id,
+            object_type=object_type,
+            object_id=object_id,
+            team_id=team_id,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"Failed to get permissions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get permissions")
 
 
 # ============================================
