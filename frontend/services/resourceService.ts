@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient';
-import { Folder, Resource, ResourceItem, SmartCollection } from '../types';
+import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import { getAuthHeaders } from './parserService';
 
 const getApiUrl = (): string => {
@@ -62,6 +62,15 @@ export async function renameFolder(id: string, name: string): Promise<void> {
     .from('folders')
     .update({ name })
     .eq('id', id);
+
+  if (error) throw error;
+}
+
+export async function renameResource(resourceId: string, filename: string): Promise<void> {
+  const { error } = await supabase
+    .from('resources')
+    .update({ filename })
+    .eq('id', resourceId);
 
   if (error) throw error;
 }
@@ -242,6 +251,41 @@ export async function fetchTrashedResources(
   if (!response.ok) throw new Error('Failed to fetch trashed resources');
   const json = await response.json();
   return json.data || [];
+}
+
+// ─── Single Resource ────────────────────────────────────
+
+export async function fetchResourceById(resourceId: string): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch resource');
+  const json = await response.json();
+  return json.data;
+}
+
+// ─── Versions ───────────────────────────────────────────
+
+export async function fetchResourceVersions(resourceId: string): Promise<ResourceVersion[]> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/versions`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch versions');
+  const json = await response.json();
+  return json.data || [];
+}
+
+// ─── File URL ───────────────────────────────────────────
+
+export function getResourceFileUrl(resourceId: string, token?: string): string {
+  const apiUrl = getApiUrl();
+  const base = `${apiUrl}/api/v1/resources/${resourceId}/file`;
+  if (token) {
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+  return base;
 }
 
 // ─── Tags ────────────────────────────────────────────────

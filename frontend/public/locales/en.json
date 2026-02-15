@@ -331,7 +331,21 @@
     "newLibrary": "New Library",
     "libraryName": "Library name",
     "noLibraries": "No libraries yet. Create one to get started.",
-    "allFiles": "All Files"
+    "allFiles": "All Files",
+    "open": "Open",
+    "openInNewTab": "Open in New Tab",
+    "downloadOriginal": "Download Original",
+    "rename": "Rename",
+    "copyTo": "Copy To",
+    "moveTo": "Move To",
+    "refresh": "Refresh",
+    "uploadFile": "Upload File",
+    "itemCount": "{{count}} items",
+    "download": "Download",
+    "noPreview": "Preview not available",
+    "fileDetail": "File Detail",
+    "versions": "Versions",
+    "location": "Location"
   },
   "annotations": {
     "annotate": "Annotate",
