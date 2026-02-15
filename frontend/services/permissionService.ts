@@ -1,0 +1,41 @@
+// frontend/services/permissionService.ts
+
+/**
+ * Permission API service
+ *
+ * Fetches effective role and capabilities from the backend
+ * ReBAC permission system.
+ */
+
+import { getAuthHeaders } from './parserService';
+
+const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
+
+export interface EffectivePermission {
+  role: string;
+  capabilities: string[];
+}
+
+/**
+ * Fetch the effective role and capabilities for the current user
+ * on a specific object within a team.
+ */
+export const fetchEffectiveRole = async (
+  objectType: string,
+  objectId: string,
+  teamId: string,
+): Promise<EffectivePermission> => {
+  const headers = await getAuthHeaders();
+  const params = new URLSearchParams({
+    object_type: objectType,
+    object_id: objectId,
+    team_id: teamId,
+  });
+  const res = await fetch(`${API_BASE}/api/v1/resources/permissions?${params}`, {
+    headers,
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch permissions: ${res.status}`);
+  }
+  return res.json();
+};

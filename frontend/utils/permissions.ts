@@ -1,5 +1,23 @@
 import { Permission } from '../types';
 
+// ─── ReBAC Capabilities (matches backend) ────────────────
+
+export const CAPABILITIES: Record<string, string[]> = {
+  admin:  ['view', 'download', 'upload', 'update', 'copy', 'move', 'delete', 'share', 'manage'],
+  editor: ['view', 'download', 'upload', 'update', 'copy', 'move', 'share'],
+  viewer: ['view', 'download'],
+  none:   [],
+};
+
+/**
+ * Check if a role has a specific capability.
+ */
+export function canDo(action: string, role: string): boolean {
+  return CAPABILITIES[role]?.includes(action) ?? false;
+}
+
+// ─── Legacy team-level permissions ───────────────────────
+
 // Role → permissions mapping
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   owner: ['*'],
