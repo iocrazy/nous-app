@@ -1190,7 +1190,14 @@ async def _handle_ytdlp_fetch(
                 from app.services.downloader import DownloaderService
 
                 repo = VideoRepository()
-                storage_dir, relative_month = Utils.create_download_folder()
+
+                # Use structured path
+                from app.services.url_router import URLRouter
+
+                detected_plat, _ = URLRouter.detect_platform(url)
+                storage_dir, relative_prefix = Utils.create_web_resource_path(
+                    detected_plat, platform_id
+                )
 
                 try:
                     if download_video:
@@ -1199,7 +1206,7 @@ async def _handle_ytdlp_fetch(
                         )
                         if result.get("file_path"):
                             file_name = os.path.basename(result["file_path"])
-                            relative_path = f"{relative_month}/{file_name}"
+                            relative_path = f"{relative_prefix}/{file_name}"
                             await repo.mark_video_as_downloaded(
                                 platform_id=platform_id,
                                 download_path=relative_path,

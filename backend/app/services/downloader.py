@@ -376,16 +376,17 @@ class DownloaderService:
 
             logger.info(f"准备下载视频: {platform_id}")
 
-            # create file path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
-            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
+            # Create structured path: resources/web/{platform}/{external_id}/
+            source_platform = video_data.get("source_platform", "douyin")
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                source_platform, platform_id
+            )
+            logger.debug(f"下载路径: {full_path}, 相对前缀: {relative_prefix}")
 
-            # generate file name
+            video_full_path = os.path.join(full_path, "video.mp4")
+            video_relative_path = f"{relative_prefix}/video.mp4"
             video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-            video_full_path = os.path.join(full_path, file_name + ".mp4")
-            video_relative_path = f"{relative_month}/{file_name}.mp4"  # Relative path
-            logger.debug(f"视频文件名: {file_name}")
+            logger.debug(f"视频文件: {video_relative_path}")
 
             # Download video
             video_urls = video_data.get("video_download_urls")
@@ -534,23 +535,14 @@ class DownloaderService:
 
             logger.info(f"准备下载 {platform_id} 的图片集")
 
-            # create file path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
-            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
-
-            # generate file name
+            # Create structured path: resources/web/{platform}/{external_id}/
+            source_platform = video_data.get("source_platform", "douyin")
+            sub_download_full_path, sub_download_relative_path = (
+                Utils.create_web_resource_path(source_platform, platform_id)
+            )
             video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-
-            # Full path and relative path
-            sub_download_full_path = os.path.join(full_path, file_name)
-            sub_download_relative_path = (
-                f"{relative_month}/{file_name}"  # Relative path
-            )
-            os.makedirs(sub_download_full_path, exist_ok=True)
-            logger.success(
-                f"Successfully created download file path: {sub_download_full_path}"
-            )
+            file_name = platform_id  # Use platform_id as base name for image files
+            logger.debug(f"图片下载路径: {sub_download_full_path}")
 
             video_urls = video_data.get("video_download_urls")
             image_urls = video_data.get("image_download_urls")
@@ -738,17 +730,15 @@ class DownloaderService:
             # Get music URL list from dict
             music_urls = music_data.get("music_download_urls", [])
 
-            # Create download path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
+            # Create structured path: resources/web/{platform}/{external_id}/
+            # Note: music_data doesn't have source_platform, default to douyin
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                "douyin", platform_id
+            )
 
-            # Get music name from dict
-            music_name = music_data.get("music_name")
-            if not music_name:
-                music_name = f"{platform_id}_music"
-
-            # Generate music file path (full path and relative path)
-            music_full_path = os.path.join(full_path, f"{music_name}.mp3")
-            music_relative_path = f"{relative_month}/{music_name}.mp3"
+            # Generate music file path
+            music_full_path = os.path.join(full_path, "music.mp3")
+            music_relative_path = f"{relative_prefix}/music.mp3"
 
             # Try to download music
             for url in music_urls:
@@ -882,14 +872,13 @@ class DownloaderService:
                 result.error = "没有封面 URL"
                 return result
 
-            # Create download path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
+            # Create structured path: resources/web/{platform}/{external_id}/
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                source_platform, platform_id
+            )
 
-            # Generate file name
-            video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-            cover_full_path = os.path.join(full_path, f"{file_name}_cover.jpg")
-            cover_relative_path = f"{relative_month}/{file_name}_cover.jpg"
+            cover_full_path = os.path.join(full_path, "cover.jpg")
+            cover_relative_path = f"{relative_prefix}/cover.jpg"
 
             # Try to download cover (try multiple URLs)
             for url in cover_urls:
