@@ -275,6 +275,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Folder upload ref ───────────────────────────────
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── Folder breadcrumb chain (independent of full folders array) ──
+  const [folderChain, setFolderChain] = useState<Folder[]>([]);
+
   // ─── Derived view flags ──────────────────────────────
 
   const isResourcesView = sidebarView === 'resources';
@@ -345,6 +348,59 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     };
     loadPreviews();
   }, [childFolders]);
+
+  // ─── Build folder breadcrumb chain ────────────────────
+
+  useEffect(() => {
+    if (!selectedFolderId) {
+      setFolderChain([]);
+      return;
+    }
+
+    // Try to build chain from the already-loaded folders array
+    const buildChainFromFolders = (allFolders: Folder[]): Folder[] | null => {
+      const folder = allFolders.find((f) => f.id === selectedFolderId);
+      if (!folder) return null;
+      const chain: Folder[] = [];
+      let current: Folder | undefined = folder;
+      while (current) {
+        chain.unshift(current);
+        current = current.parent_id ? allFolders.find((f) => f.id === current!.parent_id) : undefined;
+      }
+      return chain;
+    };
+
+    const chain = buildChainFromFolders(folders);
+    if (chain && chain.length > 0) {
+      setFolderChain(chain);
+      return;
+    }
+
+    // Fallback: fetch folder chain directly from Supabase
+    let cancelled = false;
+    const fetchChain = async () => {
+      try {
+        const { supabase } = await import('../supabaseClient');
+        const result: Folder[] = [];
+        let currentId: string | null = selectedFolderId;
+        while (currentId) {
+          const { data, error } = await supabase
+            .from('folders')
+            .select('*')
+            .eq('id', currentId)
+            .single();
+          if (error || !data || cancelled) break;
+          result.unshift(data);
+          currentId = data.parent_id;
+        }
+        if (!cancelled) setFolderChain(result);
+      } catch {
+        // ignore
+      }
+    };
+    fetchChain();
+    return () => { cancelled = true; };
+  }, [selectedFolderId, folders]);
 
   // ─── Load resources on folder change ─────────────────
 
@@ -1151,17 +1207,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         onClick: selectedFolderId ? () => navigate(resPath(`/resources/library/${selectedLibraryId}`)) : undefined,
       });
 
-      if (selectedFolderId) {
-        const folder = folders.find((f) => f.id === selectedFolderId);
-        // Build ancestor chain
-        const chain: Folder[] = [];
-        let current = folder;
-        while (current) {
-          chain.unshift(current);
-          current = current.parent_id ? folders.find((f) => f.id === current!.parent_id) : undefined;
-        }
-        chain.forEach((f, idx) => {
-          const isLast = idx === chain.length - 1;
+      if (selectedFolderId && folderChain.length > 0) {
+        folderChain.forEach((f, idx) => {
+          const isLast = idx === folderChain.length - 1;
           segments.push({
             label: f.name,
             onClick: isLast ? undefined : () => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${f.id}`)),
@@ -1179,16 +1227,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       onClick: selectedFolderId ? () => navigate(resPath('/resources')) : undefined,
     });
 
-    if (selectedFolderId) {
-      const folder = folders.find((f) => f.id === selectedFolderId);
-      const chain: Folder[] = [];
-      let current = folder;
-      while (current) {
-        chain.unshift(current);
-        current = current.parent_id ? folders.find((f) => f.id === current!.parent_id) : undefined;
-      }
-      chain.forEach((f, idx) => {
-        const isLast = idx === chain.length - 1;
+    if (selectedFolderId && folderChain.length > 0) {
+      folderChain.forEach((f, idx) => {
+        const isLast = idx === folderChain.length - 1;
         segments.push({
           label: f.name,
           onClick: isLast ? undefined : () => navigate(resPath(`/resources/folder/${f.id}`)),
@@ -1197,7 +1238,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
 
     return segments;
-  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, t, navigate, resPath]);
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, folderChain, t, navigate, resPath]);
 
   // ─── Sort ────────────────────────────────────────────
 
