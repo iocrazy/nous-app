@@ -1,11 +1,11 @@
 import React from 'react';
-import { Folder as FolderIcon, ChevronRight } from 'lucide-react';
+import { Folder as FolderIcon, ChevronRight, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Folder } from '../types';
 
 interface FolderCardProps {
   folder: Folder;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent) => void;
   viewMode: 'grid' | 'list';
   isSelected?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
@@ -15,6 +15,9 @@ interface FolderCardProps {
   onRenameConfirm?: () => void;
   onRenameCancel?: () => void;
   childCount?: number;
+  selectable?: boolean;
+  isChecked?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -58,17 +61,36 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   onRenameConfirm,
   onRenameCancel,
   childCount,
+  selectable = false,
+  isChecked = false,
+  onToggleSelect,
 }) => {
   const { t } = useTranslation();
   const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
+  const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
+
+  const checkbox = selectable ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
+      className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
+        isChecked
+          ? 'bg-indigo-500 text-white'
+          : 'bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 opacity-0 group-hover:opacity-100'
+      } ${isChecked ? 'opacity-100' : ''}`}
+    >
+      <Check size={12} />
+    </button>
+  ) : null;
 
   if (viewMode === 'list') {
     return (
       <div
-        onClick={onClick}
+        data-context-item
+        onClick={(e) => onClick(e)}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group ${selectedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
       >
+        {checkbox}
         <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-500/20 transition-colors">
           <FolderIcon size={18} className="text-amber-400" fill="currentColor" fillOpacity={0.15} />
         </div>
@@ -97,10 +119,12 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   // Grid mode
   return (
     <div
-      onClick={onClick}
+      data-context-item
+      onClick={(e) => onClick(e)}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing}`}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing} ${checkedRing}`}
     >
+      {checkbox}
       {/* Folder icon area */}
       <div className="relative h-28 flex items-center justify-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
         <div className="relative">
