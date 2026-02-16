@@ -354,7 +354,10 @@
     "shareFolder": "分享文件夹",
     "fileListPanel": "文件列表",
     "searchFiles": "搜索文件...",
-    "openFolder": "打开文件夹"
+    "openFolder": "打开文件夹",
+    "folders": "文件夹",
+    "files": "文件",
+    "items": "项"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

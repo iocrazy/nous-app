@@ -404,17 +404,18 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       <div className="flex-1 flex overflow-hidden">
         {/* File list panel */}
         {showFileList && (
-          <div className="w-72 border-r border-zinc-800 flex flex-col shrink-0 bg-zinc-900/50">
-            {/* Search */}
-            <div className="p-3 border-b border-zinc-800">
+          <div className="w-64 border-r border-zinc-800/80 flex flex-col shrink-0">
+            {/* Header + search */}
+            <div className="px-3 py-2.5 border-b border-zinc-800/60">
+              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">{t('resources.fileListPanel')}</p>
               <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
                 <input
                   type="text"
                   value={fileListSearch}
                   onChange={(e) => setFileListSearch(e.target.value)}
                   placeholder={t('resources.searchFiles')}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-zinc-800/60 border border-zinc-700/30 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
               </div>
             </div>
@@ -433,17 +434,17 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                         navigate(`${basePath}/resources/file/${item.resource.id}`);
                       }
                     }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
-                        ? 'bg-indigo-500/10 border-l-2 border-indigo-500'
-                        : 'hover:bg-zinc-800/80 border-l-2 border-transparent'
+                        ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
+                        : 'hover:bg-zinc-800/60 border-l-2 border-transparent'
                     }`}
                   >
                     {thumb ? (
                       <img
                         src={thumb}
                         alt=""
-                        className="w-8 h-8 rounded object-cover shrink-0"
+                        className={`w-8 h-8 rounded object-cover shrink-0 ${isActive ? 'ring-1 ring-indigo-400/50' : ''}`}
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     ) : (
@@ -458,7 +459,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 );
               })}
               {filteredSiblings.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-4">{t('resources.noResources')}</p>
+                <p className="text-xs text-zinc-600 text-center py-6">{t('resources.noResources')}</p>
               )}
             </div>
           </div>

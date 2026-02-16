@@ -1,5 +1,5 @@
 import React from 'react';
-import { FolderOpen, Clock, ChevronRight } from 'lucide-react';
+import { Folder as FolderIcon, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Folder } from '../types';
 
@@ -26,6 +26,26 @@ function formatDate(dateStr: string | null | undefined): string {
   });
 }
 
+const RenameInput: React.FC<{
+  value: string;
+  onChange?: (v: string) => void;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+}> = ({ value, onChange, onConfirm, onCancel }) => (
+  <input
+    autoFocus
+    value={value}
+    onChange={(e) => onChange?.(e.target.value)}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter') onConfirm?.();
+      if (e.key === 'Escape') onCancel?.();
+    }}
+    onBlur={() => onCancel?.()}
+    onClick={(e) => e.stopPropagation()}
+    className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+  />
+);
+
 export const FolderCard: React.FC<FolderCardProps> = ({
   folder,
   onClick,
@@ -47,43 +67,29 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       <div
         onClick={onClick}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group ${selectedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group ${selectedRing}`}
       >
-        <div className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0">
-          <FolderOpen size={18} className="text-amber-400" />
+        <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-500/20 transition-colors">
+          <FolderIcon size={18} className="text-amber-400" fill="currentColor" fillOpacity={0.15} />
         </div>
         <div className="flex-1 min-w-0">
           {renaming ? (
-            <input
-              autoFocus
-              value={renameValue}
-              onChange={(e) => onRenameChange?.(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') onRenameConfirm?.();
-                if (e.key === 'Escape') onRenameCancel?.();
-              }}
-              onBlur={() => onRenameCancel?.()}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
-            />
+            <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
           ) : (
-            <p className="text-sm text-white truncate group-hover:text-amber-300 transition-colors">
+            <p className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
               {folder.name}
             </p>
           )}
         </div>
         {childCount != null && (
-          <div className="text-xs text-zinc-500 flex-shrink-0">
-            {t('resources.itemCount', { count: childCount })}
-          </div>
+          <span className="text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
+            {childCount} {childCount === 1 ? 'item' : 'items'}
+          </span>
         )}
-        <div className="text-xs text-zinc-500 flex-shrink-0 flex items-center gap-1">
-          <Clock size={12} />
+        <span className="text-[11px] text-zinc-600 flex-shrink-0">
           {formatDate(folder.created_at)}
-        </div>
-        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500">
-          <ChevronRight size={14} />
-        </div>
+        </span>
+        <ChevronRight size={14} className="flex-shrink-0 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
     );
   }
@@ -93,40 +99,36 @@ export const FolderCard: React.FC<FolderCardProps> = ({
     <div
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden ${selectedRing}`}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing}`}
     >
       {/* Folder icon area */}
-      <div className="relative h-32 flex items-center justify-center bg-amber-500/5">
-        <FolderOpen size={48} className="text-amber-400/60 group-hover:text-amber-400 transition-colors" />
+      <div className="relative h-28 flex items-center justify-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
+        <div className="relative">
+          <FolderIcon
+            size={44}
+            className="text-amber-400/50 group-hover:text-amber-400/80 transition-all duration-300 group-hover:scale-105"
+            fill="currentColor"
+            fillOpacity={0.08}
+          />
+        </div>
+        {childCount != null && childCount > 0 && (
+          <span className="absolute top-2.5 right-2.5 text-[10px] text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded-md">
+            {childCount}
+          </span>
+        )}
       </div>
       {/* Info */}
-      <div className="p-3">
+      <div className="px-3 py-2.5 border-t border-zinc-700/20">
         {renaming ? (
-          <input
-            autoFocus
-            value={renameValue}
-            onChange={(e) => onRenameChange?.(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onRenameConfirm?.();
-              if (e.key === 'Escape') onRenameCancel?.();
-            }}
-            onBlur={() => onRenameCancel?.()}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
-          />
+          <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
         ) : (
-          <p className="text-sm text-white truncate group-hover:text-amber-300 transition-colors font-medium">
+          <p className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
             {folder.name}
           </p>
         )}
-        <div className="flex items-center justify-between mt-2 text-xs text-zinc-500">
-          {childCount != null ? (
-            <span>{t('resources.itemCount', { count: childCount })}</span>
-          ) : (
-            <span />
-          )}
-          <span>{formatDate(folder.created_at)}</span>
-        </div>
+        <p className="text-[11px] text-zinc-600 mt-1">
+          {formatDate(folder.created_at)}
+        </p>
       </div>
     </div>
   );

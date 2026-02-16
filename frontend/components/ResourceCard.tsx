@@ -93,9 +93,9 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       <div
         onClick={onClick}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group ${selectedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group ${selectedRing}`}
       >
-        <div className={`p-2 rounded-lg ${bg} flex-shrink-0`}>
+        <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
           <IconComponent size={18} className={color} />
         </div>
         <div className="flex-1 min-w-0">
@@ -113,18 +113,17 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
             />
           ) : (
-            <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors">
+            <p className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
               {filename}
             </p>
           )}
         </div>
-        <div className="text-xs text-zinc-500 flex-shrink-0">
+        <span className="text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
           {formatFileSize(fileSize)}
-        </div>
-        <div className="text-xs text-zinc-500 flex-shrink-0 flex items-center gap-1">
-          <Clock size={12} />
+        </span>
+        <span className="text-[11px] text-zinc-600 flex-shrink-0">
           {formatDate(createdAt)}
-        </div>
+        </span>
         {/* Actions */}
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {!showRestoreAction && onTrash && resource && (
@@ -164,23 +163,23 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     <div
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden ${selectedRing}`}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing}`}
     >
       {/* Thumbnail */}
-      <div className={`relative h-32 flex items-center justify-center ${bg}`}>
+      <div className={`relative h-28 flex items-center justify-center ${bg}`}>
         {thumbnailSrc ? (
           <img
             src={thumbnailSrc}
             alt={filename}
-            className="w-full h-full object-cover rounded-t-lg"
+            className="w-full h-full object-cover"
             loading="lazy"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         ) : (
-          <IconComponent size={40} className={`${color} opacity-60 group-hover:opacity-100 transition-opacity`} />
+          <IconComponent size={36} className={`${color} opacity-50 group-hover:opacity-80 transition-opacity`} />
         )}
         {mimeType?.startsWith('video/') && resource?.duration_seconds != null && (
-          <span className="absolute bottom-1 right-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
+          <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums">
             {formatDuration(resource.duration_seconds)}
           </span>
         )}
@@ -216,7 +215,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         )}
       </div>
       {/* Info */}
-      <div className="p-3">
+      <div className="px-3 py-2.5 border-t border-zinc-700/20">
         {renaming ? (
           <input
             autoFocus
@@ -231,11 +230,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
           />
         ) : (
-          <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors font-medium">
+          <p className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
             {filename}
           </p>
         )}
-        <div className="flex items-center justify-between mt-2 text-xs text-zinc-500">
+        <div className="flex items-center justify-between mt-1 text-[11px] text-zinc-600">
           <span>{formatFileSize(fileSize)}</span>
           <span>{formatDate(createdAt)}</span>
         </div>

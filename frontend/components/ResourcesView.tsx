@@ -1022,22 +1022,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Render ──────────────────────────────────────────
 
   const sidebarItemClass = (active: boolean) =>
-    `w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left ${
-      active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+    `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left ${
+      active ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
     }`;
 
   return (
     <div className="flex h-full animate-in fade-in duration-300">
       {/* ── Left panel: Unified sidebar navigation ── */}
-      <div className="w-56 shrink-0 border-r border-zinc-800 flex flex-col py-3">
+      <div className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col">
         {/* Navigation */}
-        <div className="flex-1 overflow-y-auto space-y-0.5 px-1">
+        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {/* ── Top section: Shared / Quick Access / Recycle Bin ── */}
           <button
             onClick={() => navigate(resPath('/resources/shared'))}
             className={sidebarItemClass(isSharedView)}
           >
-            <Share2 size={14} className="shrink-0" />
+            <Share2 size={15} className="shrink-0 opacity-70" />
             <span>{t('resources.sharedManagement')}</span>
           </button>
 
@@ -1047,7 +1047,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             }}
             className={sidebarItemClass(false)}
           >
-            <Star size={14} className="shrink-0" />
+            <Star size={15} className="shrink-0 opacity-70" />
             <span>{t('resources.quickAccess')}</span>
           </button>
 
@@ -1055,24 +1055,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             onClick={() => navigate(resPath('/resources/recycle'))}
             className={sidebarItemClass(isRecycleView)}
           >
-            <Trash2 size={14} className="shrink-0" />
+            <Trash2 size={15} className="shrink-0 opacity-70" />
             <span>{t('resources.recycleBin')}</span>
           </button>
 
           {/* ── Divider ── */}
-          <div className="mx-2 my-2 border-t border-zinc-800" />
+          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
 
           {/* ── Main section: Team Libraries / Personal Resources ── */}
           {scopeType === 'team' ? (
             <>
               {/* Team Libraries with ➕ */}
-              <div className="flex items-center justify-between pr-1">
-                <span className="px-3 py-1.5 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+              <div className="flex items-center justify-between pr-1 mb-0.5">
+                <span className="px-3 py-1 text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
                   {t('resources.teamLibraries')}
                 </span>
                 <button
                   onClick={() => setCreatingLibrary(true)}
-                  className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
                   title={t('resources.newLibrary')}
                 >
                   <Plus size={14} />
@@ -1086,7 +1086,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
                   className={sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}
                 >
-                  <BookOpen size={14} className="shrink-0" />
+                  <BookOpen size={15} className="shrink-0 opacity-70" />
                   <span className="truncate">{lib.name}</span>
                 </button>
               ))}
@@ -1136,7 +1136,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 onClick={() => navigate(resPath('/resources/downloads'))}
                 className={sidebarItemClass(isDownloadsView)}
               >
-                <Download size={14} className="shrink-0" />
+                <Download size={15} className="shrink-0 opacity-70" />
                 <span>{t('resources.downloads')}</span>
               </button>
 
@@ -1146,7 +1146,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   onClick={() => navigate(resPath('/resources'))}
                   className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
                 >
-                  <FolderOpen size={14} className="shrink-0" />
+                  <FolderOpen size={15} className="shrink-0 opacity-70" />
                   <span>{t('resources.myResources')}</span>
                 </button>
                 <button
@@ -1154,7 +1154,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     navigate(resPath('/resources'));
                     setCreatingFolder(true);
                   }}
-                  className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
+                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
                   title={t('resources.newFolder')}
                 >
                   <Plus size={14} />
@@ -1165,23 +1165,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           )}
 
           {/* ── Divider ── */}
-          <div className="mx-2 my-2 border-t border-zinc-800" />
+          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
 
           {/* ── Smart Folders with ➕ ── */}
-          <div className="flex items-center justify-between pr-1">
+          <div className="flex items-center justify-between pr-1 mb-0.5">
+            <span className="px-3 py-1 text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
+              {t('resources.smartFolders')}
+            </span>
             <button
-              onClick={() => {
-                if (smartFolders.length > 0) {
-                  navigate(resPath(`/resources/smart/${smartFolders[0].id}`));
-                }
-              }}
-              className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId)}
-            >
-              <Zap size={14} className="shrink-0" />
-              <span>{t('resources.smartFolders')}</span>
-            </button>
-            <button
-              className="p-1 text-zinc-600 hover:text-zinc-400 rounded transition-colors shrink-0"
+              className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
               title={t('smartFolder.createTitle')}
               onClick={(e) => { e.stopPropagation(); setShowSmartFolderEditor(true); }}
             >
@@ -1189,7 +1181,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </button>
           </div>
 
-          {/* Smart folder items (nested) */}
+          {/* Smart folder items */}
           {smartFolders.map((sf) => (
             <button
               key={sf.id}
@@ -1200,9 +1192,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
               }}
               className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
-              style={{ paddingLeft: '12px' }}
             >
-              <Zap size={14} className="shrink-0" />
+              <Zap size={15} className="shrink-0 opacity-70" />
               <span className="truncate flex-1">{sf.name}</span>
               <span
                 className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
@@ -1216,6 +1207,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </span>
             </button>
           ))}
+
+          {smartFolders.length === 0 && (
+            <button
+              onClick={() => setShowSmartFolderEditor(true)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
+            >
+              <Plus size={15} className="shrink-0 opacity-70" />
+              <span>{t('smartFolder.createTitle')}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1226,25 +1227,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         ) : (
         <>
         {/* Toolbar */}
-        <div className="px-6 py-3 border-b border-zinc-800 space-y-2">
-          {/* Row 1: Breadcrumb + item count */}
-          <div className="flex items-center justify-between">
-            <Breadcrumb segments={breadcrumbSegments} />
-            {!loading && (
-              <span className="text-xs text-zinc-500">
-                {t('resources.itemCount', { count: childFolders.length + sortedItems.length })}
-              </span>
-            )}
-          </div>
+        <div className="px-6 py-3 border-b border-zinc-800/80">
+          {/* Single row: Breadcrumb + controls */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <Breadcrumb segments={breadcrumbSegments} />
+              {!loading && (
+                <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
+                  {childFolders.length + sortedItems.length} {t('resources.items')}
+                </span>
+              )}
+            </div>
 
-          {/* Row 2: Sort + View Toggle + Upload + New Folder */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {/* Sort dropdown */}
               <div className="relative">
                 <button
                   onClick={() => setShowSortMenu(!showSortMenu)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 rounded-lg transition-colors"
                 >
                   <span>{currentSortLabel}</span>
                   <ChevronDown size={12} />
@@ -1272,11 +1272,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </div>
 
               {/* View toggle */}
-              <div className="flex bg-zinc-800 rounded-lg p-0.5">
+              <div className="flex bg-zinc-800/60 rounded-lg p-0.5">
                 <button
                   onClick={() => setViewMode('grid')}
                   className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                    viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
                   <LayoutGrid size={14} />
@@ -1284,15 +1284,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 <button
                   onClick={() => setViewMode('list')}
                   className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                    viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
                   <LayoutList size={14} />
                 </button>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
               {/* Upload button (only on resources view) */}
               {canUpload && (
                 <>
@@ -1329,7 +1327,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   {/* New Folder button */}
                   <button
                     onClick={() => setCreatingFolder(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 border border-zinc-700/50 rounded-lg transition-colors"
                   >
                     <FolderPlus size={14} />
                     <span>{t('resources.newFolder')}</span>
@@ -1415,104 +1413,130 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             loading ? (
               viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
             ) : (childFolders.length > 0 || sortedItems.length > 0) ? (
-              viewMode === 'grid' ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {childFolders.map((folder) => (
-                    <FolderCard
-                      key={`folder-${folder.id}`}
-                      folder={folder}
-                      onClick={() => {
-                        if (selectedLibraryId) {
-                          navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                        } else {
-                          navigate(resPath(`/resources/folder/${folder.id}`));
-                        }
-                      }}
-                      viewMode="grid"
-                      onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                      renaming={renamingFolderId === folder.id}
-                      renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                      onRenameChange={setRenameFolderValue}
-                      onRenameConfirm={handleRenameFolderConfirm}
-                      onRenameCancel={() => setRenamingFolderId(null)}
-                    />
-                  ))}
-                  {sortedItems.map((item) => (
-                    <ResourceCard
-                      key={item.id}
-                      item={item}
-                      onClick={() => handleResourceClick(item)}
-                      viewMode="grid"
-                      isSelected={selectedResource?.id === item.id}
-                      showRestoreAction={isRecycleView}
-                      onTrash={isRecycleView ? undefined : handleTrash}
-                      onRestore={isRecycleView ? handleRestore : undefined}
-                      onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                      onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                      renaming={renamingResourceId === item.id}
-                      renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                      onRenameChange={setRenameValue}
-                      onRenameConfirm={handleRenameResourceConfirm}
-                      onRenameCancel={() => setRenamingResourceId(null)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {childFolders.map((folder) => (
-                    <FolderCard
-                      key={`folder-${folder.id}`}
-                      folder={folder}
-                      onClick={() => {
-                        if (selectedLibraryId) {
-                          navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                        } else {
-                          navigate(resPath(`/resources/folder/${folder.id}`));
-                        }
-                      }}
-                      viewMode="list"
-                      onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                      renaming={renamingFolderId === folder.id}
-                      renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                      onRenameChange={setRenameFolderValue}
-                      onRenameConfirm={handleRenameFolderConfirm}
-                      onRenameCancel={() => setRenamingFolderId(null)}
-                    />
-                  ))}
-                  {sortedItems.map((item) => (
-                    <ResourceCard
-                      key={item.id}
-                      item={item}
-                      onClick={() => handleResourceClick(item)}
-                      viewMode="list"
-                      isSelected={selectedResource?.id === item.id}
-                      showRestoreAction={isRecycleView}
-                      onTrash={isRecycleView ? undefined : handleTrash}
-                      onRestore={isRecycleView ? handleRestore : undefined}
-                      onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                      onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                      renaming={renamingResourceId === item.id}
-                      renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                      onRenameChange={setRenameValue}
-                      onRenameConfirm={handleRenameResourceConfirm}
-                      onRenameCancel={() => setRenamingResourceId(null)}
-                    />
-                  ))}
-                </div>
-              )
+              <div className="space-y-5">
+                {/* Folders section */}
+                {childFolders.length > 0 && (
+                  <div>
+                    {sortedItems.length > 0 && (
+                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
+                    )}
+                    {viewMode === 'grid' ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                        {childFolders.map((folder) => (
+                          <FolderCard
+                            key={`folder-${folder.id}`}
+                            folder={folder}
+                            onClick={() => {
+                              if (selectedLibraryId) {
+                                navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                              } else {
+                                navigate(resPath(`/resources/folder/${folder.id}`));
+                              }
+                            }}
+                            viewMode="grid"
+                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
+                            renaming={renamingFolderId === folder.id}
+                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
+                            onRenameChange={setRenameFolderValue}
+                            onRenameConfirm={handleRenameFolderConfirm}
+                            onRenameCancel={() => setRenamingFolderId(null)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {childFolders.map((folder) => (
+                          <FolderCard
+                            key={`folder-${folder.id}`}
+                            folder={folder}
+                            onClick={() => {
+                              if (selectedLibraryId) {
+                                navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                              } else {
+                                navigate(resPath(`/resources/folder/${folder.id}`));
+                              }
+                            }}
+                            viewMode="list"
+                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
+                            renaming={renamingFolderId === folder.id}
+                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
+                            onRenameChange={setRenameFolderValue}
+                            onRenameConfirm={handleRenameFolderConfirm}
+                            onRenameCancel={() => setRenamingFolderId(null)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Files section */}
+                {sortedItems.length > 0 && (
+                  <div>
+                    {childFolders.length > 0 && (
+                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
+                    )}
+                    {viewMode === 'grid' ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                        {sortedItems.map((item) => (
+                          <ResourceCard
+                            key={item.id}
+                            item={item}
+                            onClick={() => handleResourceClick(item)}
+                            viewMode="grid"
+                            isSelected={selectedResource?.id === item.id}
+                            showRestoreAction={isRecycleView}
+                            onTrash={isRecycleView ? undefined : handleTrash}
+                            onRestore={isRecycleView ? handleRestore : undefined}
+                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
+                            renaming={renamingResourceId === item.id}
+                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                            onRenameChange={setRenameValue}
+                            onRenameConfirm={handleRenameResourceConfirm}
+                            onRenameCancel={() => setRenamingResourceId(null)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {sortedItems.map((item) => (
+                          <ResourceCard
+                            key={item.id}
+                            item={item}
+                            onClick={() => handleResourceClick(item)}
+                            viewMode="list"
+                            isSelected={selectedResource?.id === item.id}
+                            showRestoreAction={isRecycleView}
+                            onTrash={isRecycleView ? undefined : handleTrash}
+                            onRestore={isRecycleView ? handleRestore : undefined}
+                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
+                            renaming={renamingResourceId === item.id}
+                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                            onRenameChange={setRenameValue}
+                            onRenameConfirm={handleRenameResourceConfirm}
+                            onRenameCancel={() => setRenamingResourceId(null)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : (
               /* Empty states */
               <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
                 {isRecycleView ? (
                   <>
-                    <Trash2 size={48} className="text-zinc-600 mb-4" />
-                    <p className="text-zinc-400 text-sm">{t('resources.recycleBinEmpty')}</p>
+                    <Trash2 size={48} className="text-zinc-700 mb-4" />
+                    <p className="text-zinc-500 text-sm">{t('resources.recycleBinEmpty')}</p>
                   </>
                 ) : (
                   <>
-                    <FolderOpen size={48} className="text-zinc-600 mb-4" />
-                    <p className="text-zinc-400 text-sm">{t('resources.noResources')}</p>
-                    <p className="text-zinc-500 text-xs mt-1">{t('resources.noResourcesHint')}</p>
+                    <FolderOpen size={48} className="text-zinc-700 mb-4" />
+                    <p className="text-zinc-500 text-sm">{t('resources.noResources')}</p>
+                    <p className="text-zinc-600 text-xs mt-1">{t('resources.noResourcesHint')}</p>
                   </>
                 )}
               </div>
