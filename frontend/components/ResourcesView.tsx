@@ -1278,9 +1278,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     // Apply search
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.trim().toLowerCase();
-      items = items.filter((item) =>
-        (item.resource?.filename || '').toLowerCase().includes(q)
-      );
+      items = items.filter((item) => {
+        const filename = (item.resource?.filename || '').toLowerCase();
+        const folderName = (item.resource?.folder_name || '').toLowerCase();
+        return filename.includes(q) || folderName.includes(q);
+      });
     }
 
     return items;
@@ -1306,13 +1308,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [currentItems, sortBy]);
 
+  // Filter folders by search query
+  const filteredFolders = useMemo(() => {
+    if (!debouncedSearch.trim()) return childFolders;
+    const q = debouncedSearch.trim().toLowerCase();
+    return childFolders.filter((f) => f.name.toLowerCase().includes(q));
+  }, [childFolders, debouncedSearch]);
+
   // Build ordered list of all selectable IDs for shift-click range selection
   const allSelectableIds = useMemo(() => {
     const ids: string[] = [];
-    childFolders.forEach((f) => ids.push(`folder:${f.id}`));
+    filteredFolders.forEach((f) => ids.push(`folder:${f.id}`));
     sortedItems.forEach((i) => ids.push(`item:${i.id}`));
     return ids;
-  }, [childFolders, sortedItems]);
+  }, [filteredFolders, sortedItems]);
 
   const handleToggleSelect = useCallback((compositeId: string, e: React.MouseEvent) => {
     if (e.shiftKey && lastClickedId) {
@@ -1700,7 +1709,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <Breadcrumb segments={breadcrumbSegments} />
               {!loading && (
                 <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                  {childFolders.length + sortedItems.length} {t('resources.items')}
+                  {filteredFolders.length + sortedItems.length} {t('resources.items')}
                 </span>
               )}
             </div>
@@ -1994,17 +2003,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {!isSharedView && (
             loading ? (
               viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-            ) : (childFolders.length > 0 || sortedItems.length > 0) ? (
+            ) : (filteredFolders.length > 0 || sortedItems.length > 0) ? (
               <div className="space-y-5">
                 {/* Folders section */}
-                {childFolders.length > 0 && (
+                {filteredFolders.length > 0 && (
                   <div>
                     {sortedItems.length > 0 && (
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                     )}
                     {viewMode === 'grid' ? (
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-                        {childFolders.map((folder) => (
+                        {filteredFolders.map((folder) => (
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
@@ -2033,7 +2042,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       </div>
                     ) : (
                       <div className="space-y-1.5">
-                        {childFolders.map((folder) => (
+                        {filteredFolders.map((folder) => (
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
@@ -2067,7 +2076,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 {/* Files section */}
                 {sortedItems.length > 0 && (
                   <div>
-                    {childFolders.length > 0 && (
+                    {filteredFolders.length > 0 && (
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                     )}
                     {viewMode === 'list' && (
