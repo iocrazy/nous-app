@@ -380,6 +380,7 @@ class VideoService:
         only creates a resource_item reference (zero-copy).
         """
         if not user_id:
+            logger.warning(f"_create_resource_record skipped: no user_id for {platform_id}")
             return
 
         try:
