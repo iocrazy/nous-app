@@ -351,7 +351,10 @@
     "location": "位置",
     "share": "分享",
     "shareFile": "分享文件",
-    "shareFolder": "分享文件夹"
+    "shareFolder": "分享文件夹",
+    "fileListPanel": "文件列表",
+    "searchFiles": "搜索文件...",
+    "openFolder": "打开文件夹"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

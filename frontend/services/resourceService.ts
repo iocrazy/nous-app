@@ -102,6 +102,54 @@ export function buildFolderTree(folders: Folder[]): Folder[] {
   return roots;
 }
 
+// ─── Child Folders (direct children of a parent) ────────
+
+export async function fetchChildFolders(
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+  parentId: string | null,
+  libraryId?: string | null
+): Promise<Folder[]> {
+  let query = supabase
+    .from('folders')
+    .select('*')
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('is_trashed', false);
+
+  if (parentId) {
+    query = query.eq('parent_id', parentId);
+  } else {
+    query = query.is('parent_id', null);
+  }
+
+  if (libraryId) {
+    query = query.eq('library_id', libraryId);
+  } else if (scopeType === 'team') {
+    query = query.is('library_id', null);
+  }
+
+  const { data, error } = await query.order('sort_order', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// ─── Resource Context (for detail page sibling files) ───
+
+export async function fetchResourceContext(
+  resourceId: string
+): Promise<{ folder_id: string | null; scope_type: string; scope_id: string; library_id: string | null } | null> {
+  const { data, error } = await supabase
+    .from('resource_items')
+    .select('folder_id, scope_type, scope_id, library_id')
+    .eq('resource_id', resourceId)
+    .limit(1)
+    .single();
+
+  if (error) return null;
+  return data;
+}
+
 // ─── Resources ──────────────────────────────────────────
 
 export async function fetchResources(

@@ -31,7 +31,7 @@ import { usePermission } from '../hooks/usePermission';
 import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
   fetchFolders,
-  buildFolderTree,
+  fetchChildFolders,
   fetchResources,
   createFolder,
   uploadResource,
@@ -55,6 +55,7 @@ import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { ResourceCard } from './ResourceCard';
+import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
@@ -99,84 +100,6 @@ interface ResourcesViewProps {
 type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
 type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
-// ─── Folder Tree Item (recursive) ─────────────────────
-
-interface FolderTreeItemProps {
-  folder: Folder;
-  selectedFolderId: string | null;
-  onSelect: (id: string) => void;
-  onContextMenu?: (e: React.MouseEvent, folder: Folder) => void;
-  renamingFolderId?: string | null;
-  renameFolderValue?: string;
-  onRenameFolderChange?: (value: string) => void;
-  onRenameFolderConfirm?: () => void;
-  onRenameFolderCancel?: () => void;
-  depth?: number;
-}
-
-const FolderTreeItem: React.FC<FolderTreeItemProps> = ({
-  folder,
-  selectedFolderId,
-  onSelect,
-  onContextMenu,
-  renamingFolderId,
-  renameFolderValue,
-  onRenameFolderChange,
-  onRenameFolderConfirm,
-  onRenameFolderCancel,
-  depth = 0,
-}) => {
-  const isSelected = selectedFolderId === folder.id;
-  const isRenaming = renamingFolderId === folder.id;
-
-  return (
-    <>
-      <button
-        onClick={() => onSelect(folder.id)}
-        onContextMenu={(e) => onContextMenu?.(e, folder)}
-        className={`
-          w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left
-          ${isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}
-        `}
-        style={{ paddingLeft: `${12 + depth * 16}px` }}
-      >
-        <FolderOpen size={14} className="shrink-0" />
-        {isRenaming ? (
-          <input
-            autoFocus
-            value={renameFolderValue ?? ''}
-            onChange={(e) => onRenameFolderChange?.(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') onRenameFolderConfirm?.();
-              if (e.key === 'Escape') onRenameFolderCancel?.();
-            }}
-            onBlur={() => onRenameFolderCancel?.()}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-1 min-w-0 bg-zinc-900 border border-indigo-500 rounded px-1.5 py-0 text-xs text-zinc-200 focus:outline-none"
-          />
-        ) : (
-          <span className="truncate">{folder.name}</span>
-        )}
-      </button>
-      {folder.children?.map((child) => (
-        <FolderTreeItem
-          key={child.id}
-          folder={child}
-          selectedFolderId={selectedFolderId}
-          onSelect={onSelect}
-          onContextMenu={onContextMenu}
-          renamingFolderId={renamingFolderId}
-          renameFolderValue={renameFolderValue}
-          onRenameFolderChange={onRenameFolderChange}
-          onRenameFolderConfirm={onRenameFolderConfirm}
-          onRenameFolderCancel={onRenameFolderCancel}
-          depth={depth + 1}
-        />
-      ))}
-    </>
-  );
-};
 
 // ─── Skeleton ─────────────────────────────────────────
 
@@ -228,10 +151,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Data
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [folderTree, setFolderTree] = useState<Folder[]>([]);
+  const [childFolders, setChildFolders] = useState<Folder[]>([]);
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [foldersLoading, setFoldersLoading] = useState(true);
 
   // New folder inline input
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -322,18 +244,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Load folders on scope change ────────────────────
 
   const loadFolders = useCallback(async () => {
-    setFoldersLoading(true);
     try {
       const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
       setFolders(allFolders);
-      setFolderTree(buildFolderTree(allFolders));
     } catch {
       setFolders([]);
-      setFolderTree([]);
-    } finally {
-      setFoldersLoading(false);
     }
   }, [scopeType, scopeId, selectedLibraryId]);
+
+  const loadChildFolders = useCallback(async () => {
+    if (!isResourcesView) {
+      setChildFolders([]);
+      return;
+    }
+    try {
+      const children = await fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+      setChildFolders(children);
+    } catch {
+      setChildFolders([]);
+    }
+  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
 
   useEffect(() => {
     // State resets for folder/view/smart folder handled by URL navigation
@@ -346,6 +276,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       fetchLibraries(scopeId).then(setLibraries).catch(() => setLibraries([]));
     }
   }, [loadFolders, scopeType, scopeId]);
+
+  // Load child folders when folder/library/view changes
+  useEffect(() => {
+    loadChildFolders();
+  }, [loadChildFolders]);
 
   // ─── Load resources on folder change ─────────────────
 
@@ -433,13 +368,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     try {
       await createFolder({
         name: trimmed,
-        parent_id: null,
+        parent_id: selectedFolderId || null,
         scope_type: scopeType,
         scope_id: scopeId,
+        ...(selectedLibraryId ? { library_id: selectedLibraryId } : {}),
       });
       setNewFolderName('');
       setCreatingFolder(false);
-      await loadFolders();
+      await Promise.all([loadFolders(), loadChildFolders()]);
     } catch {
       // Keep input open on error
     } finally {
@@ -852,7 +788,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             try {
               const { trashFolder } = await import('../services/resourceService');
               await trashFolder(folder.id);
-              await loadFolders();
+              await Promise.all([loadFolders(), loadChildFolders()]);
             } catch { /* ignore */ }
           },
           danger: true,
@@ -910,7 +846,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       divider: true,
     });
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders, canDo]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, canDo]);
 
   // ─── Rename handlers ─────────────────────────────────
 
@@ -945,10 +881,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
     try {
       await renameFolder(renamingFolderId, renameFolderValue.trim());
-      await loadFolders();
+      await Promise.all([loadFolders(), loadChildFolders()]);
     } catch { /* ignore */ }
     setRenamingFolderId(null);
-  }, [renamingFolderId, renameFolderValue, loadFolders]);
+  }, [renamingFolderId, renameFolderValue, loadFolders, loadChildFolders]);
 
   // ─── Smart Folder CRUD ──────────────────────────────
 
@@ -1186,82 +1122,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </div>
               )}
 
-              {/* Folder tree for selected library */}
-              {selectedLibraryId && (
-                <>
-                  {/* Create folder button inside library */}
-                  <div className="flex items-center justify-between pr-1 mt-1">
-                    <button
-                      onClick={() => navigate(resPath(`/resources/library/${selectedLibraryId}`))}
-                      className={sidebarItemClass(isResourcesView && selectedLibraryId !== null && !selectedFolderId)}
-                      style={{ paddingLeft: '12px' }}
-                    >
-                      <FolderOpen size={14} className="shrink-0" />
-                      <span>{t('resources.allFiles')}</span>
-                    </button>
-                    <button
-                      onClick={() => setCreatingFolder(true)}
-                      className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors shrink-0"
-                      title={t('resources.newFolder')}
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-
-                  {foldersLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 size={16} className="animate-spin text-zinc-500" />
-                    </div>
-                  ) : (
-                    folderTree.map((folder) => (
-                      <FolderTreeItem
-                        key={folder.id}
-                        folder={folder}
-                        selectedFolderId={isResourcesView ? selectedFolderId : null}
-                        onSelect={(id) => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${id}`))}
-                        onContextMenu={handleFolderContextMenu}
-                        renamingFolderId={renamingFolderId}
-                        renameFolderValue={renameFolderValue}
-                        onRenameFolderChange={setRenameFolderValue}
-                        onRenameFolderConfirm={handleRenameFolderConfirm}
-                        onRenameFolderCancel={() => setRenamingFolderId(null)}
-                        depth={1}
-                      />
-                    ))
-                  )}
-
-                  {/* Inline new folder input */}
-                  {creatingFolder && (
-                    <div className="flex items-center gap-1.5 px-2 py-1">
-                      <input
-                        ref={newFolderInputRef}
-                        type="text"
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleCreateFolder();
-                          if (e.key === 'Escape') {
-                            setCreatingFolder(false);
-                            setNewFolderName('');
-                          }
-                        }}
-                        onBlur={() => {
-                          if (!newFolderName.trim()) {
-                            setCreatingFolder(false);
-                            setNewFolderName('');
-                          }
-                        }}
-                        placeholder={t('resources.folderName')}
-                        disabled={savingFolder}
-                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                      />
-                      {savingFolder && (
-                        <Loader2 size={12} className="animate-spin text-zinc-400" />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
 
               {libraries.length === 0 && !creatingLibrary && (
                 <div className="px-3 py-4 text-center">
@@ -1301,58 +1161,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </button>
               </div>
 
-              {/* Folder tree */}
-              {foldersLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 size={16} className="animate-spin text-zinc-500" />
-                </div>
-              ) : (
-                folderTree.map((folder) => (
-                  <FolderTreeItem
-                    key={folder.id}
-                    folder={folder}
-                    selectedFolderId={isResourcesView ? selectedFolderId : null}
-                    onSelect={(id) => navigate(resPath(`/resources/folder/${id}`))}
-                    onContextMenu={handleFolderContextMenu}
-                    renamingFolderId={renamingFolderId}
-                    renameFolderValue={renameFolderValue}
-                    onRenameFolderChange={setRenameFolderValue}
-                    onRenameFolderConfirm={handleRenameFolderConfirm}
-                    onRenameFolderCancel={() => setRenamingFolderId(null)}
-                  />
-                ))
-              )}
-
-              {/* Inline new folder input */}
-              {creatingFolder && (
-                <div className="flex items-center gap-1.5 px-2 py-1">
-                  <input
-                    ref={newFolderInputRef}
-                    type="text"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleCreateFolder();
-                      if (e.key === 'Escape') {
-                        setCreatingFolder(false);
-                        setNewFolderName('');
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!newFolderName.trim()) {
-                        setCreatingFolder(false);
-                        setNewFolderName('');
-                      }
-                    }}
-                    placeholder={t('resources.folderName')}
-                    disabled={savingFolder}
-                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                  />
-                  {savingFolder && (
-                    <Loader2 size={12} className="animate-spin text-zinc-400" />
-                  )}
-                </div>
-              )}
             </>
           )}
 
@@ -1424,7 +1232,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             <Breadcrumb segments={breadcrumbSegments} />
             {!loading && (
               <span className="text-xs text-zinc-500">
-                {t('resources.itemCount', { count: sortedItems.length })}
+                {t('resources.itemCount', { count: childFolders.length + sortedItems.length })}
               </span>
             )}
           </div>
@@ -1570,13 +1378,65 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
           )}
 
+          {/* Inline new folder input (content area) */}
+          {creatingFolder && !isSharedView && !isRecycleView && (
+            <div className="mb-4 flex items-center gap-2 max-w-sm">
+              <FolderPlus size={16} className="text-amber-400 shrink-0" />
+              <input
+                ref={newFolderInputRef}
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateFolder();
+                  if (e.key === 'Escape') {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                  }
+                }}
+                onBlur={() => {
+                  if (!newFolderName.trim()) {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                  }
+                }}
+                placeholder={t('resources.folderName')}
+                disabled={savingFolder}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+              />
+              {savingFolder && (
+                <Loader2 size={14} className="animate-spin text-zinc-400" />
+              )}
+            </div>
+          )}
+
           {/* Resources / Recycle / Downloads content */}
           {!isSharedView && (
             loading ? (
               viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-            ) : sortedItems.length > 0 ? (
+            ) : (childFolders.length > 0 || sortedItems.length > 0) ? (
               viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {childFolders.map((folder) => (
+                    <FolderCard
+                      key={`folder-${folder.id}`}
+                      folder={folder}
+                      onClick={() => {
+                        if (selectedLibraryId) {
+                          navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                        } else {
+                          navigate(resPath(`/resources/folder/${folder.id}`));
+                        }
+                      }}
+                      viewMode="grid"
+                      onContextMenu={(e) => handleFolderContextMenu(e, folder)}
+                      renaming={renamingFolderId === folder.id}
+                      renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
+                      onRenameChange={setRenameFolderValue}
+                      onRenameConfirm={handleRenameFolderConfirm}
+                      onRenameCancel={() => setRenamingFolderId(null)}
+                    />
+                  ))}
                   {sortedItems.map((item) => (
                     <ResourceCard
                       key={item.id}
@@ -1599,6 +1459,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {childFolders.map((folder) => (
+                    <FolderCard
+                      key={`folder-${folder.id}`}
+                      folder={folder}
+                      onClick={() => {
+                        if (selectedLibraryId) {
+                          navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                        } else {
+                          navigate(resPath(`/resources/folder/${folder.id}`));
+                        }
+                      }}
+                      viewMode="list"
+                      onContextMenu={(e) => handleFolderContextMenu(e, folder)}
+                      renaming={renamingFolderId === folder.id}
+                      renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
+                      onRenameChange={setRenameFolderValue}
+                      onRenameConfirm={handleRenameFolderConfirm}
+                      onRenameCancel={() => setRenamingFolderId(null)}
+                    />
+                  ))}
                   {sortedItems.map((item) => (
                     <ResourceCard
                       key={item.id}
