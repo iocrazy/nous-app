@@ -16,9 +16,11 @@ import {
   X,
   Layers,
   FileQuestion,
+  PanelLeft,
+  Search,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Resource, ResourceVersion, Tag } from '../types';
+import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
 import {
   fetchResourceById,
   fetchResourceVersions,
@@ -26,6 +28,9 @@ import {
   addResourceTag,
   removeResourceTag,
   getResourceFileUrl,
+  fetchResourceContext,
+  fetchResources,
+  getResourceCoverUrl,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
 import { getSupabaseAccessToken } from '../supabaseClient';
@@ -195,6 +200,39 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
+  // File list panel state
+  const [showFileList, setShowFileList] = useState(false);
+  const [siblingFiles, setSiblingFiles] = useState<ResourceItem[]>([]);
+  const [fileListSearch, setFileListSearch] = useState('');
+
+  // Load sibling files for file list panel
+  useEffect(() => {
+    let cancelled = false;
+    const loadSiblings = async () => {
+      try {
+        const ctx = await fetchResourceContext(resourceId);
+        if (!ctx || cancelled) return;
+        const items = await fetchResources(
+          ctx.scope_type as 'personal' | 'team',
+          ctx.scope_id,
+          ctx.folder_id,
+          ctx.library_id,
+        );
+        if (!cancelled) setSiblingFiles(items);
+      } catch {
+        if (!cancelled) setSiblingFiles([]);
+      }
+    };
+    loadSiblings();
+    return () => { cancelled = true; };
+  }, [resourceId]);
+
+  const filteredSiblings = fileListSearch
+    ? siblingFiles.filter((item) =>
+        (item.resource?.filename ?? '').toLowerCase().includes(fileListSearch.toLowerCase())
+      )
+    : siblingFiles;
+
   // Build authenticated file URL
   useEffect(() => {
     let cancelled = false;
@@ -303,13 +341,24 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 shrink-0">
-        <button
-          onClick={handleBack}
-          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
-        >
-          <ArrowLeft size={16} />
-          <span>{t('common.back')}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFileList(!showFileList)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              showFileList ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+            }`}
+            title={t('resources.fileListPanel')}
+          >
+            <PanelLeft size={16} />
+          </button>
+          <button
+            onClick={handleBack}
+            className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            <ArrowLeft size={16} />
+            <span>{t('common.back')}</span>
+          </button>
+        </div>
         <div className="flex items-center gap-2">
           {/* Download button */}
           {fileUrl && (
@@ -353,7 +402,69 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Preview area */}
+        {/* File list panel */}
+        {showFileList && (
+          <div className="w-72 border-r border-zinc-800 flex flex-col shrink-0 bg-zinc-900/50">
+            {/* Search */}
+            <div className="p-3 border-b border-zinc-800">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  value={fileListSearch}
+                  onChange={(e) => setFileListSearch(e.target.value)}
+                  placeholder={t('resources.searchFiles')}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            {/* File list */}
+            <div className="flex-1 overflow-y-auto py-1">
+              {filteredSiblings.map((item) => {
+                const isActive = item.resource?.id === resourceId;
+                const thumb = item.resource?.thumbnail_path || (item.resource?.cover_image_path && item.resource?.id ? getResourceCoverUrl(String(item.resource.id)) : null);
+                const { icon: SibIcon, color: sibColor, bg: sibBg } = getFileIcon(item.resource?.mime_type);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      if (item.resource?.id && item.resource.id !== resourceId) {
+                        const basePath = teamId ? `/t/${teamId}` : '';
+                        navigate(`${basePath}/resources/file/${item.resource.id}`);
+                      }
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                      isActive
+                        ? 'bg-indigo-500/10 border-l-2 border-indigo-500'
+                        : 'hover:bg-zinc-800/80 border-l-2 border-transparent'
+                    }`}
+                  >
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="w-8 h-8 rounded object-cover shrink-0"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className={`w-8 h-8 rounded ${sibBg} flex items-center justify-center shrink-0`}>
+                        <SibIcon size={14} className={sibColor} />
+                      </div>
+                    )}
+                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-400'}`}>
+                      {item.resource?.filename ?? 'Untitled'}
+                    </span>
+                  </button>
+                );
+              })}
+              {filteredSiblings.length === 0 && (
+                <p className="text-xs text-zinc-600 text-center py-4">{t('resources.noResources')}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Preview area */}
         <div className="flex-1 flex items-center justify-center bg-zinc-950 p-6 min-w-0">
           <FilePreview resource={resource} fileUrl={fileUrl} />
         </div>
