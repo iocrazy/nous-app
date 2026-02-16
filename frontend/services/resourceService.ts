@@ -600,6 +600,23 @@ export async function moveFolder(
   if (error) throw error;
 }
 
+// ─── Folder Preview ──────────────────────────────────
+
+export async function getFolderPreview(
+  folderId: string
+): Promise<Array<{ thumbnail_path: string | null; mime_type: string | null }>> {
+  const { data, error } = await supabase
+    .from('resource_items')
+    .select('resource:resources(thumbnail_path, mime_type)')
+    .eq('folder_id', folderId)
+    .limit(3);
+  if (error) throw error;
+  return (data || []).map((item: any) => ({
+    thumbnail_path: item.resource?.thumbnail_path ?? null,
+    mime_type: item.resource?.mime_type ?? null,
+  }));
+}
+
 // 批量删除
 export async function trashResources(
   resourceIds: string[],

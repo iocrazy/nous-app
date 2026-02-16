@@ -54,6 +54,7 @@ import {
   moveFolder,
   trashResources,
   renameResource,
+  getFolderPreview,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -157,6 +158,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Data
   const [folders, setFolders] = useState<Folder[]>([]);
   const [childFolders, setChildFolders] = useState<Folder[]>([]);
+  const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ thumbnail_path: string | null; mime_type: string | null }>>>({});
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -295,6 +297,28 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   useEffect(() => {
     loadChildFolders();
   }, [loadChildFolders]);
+
+  // Load folder previews when child folders change
+  useEffect(() => {
+    if (childFolders.length === 0) {
+      setFolderPreviews({});
+      return;
+    }
+    const loadPreviews = async () => {
+      const previews: Record<string, Array<{ thumbnail_path: string | null; mime_type: string | null }>> = {};
+      await Promise.all(
+        childFolders.map(async (f) => {
+          try {
+            previews[f.id] = await getFolderPreview(f.id);
+          } catch {
+            previews[f.id] = [];
+          }
+        })
+      );
+      setFolderPreviews(previews);
+    };
+    loadPreviews();
+  }, [childFolders]);
 
   // ─── Load resources on folder change ─────────────────
 
@@ -694,6 +718,52 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setOperationTargetItems([]);
     setOperationTargetFolders([]);
   }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, selectedFolderId, selectedLibraryId, loadFolders, loadChildFolders]);
+
+  // ─── Handle drag-drop onto folder ──────────────────
+
+  const handleDropOnFolder = useCallback(async (targetFolderId: string | null, droppedIds: string[]) => {
+    try {
+      for (const compositeId of droppedIds) {
+        if (compositeId.startsWith('folder:')) {
+          const fId = compositeId.replace('folder:', '');
+          if (fId !== targetFolderId) {
+            await moveFolder(fId, targetFolderId, selectedLibraryId);
+          }
+        } else if (compositeId.startsWith('item:')) {
+          const itemId = compositeId.replace('item:', '');
+          await moveResourceItem(itemId, targetFolderId, selectedLibraryId);
+        }
+      }
+      // Refresh
+      await Promise.all([loadFolders(), loadChildFolders()]);
+      const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+      setResources(items);
+      setSelectedIds(new Set());
+    } catch { /* ignore */ }
+  }, [selectedLibraryId, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders]);
+
+  // ─── Sidebar drop handlers ────────────────────────
+
+  const handleSidebarDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/mediahub-items')) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, []);
+
+  const handleSidebarDrop = useCallback((e: React.DragEvent, targetFolderId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const raw = e.dataTransfer.getData('application/mediahub-items');
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.ids && Array.isArray(data.ids)) {
+          handleDropOnFolder(targetFolderId, data.ids);
+        }
+      } catch { /* ignore */ }
+    }
+  }, [handleDropOnFolder]);
 
   const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
     if (!confirm(t('smartFolder.confirmDelete'))) return;
@@ -1244,6 +1314,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <div className="flex items-center justify-between pr-1">
                 <button
                   onClick={() => navigate(resPath('/resources'))}
+                  onDragOver={handleSidebarDragOver}
+                  onDrop={(e) => handleSidebarDrop(e, null)}
                   className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
                 >
                   <FolderOpen size={15} className="shrink-0 opacity-70" />
@@ -1543,6 +1615,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
+                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
+                            previewItems={folderPreviews[folder.id]}
                           />
                         ))}
                       </div>
@@ -1569,6 +1643,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
+                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
+                            previewItems={folderPreviews[folder.id]}
                           />
                         ))}
                       </div>
@@ -1604,6 +1680,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
+                            selectedIds={selectedIds}
+                            compositeId={`item:${item.id}`}
                           />
                         ))}
                       </div>
@@ -1629,6 +1707,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
+                            selectedIds={selectedIds}
+                            compositeId={`item:${item.id}`}
                           />
                         ))}
                       </div>
