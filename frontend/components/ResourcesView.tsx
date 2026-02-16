@@ -1622,19 +1622,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </div>
 
               {/* Folder tree */}
-              <SidebarFolderTree
-                folders={folders}
-                currentFolderId={selectedFolderId}
-                onNavigate={(folderId) => {
-                  if (folderId) {
-                    navigate(resPath(`/resources/folder/${folderId}`));
-                  } else {
-                    navigate(resPath('/resources'));
-                  }
-                }}
-                onDragOver={handleSidebarDragOver}
-                onDrop={handleSidebarDrop}
-              />
+              {scopeType === 'team' && (
+                <SidebarFolderTree
+                  folders={folders}
+                  currentFolderId={selectedFolderId}
+                  onNavigate={(folderId) => {
+                    if (folderId) {
+                      navigate(resPath(`/resources/folder/${folderId}`));
+                    } else {
+                      navigate(resPath('/resources'));
+                    }
+                  }}
+                  onDragOver={handleSidebarDragOver}
+                  onDrop={handleSidebarDrop}
+                />
+              )}
 
             </>
           )}

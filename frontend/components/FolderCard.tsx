@@ -207,17 +207,27 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       {checkbox}
       {moreButton}
       {/* Folder icon area */}
-      <div className="relative h-28 flex items-center justify-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
-        {hasPreview ? (
-          <div className="grid grid-cols-2 gap-1 p-3 w-full h-full">
-            {previewItems!.slice(0, 3).map((pi, idx) => {
+      <div className="relative h-28 flex items-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
+        {/* Left: folder icon */}
+        <div className="flex-1 flex items-center justify-center">
+          <FolderIcon
+            size={52}
+            className="text-amber-500 group-hover:text-amber-400 transition-all duration-300 group-hover:scale-105"
+            fill="currentColor"
+            fillOpacity={0.3}
+          />
+        </div>
+        {/* Right: preview thumbnails */}
+        {hasPreview && (
+          <div className="w-[40%] flex flex-col gap-1 p-2 h-full justify-center">
+            {previewItems!.slice(0, 2).map((pi, idx) => {
               if (pi.thumbnail_path) {
                 return (
                   <img
                     key={idx}
                     src={pi.thumbnail_path}
                     alt=""
-                    className={`rounded object-cover ${idx === 0 && previewItems!.length < 3 ? 'col-span-2 h-full' : idx === 0 ? 'col-span-2 h-14' : 'h-8'} w-full`}
+                    className="rounded object-cover h-[calc(50%-2px)] w-full"
                     loading="lazy"
                   />
                 );
@@ -226,21 +236,12 @@ export const FolderCard: React.FC<FolderCardProps> = ({
               return (
                 <div
                   key={idx}
-                  className={`rounded bg-zinc-800/60 flex items-center justify-center ${idx === 0 && previewItems!.length < 3 ? 'col-span-2 h-full' : idx === 0 ? 'col-span-2 h-14' : 'h-8'}`}
+                  className="rounded bg-zinc-800/60 flex items-center justify-center h-[calc(50%-2px)]"
                 >
-                  <PreviewIcon size={idx === 0 ? 20 : 14} className={`${previewColor} opacity-50`} />
+                  <PreviewIcon size={16} className={`${previewColor} opacity-50`} />
                 </div>
               );
             })}
-          </div>
-        ) : (
-          <div className="relative">
-            <FolderIcon
-              size={44}
-              className="text-amber-400/50 group-hover:text-amber-400/80 transition-all duration-300 group-hover:scale-105"
-              fill="currentColor"
-              fillOpacity={0.08}
-            />
           </div>
         )}
         {childCount != null && childCount > 0 && (
