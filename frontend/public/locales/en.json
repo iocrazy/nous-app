@@ -354,7 +354,10 @@
     "shareFolder": "Share Folder",
     "fileListPanel": "File List",
     "searchFiles": "Search files...",
-    "openFolder": "Open Folder"
+    "openFolder": "Open Folder",
+    "folders": "Folders",
+    "files": "Files",
+    "items": "items"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
