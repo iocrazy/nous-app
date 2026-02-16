@@ -273,7 +273,7 @@ class DouyinParser:
             "datasize": Utils.format_file_size(data_size),
             "datasize_bytes": data_size or 0,
             "duration": Utils.format_duration(video_data.get("duration")),
-            "resolution": f"{video_data.get('width')}:{video_data.get('height')}",
+            "resolution": f"{video_data.get('width')}x{video_data.get('height')}",
             "source_platform": "douyin",
             "external_id": aweme_id,
             "video_download_urls": video_data.get("play_addr", {}).get(
