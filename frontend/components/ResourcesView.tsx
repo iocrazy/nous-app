@@ -900,17 +900,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     if (contextMenu.type === 'folder') {
       const folder = contextMenu.target as Folder;
+      const folderUrl = selectedLibraryId
+        ? resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`)
+        : resPath(`/resources/folder/${folder.id}`);
       const items: ContextMenuItem[] = [
+        {
+          label: t('resources.openInNewTab'),
+          icon: <ExternalLink size={14} />,
+          onClick: () => {
+            window.open(folderUrl, '_blank');
+          },
+        },
         {
           label: t('resources.open'),
           icon: <FolderOpen size={14} />,
-          onClick: () => {
-            if (selectedLibraryId) {
-              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-            } else {
-              navigate(resPath(`/resources/folder/${folder.id}`));
-            }
-          },
+          onClick: () => navigate(folderUrl),
         },
       ];
       if (canDo('update')) {
@@ -920,6 +924,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onClick: () => {
             setRenamingFolderId(folder.id);
             setRenameFolderValue(folder.name);
+          },
+          divider: true,
+        });
+      }
+      if (canDo('copy')) {
+        items.push({
+          label: t('resources.copyTo'),
+          icon: <Copy size={14} />,
+          onClick: () => {
+            // For folders, copy means copy contents - use move picker in copy mode
+            setOperationTargetItems([]);
+            setOperationTargetFolders([folder]);
+            setFolderPickerMode('copy');
           },
         });
       }
