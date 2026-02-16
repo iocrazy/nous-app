@@ -48,6 +48,11 @@ import {
   updateSmartFolder,
   deleteSmartFolder,
   renameFolder,
+  moveResourceItem,
+  moveResourceItems,
+  copyResourceItem,
+  moveFolder,
+  trashResources,
   renameResource,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
@@ -60,6 +65,7 @@ import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
+import { FolderPickerModal } from './FolderPickerModal';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -221,6 +227,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     folderId?: string;
     libraryId?: string;
   } | null>(null);
+
+  // Copy/Move operations
+  const [folderPickerMode, setFolderPickerMode] = useState<'copy' | 'move' | null>(null);
+  const [operationTargetItems, setOperationTargetItems] = useState<ResourceItem[]>([]);
+  const [operationTargetFolders, setOperationTargetFolders] = useState<Folder[]>([]);
 
   // ─── Permission check ────────────────────────────────
 
@@ -636,8 +647,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   }, []);
 
   const handleEmptyAreaContextMenu = useCallback((e: React.MouseEvent) => {
-    // Only trigger on the content area itself, not on children
-    if (e.target === e.currentTarget) {
+    // Only trigger when not right-clicking on a card (cards have their own context menus)
+    const target = e.target as HTMLElement;
+    if (!target.closest('[data-context-item]')) {
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'empty' });
     }
@@ -646,6 +658,38 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
   }, []);
+
+  const handleFolderPickerConfirm = useCallback(async (targetFolderId: string | null, targetLibraryId?: string | null) => {
+    try {
+      if (folderPickerMode === 'move') {
+        // Move folders
+        for (const folder of operationTargetFolders) {
+          await moveFolder(folder.id, targetFolderId, targetLibraryId);
+        }
+        // Move items
+        if (operationTargetItems.length === 1) {
+          await moveResourceItem(operationTargetItems[0].id, targetFolderId, targetLibraryId);
+        } else if (operationTargetItems.length > 1) {
+          await moveResourceItems(operationTargetItems.map((i) => i.id), targetFolderId, targetLibraryId);
+        }
+        // Reload
+        await Promise.all([loadFolders(), loadChildFolders()]);
+        const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+        setResources(items);
+      } else if (folderPickerMode === 'copy') {
+        for (const item of operationTargetItems) {
+          if (item.resource?.id) {
+            await copyResourceItem(String(item.resource.id), scopeType, scopeId, targetFolderId, targetLibraryId);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    setFolderPickerMode(null);
+    setOperationTargetItems([]);
+    setOperationTargetFolders([]);
+  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, selectedFolderId, selectedLibraryId, loadFolders, loadChildFolders]);
 
   const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
     if (!confirm(t('smartFolder.confirmDelete'))) return;
@@ -710,16 +754,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         items.push({
           label: t('resources.copyTo'),
           icon: <Copy size={14} />,
-          onClick: () => {},
-          disabled: true,
+          onClick: () => {
+            setOperationTargetItems([item]);
+            setOperationTargetFolders([]);
+            setFolderPickerMode('copy');
+          },
         });
       }
       if (canDo('move')) {
         items.push({
           label: t('resources.moveTo'),
           icon: <Move size={14} />,
-          onClick: () => {},
-          disabled: true,
+          onClick: () => {
+            setOperationTargetItems([item]);
+            setOperationTargetFolders([]);
+            setFolderPickerMode('move');
+          },
         });
       }
       if (canDo('share')) {
@@ -767,6 +817,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onClick: () => {
             setRenamingFolderId(folder.id);
             setRenameFolderValue(folder.name);
+          },
+        });
+      }
+      if (canDo('move')) {
+        items.push({
+          label: t('resources.moveTo'),
+          icon: <Move size={14} />,
+          onClick: () => {
+            setOperationTargetItems([]);
+            setOperationTargetFolders([folder]);
+            setFolderPickerMode('move');
           },
         });
       }
@@ -1659,6 +1720,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onClose={() => setShareTarget(null)}
           resourceId={shareTarget.resourceId}
           folderId={shareTarget.folderId}
+        />
+      )}
+
+      {/* ── Folder Picker Modal (Copy/Move) ── */}
+      {folderPickerMode && (
+        <FolderPickerModal
+          isOpen={true}
+          onClose={() => {
+            setFolderPickerMode(null);
+            setOperationTargetItems([]);
+            setOperationTargetFolders([]);
+          }}
+          onConfirm={handleFolderPickerConfirm}
+          mode={folderPickerMode}
+          scopeType={scopeType}
+          scopeId={scopeId}
+          currentLibraryId={selectedLibraryId}
+          excludeFolderIds={operationTargetFolders.map((f) => f.id)}
         />
       )}
     </div>
