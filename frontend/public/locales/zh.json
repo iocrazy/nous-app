@@ -389,7 +389,12 @@
     "listHeaderName": "名称",
     "listHeaderType": "类型",
     "listHeaderSize": "大小",
-    "paste": "粘贴"
+    "paste": "粘贴",
+    "uploadFolder": "上传文件夹",
+    "trashedNotification": "已移到回收站: {{name}}",
+    "renamedNotification": "已重命名为 {{name}}",
+    "copiedToClipboard": "已复制 {{count}} 项",
+    "cutToClipboard": "已剪切 {{count}} 项"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

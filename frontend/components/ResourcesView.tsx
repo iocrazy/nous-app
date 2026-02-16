@@ -71,6 +71,8 @@ import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
 import { SidebarFolderTree } from './SidebarFolderTree';
+import { useToast } from './Toast';
+import { useFileKeyboard } from '../hooks/useFileKeyboard';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -262,6 +264,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     scopeType === 'team' ? permObjectId : null,
     scopeType === 'team' ? (teamId ?? null) : null,
   );
+
+  // ─── Toast ────────────────────────────────────────────
+  const { addToast } = useToast();
+
+  // ─── Clipboard state for keyboard shortcuts ──────────
+  const [clipboardItems, setClipboardItems] = useState<ResourceItem[]>([]);
+  const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null);
+
+  // ─── Folder upload ref ───────────────────────────────
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Derived view flags ──────────────────────────────
 
@@ -596,11 +608,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const handleTrash = useCallback(async (resourceId: string) => {
     try {
+      const item = resources.find((r) => r.resource?.id === resourceId);
       await trashResource(resourceId, scopeType, scopeId);
       setResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
       if (selectedResource?.resource?.id === resourceId) setSelectedResource(null);
+      const filename = item?.resource?.filename || '';
+      addToast(t('resources.trashedNotification', { name: filename }), 'success');
     } catch { /* ignore */ }
-  }, [selectedResource, scopeType, scopeId]);
+  }, [selectedResource, scopeType, scopeId, resources, addToast, t]);
 
   const handleRestore = useCallback(async (resourceId: string) => {
     try {
@@ -733,12 +748,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         await Promise.all([loadFolders(), loadChildFolders()]);
         const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
         setResources(items);
+        const totalMoved = operationTargetItems.length + operationTargetFolders.length;
+        addToast(t('resources.moveSuccess', { count: totalMoved }), 'success');
       } else if (folderPickerMode === 'copy') {
         for (const item of operationTargetItems) {
           if (item.resource?.id) {
             await copyResourceItem(String(item.resource.id), scopeType, scopeId, targetFolderId, targetLibraryId);
           }
         }
+        addToast(t('resources.copySuccess', { count: operationTargetItems.length }), 'success');
       }
     } catch {
       /* ignore */
@@ -746,7 +764,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setFolderPickerMode(null);
     setOperationTargetItems([]);
     setOperationTargetFolders([]);
-  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, selectedFolderId, selectedLibraryId, loadFolders, loadChildFolders]);
+  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, selectedFolderId, selectedLibraryId, loadFolders, loadChildFolders, addToast, t]);
 
   // ─── Handle drag-drop onto folder ──────────────────
 
@@ -1070,9 +1088,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             : r
         )
       );
+      addToast(t('resources.renamedNotification', { name: renameValue.trim() }), 'success');
     } catch { /* ignore */ }
     setRenamingResourceId(null);
-  }, [renamingResourceId, renameValue, resources]);
+  }, [renamingResourceId, renameValue, resources, addToast, t]);
 
   const handleRenameFolderConfirm = useCallback(async () => {
     if (!renamingFolderId || !renameFolderValue.trim()) {
@@ -1082,9 +1101,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     try {
       await renameFolder(renamingFolderId, renameFolderValue.trim());
       await Promise.all([loadFolders(), loadChildFolders()]);
+      addToast(t('resources.renamedNotification', { name: renameFolderValue.trim() }), 'success');
     } catch { /* ignore */ }
     setRenamingFolderId(null);
-  }, [renamingFolderId, renameFolderValue, loadFolders, loadChildFolders]);
+  }, [renamingFolderId, renameFolderValue, loadFolders, loadChildFolders, addToast, t]);
 
   // ─── Smart Folder CRUD ──────────────────────────────
 
@@ -1290,6 +1310,103 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
     originalAction();
   }, [selectedIds, handleToggleSelect]);
+
+  // ─── Keyboard shortcuts ─────────────────────────────
+
+  useFileKeyboard({
+    allSelectableIds,
+    selectedIds,
+    setSelectedIds,
+    enabled: isResourcesView && !renamingResourceId && !renamingFolderId && !creatingFolder,
+    onDelete: useCallback(() => {
+      const resourceIds = sortedItems
+        .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+        .map((i) => String(i.resource!.id));
+      if (resourceIds.length > 0) {
+        trashResources(resourceIds).then(async () => {
+          const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+          setResources(items);
+          setSelectedIds(new Set());
+          addToast(t('resources.trashedNotification', { name: `${resourceIds.length} items` }), 'success');
+        }).catch(() => {});
+      }
+    }, [sortedItems, selectedIds, scopeType, scopeId, selectedFolderId, selectedLibraryId, addToast, t]),
+    onRename: useCallback((compositeId: string) => {
+      if (compositeId.startsWith('folder:')) {
+        const fId = compositeId.replace('folder:', '');
+        const folder = childFolders.find((f) => f.id === fId);
+        if (folder) {
+          setRenamingFolderId(fId);
+          setRenameFolderValue(folder.name);
+        }
+      } else if (compositeId.startsWith('item:')) {
+        const itemId = compositeId.replace('item:', '');
+        const item = resources.find((r) => r.id === itemId);
+        if (item?.resource) {
+          setRenamingResourceId(itemId);
+          setRenameValue(item.resource.filename ?? '');
+        }
+      }
+    }, [childFolders, resources]),
+    onOpen: useCallback((compositeId: string) => {
+      if (compositeId.startsWith('folder:')) {
+        const fId = compositeId.replace('folder:', '');
+        if (selectedLibraryId) {
+          navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${fId}`));
+        } else {
+          navigate(resPath(`/resources/folder/${fId}`));
+        }
+      } else if (compositeId.startsWith('item:')) {
+        const itemId = compositeId.replace('item:', '');
+        const item = resources.find((r) => r.id === itemId);
+        if (item?.resource?.id) {
+          navigate(resPath(`/resources/file/${item.resource.id}`));
+        }
+      }
+    }, [selectedLibraryId, navigate, resPath, resources]),
+    onNewFolder: useCallback(() => setCreatingFolder(true), []),
+    onCopy: useCallback(() => {
+      const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+      if (items.length > 0) {
+        setClipboardItems(items);
+        setClipboardMode('copy');
+        addToast(t('resources.copiedToClipboard', { count: items.length }), 'info');
+      }
+    }, [sortedItems, selectedIds, addToast, t]),
+    onCut: useCallback(() => {
+      const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+      if (items.length > 0) {
+        setClipboardItems(items);
+        setClipboardMode('cut');
+        addToast(t('resources.cutToClipboard', { count: items.length }), 'info');
+      }
+    }, [sortedItems, selectedIds, addToast, t]),
+    onPaste: useCallback(async () => {
+      if (clipboardItems.length === 0 || !clipboardMode) return;
+      try {
+        if (clipboardMode === 'copy') {
+          for (const item of clipboardItems) {
+            if (item.resource?.id) {
+              await copyResourceItem(String(item.resource.id), scopeType, scopeId, selectedFolderId, selectedLibraryId);
+            }
+          }
+          addToast(t('resources.copySuccess', { count: clipboardItems.length }), 'success');
+        } else {
+          // cut = move
+          if (clipboardItems.length === 1) {
+            await moveResourceItem(clipboardItems[0].id, selectedFolderId, selectedLibraryId);
+          } else {
+            await moveResourceItems(clipboardItems.map((i) => i.id), selectedFolderId, selectedLibraryId);
+          }
+          addToast(t('resources.moveSuccess', { count: clipboardItems.length }), 'success');
+          setClipboardItems([]);
+          setClipboardMode(null);
+        }
+        const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+        setResources(items);
+      } catch { /* ignore */ }
+    }, [clipboardItems, clipboardMode, scopeType, scopeId, selectedFolderId, selectedLibraryId, addToast, t]),
+  });
 
   const toggleFilter = useCallback((type: FilterType) => {
     setActiveFilters((prev) => {
@@ -1687,23 +1804,66 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       }
                     }}
                   />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg transition-colors"
-                  >
-                    {uploading ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        <span>{uploadProgress}%</span>
-                      </>
-                    ) : (
-                      <>
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    // @ts-ignore - webkitdirectory is non-standard but widely supported
+                    webkitdirectory=""
+                    directory=""
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.length) {
+                        handleUpload(e.target.files);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  {uploading ? (
+                    <button
+                      disabled
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
+                    >
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>{uploadProgress}%</span>
+                    </button>
+                  ) : (
+                    <div className="relative group/upload">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
+                      >
                         <Upload size={14} />
                         <span>{t('resources.upload')}</span>
-                      </>
-                    )}
-                  </button>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const menu = (e.currentTarget.nextElementSibling as HTMLElement);
+                          if (menu) menu.classList.toggle('hidden');
+                        }}
+                        className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
+                      >
+                        <ChevronDown size={12} />
+                      </button>
+                      <div className="hidden absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                        <button
+                          onClick={() => { fileInputRef.current?.click(); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                        >
+                          <Upload size={12} />
+                          {t('resources.uploadFile')}
+                        </button>
+                        <button
+                          onClick={() => { folderInputRef.current?.click(); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                        >
+                          <FolderOpen size={12} />
+                          {t('resources.uploadFolder')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* New Folder button */}
                   <button
@@ -1821,6 +1981,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameFolderValue}
                             onRenameConfirm={handleRenameFolderConfirm}
                             onRenameCancel={() => setRenamingFolderId(null)}
+                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
@@ -1849,6 +2010,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameFolderValue}
                             onRenameConfirm={handleRenameFolderConfirm}
                             onRenameCancel={() => setRenamingFolderId(null)}
+                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
@@ -1901,6 +2063,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameValue}
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
+                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
@@ -1928,6 +2091,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameValue}
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
+                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
