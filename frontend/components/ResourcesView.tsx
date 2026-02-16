@@ -1830,6 +1830,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     {childFolders.length > 0 && (
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                     )}
+                    {viewMode === 'list' && (
+                      <div className="flex items-center gap-4 px-4 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/60 mb-1">
+                        <div className="w-10" /> {/* thumbnail spacer */}
+                        <button onClick={() => setSortBy(sortBy === 'name-az' ? 'name-za' : 'name-az')} className="flex-1 text-left hover:text-zinc-300 transition-colors cursor-pointer">
+                          {t('resources.listHeaderName')} {sortBy === 'name-az' ? '↑' : sortBy === 'name-za' ? '↓' : ''}
+                        </button>
+                        <span className="w-24 text-left">{t('resources.listHeaderType')}</span>
+                        <button onClick={() => setSortBy(sortBy === 'largest' ? 'smallest' : 'largest')} className="w-20 text-right hover:text-zinc-300 transition-colors cursor-pointer">
+                          {t('resources.listHeaderSize')} {sortBy === 'largest' ? '↓' : sortBy === 'smallest' ? '↑' : ''}
+                        </button>
+                        <button onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')} className="w-28 text-right hover:text-zinc-300 transition-colors cursor-pointer">
+                          {t('resources.modifiedAt')} {sortBy === 'newest' ? '↓' : sortBy === 'oldest' ? '↑' : ''}
+                        </button>
+                      </div>
+                    )}
                     {viewMode === 'grid' ? (
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                         {sortedItems.map((item) => (
