@@ -526,3 +526,92 @@ export async function fetchSmartFolderResources(
   if (error) throw error;
   return data || [];
 }
+
+// ─── Move / Copy / Batch ─────────────────────────────
+
+// 移动文件到指定文件夹
+export async function moveResourceItem(
+  resourceItemId: string,
+  targetFolderId: string | null,
+  targetLibraryId?: string | null
+): Promise<void> {
+  const update: Record<string, any> = { folder_id: targetFolderId };
+  if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
+  const { error } = await supabase
+    .from('resource_items')
+    .update(update)
+    .eq('id', resourceItemId);
+  if (error) throw error;
+}
+
+// 批量移动
+export async function moveResourceItems(
+  resourceItemIds: string[],
+  targetFolderId: string | null,
+  targetLibraryId?: string | null
+): Promise<void> {
+  const update: Record<string, any> = { folder_id: targetFolderId };
+  if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
+  const { error } = await supabase
+    .from('resource_items')
+    .update(update)
+    .in('id', resourceItemIds);
+  if (error) throw error;
+}
+
+// 复制文件（创建新 resource_item 指向同一个 resource）
+export async function copyResourceItem(
+  resourceId: string,
+  targetScopeType: 'personal' | 'team',
+  targetScopeId: string,
+  targetFolderId: string | null,
+  targetLibraryId?: string | null
+): Promise<ResourceItem> {
+  const user = (await supabase.auth.getUser()).data.user;
+  if (!user) throw new Error('Not authenticated');
+  const { data, error } = await supabase
+    .from('resource_items')
+    .insert({
+      resource_id: resourceId,
+      scope_type: targetScopeType,
+      scope_id: targetScopeId,
+      folder_id: targetFolderId,
+      library_id: targetLibraryId || null,
+      added_by: user.id,
+    })
+    .select('*, resource:resources(*)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// 移动文件夹
+export async function moveFolder(
+  folderId: string,
+  targetParentId: string | null,
+  targetLibraryId?: string | null
+): Promise<void> {
+  const update: Record<string, any> = { parent_id: targetParentId };
+  if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
+  const { error } = await supabase
+    .from('folders')
+    .update(update)
+    .eq('id', folderId);
+  if (error) throw error;
+}
+
+// 批量删除
+export async function trashResources(
+  resourceIds: string[],
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const headers = await getAuthHeaders();
+  await Promise.all(resourceIds.map(async (id) => {
+    const response = await fetch(`${apiUrl}/api/v1/resources/${id}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_trashed: true }),
+    });
+    if (!response.ok) throw new Error('Failed to trash resource');
+  }));
+}
