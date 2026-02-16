@@ -383,7 +383,12 @@
     "copySuccess": "已复制 {{count}} 个文件",
     "confirm": "确定",
     "cancel": "取消",
-    "rootFolder": "根目录"
+    "rootFolder": "根目录",
+    "clearFilters": "清除筛选",
+    "modifiedAt": "修改时间",
+    "listHeaderName": "名称",
+    "listHeaderType": "类型",
+    "listHeaderSize": "大小"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

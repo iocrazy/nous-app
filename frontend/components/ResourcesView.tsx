@@ -13,6 +13,7 @@ import {
   Plus,
   Zap,
   FolderPlus,
+  Check,
   CheckCircle2,
   XCircle,
   X,
@@ -23,6 +24,8 @@ import {
   Copy,
   Move,
   RefreshCw,
+  Filter,
+  Search,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
@@ -201,6 +204,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Filter state
+  type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+  const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
@@ -638,6 +651,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Debounce search
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery]);
+
+  // Clear search/filter on view/folder change
+  useEffect(() => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+  }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
 
   // Clear selection on view/folder/library change
   useEffect(() => {
@@ -1122,8 +1150,46 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       ? downloadedResources
       : resources;
 
+  // Apply filter and search
+  const filteredItems = useMemo(() => {
+    let items = currentItems;
+
+    // Apply type filters
+    if (activeFilters.size > 0) {
+      items = items.filter((item) => {
+        const mime = item.resource?.mime_type || '';
+        if (activeFilters.has('video') && mime.startsWith('video/')) return true;
+        if (activeFilters.has('image') && mime.startsWith('image/')) return true;
+        if (activeFilters.has('audio') && mime.startsWith('audio/')) return true;
+        if (activeFilters.has('document') && (
+          mime.startsWith('application/pdf') ||
+          mime.startsWith('application/msword') ||
+          mime.startsWith('application/vnd.') ||
+          mime.startsWith('text/')
+        )) return true;
+        if (activeFilters.has('other')) {
+          const isKnown = mime.startsWith('video/') || mime.startsWith('image/') || mime.startsWith('audio/') ||
+            mime.startsWith('application/pdf') || mime.startsWith('application/msword') ||
+            mime.startsWith('application/vnd.') || mime.startsWith('text/');
+          if (!isKnown) return true;
+        }
+        return false;
+      });
+    }
+
+    // Apply search
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.trim().toLowerCase();
+      items = items.filter((item) =>
+        (item.resource?.filename || '').toLowerCase().includes(q)
+      );
+    }
+
+    return items;
+  }, [currentItems, activeFilters, debouncedSearch]);
+
   const sortedItems = useMemo(() => {
-    const items = [...currentItems];
+    const items = [...filteredItems];
     switch (sortBy) {
       case 'newest':
         return items.sort((a, b) => new Date(b.resource?.created_at ?? b.created_at).getTime() - new Date(a.resource?.created_at ?? a.created_at).getTime());
@@ -1187,6 +1253,23 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
     originalAction();
   }, [selectedIds, handleToggleSelect]);
+
+  const toggleFilter = useCallback((type: FilterType) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }, []);
+
+  const filterOptions: { value: FilterType; label: string }[] = [
+    { value: 'video', label: t('smartFolder.fileTypes.video') },
+    { value: 'image', label: t('smartFolder.fileTypes.image') },
+    { value: 'audio', label: t('smartFolder.fileTypes.audio') },
+    { value: 'document', label: t('smartFolder.fileTypes.document') },
+    { value: 'other', label: t('smartFolder.fileTypes.other') },
+  ];
 
   // Sort options
   const sortOptions: { value: SortBy; label: string }[] = [
@@ -1428,6 +1511,79 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Search box */}
+              <div className="relative flex items-center">
+                <Search size={14} className="absolute left-2.5 text-zinc-500 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('resources.searchFiles')}
+                  className="w-44 pl-8 pr-7 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 text-zinc-500 hover:text-zinc-300"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter button */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowFilterPanel(!showFilterPanel)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                    activeFilters.size > 0
+                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80'
+                  }`}
+                >
+                  <Filter size={14} />
+                  {activeFilters.size > 0 && (
+                    <span className="min-w-[16px] h-4 flex items-center justify-center text-[10px] font-medium bg-indigo-500 text-white rounded-full px-1">
+                      {activeFilters.size}
+                    </span>
+                  )}
+                </button>
+                {showFilterPanel && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowFilterPanel(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                      {filterOptions.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => toggleFilter(opt.value)}
+                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center justify-between ${
+                            activeFilters.has(opt.value)
+                              ? 'bg-zinc-800 text-indigo-400'
+                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          {activeFilters.has(opt.value) && (
+                            <Check size={12} className="text-indigo-400" />
+                          )}
+                        </button>
+                      ))}
+                      {activeFilters.size > 0 && (
+                        <>
+                          <div className="mx-2 my-1 border-t border-zinc-700" />
+                          <button
+                            onClick={() => { setActiveFilters(new Set()); setShowFilterPanel(false); }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                          >
+                            {t('resources.clearFilters')}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* Sort dropdown */}
               <div className="relative">
                 <button
