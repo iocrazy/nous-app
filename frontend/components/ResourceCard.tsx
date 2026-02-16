@@ -2,6 +2,7 @@ import React from 'react';
 import { File, Film, Image, FileText, Trash2, RotateCcw, X, Clock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
+import { getResourceCoverUrl } from '../services/resourceService';
 
 interface ResourceCardProps {
   item: ResourceItem;
@@ -75,6 +76,15 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const fileSize = resource?.file_size_bytes ?? null;
   const createdAt = resource?.created_at ?? item.created_at;
   const { icon: IconComponent, color, bg } = getFileIcon(mimeType);
+
+  // Determine thumbnail source: thumbnail_path (Supabase URL) > cover endpoint
+  const thumbnailSrc = React.useMemo(() => {
+    if (resource?.thumbnail_path) return resource.thumbnail_path;
+    if (resource?.cover_image_path && resource?.id) {
+      return getResourceCoverUrl(String(resource.id));
+    }
+    return null;
+  }, [resource?.thumbnail_path, resource?.cover_image_path, resource?.id]);
 
   const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
 
@@ -158,12 +168,13 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     >
       {/* Thumbnail */}
       <div className={`relative h-32 flex items-center justify-center ${bg}`}>
-        {resource?.thumbnail_path ? (
+        {thumbnailSrc ? (
           <img
-            src={resource.thumbnail_path}
+            src={thumbnailSrc}
             alt={filename}
             className="w-full h-full object-cover rounded-t-lg"
             loading="lazy"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         ) : (
           <IconComponent size={40} className={`${color} opacity-60 group-hover:opacity-100 transition-opacity`} />

@@ -608,11 +608,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const handleTrash = useCallback(async (resourceId: string) => {
     try {
-      await trashResource(resourceId);
+      await trashResource(resourceId, scopeType, scopeId);
       setResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
       if (selectedResource?.resource?.id === resourceId) setSelectedResource(null);
     } catch { /* ignore */ }
-  }, [selectedResource]);
+  }, [selectedResource, scopeType, scopeId]);
 
   const handleRestore = useCallback(async (resourceId: string) => {
     try {
@@ -792,7 +792,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           label: t('resources.share'),
           icon: <Share2 size={14} />,
           onClick: () => {
-            setShareTarget({ resourceId: item.resource?.id });
+            setShareTarget({ resourceId: String(item.resource?.id) });
           },
         });
       }
@@ -840,7 +840,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           label: t('resources.share'),
           icon: <Share2 size={14} />,
           onClick: () => {
-            setShareTarget({ folderId: folder.id });
+            setShareTarget({ folderId: String(folder.id) });
           },
         });
       }

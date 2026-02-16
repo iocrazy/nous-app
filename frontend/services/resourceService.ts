@@ -210,11 +210,19 @@ export async function uploadResource(
 
 // ─── Trash / Restore ─────────────────────────────────────
 
-export async function trashResource(resourceId: string): Promise<void> {
+export async function trashResource(
+  resourceId: string,
+  _scopeType?: 'personal' | 'team',
+  _scopeId?: string,
+): Promise<void> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
+    method: 'PATCH',
+    headers: {
+      ...(await getAuthHeaders()),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ is_trashed: true }),
   });
   if (!response.ok) throw new Error('Failed to trash resource');
 }
@@ -282,6 +290,15 @@ export async function fetchResourceVersions(resourceId: string): Promise<Resourc
 export function getResourceFileUrl(resourceId: string, token?: string): string {
   const apiUrl = getApiUrl();
   const base = `${apiUrl}/api/v1/resources/${resourceId}/file`;
+  if (token) {
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+  return base;
+}
+
+export function getResourceCoverUrl(resourceId: string, token?: string): string {
+  const apiUrl = getApiUrl();
+  const base = `${apiUrl}/api/v1/resources/${resourceId}/cover`;
   if (token) {
     return `${base}?token=${encodeURIComponent(token)}`;
   }
