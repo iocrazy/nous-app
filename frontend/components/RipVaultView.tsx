@@ -50,15 +50,23 @@ export const RipVaultView: React.FC = () => {
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-zinc-800">
-        {/* Left: Title */}
-        <div className="text-sm font-medium text-zinc-300 shrink-0">
-          RipVault
+      {/* Header — matches Library page layout */}
+      <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 px-6 pt-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">RipVault</h1>
+          <p className="text-zinc-400 text-sm">{t('library.subtitle', 'Manage your saved downloads')}</p>
         </div>
 
-        {/* Center: Search */}
-        <div className="flex-1 max-w-md">
+        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+          <button
+            onClick={loadLibraryData}
+            disabled={isLoadingLibrary}
+            className="p-2 bg-zinc-900 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            title="Refresh Data"
+          >
+            <RefreshCw size={20} className={isLoadingLibrary ? 'animate-spin' : ''} />
+          </button>
+
           <SemanticSearchBar
             onSearch={(results, query) => {
               setSearchResults(results as any);
@@ -71,62 +79,38 @@ export const RipVaultView: React.FC = () => {
               setSearchQueryText('');
             }}
             placeholder={t('library.searchPlaceholder', 'Search title, tags, notes...')}
+            className="flex-1 md:w-80"
             library={library as any}
           />
-        </div>
 
-        {/* Right: Refresh + View toggles */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={loadLibraryData}
-            disabled={isLoadingLibrary}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
-            title="Refresh"
-          >
-            <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
-          </button>
-
-          <div className="flex bg-zinc-800 rounded-lg p-0.5">
-            <button
-              onClick={() => setLibraryViewMode('grid')}
-              className={`p-1.5 rounded-md transition-colors ${
-                libraryViewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-              title="Grid"
-            >
-              <LayoutGrid size={14} />
-            </button>
+          <div className="hidden md:flex bg-zinc-900 rounded-lg border border-zinc-800 p-1">
             <button
               onClick={() => setLibraryViewMode('list')}
-              className={`p-1.5 rounded-md transition-colors ${
-                libraryViewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-              title="List"
+              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="List View"
             >
-              <LayoutList size={14} />
+              <LayoutList size={18} />
+            </button>
+            <button
+              onClick={() => setLibraryViewMode('grid')}
+              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Grid View"
+            >
+              <LayoutGrid size={18} />
             </button>
             <button
               onClick={() => setLibraryViewMode('feed')}
-              className={`p-1.5 rounded-md transition-colors ${
-                libraryViewMode === 'feed' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-              title="Feed"
+              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Feed View"
             >
-              <Smartphone size={14} />
+              <Smartphone size={18} />
             </button>
           </div>
-
-          {/* Count badge */}
-          {!isLoadingLibrary && (
-            <span className="bg-zinc-800 text-zinc-400 rounded-full px-2.5 py-0.5 text-xs font-medium">
-              {filteredLibrary.length}
-            </span>
-          )}
         </div>
-      </div>
+      </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
         {/* Error banner */}
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
@@ -151,7 +135,7 @@ export const RipVaultView: React.FC = () => {
           <>
             {/* Grid view */}
             {libraryViewMode === 'grid' && (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                 {filteredLibrary.map((item) => (
                   <CompactMediaCard
                     key={item.platform_id}

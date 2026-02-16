@@ -12,7 +12,6 @@ import {
   Download,
   Plus,
   Zap,
-  Star,
   FolderPlus,
   CheckCircle2,
   XCircle,
@@ -1032,23 +1031,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       <div className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col">
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {/* ── Top section: Shared / Quick Access / Recycle Bin ── */}
+          {/* ── Top section: Shared / Recycle Bin ── */}
           <button
             onClick={() => navigate(resPath('/resources/shared'))}
             className={sidebarItemClass(isSharedView)}
           >
             <Share2 size={15} className="shrink-0 opacity-70" />
             <span>{t('resources.sharedManagement')}</span>
-          </button>
-
-          <button
-            onClick={() => {
-              // TODO: Quick Access view
-            }}
-            className={sidebarItemClass(false)}
-          >
-            <Star size={15} className="shrink-0 opacity-70" />
-            <span>{t('resources.quickAccess')}</span>
           </button>
 
           <button
