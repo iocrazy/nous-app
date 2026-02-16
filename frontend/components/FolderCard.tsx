@@ -1,7 +1,12 @@
-import React from 'react';
-import { Folder as FolderIcon, ChevronRight, Check } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Folder as FolderIcon, ChevronRight, Check, MoreVertical, Film, Image, FileText, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Folder } from '../types';
+
+interface FolderPreviewItem {
+  thumbnail_path?: string | null;
+  mime_type?: string | null;
+}
 
 interface FolderCardProps {
   folder: Folder;
@@ -18,6 +23,10 @@ interface FolderCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  // Drop target
+  onDropItems?: (ids: string[]) => void;
+  // Folder preview
+  previewItems?: FolderPreviewItem[];
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -27,6 +36,13 @@ function formatDate(dateStr: string | null | undefined): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function getPreviewIcon(mimeType: string | null | undefined) {
+  if (!mimeType) return { icon: File, color: 'text-zinc-500' };
+  if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400' };
+  if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400' };
+  return { icon: FileText, color: 'text-blue-400' };
 }
 
 const RenameInput: React.FC<{
@@ -64,10 +80,43 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   selectable = false,
   isChecked = false,
   onToggleSelect,
+  onDropItems,
+  previewItems,
 }) => {
   const { t } = useTranslation();
+  const [dragHover, setDragHover] = useState(false);
   const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
   const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
+  const dropRing = dragHover ? 'ring-2 ring-indigo-500 bg-indigo-500/10' : '';
+
+  // ─── Drop target handlers ─────────────────────────────
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/mediahub-items')) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragHover(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.stopPropagation();
+    setDragHover(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragHover(false);
+    const raw = e.dataTransfer.getData('application/mediahub-items');
+    if (raw && onDropItems) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.ids && Array.isArray(data.ids)) {
+          onDropItems(data.ids);
+        }
+      } catch { /* ignore */ }
+    }
+  }, [onDropItems]);
 
   const checkbox = selectable ? (
     <button
@@ -82,13 +131,29 @@ export const FolderCard: React.FC<FolderCardProps> = ({
     </button>
   ) : null;
 
+  // ⋮ more button
+  const moreButton = onContextMenu ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
+      className="absolute top-2 right-2 z-10 p-1.5 bg-zinc-900/80 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+    >
+      <MoreVertical size={14} />
+    </button>
+  ) : null;
+
+  // Folder preview thumbnails
+  const hasPreview = previewItems && previewItems.length > 0;
+
   if (viewMode === 'list') {
     return (
       <div
         data-context-item
         onClick={(e) => onClick(e)}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 hover:ring-1 hover:ring-zinc-700 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing} ${dropRing}`}
       >
         {checkbox}
         <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-500/20 transition-colors">
@@ -111,6 +176,16 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         <span className="text-[11px] text-zinc-600 flex-shrink-0">
           {formatDate(folder.created_at)}
         </span>
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {onContextMenu && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
+              className="p-1.5 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+            >
+              <MoreVertical size={14} />
+            </button>
+          )}
+        </div>
         <ChevronRight size={14} className="flex-shrink-0 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
     );
@@ -122,19 +197,50 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       data-context-item
       onClick={(e) => onClick(e)}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing} ${checkedRing}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 hover:ring-1 hover:ring-zinc-700 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing} ${checkedRing} ${dropRing}`}
     >
       {checkbox}
+      {moreButton}
       {/* Folder icon area */}
       <div className="relative h-28 flex items-center justify-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
-        <div className="relative">
-          <FolderIcon
-            size={44}
-            className="text-amber-400/50 group-hover:text-amber-400/80 transition-all duration-300 group-hover:scale-105"
-            fill="currentColor"
-            fillOpacity={0.08}
-          />
-        </div>
+        {hasPreview ? (
+          <div className="grid grid-cols-2 gap-1 p-3 w-full h-full">
+            {previewItems!.slice(0, 3).map((pi, idx) => {
+              if (pi.thumbnail_path) {
+                return (
+                  <img
+                    key={idx}
+                    src={pi.thumbnail_path}
+                    alt=""
+                    className={`rounded object-cover ${idx === 0 && previewItems!.length < 3 ? 'col-span-2 h-full' : idx === 0 ? 'col-span-2 h-14' : 'h-8'} w-full`}
+                    loading="lazy"
+                  />
+                );
+              }
+              const { icon: PreviewIcon, color: previewColor } = getPreviewIcon(pi.mime_type);
+              return (
+                <div
+                  key={idx}
+                  className={`rounded bg-zinc-800/60 flex items-center justify-center ${idx === 0 && previewItems!.length < 3 ? 'col-span-2 h-full' : idx === 0 ? 'col-span-2 h-14' : 'h-8'}`}
+                >
+                  <PreviewIcon size={idx === 0 ? 20 : 14} className={`${previewColor} opacity-50`} />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="relative">
+            <FolderIcon
+              size={44}
+              className="text-amber-400/50 group-hover:text-amber-400/80 transition-all duration-300 group-hover:scale-105"
+              fill="currentColor"
+              fillOpacity={0.08}
+            />
+          </div>
+        )}
         {childCount != null && childCount > 0 && (
           <span className="absolute top-2.5 right-2.5 text-[10px] text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded-md">
             {childCount}

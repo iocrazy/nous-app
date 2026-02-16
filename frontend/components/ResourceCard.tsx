@@ -1,5 +1,5 @@
-import React from 'react';
-import { File, Film, Image, FileText, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
+import React, { useRef, useCallback } from 'react';
+import { File, Film, Image, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
@@ -22,6 +22,9 @@ interface ResourceCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  // Drag support
+  selectedIds?: Set<string>;
+  compositeId?: string;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -51,7 +54,20 @@ function getFileIcon(mimeType: string | null | undefined) {
   if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
-  if (mimeType.startsWith('text/') || mimeType.includes('pdf') || mimeType.includes('document'))
+  // PDF
+  if (mimeType.includes('pdf'))
+    return { icon: FileType, color: 'text-red-400', bg: 'bg-red-500/20' };
+  // Word / document
+  if (mimeType.includes('word') || mimeType.includes('document') || mimeType.includes('msword'))
+    return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
+  // Excel / spreadsheet
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('ms-excel'))
+    return { icon: FileSpreadsheet, color: 'text-emerald-400', bg: 'bg-emerald-500/20' };
+  // PowerPoint / presentation
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint'))
+    return { icon: Presentation, color: 'text-orange-400', bg: 'bg-orange-500/20' };
+  // Generic text
+  if (mimeType.startsWith('text/'))
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
   return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
 }
@@ -74,6 +90,8 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   selectable = false,
   isChecked = false,
   onToggleSelect,
+  selectedIds,
+  compositeId,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -95,6 +113,34 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
   const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
 
+  // ─── Drag support ────────────────────────────────────
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    const myId = compositeId || `item:${item.id}`;
+    let dragIds: string[];
+
+    if (selectedIds && selectedIds.has(myId) && selectedIds.size > 1) {
+      dragIds = Array.from(selectedIds);
+    } else {
+      dragIds = [myId];
+    }
+
+    e.dataTransfer.setData(
+      'application/mediahub-items',
+      JSON.stringify({ type: 'resources', ids: dragIds })
+    );
+    e.dataTransfer.effectAllowed = 'move';
+
+    // Custom drag image showing count
+    const dragEl = document.createElement('div');
+    dragEl.style.cssText = 'position:fixed;top:-1000px;left:-1000px;background:#3730a3;color:white;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;z-index:99999;pointer-events:none;';
+    dragEl.textContent = dragIds.length > 1 ? `${dragIds.length} items` : filename;
+    document.body.appendChild(dragEl);
+    e.dataTransfer.setDragImage(dragEl, 0, 0);
+    requestAnimationFrame(() => {
+      setTimeout(() => document.body.removeChild(dragEl), 0);
+    });
+  }, [compositeId, item.id, selectedIds, filename]);
+
   const checkbox = selectable ? (
     <button
       onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
@@ -108,13 +154,26 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     </button>
   ) : null;
 
+  // ⋮ more button that triggers context menu
+  const moreButton = onContextMenu ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
+      className="p-1.5 bg-zinc-900/80 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+      title={t('resources.moreActions')}
+    >
+      <MoreVertical size={14} />
+    </button>
+  ) : null;
+
   if (viewMode === 'list') {
     return (
       <div
         data-context-item
+        draggable
+        onDragStart={handleDragStart}
         onClick={(e) => onClick(e)}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 hover:ring-1 hover:ring-zinc-700 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
       >
         {checkbox}
         <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -148,6 +207,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         </span>
         {/* Actions */}
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {moreButton}
           {!showRestoreAction && onTrash && resource && (
             <button
               onClick={(e) => { e.stopPropagation(); onTrash(resource.id); }}
@@ -184,9 +244,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   return (
     <div
       data-context-item
+      draggable
+      onDragStart={handleDragStart}
       onClick={(e) => onClick(e)}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing} ${checkedRing}`}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:ring-1 hover:ring-zinc-700 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing} ${checkedRing}`}
     >
       {checkbox}
       {/* Thumbnail */}
@@ -208,9 +270,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           </span>
         )}
       </div>
-      {/* Actions overlay */}
+      {/* Actions overlay - top right */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {!showRestoreAction && onTrash && resource && (
+        {moreButton}
+        {!showRestoreAction && onTrash && resource && !moreButton && (
           <button
             onClick={(e) => { e.stopPropagation(); onTrash(resource.id); }}
             className="p-1.5 bg-zinc-900/80 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
