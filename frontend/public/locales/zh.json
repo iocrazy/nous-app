@@ -388,7 +388,8 @@
     "modifiedAt": "修改时间",
     "listHeaderName": "名称",
     "listHeaderType": "类型",
-    "listHeaderSize": "大小"
+    "listHeaderSize": "大小",
+    "paste": "粘贴"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
