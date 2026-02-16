@@ -26,7 +26,8 @@
     "activity": "Activity",
     "backToProjects": "Projects",
     "projectSettings": "Project Settings",
-    "points": "Points"
+    "points": "Points",
+    "shared": "Shared"
   },
   "user": {
     "profile": "Profile",
@@ -112,7 +113,8 @@
     "search": "Search",
     "create": "Create",
     "creating": "Creating...",
-    "saving": "Saving..."
+    "saving": "Saving...",
+    "all": "All"
   },
   "parser": {
     "title": "Media Parser",
@@ -537,5 +539,40 @@
     "active": "Active",
     "expired": "Expired",
     "cancelled": "Cancelled"
+  },
+  "share": {
+    "title": "Shared Content",
+    "enterPassword": "Enter Password",
+    "passwordRequired": "This Share Is Password Protected",
+    "expired": "This Share Has Expired",
+    "notFound": "Share Not Found",
+    "cancelled": "This Share Has Been Cancelled",
+    "maxViewsReached": "Maximum Views Reached",
+    "download": "Download",
+    "createdBy": "Shared by",
+    "expiresAt": "Expires",
+    "views": "views",
+    "passwordError": "Incorrect password",
+    "submit": "Access",
+    "noPreview": "Preview not available"
+  },
+  "shared": {
+    "title": "My Shares",
+    "empty": "No Shares Yet",
+    "emptyHint": "Right-click a file or folder and select Share to create one",
+    "copyLink": "Copy Link",
+    "cancelShare": "Cancel Share",
+    "confirmCancel": "Cancel this share? Recipients will no longer be able to access it.",
+    "status": {
+      "active": "Active",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "type": {
+      "link": "Link",
+      "review": "Review",
+      "presentation": "Presentation",
+      "delivery": "Delivery"
+    }
   }
 }

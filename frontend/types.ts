@@ -120,7 +120,7 @@ export interface SummaryData {
 // Keep backward compatibility alias
 export type DouyinBase = Video;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'management';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'management' | 'shared';
 
 export interface ApiKey {
   id: number;

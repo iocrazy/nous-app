@@ -16,12 +16,21 @@ import { ResourcesPage } from './pages/ResourcesPage';
 import { TodolistPage } from './pages/TodolistPage';
 import { PlayerPage } from './pages/PlayerPage';
 import { ResourceDetailPage } from './pages/ResourceDetailPage';
+import { SharePage } from './pages/SharePage';
+import { SharedPage } from './pages/SharedPage';
 
 export const router = createBrowserRouter([
+  // Public routes (no auth required)
   {
     path: '/login',
     element: <LoginPage />,
   },
+  {
+    path: '/share/:shareCode',
+    element: <SharePage />,
+  },
+
+  // Authenticated routes
   {
     element: <AuthGuard />,
     children: [
@@ -46,6 +55,7 @@ export const router = createBrowserRouter([
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
       { path: 'player/:displayId', element: <RedirectToTeam view="player" /> },
+      { path: 'shared', element: <RedirectToTeam view="shared" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
@@ -79,6 +89,7 @@ export const router = createBrowserRouter([
           { path: 'members', element: <MembersPage /> },
           { path: 'billing', element: <BillingPage /> },
           { path: 'todolist', element: <TodolistPage /> },
+          { path: 'shared', element: <SharedPage /> },
           { path: 'player/:displayId', element: <PlayerPage /> },
         ],
       },

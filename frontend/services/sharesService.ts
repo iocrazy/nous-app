@@ -174,19 +174,18 @@ export const cancelShare = async (shareId: string): Promise<void> => {
 
 /**
  * Access a share by its public share code (no auth required for public access).
+ * Backend uses POST with JSON body for password verification.
  */
 export const accessShare = async (
   shareCode: string,
   password?: string
 ): Promise<Share> => {
-  const params = new URLSearchParams();
-  if (password) params.set('password', password);
-
-  const query = params.toString();
-  const url = `${API_BASE}/api/v1/shares/code/${shareCode}${query ? `?${query}` : ''}`;
+  const url = `${API_BASE}/api/v1/shares/code/${shareCode}`;
 
   const response = await fetch(url, {
-    method: 'GET',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: password || null }),
   });
 
   if (!response.ok) {
