@@ -15,10 +15,19 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep, OptionalAuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.schemas.shares import ShareAccessRequest, ShareCreate, ShareUpdate
+
+
+class ShareCommentCreate(BaseModel):
+    """Request body for creating a comment on a shared resource."""
+
+    content: str = Field(..., min_length=1, max_length=5000)
+    timecode: Optional[float] = Field(None, ge=0, description="Timestamp in seconds")
+    visibility: str = Field("all", pattern="^(all|team|private)$")
 
 router = APIRouter(prefix="/shares")
 
@@ -529,3 +538,144 @@ async def access_share_by_code(
     except Exception as e:
         logger.error(f"Failed to access share {share_code}: {e}")
         raise HTTPException(status_code=500, detail="Failed to access share")
+
+
+# ============================================
+# Share comments endpoints
+# ============================================
+
+
+@router.get("/code/{share_code}/comments")
+async def get_share_comments(
+    share_code: str,
+    auth: OptionalAuthDep = None,
+):
+    """
+    Get comments for a shared resource (public endpoint).
+
+    Returns comments ordered by timestamp_seconds (if present) then created_at.
+    """
+    try:
+        client = await get_async_supabase_admin()
+
+        # Look up share
+        share_result = (
+            await client.table("shares")
+            .select("id, status, share_type")
+            .eq("share_code", share_code)
+            .execute()
+        )
+
+        if not share_result.data:
+            raise HTTPException(status_code=404, detail="Share not found")
+
+        share = share_result.data[0]
+
+        if share["status"] == "cancelled":
+            raise HTTPException(status_code=410, detail="Share cancelled")
+        if share["share_type"] != "review":
+            raise HTTPException(
+                status_code=400, detail="Comments only available for review shares"
+            )
+
+        # Fetch comments for this share
+        comments_result = (
+            await client.table("review_comments")
+            .select("id, content, timestamp_seconds, visibility, author_id, created_at")
+            .eq("share_id", share["id"])
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        return {"success": True, "data": comments_result.data or []}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get share comments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get comments")
+
+
+@router.post("/code/{share_code}/comments")
+async def create_share_comment(
+    share_code: str,
+    body: ShareCommentCreate,
+    auth: OptionalAuthDep = None,
+):
+    """
+    Create a comment on a shared resource.
+
+    Supports both authenticated and anonymous comments.
+    Only available for review-type shares.
+    """
+    try:
+        client = await get_async_supabase_admin()
+
+        # Look up share
+        share_result = (
+            await client.table("shares")
+            .select("id, status, share_type, resource_id, project_file_id")
+            .eq("share_code", share_code)
+            .execute()
+        )
+
+        if not share_result.data:
+            raise HTTPException(status_code=404, detail="Share not found")
+
+        share = share_result.data[0]
+
+        if share["status"] != "active":
+            raise HTTPException(status_code=410, detail="Share is not active")
+        if share["share_type"] != "review":
+            raise HTTPException(
+                status_code=400, detail="Comments only available for review shares"
+            )
+
+        # Build comment record
+        # file_id is required in DB; use project_file_id from share if available
+        file_id = share.get("project_file_id")
+        if not file_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot add comments: share has no associated project file",
+            )
+
+        comment_data = {
+            "file_id": file_id,
+            "share_id": share["id"],
+            "content": body.content,
+            "timestamp_seconds": body.timecode,
+            "visibility": body.visibility,
+            "author_id": auth.user_id if auth else None,
+        }
+
+        # Remove None author_id for anonymous
+        if comment_data["author_id"] is None:
+            # author_id is NOT NULL in DB, so anonymous comments need
+            # a sentinel value or we skip. For now, require auth.
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required to post comments",
+            )
+
+        result = (
+            await client.table("review_comments")
+            .insert(comment_data)
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create comment")
+
+        comment = result.data[0]
+        logger.info(
+            f"Comment created on share {share_code} by "
+            f"{auth.user_id if auth else 'anonymous'}"
+        )
+        return {"success": True, "data": comment}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create share comment: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create comment")

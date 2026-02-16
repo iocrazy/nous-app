@@ -11,7 +11,7 @@
  * 5. Handle error states: expired, cancelled, password error, max views
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -26,9 +26,17 @@ import {
   Image as ImageIcon,
   Film,
   Music,
+  MessageSquare,
+  Send,
+  Timer,
 } from 'lucide-react';
 import { accessShare } from '../services/sharesService';
 import { Share } from '../types';
+import {
+  fetchShareComments,
+  createShareComment,
+  ReviewComment,
+} from '../services/reviewCommentsService';
 
 type Phase = 'initial' | 'password' | 'loading' | 'content' | 'error';
 
@@ -43,6 +51,14 @@ export const SharePage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [passwordError, setPasswordError] = useState(false);
+
+  // Review comments state
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [commentTimecode, setCommentTimecode] = useState<number | null>(null);
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const loadShare = useCallback(async (pwd?: string) => {
     if (!shareCode) return;
@@ -87,6 +103,55 @@ export const SharePage: React.FC = () => {
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     loadShare(password);
+  };
+
+  // ─── Review comments ─────────────────────────────────────
+  useEffect(() => {
+    if (phase === 'content' && share?.share_type === 'review' && shareCode) {
+      setCommentsLoading(true);
+      fetchShareComments(shareCode)
+        .then(setComments)
+        .catch(() => {})
+        .finally(() => setCommentsLoading(false));
+    }
+  }, [phase, share?.share_type, shareCode]);
+
+  const handleSubmitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareCode || !commentText.trim()) return;
+
+    setSubmittingComment(true);
+    try {
+      const newComment = await createShareComment(shareCode, {
+        content: commentText.trim(),
+        timecode: commentTimecode ?? undefined,
+      });
+      setComments((prev) => [...prev, newComment]);
+      setCommentText('');
+      setCommentTimecode(null);
+    } catch {
+      // Comment creation requires auth — silently skip for anonymous users
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const captureTimecode = () => {
+    if (videoRef.current) {
+      setCommentTimecode(Math.floor(videoRef.current.currentTime));
+    }
+  };
+
+  const seekToTimecode = (seconds: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = seconds;
+    }
+  };
+
+  const formatTimecode = (seconds: number): string => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
   };
 
   // ─── File URL helper ────────────────────────────────────
@@ -204,30 +269,40 @@ export const SharePage: React.FC = () => {
       </header>
 
       {/* Main content */}
-      <main className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-4xl">
+      <main className={`flex-1 flex ${share.share_type === 'review' ? 'flex-row' : 'items-center justify-center'} p-8 gap-6 overflow-hidden`}>
+        {/* Preview area */}
+        <div className={`${share.share_type === 'review' ? 'flex-1 min-w-0' : 'w-full max-w-4xl'}`}>
           {resourceUrl ? (
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden">
-              {/* Simplified preview - shows file type icon + download option */}
-              <div className="flex flex-col items-center justify-center py-20">
-                {getFileTypeIcon(share.share_type)}
-                <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {share.share_type === 'review' ? 'Review Link' :
-                   share.share_type === 'delivery' ? 'File Delivery' :
-                   share.share_type === 'presentation' ? 'Presentation' : 'Shared Link'}
-                </p>
-                {share.allow_download && (
-                  <a
-                    href={resourceUrl}
-                    download
-                    className="mt-6 flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
-                  >
-                    <Download size={16} />
-                    {t('share.download')}
-                  </a>
-                )}
-              </div>
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden h-full">
+              {share.share_type === 'review' ? (
+                /* Video player for review mode */
+                <video
+                  ref={videoRef}
+                  src={resourceUrl}
+                  controls
+                  className="w-full h-full object-contain bg-black"
+                />
+              ) : (
+                /* Default file preview */
+                <div className="flex flex-col items-center justify-center py-20">
+                  {getFileTypeIcon(share.share_type)}
+                  <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {share.share_type === 'delivery' ? 'File Delivery' :
+                     share.share_type === 'presentation' ? 'Presentation' : 'Shared Link'}
+                  </p>
+                  {share.allow_download && (
+                    <a
+                      href={resourceUrl}
+                      download
+                      className="mt-6 flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                      <Download size={16} />
+                      {t('share.download')}
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-20">
@@ -237,6 +312,95 @@ export const SharePage: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Review comments panel */}
+        {share.share_type === 'review' && (
+          <div className="w-80 flex-shrink-0 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col overflow-hidden">
+            {/* Panel header */}
+            <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+              <MessageSquare size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-200">{t('review.comments')}</span>
+              <span className="text-xs text-zinc-500 ml-auto">{comments.length}</span>
+            </div>
+
+            {/* Comments list */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {commentsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={20} className="animate-spin text-zinc-500" />
+                </div>
+              ) : comments.length === 0 ? (
+                <div className="text-center py-8">
+                  <MessageSquare size={24} className="text-zinc-700 mx-auto mb-2" />
+                  <p className="text-sm text-zinc-500">{t('review.noComments')}</p>
+                </div>
+              ) : (
+                comments.map((comment) => (
+                  <div key={comment.id} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500">
+                        {comment.author_id ? comment.author_id.slice(0, 8) : t('review.anonymous')}
+                      </span>
+                      <span className="text-xs text-zinc-600">
+                        {new Date(comment.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    {comment.timestamp_seconds != null && (
+                      <button
+                        onClick={() => seekToTimecode(comment.timestamp_seconds!)}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-mono"
+                      >
+                        {formatTimecode(comment.timestamp_seconds)}
+                      </button>
+                    )}
+                    <p className="text-sm text-zinc-300">{comment.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Comment input */}
+            <form onSubmit={handleSubmitComment} className="p-3 border-t border-zinc-800 space-y-2">
+              {commentTimecode != null && (
+                <div className="flex items-center gap-1.5 text-xs text-indigo-400">
+                  <Timer size={12} />
+                  <span className="font-mono">{formatTimecode(commentTimecode)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCommentTimecode(null)}
+                    className="text-zinc-500 hover:text-zinc-300 ml-auto"
+                  >
+                    &times;
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={captureTimecode}
+                  title={t('review.timecode')}
+                  className="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <Timer size={16} />
+                </button>
+                <input
+                  type="text"
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder={t('review.placeholder')}
+                  className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!commentText.trim() || submittingComment}
+                  className="p-2 text-indigo-400 hover:text-indigo-300 disabled:text-zinc-600 transition-colors"
+                >
+                  <Send size={16} />
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </main>
 
       {/* Footer metadata */}

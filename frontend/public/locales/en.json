@@ -556,6 +556,14 @@
     "submit": "Access",
     "noPreview": "Preview not available"
   },
+  "review": {
+    "comments": "Comments",
+    "addComment": "Add Comment",
+    "placeholder": "Write a comment...",
+    "timecode": "Capture Timecode",
+    "noComments": "No comments yet",
+    "anonymous": "Anonymous"
+  },
   "shared": {
     "title": "My Shares",
     "empty": "No Shares Yet",

@@ -556,6 +556,14 @@
     "submit": "访问",
     "noPreview": "暂无预览"
   },
+  "review": {
+    "comments": "评论",
+    "addComment": "添加评论",
+    "placeholder": "写下评论...",
+    "timecode": "标记时间点",
+    "noComments": "暂无评论",
+    "anonymous": "匿名"
+  },
   "shared": {
     "title": "我的分享",
     "empty": "暂无分享",
