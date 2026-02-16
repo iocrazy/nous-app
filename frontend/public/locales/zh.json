@@ -26,7 +26,8 @@
     "activity": "动态",
     "backToProjects": "项目",
     "projectSettings": "项目设置",
-    "points": "积分"
+    "points": "积分",
+    "shared": "分享管理"
   },
   "user": {
     "profile": "个人资料",
@@ -112,7 +113,8 @@
     "search": "搜索",
     "create": "创建",
     "creating": "创建中...",
-    "saving": "保存中..."
+    "saving": "保存中...",
+    "all": "全部"
   },
   "parser": {
     "title": "媒体解析",
@@ -537,5 +539,40 @@
     "active": "活跃",
     "expired": "已过期",
     "cancelled": "已取消"
+  },
+  "share": {
+    "title": "分享内容",
+    "enterPassword": "请输入密码",
+    "passwordRequired": "此分享需要密码访问",
+    "expired": "此分享已过期",
+    "notFound": "分享未找到",
+    "cancelled": "此分享已被取消",
+    "maxViewsReached": "已达到最大浏览次数",
+    "download": "下载",
+    "createdBy": "分享者",
+    "expiresAt": "过期时间",
+    "views": "次浏览",
+    "passwordError": "密码错误",
+    "submit": "访问",
+    "noPreview": "暂无预览"
+  },
+  "shared": {
+    "title": "我的分享",
+    "empty": "暂无分享",
+    "emptyHint": "右键文件或文件夹选择分享来创建",
+    "copyLink": "复制链接",
+    "cancelShare": "取消分享",
+    "confirmCancel": "确定取消此分享？接收者将无法再访问。",
+    "status": {
+      "active": "活跃",
+      "expired": "已过期",
+      "cancelled": "已取消"
+    },
+    "type": {
+      "link": "链接",
+      "review": "审阅",
+      "presentation": "演示",
+      "delivery": "交付"
+    }
   }
 }

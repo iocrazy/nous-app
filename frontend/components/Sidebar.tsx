@@ -18,6 +18,7 @@ import {
   Activity,
   CreditCard,
   Coins,
+  Share2,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -173,6 +174,7 @@ const VIEW_PATH_MAP: Record<string, string> = {
   members: '/members',
   resources: '/resources',
   todolist: '/todolist',
+  shared: '/shared',
 };
 
 function viewFromPathname(pathname: string): ViewState {
@@ -188,6 +190,7 @@ function viewFromPathname(pathname: string): ViewState {
   if (stripped.startsWith('/members')) return 'members';
   if (stripped.startsWith('/resources')) return 'resources';
   if (stripped.startsWith('/todolist')) return 'todolist';
+  if (stripped.startsWith('/shared')) return 'shared';
   if (stripped.startsWith('/player')) return 'resources';
   return 'parser';
 }
@@ -371,6 +374,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             active={currentView === 'todolist'}
             onClick={() => handleNav('todolist')}
           />
+          <SidebarItem
+            icon={Share2}
+            label={t('sidebar.shared')}
+            active={currentView === 'shared'}
+            onClick={() => handleNav('shared')}
+          />
           {hasPermission(permissions, 'member.view') && (
             <>
               <SidebarItem
@@ -449,6 +458,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label={t('sidebar.todolist')}
           active={currentView === 'todolist'}
           onClick={() => handleNav('todolist')}
+        />
+        <SidebarItem
+          icon={Share2}
+          label={t('sidebar.shared')}
+          active={currentView === 'shared'}
+          onClick={() => handleNav('shared')}
         />
 
         <Divider />
