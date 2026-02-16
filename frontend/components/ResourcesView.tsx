@@ -1001,6 +1001,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       onClick: async () => {
         setLoading(true);
         try {
+          await Promise.all([loadChildFolders()]);
           const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
           setResources(items);
         } catch { /* ignore */ }
@@ -1008,6 +1009,25 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       },
       divider: true,
     });
+    // Paste option when there are items in clipboard (operationTargetItems from copy)
+    if (operationTargetItems.length > 0 && folderPickerMode === null) {
+      emptyItems.push({
+        label: t('resources.paste'),
+        icon: <Copy size={14} />,
+        onClick: async () => {
+          try {
+            for (const item of operationTargetItems) {
+              if (item.resource?.id) {
+                await copyResourceItem(String(item.resource.id), scopeType, scopeId, selectedFolderId, selectedLibraryId);
+              }
+            }
+            const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+            setResources(items);
+            setOperationTargetItems([]);
+          } catch { /* ignore */ }
+        },
+      });
+    }
     return emptyItems;
   }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, handleDeleteSmartFolder, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, canDo]);
 

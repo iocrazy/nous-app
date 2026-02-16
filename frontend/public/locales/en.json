@@ -388,7 +388,8 @@
     "modifiedAt": "Modified",
     "listHeaderName": "Name",
     "listHeaderType": "Type",
-    "listHeaderSize": "Size"
+    "listHeaderSize": "Size",
+    "paste": "Paste"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
