@@ -1,12 +1,12 @@
 import React from 'react';
-import { File, Film, Image, FileText, Trash2, RotateCcw, X, Clock } from 'lucide-react';
+import { File, Film, Image, FileText, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
 
 interface ResourceCardProps {
   item: ResourceItem;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent) => void;
   viewMode: 'grid' | 'list';
   isSelected?: boolean;
   showRestoreAction?: boolean;
@@ -19,6 +19,9 @@ interface ResourceCardProps {
   onRenameChange?: (value: string) => void;
   onRenameConfirm?: () => void;
   onRenameCancel?: () => void;
+  selectable?: boolean;
+  isChecked?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -68,6 +71,9 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   onRenameChange,
   onRenameConfirm,
   onRenameCancel,
+  selectable = false,
+  isChecked = false,
+  onToggleSelect,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -87,14 +93,30 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   }, [resource?.thumbnail_path, resource?.cover_image_path, resource?.id]);
 
   const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
+  const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
+
+  const checkbox = selectable ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
+      className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
+        isChecked
+          ? 'bg-indigo-500 text-white'
+          : 'bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 opacity-0 group-hover:opacity-100'
+      } ${isChecked ? 'opacity-100' : ''}`}
+    >
+      <Check size={12} />
+    </button>
+  ) : null;
 
   if (viewMode === 'list') {
     return (
       <div
-        onClick={onClick}
+        data-context-item
+        onClick={(e) => onClick(e)}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group ${selectedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
       >
+        {checkbox}
         <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
           <IconComponent size={18} className={color} />
         </div>
@@ -161,10 +183,12 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   // Grid mode
   return (
     <div
-      onClick={onClick}
+      data-context-item
+      onClick={(e) => onClick(e)}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing}`}
+      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing} ${checkedRing}`}
     >
+      {checkbox}
       {/* Thumbnail */}
       <div className={`relative h-28 flex items-center justify-center ${bg}`}>
         {thumbnailSrc ? (

@@ -228,6 +228,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     libraryId?: string;
   } | null>(null);
 
+  // Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+
   // Copy/Move operations
   const [folderPickerMode, setFolderPickerMode] = useState<'copy' | 'move' | null>(null);
   const [operationTargetItems, setOperationTargetItems] = useState<ResourceItem[]>([]);
@@ -1067,6 +1071,52 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [currentItems, sortBy]);
 
+  // Build ordered list of all selectable IDs for shift-click range selection
+  const allSelectableIds = useMemo(() => {
+    const ids: string[] = [];
+    childFolders.forEach((f) => ids.push(`folder:${f.id}`));
+    sortedItems.forEach((i) => ids.push(`item:${i.id}`));
+    return ids;
+  }, [childFolders, sortedItems]);
+
+  const handleToggleSelect = useCallback((compositeId: string, e: React.MouseEvent) => {
+    if (e.shiftKey && lastClickedId) {
+      const allIds = allSelectableIds;
+      const startIdx = allIds.indexOf(lastClickedId);
+      const endIdx = allIds.indexOf(compositeId);
+      if (startIdx >= 0 && endIdx >= 0) {
+        const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (let i = from; i <= to; i++) next.add(allIds[i]);
+          return next;
+        });
+      }
+    } else if (e.metaKey || e.ctrlKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(compositeId)) next.delete(compositeId);
+        else next.add(compositeId);
+        return next;
+      });
+    } else {
+      setSelectedIds(new Set([compositeId]));
+    }
+    setLastClickedId(compositeId);
+  }, [lastClickedId, allSelectableIds]);
+
+  const handleCardClick = useCallback((compositeId: string, originalAction: () => void, e?: React.MouseEvent) => {
+    if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+      handleToggleSelect(compositeId, e);
+      return;
+    }
+    if (selectedIds.size > 0) {
+      setSelectedIds(new Set());
+      return;
+    }
+    originalAction();
+  }, [selectedIds, handleToggleSelect]);
+
   // Sort options
   const sortOptions: { value: SortBy; label: string }[] = [
     { value: 'newest', label: t('resources.sortNewest') },
@@ -1476,13 +1526,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
-                            onClick={() => {
+                            onClick={(e?: any) => handleCardClick(`folder:${folder.id}`, () => {
                               if (selectedLibraryId) {
                                 navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                               } else {
                                 navigate(resPath(`/resources/folder/${folder.id}`));
                               }
-                            }}
+                            }, e)}
                             viewMode="grid"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -1490,6 +1540,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameFolderValue}
                             onRenameConfirm={handleRenameFolderConfirm}
                             onRenameCancel={() => setRenamingFolderId(null)}
+                            selectable
+                            isChecked={selectedIds.has(`folder:${folder.id}`)}
+                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
                           />
                         ))}
                       </div>
@@ -1499,13 +1552,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
-                            onClick={() => {
+                            onClick={(e?: any) => handleCardClick(`folder:${folder.id}`, () => {
                               if (selectedLibraryId) {
                                 navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                               } else {
                                 navigate(resPath(`/resources/folder/${folder.id}`));
                               }
-                            }}
+                            }, e)}
                             viewMode="list"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -1513,6 +1566,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameFolderValue}
                             onRenameConfirm={handleRenameFolderConfirm}
                             onRenameCancel={() => setRenamingFolderId(null)}
+                            selectable
+                            isChecked={selectedIds.has(`folder:${folder.id}`)}
+                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
                           />
                         ))}
                       </div>
@@ -1532,7 +1588,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <ResourceCard
                             key={item.id}
                             item={item}
-                            onClick={() => handleResourceClick(item)}
+                            onClick={(e?: any) => handleCardClick(`item:${item.id}`, () => handleResourceClick(item), e)}
                             viewMode="grid"
                             isSelected={selectedResource?.id === item.id}
                             showRestoreAction={isRecycleView}
@@ -1545,6 +1601,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameValue}
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
+                            selectable={!isRecycleView}
+                            isChecked={selectedIds.has(`item:${item.id}`)}
+                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
                           />
                         ))}
                       </div>
@@ -1554,7 +1613,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <ResourceCard
                             key={item.id}
                             item={item}
-                            onClick={() => handleResourceClick(item)}
+                            onClick={(e?: any) => handleCardClick(`item:${item.id}`, () => handleResourceClick(item), e)}
                             viewMode="list"
                             isSelected={selectedResource?.id === item.id}
                             showRestoreAction={isRecycleView}
@@ -1567,6 +1626,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameChange={setRenameValue}
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
+                            selectable={!isRecycleView}
+                            isChecked={selectedIds.has(`item:${item.id}`)}
+                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
                           />
                         ))}
                       </div>
@@ -1607,6 +1669,67 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onAddTag={handleAddTag}
           onRemoveTag={handleRemoveTag}
         />
+      )}
+
+      {/* ── Batch Selection Toolbar ── */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
+          <span className="text-sm text-zinc-300 font-medium">
+            {t('resources.selected', { count: selectedIds.size })}
+          </span>
+          <div className="w-px h-5 bg-zinc-700" />
+          <button
+            onClick={() => {
+              const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+              const flds = childFolders.filter((f) => selectedIds.has(`folder:${f.id}`));
+              setOperationTargetItems(items);
+              setOperationTargetFolders(flds);
+              setFolderPickerMode('move');
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            <Move size={14} />
+            {t('resources.batchMove')}
+          </button>
+          <button
+            onClick={() => {
+              const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+              setOperationTargetItems(items);
+              setOperationTargetFolders([]);
+              setFolderPickerMode('copy');
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            <Copy size={14} />
+            {t('resources.batchCopy')}
+          </button>
+          <button
+            onClick={async () => {
+              const resourceIds = sortedItems
+                .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+                .map((i) => String(i.resource!.id));
+              if (resourceIds.length > 0) {
+                try {
+                  await trashResources(resourceIds);
+                  const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+                  setResources(items);
+                  setSelectedIds(new Set());
+                } catch { /* ignore */ }
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+          >
+            <Trash2 size={14} />
+            {t('resources.batchDelete')}
+          </button>
+          <div className="w-px h-5 bg-zinc-700" />
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
       )}
 
       {/* ── Context Menu ── */}
