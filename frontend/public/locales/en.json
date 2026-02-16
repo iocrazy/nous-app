@@ -389,7 +389,12 @@
     "listHeaderName": "Name",
     "listHeaderType": "Type",
     "listHeaderSize": "Size",
-    "paste": "Paste"
+    "paste": "Paste",
+    "uploadFolder": "Upload Folder",
+    "trashedNotification": "Moved to trash: {{name}}",
+    "renamedNotification": "Renamed to {{name}}",
+    "copiedToClipboard": "{{count}} items copied",
+    "cutToClipboard": "{{count}} items cut"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

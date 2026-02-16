@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Folder as FolderIcon, ChevronRight, Check, MoreVertical, Film, Image, FileText, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Folder } from '../types';
+import { formatDateShort } from '../utils/formatDate';
 
 interface FolderPreviewItem {
   thumbnail_path?: string | null;
@@ -23,6 +24,8 @@ interface FolderCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  // Double-click rename
+  onStartRename?: () => void;
   // Drop target
   onDropItems?: (ids: string[]) => void;
   // Folder preview
@@ -30,12 +33,7 @@ interface FolderCardProps {
 }
 
 function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  return formatDateShort(dateStr);
 }
 
 function getPreviewIcon(mimeType: string | null | undefined) {
@@ -77,6 +75,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   onRenameConfirm,
   onRenameCancel,
   childCount,
+  onStartRename,
   selectable = false,
   isChecked = false,
   onToggleSelect,
@@ -163,7 +162,10 @@ export const FolderCard: React.FC<FolderCardProps> = ({
           {renaming ? (
             <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
           ) : (
-            <p className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
+            <p
+              className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+              onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+            >
               {folder.name}
             </p>
           )}
@@ -252,7 +254,10 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         {renaming ? (
           <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
         ) : (
-          <p className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
+          <p
+            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+            onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+          >
             {folder.name}
           </p>
         )}

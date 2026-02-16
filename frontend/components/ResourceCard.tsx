@@ -3,6 +3,7 @@ import { File, Film, Image, FileText, FileSpreadsheet, Presentation, FileType, T
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
+import { formatDateShort } from '../utils/formatDate';
 
 interface ResourceCardProps {
   item: ResourceItem;
@@ -22,6 +23,8 @@ interface ResourceCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  // Double-click rename
+  onStartRename?: () => void;
   // Drag support
   selectedIds?: Set<string>;
   compositeId?: string;
@@ -36,12 +39,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 }
 
 function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  return formatDateShort(dateStr);
 }
 
 function formatDuration(seconds: number): string {
@@ -87,6 +85,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   onRenameChange,
   onRenameConfirm,
   onRenameCancel,
+  onStartRename,
   selectable = false,
   isChecked = false,
   onToggleSelect,
@@ -194,7 +193,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
             />
           ) : (
-            <p className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
+            <p
+              className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+              onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+            >
               {filename}
             </p>
           )}
@@ -317,7 +319,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
           />
         ) : (
-          <p className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium">
+          <p
+            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+            onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+          >
             {filename}
           </p>
         )}

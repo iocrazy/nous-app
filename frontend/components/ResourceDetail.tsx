@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  ExternalLink,
   File,
   Film,
   Image,
@@ -10,14 +13,13 @@ import {
   Music,
   Loader2,
   MoreHorizontal,
-  Clock,
-  HardDrive,
-  Tag as TagIcon,
   X,
   Layers,
   FileQuestion,
   PanelLeft,
+  Plus,
   Search,
+  Share2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -34,6 +36,8 @@ import {
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
 import { getSupabaseAccessToken } from '../supabaseClient';
+import { formatDateLocalized } from '../utils/formatDate';
+import { ShareModal } from './ShareModal';
 
 // ─── Utility functions ──────────────────────────────────
 
@@ -47,13 +51,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';
-  return new Date(dateStr).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateLocalized(dateStr);
 }
 
 function formatDuration(seconds: number | null | undefined): string {
@@ -76,6 +74,12 @@ function getFileIcon(mimeType: string | null | undefined) {
   if (mimeType.startsWith('text/') || mimeType.includes('pdf') || mimeType.includes('document'))
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
   return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+}
+
+function getFileExtension(filename: string | null | undefined): string {
+  if (!filename) return '';
+  const parts = filename.split('.');
+  return parts.length > 1 ? parts[parts.length - 1].toUpperCase() : '';
 }
 
 // ─── FilePreview ─────────────────────────────────────────
@@ -103,7 +107,7 @@ const FilePreview: React.FC<{
       <video
         src={fileUrl}
         controls
-        className="max-w-full max-h-full rounded-lg"
+        className="max-w-full max-h-[calc(100vh-13rem)] rounded-lg object-contain"
         poster={resource.thumbnail_path || undefined}
       />
     );
@@ -126,7 +130,7 @@ const FilePreview: React.FC<{
       <img
         src={fileUrl}
         alt={resource.filename}
-        className="max-w-full max-h-full object-contain rounded-lg"
+        className="max-w-full max-h-[calc(100vh-13rem)] object-contain rounded-lg"
       />
     );
   }
@@ -135,7 +139,7 @@ const FilePreview: React.FC<{
     return (
       <iframe
         src={fileUrl}
-        className="w-full h-full rounded-lg"
+        className="w-full h-[calc(100vh-13rem)] rounded-lg"
         title={resource.filename}
       />
     );
@@ -160,21 +164,17 @@ const FilePreview: React.FC<{
   );
 };
 
-// ─── InfoRow ─────────────────────────────────────────────
+// ─── CompactInfoRow ─────────────────────────────────────
 
-const InfoRow: React.FC<{
-  icon: React.ReactNode;
+const CompactInfoRow: React.FC<{
   label: string;
   value: string | null | undefined;
-}> = ({ icon, label, value }) => {
+}> = ({ label, value }) => {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-3 py-2">
-      <span className="mt-0.5 text-zinc-500 shrink-0">{icon}</span>
-      <div className="min-w-0">
-        <p className="text-xs text-zinc-500">{label}</p>
-        <p className="text-sm text-zinc-300 break-words">{value}</p>
-      </div>
+    <div className="flex justify-between items-center py-1.5">
+      <span className="text-xs text-zinc-500">{label}</span>
+      <span className="text-xs text-zinc-300 text-right">{value}</span>
     </div>
   );
 };
@@ -199,11 +199,21 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [error, setError] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
   const [siblingFiles, setSiblingFiles] = useState<ResourceItem[]>([]);
   const [fileListSearch, setFileListSearch] = useState('');
+
+  // Navigation state
+  const [currentIndex, setCurrentIndex] = useState<number>(-1);
+
+  // Inspector state
+  const [notes, setNotes] = useState('');
+  const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
 
   // Load sibling files for file list panel
   useEffect(() => {
@@ -226,6 +236,51 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     loadSiblings();
     return () => { cancelled = true; };
   }, [resourceId]);
+
+  // Compute current index in sibling list
+  useEffect(() => {
+    const idx = siblingFiles.findIndex(item => item.resource?.id === resourceId);
+    setCurrentIndex(idx);
+  }, [siblingFiles, resourceId]);
+
+  // Navigation functions
+  const navigateToSibling = useCallback((dir: 'prev' | 'next') => {
+    const newIdx = dir === 'prev' ? currentIndex - 1 : currentIndex + 1;
+    if (newIdx < 0 || newIdx >= siblingFiles.length) return;
+    const target = siblingFiles[newIdx];
+    if (target.resource?.id) {
+      navigate(`${teamId ? `/t/${teamId}` : ''}/resources/file/${target.resource.id}`);
+    }
+  }, [siblingFiles, currentIndex, teamId, navigate]);
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < siblingFiles.length - 1;
+
+  // Keyboard ← → navigation
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToSibling('prev'); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); navigateToSibling('next'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigateToSibling]);
+
+  // Reset notes when file changes
+  useEffect(() => { setNotes(''); }, [resourceId]);
+
+  // Close tag dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setShowTagDropdown(false);
+        setTagSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const filteredSiblings = fileListSearch
     ? siblingFiles.filter((item) =>
@@ -291,6 +346,8 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       await addResourceTag(resourceId, tagId);
       const updated = await fetchResourceTags(resourceId);
       setAssignedTags(updated);
+      setShowTagDropdown(false);
+      setTagSearch('');
     } catch { /* ignore */ }
   }, [resourceId]);
 
@@ -336,12 +393,18 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
   const assignedTagIds = new Set(assignedTags.map((t) => t.tag?.id).filter(Boolean));
+  const fileExt = getFileExtension(resource.filename);
+  const availableTags = allTags.filter((tag) => !assignedTagIds.has(tag.id));
+  const filteredAvailableTags = tagSearch
+    ? availableTags.filter((tag) => tag.name.toLowerCase().includes(tagSearch.toLowerCase()))
+    : availableTags;
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 shrink-0">
-        <div className="flex items-center gap-2">
+      {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
+        {/* Left: panel toggle + back */}
+        <div className="flex items-center gap-1.5 min-w-[140px]">
           <button
             onClick={() => setShowFileList(!showFileList)}
             className={`p-1.5 rounded-lg transition-colors ${
@@ -353,14 +416,57 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </button>
           <button
             onClick={handleBack}
-            className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
           >
             <ArrowLeft size={16} />
             <span>{t('common.back')}</span>
           </button>
         </div>
+
+        {/* Center: prev/next + filename */}
         <div className="flex items-center gap-2">
-          {/* Download button */}
+          <button
+            onClick={() => navigateToSibling('prev')}
+            disabled={!hasPrev}
+            className={`p-1 rounded transition-colors ${
+              hasPrev ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800' : 'text-zinc-700 cursor-not-allowed'
+            }`}
+            title={t('resources.prevFile')}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="flex items-center gap-2 px-2">
+            <FileIcon size={14} className={iconColor} />
+            <span className="text-sm text-zinc-200 font-medium max-w-[300px] truncate">
+              {resource.filename}
+            </span>
+            {currentIndex >= 0 && siblingFiles.length > 0 && (
+              <span className="text-xs text-zinc-500">
+                ({currentIndex + 1}/{siblingFiles.length})
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => navigateToSibling('next')}
+            disabled={!hasNext}
+            className={`p-1 rounded transition-colors ${
+              hasNext ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800' : 'text-zinc-700 cursor-not-allowed'
+            }`}
+            title={t('resources.nextFile')}
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        {/* Right: download + more */}
+        <div className="flex items-center gap-1.5 min-w-[140px] justify-end">
+          <button
+            onClick={() => setShowShareModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+          >
+            <Share2 size={14} />
+            <span>{t('resources.share')}</span>
+          </button>
           {fileUrl && (
             <a
               href={fileUrl}
@@ -371,7 +477,6 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               <span>{t('resources.download')}</span>
             </a>
           )}
-          {/* More menu */}
           <div className="relative">
             <button
               onClick={() => setShowMoreMenu(!showMoreMenu)}
@@ -466,120 +571,183 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         )}
 
         {/* Preview area */}
-        <div className="flex-1 flex items-center justify-center bg-zinc-950 p-6 min-w-0">
+        <div className="flex-1 flex items-center justify-center bg-zinc-950 p-6 min-w-0 overflow-hidden">
           <FilePreview resource={resource} fileUrl={fileUrl} />
         </div>
 
-        {/* Right: Info panel */}
-        <div className="w-80 border-l border-zinc-800 overflow-y-auto p-4 space-y-5 shrink-0">
-          {/* File icon + name */}
-          <div className="flex items-start gap-3">
-            <div className={`p-2.5 rounded-xl ${iconBg} shrink-0`}>
-              <FileIcon size={20} className={iconColor} />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-medium text-white break-words leading-snug">
-                {resource.filename}
-              </h2>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                {resource.file_type || resource.mime_type || 'Unknown type'}
-              </p>
+        {/* Right: Inspector panel (Eagle style) */}
+        <div className="w-80 border-l border-zinc-800 overflow-y-auto shrink-0">
+
+          {/* Section 1 — File Header */}
+          <div className="px-4 py-4">
+            <div className="flex items-start gap-3">
+              <div className={`p-2 rounded-lg ${iconBg} shrink-0`}>
+                <FileIcon size={18} className={iconColor} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-medium text-white break-words leading-snug">
+                  {resource.filename}
+                </h2>
+                <div className="flex items-center gap-2 mt-1">
+                  {fileExt && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-zinc-800 text-zinc-400 rounded">
+                      {fileExt}
+                    </span>
+                  )}
+                  {resource.current_version != null && (
+                    <span className="text-[10px] text-zinc-500">v{resource.current_version}</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Metadata section */}
-          <div className="space-y-0">
-            <InfoRow
-              icon={<HardDrive size={14} />}
-              label={t('resources.size')}
-              value={formatFileSize(resource.file_size_bytes)}
-            />
-            <InfoRow
-              icon={<Clock size={14} />}
-              label={t('resources.createdAt')}
-              value={formatDate(resource.created_at)}
-            />
+          {/* Section 2 — File Properties */}
+          <div className="px-4 py-3 border-t border-zinc-800">
+            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1">
+              {t('resources.fileProperties')}
+            </h4>
+            <CompactInfoRow label={t('resources.size')} value={formatFileSize(resource.file_size_bytes)} />
+            <CompactInfoRow label={t('resources.createdAt')} value={formatDate(resource.created_at)} />
             {(isVideo || isAudio) && resource.duration_seconds != null && (
-              <InfoRow
-                icon={<Film size={14} />}
-                label={t('resources.duration')}
-                value={formatDuration(resource.duration_seconds)}
-              />
+              <CompactInfoRow label={t('resources.duration')} value={formatDuration(resource.duration_seconds)} />
             )}
             {isVideo && resource.resolution && (
-              <InfoRow
-                icon={<Layers size={14} />}
-                label={t('resources.resolution')}
-                value={resource.resolution.replace(':', 'x')}
-              />
+              <CompactInfoRow label={t('resources.resolution')} value={resource.resolution.replace(':', 'x')} />
             )}
+            <CompactInfoRow label={t('resources.mimeType')} value={resource.mime_type} />
           </div>
 
-          {/* Tags section */}
-          <div>
-            <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+          {/* Section 3 — Tags (Eagle style) */}
+          <div className="px-4 py-3 border-t border-zinc-800">
+            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
               {t('resources.tags')}
             </h4>
-            {/* Assigned tags */}
-            {assignedTags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {assignedTags.map((item) => item.tag && (
-                  <span
-                    key={item.tag.id}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity"
-                    style={{
-                      backgroundColor: (item.tag.color || '#6366f1') + '20',
-                      color: item.tag.color || '#6366f1',
-                    }}
-                    onClick={() => handleRemoveTag(item.tag.id)}
-                    title="Click to remove"
-                  >
-                    {item.tag.name}
-                    <X size={10} />
-                  </span>
-                ))}
-              </div>
-            )}
-            {/* Available tags */}
-            <div className="space-y-0.5 max-h-32 overflow-y-auto">
-              {allTags.filter((tag) => !assignedTagIds.has(tag.id)).map((tag) => (
-                <button
-                  key={tag.id}
-                  onClick={() => handleAddTag(tag.id)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg text-zinc-400 hover:bg-zinc-800 transition-colors"
+            <div className="flex flex-wrap gap-1.5">
+              {assignedTags.map((item) => item.tag && (
+                <span
+                  key={item.tag.id}
+                  className="group inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full transition-opacity"
+                  style={{
+                    backgroundColor: (item.tag.color || '#6366f1') + '20',
+                    color: item.tag.color || '#6366f1',
+                  }}
                 >
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: tag.color || '#6366f1' }}
-                  />
-                  <span className="truncate">{tag.name}</span>
-                </button>
+                  {item.tag.name}
+                  <button
+                    onClick={() => handleRemoveTag(item.tag.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+                    title="Remove"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
               ))}
-              {allTags.length === 0 && (
-                <p className="text-xs text-zinc-600 py-1">{t('resources.noTagsAvailable')}</p>
-              )}
+              {/* Add tag button */}
+              <div className="relative" ref={tagDropdownRef}>
+                <button
+                  onClick={() => { setShowTagDropdown(!showTagDropdown); setTagSearch(''); }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+                >
+                  <Plus size={10} />
+                  {t('resources.addTag')}
+                </button>
+                {showTagDropdown && (
+                  <div className="absolute left-0 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 py-1">
+                    <div className="px-2 pb-1">
+                      <input
+                        type="text"
+                        value={tagSearch}
+                        onChange={(e) => setTagSearch(e.target.value)}
+                        placeholder="Search tags..."
+                        className="w-full bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-32 overflow-y-auto">
+                      {filteredAvailableTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => handleAddTag(tag.id)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: tag.color || '#6366f1' }}
+                          />
+                          <span className="truncate">{tag.name}</span>
+                        </button>
+                      ))}
+                      {filteredAvailableTags.length === 0 && (
+                        <p className="text-xs text-zinc-600 text-center py-2">{t('resources.noTagsAvailable')}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Versions section */}
+          {/* Section 4 — Notes */}
+          <div className="px-4 py-3 border-t border-zinc-800">
+            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              {t('resources.notes')}
+            </h4>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder={t('resources.notesPlaceholder')}
+              rows={3}
+              className="w-full bg-zinc-800/50 border border-zinc-700/30 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+          </div>
+
+          {/* Section 5 — Source */}
+          <div className="px-4 py-3 border-t border-zinc-800">
+            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              {t('resources.source')}
+            </h4>
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded ${
+                resource.source_type === 'web'
+                  ? 'bg-blue-500/10 text-blue-400'
+                  : 'bg-emerald-500/10 text-emerald-400'
+              }`}>
+                {resource.source_type === 'web' ? t('resources.webDownload') : t('resources.uploaded')}
+              </span>
+            </div>
+            {resource.video_id && (
+              <a
+                href={`/resources/video/${resource.video_id}`}
+                className="inline-flex items-center gap-1.5 mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalLink size={12} />
+                {t('resources.viewOriginal')}
+              </a>
+            )}
+          </div>
+
+          {/* Section 6 — Versions */}
           {versions.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+            <div className="px-4 py-3 border-t border-zinc-800">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
                 {t('resources.versions')}
               </h4>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {versions
                   .sort((a, b) => b.version_number - a.version_number)
                   .map((ver) => (
                     <div
                       key={ver.id}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${
+                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-zinc-800/70 ${
                         ver.version_number === resource.current_version
-                          ? 'bg-indigo-500/10 border border-indigo-500/30'
-                          : 'bg-zinc-800/50'
+                          ? 'bg-indigo-500/10 border border-indigo-500/20'
+                          : 'bg-transparent'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <span className={`font-medium ${
                           ver.version_number === resource.current_version
                             ? 'text-indigo-400'
@@ -588,12 +756,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                           v{ver.version_number}
                         </span>
                         {ver.version_number === resource.current_version && (
-                          <span className="text-indigo-400/70 text-[10px]">
-                            current
-                          </span>
+                          <span className="text-indigo-400/60 text-[10px]">current</span>
                         )}
                       </div>
-                      <span className="text-zinc-500">
+                      <span className="text-zinc-500 text-[10px]">
                         {formatDate(ver.created_at)}
                       </span>
                     </div>
@@ -601,18 +767,17 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               </div>
             </div>
           )}
-
-          {/* Source info */}
-          <div>
-            <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              Source
-            </h4>
-            <p className="text-xs text-zinc-500">
-              {resource.source_type === 'web' ? 'Downloaded from web' : 'Uploaded'}
-            </p>
-          </div>
         </div>
       </div>
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <ShareModal
+          isOpen={true}
+          onClose={() => setShowShareModal(false)}
+          resourceId={resourceId}
+        />
+      )}
     </div>
   );
 };
