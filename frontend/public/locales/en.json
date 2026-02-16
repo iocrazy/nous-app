@@ -383,7 +383,12 @@
     "copySuccess": "Copied {{count}} files",
     "confirm": "Confirm",
     "cancel": "Cancel",
-    "rootFolder": "Root"
+    "rootFolder": "Root",
+    "clearFilters": "Clear Filters",
+    "modifiedAt": "Modified",
+    "listHeaderName": "Name",
+    "listHeaderType": "Type",
+    "listHeaderSize": "Size"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
