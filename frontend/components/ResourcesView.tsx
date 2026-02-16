@@ -67,6 +67,7 @@ import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
+import { SidebarFolderTree } from './SidebarFolderTree';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -1332,6 +1333,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   <Plus size={14} />
                 </button>
               </div>
+
+              {/* Folder tree */}
+              <SidebarFolderTree
+                folders={folders}
+                currentFolderId={selectedFolderId}
+                onNavigate={(folderId) => {
+                  if (folderId) {
+                    navigate(resPath(`/resources/folder/${folderId}`));
+                  } else {
+                    navigate(resPath('/resources'));
+                  }
+                }}
+                onDragOver={handleSidebarDragOver}
+                onDrop={handleSidebarDrop}
+              />
 
             </>
           )}
