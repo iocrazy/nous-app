@@ -41,7 +41,11 @@ export const createShare = async (data: {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Failed to create share' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    const detail = error.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((d: { msg?: string }) => d.msg || '').join('; ')
+      : (typeof detail === 'string' ? detail : `HTTP ${response.status}`);
+    throw new Error(message);
   }
 
   const result = await response.json();

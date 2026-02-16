@@ -398,7 +398,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               <InfoRow
                 icon={<Layers size={14} />}
                 label={t('resources.resolution')}
-                value={resource.resolution}
+                value={resource.resolution.replace(':', 'x')}
               />
             )}
           </div>
