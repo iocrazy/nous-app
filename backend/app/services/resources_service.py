@@ -231,6 +231,7 @@ class ResourcesService:
             "file_size_bytes": file_size_bytes,
             "duration_seconds": duration_seconds,
             "resolution": resolution,
+            "thumbnail_path": cover_image_path,
             "cover_image_path": cover_image_path,
         }
         resource = await self.repo.create_resource(resource_data)
