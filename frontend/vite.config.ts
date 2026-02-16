@@ -49,6 +49,7 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
           navigateFallback: '/index.html',
           navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//],
           runtimeCaching: [
