@@ -712,6 +712,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setContextMenu(null);
   }, []);
 
+  const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
+    if (!confirm(t('smartFolder.confirmDelete'))) return;
+    await deleteSmartFolder(String(sf.id));
+    const updated = await fetchSmartFolders(scopeType, scopeId);
+    setSmartFolders(updated);
+    // If we're viewing the deleted folder, go back to resources root
+    if (selectedSmartFolderId === String(sf.id)) {
+      navigate(resPath('/resources'));
+    }
+  }, [scopeType, scopeId, selectedSmartFolderId, navigate, resPath, t]);
+
   // Build context menu items based on type
   const contextMenuItems = useMemo((): ContextMenuItem[] => {
     if (!contextMenu) return [];
@@ -958,17 +969,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     setSmartFolders(updated);
     setEditingSmartFolder(null);
   }, [editingSmartFolder, scopeType, scopeId]);
-
-  const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
-    if (!confirm(t('smartFolder.confirmDelete'))) return;
-    await deleteSmartFolder(String(sf.id));
-    const updated = await fetchSmartFolders(scopeType, scopeId);
-    setSmartFolders(updated);
-    // If we're viewing the deleted folder, go back to resources root
-    if (selectedSmartFolderId === String(sf.id)) {
-      navigate(resPath('/resources'));
-    }
-  }, [scopeType, scopeId, selectedSmartFolderId, navigate, resPath, t]);
 
   // ─── Breadcrumb ───────────────────────────────────────
 
