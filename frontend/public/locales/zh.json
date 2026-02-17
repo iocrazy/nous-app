@@ -419,7 +419,8 @@
     "permanentDeleteSuccess": "已永久删除",
     "permanentDeleteFailed": "永久删除失败",
     "movedToTrash": "已移至回收站",
-    "recycleBinAutoCleanup": "回收站中的内容将在 15 天后自动永久删除。"
+    "recycleBinAutoCleanup": "回收站中的内容将在 15 天后自动永久删除。",
+    "daysLeft": "剩余 {{count}} 天"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

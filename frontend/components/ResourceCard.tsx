@@ -45,6 +45,17 @@ function formatDate(dateStr: string | null | undefined): string {
   return formatDateShort(dateStr);
 }
 
+const TRASH_RETENTION_DAYS = 15;
+
+function getDaysUntilDeletion(trashedAt: string | null | undefined): number | null {
+  if (!trashedAt) return null;
+  const trashedDate = new Date(trashedAt);
+  const deleteDate = new Date(trashedDate.getTime() + TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const remaining = Math.ceil((deleteDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(0, remaining);
+}
+
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -252,6 +263,16 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         <span className="text-[11px] text-zinc-600 flex-shrink-0">
           {formatDate(createdAt)}
         </span>
+        {showRestoreAction && resource?.trashed_at && (() => {
+          const days = getDaysUntilDeletion(resource.trashed_at);
+          if (days === null) return null;
+          return (
+            <span className={`text-[11px] flex-shrink-0 flex items-center gap-1 ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-zinc-500'}`}>
+              <Clock size={11} />
+              {t('resources.daysLeft', { count: days })}
+            </span>
+          );
+        })()}
         {/* Actions */}
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {moreButton}
@@ -407,10 +428,21 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             {filename}
           </p>
         )}
-        <div className="flex items-center justify-between mt-1 text-[11px] text-zinc-600">
-          <span>{formatFileSize(fileSize)}</span>
-          <span>{formatDate(createdAt)}</span>
-        </div>
+        {showRestoreAction && resource?.trashed_at ? (() => {
+          const days = getDaysUntilDeletion(resource.trashed_at);
+          if (days === null) return null;
+          return (
+            <div className={`flex items-center gap-1 mt-1 text-[11px] ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-zinc-500'}`}>
+              <Clock size={11} />
+              {t('resources.daysLeft', { count: days })}
+            </div>
+          );
+        })() : (
+          <div className="flex items-center justify-between mt-1 text-[11px] text-zinc-600">
+            <span>{formatFileSize(fileSize)}</span>
+            <span>{formatDate(createdAt)}</span>
+          </div>
+        )}
       </div>
     </div>
   );
