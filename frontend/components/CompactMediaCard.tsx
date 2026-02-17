@@ -18,8 +18,14 @@ const getPlatformLabel = (platform?: string): string => {
 
 interface CompactMediaCardProps {
   data: Video;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent) => void;
+  onDoubleClick?: () => void;
   isShared?: boolean;
+  isSelected?: boolean;
+  selectable?: boolean;
+  isChecked?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
+  forceShowCheckbox?: boolean;
 }
 
 // Helper to get AI status icon styling
@@ -52,7 +58,7 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, isShared }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
@@ -100,10 +106,33 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   return (
     <div
-      className="group relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all active:scale-[0.98] shadow-sm"
+      className={`group relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
+        isChecked || isSelected
+          ? 'border-indigo-500/50 ring-1 ring-inset ring-indigo-500/30'
+          : 'border-zinc-800 hover:border-zinc-600'
+      }`}
+      onDoubleClick={onDoubleClick}
+      data-context-item
     >
+      {/* Checkbox overlay */}
+      {selectable && (
+        <div
+          className={`absolute top-2 left-2 z-30 ${forceShowCheckbox || isChecked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
+            className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+              isChecked
+                ? 'bg-indigo-500 text-white'
+                : 'bg-black/50 border border-zinc-500 text-transparent hover:border-zinc-300'
+            }`}
+          >
+            <Check size={12} />
+          </button>
+        </div>
+      )}
       {/* Thumbnail Container - Handles Hover Playback & Sliding */}
-      <div 
+      <div
         className="relative w-full overflow-hidden bg-black aspect-[3/4] cursor-pointer"
         onClick={onClick}
         onMouseEnter={() => isVideo && setIsPlaying(true)}
@@ -203,9 +232,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
       </div>
 
       {/* Info & Actions Section - Handles Detail View */}
-      <div 
+      <div
         className="p-3 flex flex-col gap-3 bg-zinc-900 cursor-pointer"
-        onClick={onClick}
+        onClick={(e) => onClick(e)}
       >
         
         {/* Tags Row - Single line only */}

@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Layers, Loader2, Upload } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, Layers, Loader2, Upload, Trash2, Check, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { FileVersion } from '../types';
-import { fetchFileVersions, uploadNewVersion } from '../services/projectsService';
+import { ResourceVersion } from '../types';
+import {
+  fetchResourceVersions,
+  uploadNewVersion,
+  setCurrentVersion,
+  deleteVersion,
+} from '../services/resourceService';
 
 interface VersionManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  projectId: string;
-  fileId: string;
+  resourceId: string;
   currentVersionNumber: number;
-  onVersionSelect: (version: FileVersion) => void;
-  onVersionUploaded: () => void;
+  onVersionChange: () => void;
 }
 
 const formatFileSize = (bytes: number | null): string => {
@@ -40,39 +43,39 @@ const formatDate = (dateString: string): string => {
 export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
   isOpen,
   onClose,
-  projectId,
-  fileId,
+  resourceId,
   currentVersionNumber,
-  onVersionSelect,
-  onVersionUploaded,
+  onVersionChange,
 }) => {
   const { t } = useTranslation();
-  const [versions, setVersions] = useState<FileVersion[]>([]);
-  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [versions, setVersions] = useState<ResourceVersion[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ResourceVersion | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [settingCurrent, setSettingCurrent] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadVersions = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchResourceVersions(resourceId);
+      setVersions(data.sort((a, b) => b.version_number - a.version_number));
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setError(errorObj?.message || 'Failed to load versions');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [resourceId]);
 
   useEffect(() => {
     if (isOpen) {
       loadVersions();
     }
-  }, [isOpen, projectId, fileId]);
-
-  const loadVersions = async () => {
-    setIsLoadingVersions(true);
-    setError(null);
-    try {
-      const data = await fetchFileVersions(projectId, fileId);
-      setVersions(data);
-    } catch (err: unknown) {
-      console.error('Failed to load versions:', err);
-      const errorObj = err as { message?: string };
-      setError(errorObj?.message || 'Failed to load versions');
-    } finally {
-      setIsLoadingVersions(false);
-    }
-  };
+  }, [isOpen, loadVersions]);
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -85,11 +88,10 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
     setIsUploading(true);
     setError(null);
     try {
-      await uploadNewVersion(projectId, fileId, file);
+      await uploadNewVersion(resourceId, file);
       await loadVersions();
-      onVersionUploaded();
+      onVersionChange();
     } catch (err: unknown) {
-      console.error('Failed to upload version:', err);
       const errorObj = err as { message?: string };
       setError(errorObj?.message || 'Failed to upload version');
     } finally {
@@ -100,9 +102,36 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
     }
   };
 
-  const handleVersionClick = (version: FileVersion) => {
-    onVersionSelect(version);
-    onClose();
+  const handleSetCurrent = async (versionNumber: number) => {
+    if (versionNumber === currentVersionNumber) return;
+    setSettingCurrent(versionNumber);
+    setError(null);
+    try {
+      await setCurrentVersion(resourceId, versionNumber);
+      onVersionChange();
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setError(errorObj?.message || 'Failed to set current version');
+    } finally {
+      setSettingCurrent(null);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      await deleteVersion(resourceId, pendingDelete.id);
+      await loadVersions();
+      onVersionChange();
+    } catch (err: unknown) {
+      const errorObj = err as { message?: string };
+      setError(errorObj?.message || 'Failed to delete version');
+    } finally {
+      setIsDeleting(false);
+      setPendingDelete(null);
+    }
   };
 
   if (!isOpen) return null;
@@ -124,7 +153,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
               <Layers size={20} className="text-indigo-400" />
             </div>
             <h2 className="text-lg font-semibold text-white">
-              {t('mediatrack.review.manageVersions') || 'Manage Versions'}
+              {t('resources.manageVersions', 'Manage Versions')}
             </h2>
           </div>
           <button
@@ -143,23 +172,26 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
             </div>
           )}
 
-          {isLoadingVersions ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 size={24} className="text-zinc-400 animate-spin" />
             </div>
           ) : versions.length === 0 ? (
             <div className="text-center py-8 text-zinc-500 text-sm">
-              No versions found
+              {t('resources.noVersions', 'No versions found')}
             </div>
           ) : (
             <div className="space-y-2">
               {versions.map((version) => {
                 const isCurrent = version.version_number === currentVersionNumber;
                 return (
-                  <button
+                  <div
                     key={version.id}
-                    onClick={() => handleVersionClick(version)}
-                    className="w-full text-left p-3 rounded-xl border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 transition-colors group"
+                    className={`p-3 rounded-xl border transition-colors ${
+                      isCurrent
+                        ? 'border-indigo-500/30 bg-indigo-500/5'
+                        : 'border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50'
+                    }`}
                   >
                     <div className="flex items-center gap-3">
                       {/* Version badge */}
@@ -173,7 +205,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                         V{version.version_number}
                       </span>
 
-                      {/* Filename & current label */}
+                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-white truncate">
@@ -181,19 +213,11 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                           </span>
                           {isCurrent && (
                             <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/20 text-emerald-400 rounded">
-                              {t('mediatrack.review.currentVersion') || 'Current'}
+                              {t('resources.currentLabel', 'Current')}
                             </span>
                           )}
                         </div>
-
-                        {/* Metadata */}
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
-                          {version.uploaded_by && (
-                            <span>{version.uploaded_by}</span>
-                          )}
-                          {version.uploaded_by && version.created_at && (
-                            <span className="text-zinc-700">|</span>
-                          )}
                           {version.created_at && (
                             <span>{formatDate(version.created_at)}</span>
                           )}
@@ -203,10 +227,43 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                               <span>{formatFileSize(version.file_size_bytes)}</span>
                             </>
                           )}
+                          {version.resolution && (
+                            <>
+                              <span className="text-zinc-700">|</span>
+                              <span>{version.resolution}</span>
+                            </>
+                          )}
                         </div>
                       </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!isCurrent && (
+                          <button
+                            onClick={() => handleSetCurrent(version.version_number)}
+                            disabled={settingCurrent !== null}
+                            className="p-1.5 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                            title={t('resources.setAsCurrent', 'Set as current')}
+                          >
+                            {settingCurrent === version.version_number ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <Check size={14} />
+                            )}
+                          </button>
+                        )}
+                        {versions.length > 1 && (
+                          <button
+                            onClick={() => setPendingDelete(version)}
+                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            title={t('resources.deleteVersion', 'Delete version')}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -229,17 +286,65 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
             {isUploading ? (
               <>
                 <Loader2 size={18} className="animate-spin" />
-                <span>Uploading...</span>
+                <span>{t('resources.uploadingVersion', 'Uploading...')}</span>
               </>
             ) : (
               <>
                 <Upload size={18} />
-                <span>{t('mediatrack.review.uploadNewVersion') || 'Upload New Version'}</span>
+                <span>{t('resources.uploadNewVersion', 'Upload New Version')}</span>
               </>
             )}
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {pendingDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setPendingDelete(null)}
+          />
+          <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <AlertTriangle size={20} className="text-red-400" />
+                </div>
+                <h3 className="text-base font-semibold text-white">
+                  {t('resources.confirmDeleteVersion', 'Delete Version')}
+                </h3>
+              </div>
+              <p className="text-sm text-zinc-400 mb-6">
+                {t(
+                  'resources.deleteVersionWarning',
+                  'This will permanently delete V{{version}} and its files. This action cannot be undone.',
+                ).replace('{{version}}', String(pendingDelete.version_number))}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setPendingDelete(null)}
+                  className="flex-1 px-4 py-2 text-sm text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors"
+                >
+                  {t('common.cancel', 'Cancel')}
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={isDeleting}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-500 disabled:bg-red-600/50 rounded-xl transition-colors"
+                >
+                  {isDeleting ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                  <span>{t('common.delete', 'Delete')}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

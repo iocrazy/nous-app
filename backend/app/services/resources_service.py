@@ -70,14 +70,14 @@ class ResourcesService:
         resource = await self.repo.create_resource(resource_data)
         resource_id = str(resource["id"])
 
-        # Save to disk — teams/{scope_id}/uploads/{resource_id}/
-        save_dir = Path(settings.DOWNLOAD_PATH) / "teams" / scope_id / "uploads" / resource_id
+        # Save to disk — teams/{scope_id}/uploads/{resource_id}/v1/
+        save_dir = Path(settings.DOWNLOAD_PATH) / "teams" / scope_id / "uploads" / resource_id / "v1"
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
         with open(target, "wb") as f:
             f.write(content)
 
-        relative_path = f"teams/{scope_id}/uploads/{resource_id}/{safe_name}"
+        relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
         # Extract video metadata
         metadata = {}
@@ -111,6 +111,12 @@ class ResourcesService:
         }
         await self.repo.create_resource_item(item_data)
 
+        # Trigger HLS transcode for video files
+        if file_type == "video":
+            versions = await self.repo.get_versions(resource_id)
+            if versions:
+                self._trigger_transcode(resource_id, str(versions[0]["id"]), mime)
+
         return resource
 
     # ------------------------------------------------------------------ #
@@ -134,18 +140,28 @@ class ResourcesService:
         safe_name = self._sanitize_filename(file.filename)
         content = await file.read()
 
-        # Version files stored alongside the resource
-        # Need scope_id from resource_items to build path
-        item = await self.repo.get_first_resource_item(resource_id)
-        if not item:
-            raise ValueError("Resource has no scope association")
-        version_scope_id = item["scope_id"]
+        # Determine storage base path from existing file_path or resource_items
+        existing_path = resource.get("file_path", "")
+        if existing_path and "/v" in existing_path:
+            # Extract base path before /v{n}/
+            parts = existing_path.split("/")
+            # Find the vN segment and take everything before it
+            base_parts = []
+            for p in parts:
+                if p.startswith("v") and p[1:].isdigit():
+                    break
+                base_parts.append(p)
+            base_relative = "/".join(base_parts)
+        else:
+            # Fallback: use resource_items scope
+            item = await self.repo.get_first_resource_item(resource_id)
+            if not item:
+                raise ValueError("Resource has no scope association")
+            base_relative = f"teams/{item['scope_id']}/uploads/{resource_id}"
 
-        save_dir = (
-            Path(settings.DOWNLOAD_PATH) / "teams" / version_scope_id / "uploads" / resource_id / "versions"
-        )
+        save_dir = Path(settings.DOWNLOAD_PATH) / base_relative / f"v{next_version}"
         save_dir.mkdir(parents=True, exist_ok=True)
-        target = save_dir / f"v{next_version}_{safe_name}"
+        target = save_dir / safe_name
         with open(target, "wb") as f:
             f.write(content)
 
@@ -155,9 +171,7 @@ class ResourcesService:
         if file_type == "video":
             metadata = await self._extract_video_metadata(str(target))
 
-        relative_path = (
-            f"teams/{version_scope_id}/uploads/{resource_id}/versions/v{next_version}_{safe_name}"
-        )
+        relative_path = f"{base_relative}/v{next_version}/{safe_name}"
         version_data = {
             "resource_id": resource_id,
             "version_number": next_version,
@@ -182,7 +196,88 @@ class ResourcesService:
         }
         await self.repo.update_resource(resource_id, update_data)
 
+        # Trigger HLS transcode for video files
+        if file_type == "video":
+            self._trigger_transcode(resource_id, str(version["id"]), mime)
+
         return version
+
+    # ------------------------------------------------------------------ #
+    # Version management
+    # ------------------------------------------------------------------ #
+
+    async def set_current_version(
+        self, resource_id: str, version_number: int, user_id: str
+    ) -> dict:
+        """Set a specific version as the current active version."""
+        resource = await self.repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise ValueError("Resource not found")
+
+        version = await self.repo.get_version_by_number(resource_id, version_number)
+        if not version:
+            raise ValueError(f"Version {version_number} not found")
+
+        update_data = {
+            "current_version": version_number,
+            "file_path": version.get("file_path"),
+            "file_size_bytes": version.get("file_size_bytes"),
+            "mime_type": version.get("mime_type"),
+            "filename": version.get("filename"),
+        }
+        if version.get("duration_seconds"):
+            update_data["duration_seconds"] = version["duration_seconds"]
+        if version.get("resolution"):
+            update_data["resolution"] = version["resolution"]
+        if version.get("thumbnail_path"):
+            update_data["thumbnail_path"] = version["thumbnail_path"]
+
+        await self.repo.update_resource(resource_id, update_data)
+        return version
+
+    async def delete_version(
+        self, resource_id: str, version_id: str, user_id: str
+    ) -> bool:
+        """Delete a specific version (must keep at least one)."""
+        resource = await self.repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise ValueError("Resource not found")
+
+        versions = await self.repo.get_versions(resource_id)
+        if len(versions) <= 1:
+            raise ValueError("Cannot delete the last version")
+
+        target = next((v for v in versions if str(v["id"]) == version_id), None)
+        if not target:
+            raise ValueError("Version not found")
+
+        # Delete physical files for this version
+        file_path = target.get("file_path")
+        if file_path:
+            import shutil
+            base = Path(settings.DOWNLOAD_PATH)
+            full = base / file_path
+            # Remove the v{n}/ directory
+            version_dir = full.parent
+            if version_dir.exists() and version_dir.name.startswith("v"):
+                try:
+                    shutil.rmtree(version_dir)
+                    logger.info(f"Deleted version directory: {version_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete version dir {version_dir}: {e}")
+
+        await self.repo.delete_version(version_id)
+
+        # If we deleted the current version, switch to the latest remaining
+        if target["version_number"] == resource.get("current_version"):
+            remaining = await self.repo.get_versions(resource_id)
+            if remaining:
+                latest = remaining[0]  # ordered desc by version_number
+                await self.set_current_version(
+                    resource_id, latest["version_number"], user_id
+                )
+
+        return True
 
     # ------------------------------------------------------------------ #
     # Create resource from parser download (dedup)
@@ -435,6 +530,14 @@ class ResourcesService:
         if mime.startswith("audio/"):
             return "audio"
         return "document"
+
+    def _trigger_transcode(self, resource_id: str, version_id: str, mime_type: str):
+        """Queue HLS transcoding for a video version."""
+        try:
+            from app.tasks.transcode_tasks import maybe_trigger_transcode
+            maybe_trigger_transcode(resource_id, version_id, mime_type)
+        except Exception as e:
+            logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
 
     async def _extract_video_metadata(self, filepath: str) -> dict:
         try:

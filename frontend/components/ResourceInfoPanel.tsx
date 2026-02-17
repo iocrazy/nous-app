@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, File, Film, Image, FileText } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, File, Film, Image, FileText, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
@@ -54,6 +54,106 @@ const InfoRow = ({ label, value }: { label: string; value: string | null | undef
     <div className="flex justify-between items-center py-1.5">
       <span className="text-xs text-zinc-500">{label}</span>
       <span className="text-xs text-zinc-300 text-right">{value}</span>
+    </div>
+  );
+};
+
+const TagsSection: React.FC<{
+  assignedTags: Array<{ tag: Tag }>;
+  allTags: Tag[];
+  assignedTagIds: Set<string>;
+  onAddTag: (tagId: string) => void;
+  onRemoveTag: (tagId: string) => void;
+}> = ({ assignedTags, allTags, assignedTagIds, onAddTag, onRemoveTag }) => {
+  const { t } = useTranslation();
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const availableTags = allTags.filter((tag) => !assignedTagIds.has(tag.id));
+  const filtered = search
+    ? availableTags.filter((tag) => tag.name.toLowerCase().includes(search.toLowerCase()))
+    : availableTags;
+
+  return (
+    <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+      <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+        {t('resources.tags')}
+      </h4>
+      <div className="flex flex-wrap gap-1.5">
+        {assignedTags.map((item) => item.tag && (
+          <span
+            key={item.tag.id}
+            className="group inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full transition-opacity"
+            style={{
+              backgroundColor: (item.tag.color || '#6366f1') + '20',
+              color: item.tag.color || '#6366f1',
+            }}
+          >
+            {item.tag.name}
+            <button
+              onClick={() => onRemoveTag(item.tag.id)}
+              className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+              title="Remove"
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        {/* Add tag button + dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => { setShowDropdown(!showDropdown); setSearch(''); }}
+            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+          >
+            <Plus size={10} />
+            {t('resources.addTag')}
+          </button>
+          {showDropdown && (
+            <div className="absolute left-0 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 py-1">
+              <div className="px-2 pb-1">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search tags..."
+                  className="w-full bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+                  autoFocus
+                />
+              </div>
+              <div className="max-h-32 overflow-y-auto">
+                {filtered.map((tag) => (
+                  <button
+                    key={tag.id}
+                    onClick={() => { onAddTag(tag.id); setShowDropdown(false); setSearch(''); }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: tag.color || '#6366f1' }}
+                    />
+                    <span className="truncate">{tag.name}</span>
+                  </button>
+                ))}
+                {filtered.length === 0 && (
+                  <p className="text-xs text-zinc-600 text-center py-2">{t('resources.noTagsAvailable')}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -147,51 +247,14 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         </div>
       )}
 
-      {/* Tags */}
-      <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-          {t('resources.tags')}
-        </h4>
-        {/* Assigned tags */}
-        {assignedTags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {assignedTags.map((t) => t.tag && (
-              <span
-                key={t.tag.id}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity"
-                style={{
-                  backgroundColor: (t.tag.color || '#6366f1') + '20',
-                  color: t.tag.color || '#6366f1',
-                }}
-                onClick={() => onRemoveTag(t.tag.id)}
-                title="Click to remove"
-              >
-                {t.tag.name}
-                <X size={10} />
-              </span>
-            ))}
-          </div>
-        )}
-        {/* Available tags to add */}
-        <div className="space-y-0.5 max-h-40 overflow-y-auto">
-          {allTags.filter((tag) => !assignedTagIds.has(tag.id)).map((tag) => (
-            <button
-              key={tag.id}
-              onClick={() => onAddTag(tag.id)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg text-zinc-400 hover:bg-zinc-800 transition-colors"
-            >
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: tag.color || '#6366f1' }}
-              />
-              <span className="truncate">{tag.name}</span>
-            </button>
-          ))}
-          {allTags.length === 0 && (
-            <p className="text-xs text-zinc-600 py-1">{t('resources.noTagsAvailable')}</p>
-          )}
-        </div>
-      </div>
+      {/* Tags — matching detail page style */}
+      <TagsSection
+        assignedTags={assignedTags}
+        allTags={allTags}
+        assignedTagIds={assignedTagIds}
+        onAddTag={onAddTag}
+        onRemoveTag={onRemoveTag}
+      />
 
       {/* Bottom spacing */}
       <div className="h-6" />

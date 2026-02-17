@@ -75,6 +75,30 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource by video_id {video_id}: {e}")
             return None
 
+    async def get_resource_by_platform_id(self, platform_id: str) -> Optional[Dict[str, Any]]:
+        """Look up resource by the external platform content ID (e.g. douyin aweme_id).
+
+        Two-step: videos.platform_id → videos.id → resources.video_id
+        """
+        try:
+            client = await self._get_client()
+            # Step 1: find the video by platform_id
+            video_result = (
+                await client.table("videos")
+                .select("id")
+                .eq("platform_id", platform_id)
+                .limit(1)
+                .execute()
+            )
+            if not video_result.data:
+                return None
+            video_uuid = video_result.data[0]["id"]
+            # Step 2: find the resource by video_id
+            return await self.get_resource_by_video_id(video_uuid)
+        except Exception as e:
+            logger.error(f"Failed to get resource by platform_id {platform_id}: {e}")
+            return None
+
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -310,6 +334,69 @@ class ResourcesRepository:
         except Exception as e:
             logger.error(f"Failed to get versions for resource {resource_id}: {e}")
             return []
+
+    async def get_version_by_id(self, version_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .select("*")
+                .eq("id", version_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get version {version_id}: {e}")
+            return None
+
+    async def get_version_by_number(
+        self, resource_id: str, version_number: int
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .select("*")
+                .eq("resource_id", resource_id)
+                .eq("version_number", version_number)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get version {version_number} for {resource_id}: {e}")
+            return None
+
+    async def delete_version(self, version_id: str) -> bool:
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_VERSIONS)
+                .delete()
+                .eq("id", version_id)
+                .execute()
+            )
+            logger.info(f"Deleted version {version_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete version {version_id}: {e}")
+            raise
+
+    async def update_version(
+        self, version_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .update(data)
+                .eq("id", version_id)
+                .execute()
+            )
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to update version {version_id}: {e}")
+            raise
 
     async def get_next_version_number(self, resource_id: str) -> int:
         try:

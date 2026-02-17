@@ -12,8 +12,7 @@ export type AIStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skip
 
 export interface Video {
   // Video Identity
-  id?: string;  // UUID primary key
-  display_id?: string;  // Snowflake BIGINT for URL-friendly ID
+  id?: string;  // Snowflake BIGINT primary key (was UUID, migrated in 059)
   platform_id: string;
   user_id?: string;
 
@@ -329,6 +328,9 @@ export interface ResourceVersion {
   thumbnail_path: string | null;
   uploaded_by: string | null;
   notes: string | null;
+  hls_path: string | null;
+  transcode_status: string | null;
+  transcode_at: string | null;
   created_at: string;
 }
 

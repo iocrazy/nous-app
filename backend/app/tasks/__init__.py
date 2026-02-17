@@ -24,6 +24,7 @@ from app.tasks.scheduled_tasks import (
     retry_failed_downloads,
     update_statistics,
 )
+from app.tasks.transcode_tasks import transcode_to_hls
 
 __all__ = [
     # 下载任务
@@ -34,6 +35,8 @@ __all__ = [
     # 解析任务
     "parse_single_link_task",
     "parse_batch_links_task",
+    # 转码任务
+    "transcode_to_hls",
     # 定时任务
     "cleanup_temp_files",
     "retry_failed_downloads",
