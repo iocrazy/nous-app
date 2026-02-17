@@ -452,14 +452,96 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         </div>
       </section>
 
-      {/* Provider Cards Section */}
-      <section className={`space-y-4 transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-        <div className="flex items-center gap-2 px-1">
-          <Settings size={16} className="text-zinc-500" />
-          <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">AI Providers</h3>
+      {/* Task Assignment Section */}
+      <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${
+        localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'
+      }`}>
+        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+          <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+            <Zap size={20} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-zinc-200">Task Assignment</h2>
+            <p className="text-xs text-zinc-500">Choose which provider handles each AI task</p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4">
+        <div className="p-6 space-y-5">
+          {/* Transcription */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FileText size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Transcription</span>
+            </div>
+            <div className="relative">
+              <select
+                value={localSettings.task_assignment.transcription}
+                onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
+                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+              >
+                {getTaskOptions('transcription').map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Summarization */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Summarization</span>
+            </div>
+            <div className="relative">
+              <select
+                value={localSettings.task_assignment.summarization}
+                onChange={(e) => updateTaskAssignment('summarization', e.target.value)}
+                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+              >
+                {getTaskOptions('summarization').map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Visual Analysis */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Search size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Visual Analysis</span>
+            </div>
+            <div className="relative">
+              <select
+                value={localSettings.task_assignment.visual_analysis}
+                onChange={(e) => updateTaskAssignment('visual_analysis', e.target.value)}
+                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+              >
+                {getTaskOptions('visual_analysis').map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Provider Cards Section */}
+      <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+          <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
+            <Settings size={20} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-zinc-200">AI Providers</h2>
+            <p className="text-xs text-zinc-500">Configure API keys and connections for each provider</p>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
           {Object.entries(PROVIDER_META).map(([providerKey, meta]) => {
             const config = getProviderConfig(providerKey);
             const colors = COLOR_MAP[meta.color] || COLOR_MAP.blue;
@@ -469,7 +551,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             return (
               <div
                 key={providerKey}
-                className={`bg-zinc-900 border rounded-xl overflow-hidden transition-all ${
+                className={`bg-zinc-950 border rounded-xl overflow-hidden transition-all ${
                   config.enabled ? colors.border : 'border-zinc-800'
                 }`}
               >
@@ -666,83 +748,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               </div>
             );
           })}
-        </div>
-      </section>
-
-      {/* Task Assignment Section */}
-      <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${
-        localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'
-      }`}>
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
-          <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-            <Zap size={20} />
-          </div>
-          <div>
-            <h2 className="font-semibold text-zinc-200">Task Assignment</h2>
-            <p className="text-xs text-zinc-500">Choose which provider handles each AI task</p>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-5">
-          {/* Transcription */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <FileText size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Transcription</span>
-            </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.transcription}
-                onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('transcription').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
-          </div>
-
-          {/* Summarization */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Summarization</span>
-            </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.summarization}
-                onChange={(e) => updateTaskAssignment('summarization', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('summarization').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
-          </div>
-
-          {/* Visual Analysis */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Search size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Visual Analysis</span>
-            </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.visual_analysis}
-                onChange={(e) => updateTaskAssignment('visual_analysis', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('visual_analysis').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
-          </div>
         </div>
       </section>
 
