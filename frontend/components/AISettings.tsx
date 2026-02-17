@@ -20,6 +20,9 @@ import {
   FileText,
   Search,
   AlertCircle,
+  Moon,
+  MessageSquare,
+  Cloud,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
@@ -70,6 +73,31 @@ const PROVIDER_META: Record<
     icon: <Globe size={18} />,
     color: 'violet',
     models: ['doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
+  },
+  minimax: {
+    name: 'MiniMax',
+    description: 'MiniMax cloud AI',
+    icon: <MessageSquare size={18} />,
+    color: 'amber',
+    models: ['MiniMax-Text-01', 'abab6.5s-chat', 'abab6.5-chat', 'abab5.5-chat'],
+    summaryModels: ['MiniMax-Text-01', 'abab6.5s-chat', 'abab6.5-chat'],
+  },
+  kimi: {
+    name: 'Kimi',
+    description: 'Moonshot AI',
+    icon: <Moon size={18} />,
+    color: 'teal',
+    models: ['moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
+    summaryModels: ['moonshot-v1-32k', 'moonshot-v1-8k', 'moonshot-v1-128k'],
+  },
+  qwen: {
+    name: 'Qwen',
+    description: 'Alibaba Cloud AI',
+    icon: <Cloud size={18} />,
+    color: 'rose',
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-vl-max'],
+    summaryModels: ['qwen-plus', 'qwen-max', 'qwen-turbo'],
+    analysisModels: ['qwen-vl-max'],
   },
   ollama: {
     name: 'Ollama',
@@ -132,6 +160,24 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
     text: 'text-pink-400',
     border: 'border-pink-500/30',
     badge: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  },
+  amber: {
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-400',
+    border: 'border-amber-500/30',
+    badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  },
+  teal: {
+    bg: 'bg-teal-500/10',
+    text: 'text-teal-400',
+    border: 'border-teal-500/30',
+    badge: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+  },
+  rose: {
+    bg: 'bg-rose-500/10',
+    text: 'text-rose-400',
+    border: 'border-rose-500/30',
+    badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
   },
 };
 
