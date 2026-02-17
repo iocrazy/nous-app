@@ -39,8 +39,8 @@ export function usePermission(
     fetchEffectiveRole(objectType, objectId, teamId)
       .then((result) => {
         if (!cancelled) {
-          setRole(result.role);
-          setCapabilities(result.capabilities);
+          setRole(result.role || 'viewer');
+          setCapabilities(result.capabilities || ['view', 'download']);
         }
       })
       .catch(() => {
@@ -58,7 +58,7 @@ export function usePermission(
   }, [objectType, objectId, teamId]);
 
   const canDo = useCallback(
-    (action: string) => capabilities.includes(action),
+    (action: string) => Array.isArray(capabilities) && capabilities.includes(action),
     [capabilities],
   );
 

@@ -12,6 +12,7 @@ interface WorkspaceSwitcherProps {
   userName?: string;
   onTeamChange: (teamId: string | null) => void;
   onCreateTeam: () => void;
+  collapsed?: boolean;
 }
 
 // Deterministic color palette for team avatars
@@ -34,6 +35,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   userName,
   onTeamChange,
   onCreateTeam,
+  collapsed = false,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -96,21 +98,26 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
       {/* Trigger — single-line: icon + name + chevron + badge */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center w-full hover:bg-zinc-800/50 rounded-lg px-3 py-2.5 transition-colors group text-left min-w-0"
+        className={`flex items-center w-full hover:bg-zinc-800/50 rounded-lg ${collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} transition-colors group text-left min-w-0`}
+        title={collapsed ? displayName : undefined}
       >
-        <div className={`w-5 h-5 rounded ${activeColor} flex items-center justify-center flex-shrink-0 mr-2.5`}>
-          <span className="text-white text-[10px] font-bold leading-none">{activeInitial}</span>
+        <div className={`${collapsed ? 'w-8 h-8' : 'w-5 h-5'} rounded ${activeColor} flex items-center justify-center flex-shrink-0 ${collapsed ? '' : 'mr-2.5'} transition-all duration-200`}>
+          <span className={`text-white ${collapsed ? 'text-sm' : 'text-[10px]'} font-bold leading-none`}>{activeInitial}</span>
         </div>
-        <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">
-          {displayName}
-        </span>
-        <ChevronDown
-          size={12}
-          className={`text-zinc-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-        />
-        <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2">
-          {t('plans.free')}
-        </span>
+        {!collapsed && (
+          <>
+            <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">
+              {displayName}
+            </span>
+            <ChevronDown
+              size={12}
+              className={`text-zinc-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            />
+            <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2">
+              {t('plans.free')}
+            </span>
+          </>
+        )}
       </button>
 
       {/* Dropdown */}

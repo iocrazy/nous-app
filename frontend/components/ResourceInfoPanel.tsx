@@ -2,6 +2,7 @@ import React from 'react';
 import { X, File, Film, Image, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
+import { getResourceCoverUrl } from '../services/resourceService';
 
 interface ResourceInfoPanelProps {
   resource: Resource;
@@ -50,9 +51,9 @@ function getFileIcon(mimeType: string | null | undefined) {
 const InfoRow = ({ label, value }: { label: string; value: string | null | undefined }) => {
   if (!value) return null;
   return (
-    <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
+    <div className="flex justify-between items-center py-1.5">
       <span className="text-xs text-zinc-500">{label}</span>
-      <span className="text-sm text-zinc-300">{value}</span>
+      <span className="text-xs text-zinc-300 text-right">{value}</span>
     </div>
   );
 };
@@ -71,8 +72,17 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
   const isVideo = resource.mime_type?.startsWith('video/');
 
+  // Thumbnail source: thumbnail_path (Supabase URL) > cover endpoint > fallback icon
+  const thumbnailSrc = React.useMemo(() => {
+    if (resource.thumbnail_path) return resource.thumbnail_path;
+    if (resource.cover_image_path && resource.id) {
+      return getResourceCoverUrl(String(resource.id));
+    }
+    return null;
+  }, [resource.thumbnail_path, resource.cover_image_path, resource.id]);
+
   return (
-    <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full overflow-y-auto animate-in slide-in-from-right-4 duration-300 shrink-0">
+    <div className="flex-1 min-w-0 h-full bg-zinc-900 overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
         <h3 className="text-sm font-semibold text-white">{t('resources.resourceInfo')}</h3>
@@ -84,44 +94,62 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         </button>
       </div>
 
-      {/* Preview */}
-      <div className={`mx-4 mt-4 h-40 rounded-xl flex items-center justify-center ${bg}`}>
-        <IconComponent size={48} className={`${color} opacity-70`} />
+      {/* Preview — show real thumbnail or fallback icon */}
+      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden flex items-center justify-center ${bg}`}>
+        {thumbnailSrc ? (
+          <img
+            src={thumbnailSrc}
+            alt={resource.filename}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <IconComponent size={48} className={`${color} opacity-70`} />
+        )}
       </div>
 
-      {/* Basic Info */}
+      {/* Filename */}
       <div className="px-4 mt-4">
-        <h4 className="text-sm font-medium text-white mb-1 break-words">{resource.filename}</h4>
+        <h4 className="text-sm font-medium text-white break-words leading-snug">{resource.filename}</h4>
+      </div>
+
+      {/* File Properties */}
+      <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+          {t('resources.fileProperties')}
+        </h4>
         <div className="space-y-0">
           <InfoRow label={t('resources.fileType')} value={resource.file_type || resource.mime_type} />
           <InfoRow label={t('resources.size')} value={formatFileSize(resource.file_size_bytes)} />
           <InfoRow label={t('resources.createdAt')} value={formatDate(resource.created_at)} />
+          {isVideo && (
+            <>
+              <InfoRow label={t('resources.duration')} value={formatDuration(resource.duration_seconds)} />
+              <InfoRow label={t('resources.resolution')} value={resource.resolution} />
+            </>
+          )}
+          {resource.current_version > 1 && (
+            <InfoRow label={t('resources.version')} value={`v${resource.current_version}`} />
+          )}
         </div>
       </div>
 
-      {/* Media Info (conditional) */}
-      {isVideo && (resource.duration_seconds || resource.resolution) && (
-        <div className="px-4 mt-5">
-          <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-            {t('resources.mediaInfo')}
+      {/* Source */}
+      {resource.source_type && (
+        <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+            {t('resources.source')}
           </h4>
-          <div className="space-y-0">
-            <InfoRow label={t('resources.duration')} value={formatDuration(resource.duration_seconds)} />
-            <InfoRow label={t('resources.resolution')} value={resource.resolution} />
-          </div>
-        </div>
-      )}
-
-      {/* Version */}
-      {resource.current_version > 1 && (
-        <div className="px-4 mt-5">
-          <InfoRow label={t('resources.version')} value={`v${resource.current_version}`} />
+          <span className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-zinc-800 text-zinc-300">
+            {resource.source_type === 'web' ? t('resources.webDownload') : t('resources.uploaded')}
+          </span>
         </div>
       )}
 
       {/* Tags */}
-      <div className="px-4 mt-5">
-        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+      <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
           {t('resources.tags')}
         </h4>
         {/* Assigned tags */}

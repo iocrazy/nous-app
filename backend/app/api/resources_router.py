@@ -97,7 +97,7 @@ async def upload_resource(
             thumbnail_svc = ThumbnailService()
             background_tasks.add_task(
                 thumbnail_svc.generate_thumbnail,
-                resource_id=result["id"],
+                resource_id=str(result["id"]),
                 file_path=result["file_path"],
                 mime_type=result.get("mime_type", ""),
                 scope_type=scope_type,

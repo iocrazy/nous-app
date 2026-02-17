@@ -19,6 +19,8 @@ import {
   CreditCard,
   Coins,
   Share2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -38,6 +40,7 @@ interface SidebarItemProps {
   onClick: () => void;
   hasSubmenu?: boolean;
   isOpen?: boolean;
+  collapsed?: boolean;
 }
 
 const SidebarItem: React.FC<SidebarItemProps> = ({
@@ -47,20 +50,22 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   onClick,
   hasSubmenu = false,
   isOpen = false,
+  collapsed = false,
 }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
+    title={collapsed ? label : undefined}
+    className={`w-full flex items-center ${collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2.5'} rounded-xl text-sm font-medium transition-all duration-200 group ${
       active
         ? 'bg-indigo-500/10 text-indigo-400'
         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
     }`}
   >
-    <div className="flex items-center gap-3">
-      <Icon size={20} className={active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'} />
-      <span>{label}</span>
+    <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
+      <Icon size={collapsed ? 24 : 20} className={`flex-shrink-0 ${active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`} />
+      {!collapsed && <span>{label}</span>}
     </div>
-    {hasSubmenu && (
+    {hasSubmenu && !collapsed && (
       <ChevronDown
         size={16}
         className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
@@ -101,6 +106,10 @@ interface SidebarProps {
   view?: ViewState;
   settingsTab: string;
 
+  // Collapse state
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+
   // Team context
   teams: Team[];
   activeTeamId: string | null;
@@ -133,12 +142,12 @@ interface SidebarProps {
 // Logo
 // ---------------------------------------------------------------------------
 
-const Logo: React.FC = () => (
-  <div className="flex items-center gap-3 mb-10 px-2">
-    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
-      <Sparkles className="w-5 h-5 text-white" />
+const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
+  <div className={`flex items-center ${collapsed ? 'justify-center mb-6' : 'gap-3 mb-10 px-2'}`}>
+    <div className={`${collapsed ? 'w-10 h-10' : 'w-8 h-8'} bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20 transition-all duration-200`}>
+      <Sparkles className={`${collapsed ? 'w-6 h-6' : 'w-5 h-5'} text-white`} />
     </div>
-    <span className="text-xl font-bold tracking-tight">MediaHub</span>
+    {!collapsed && <span className="text-xl font-bold tracking-tight">MediaHub</span>}
   </div>
 );
 
@@ -146,9 +155,18 @@ const Logo: React.FC = () => (
 // Version footer
 // ---------------------------------------------------------------------------
 
-const VersionFooter: React.FC = () => (
-  <div className="pt-4 pb-2 px-2 border-t border-zinc-800">
-    <span className="text-xs text-zinc-600">v{__APP_VERSION__}</span>
+const VersionFooter: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({ collapsed = false, onToggleCollapse }) => (
+  <div className={`pt-4 pb-2 border-t border-zinc-800 ${collapsed ? 'flex flex-col items-center gap-2' : 'px-2 flex items-center justify-between'}`}>
+    {!collapsed && <span className="text-xs text-zinc-600">v{__APP_VERSION__}</span>}
+    {onToggleCollapse && (
+      <button
+        onClick={onToggleCollapse}
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+      </button>
+    )}
   </div>
 );
 
@@ -204,6 +222,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   view: _view,
   // Props kept for App.tsx compatibility (unused in render after refactor)
   settingsTab: _settingsTab,
+  collapsed = false,
+  onToggleCollapse,
   teams,
   activeTeamId,
   personalTeamId,
@@ -244,23 +264,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // ===================================================================
   if (mode === 'project') {
     return (
-      <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
+      <aside className={`hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-zinc-800 bg-zinc-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
         {/* Back to projects + team name */}
-        <div className="mb-6">
-          <button
-            onClick={onProjectBack}
-            className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors mb-2"
-          >
-            <ArrowLeft size={16} />
-            <span>{t('sidebar.backToProjects')}</span>
-          </button>
-          {currentTeam && (
-            <p className="px-1 text-xs text-zinc-500 truncate">{currentTeam.name}</p>
-          )}
-        </div>
+        {collapsed ? (
+          <div className="mb-6 flex justify-center">
+            <button onClick={onProjectBack} className="p-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 transition-colors" title={t('sidebar.backToProjects')}>
+              <ArrowLeft size={24} />
+            </button>
+          </div>
+        ) : (
+          <div className="mb-6">
+            <button
+              onClick={onProjectBack}
+              className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors mb-2"
+            >
+              <ArrowLeft size={16} />
+              <span>{t('sidebar.backToProjects')}</span>
+            </button>
+            {currentTeam && (
+              <p className="px-1 text-xs text-zinc-500 truncate">{currentTeam.name}</p>
+            )}
+          </div>
+        )}
 
         {/* Project name */}
-        {activeProject && (
+        {activeProject && !collapsed && (
           <div className="px-2 mb-6">
             <p className="text-base font-bold text-zinc-100 truncate">{activeProject.name}</p>
           </div>
@@ -268,69 +296,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <nav className="flex-1 space-y-1">
           {/* FILES section */}
-          <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-            {t('sidebar.files')}
-          </p>
-          <SidebarItem
-            icon={FolderOpen}
-            label={t('sidebar.allFiles')}
-            active={currentView === 'mediatrack'}
-            onClick={() => handleNav('mediatrack')}
-          />
+          {!collapsed && (
+            <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+              {t('sidebar.files')}
+            </p>
+          )}
+          <SidebarItem icon={FolderOpen} label={t('sidebar.allFiles')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
           {hasPermission(permissions, 'resource.upload') && (
-            <SidebarItem
-              icon={Upload}
-              label={t('sidebar.upload')}
-              active={false}
-              onClick={() => handleNav('mediatrack')}
-            />
+            <SidebarItem icon={Upload} label={t('sidebar.upload')} active={false} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
           )}
 
           <div className="my-2" />
 
           {/* REVIEW section */}
-          <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-            {t('sidebar.review')}
-          </p>
-          <SidebarItem
-            icon={MessageSquare}
-            label={t('sidebar.comments')}
-            active={false}
-            onClick={() => handleNav('mediatrack')}
-          />
-          <SidebarItem
-            icon={CheckCircle2}
-            label={t('sidebar.status')}
-            active={false}
-            onClick={() => handleNav('mediatrack')}
-          />
+          {!collapsed && (
+            <p className="px-3 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+              {t('sidebar.review')}
+            </p>
+          )}
+          <SidebarItem icon={MessageSquare} label={t('sidebar.comments')} active={false} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+          <SidebarItem icon={CheckCircle2} label={t('sidebar.status')} active={false} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
 
           <Divider />
 
           {/* Bottom section */}
-          <SidebarItem
-            icon={Users}
-            label={t('sidebar.members')}
-            active={currentView === 'members'}
-            onClick={() => handleNav('members')}
-          />
-          <SidebarItem
-            icon={Activity}
-            label={t('sidebar.activity')}
-            active={false}
-            onClick={() => handleNav('mediatrack')}
-          />
+          <SidebarItem icon={Users} label={t('sidebar.members')} active={currentView === 'members'} onClick={() => handleNav('members')} collapsed={collapsed} />
+          <SidebarItem icon={Activity} label={t('sidebar.activity')} active={false} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
           {hasPermission(permissions, 'project.manage') && (
-            <SidebarItem
-              icon={Settings}
-              label={t('sidebar.projectSettings')}
-              active={currentView === 'settings'}
-              onClick={() => handleNav('settings')}
-            />
+            <SidebarItem icon={Settings} label={t('sidebar.projectSettings')} active={currentView === 'settings'} onClick={() => handleNav('settings')} collapsed={collapsed} />
           )}
         </nav>
 
-        <VersionFooter />
+        <VersionFooter collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -340,8 +337,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // ===================================================================
   if (mode === 'team') {
     return (
-      <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
-        <Logo />
+      <aside className={`hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-zinc-800 bg-zinc-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+        <Logo collapsed={collapsed} />
 
         <div className="mb-2">
           <WorkspaceSwitcher
@@ -352,65 +349,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
             userName={userName}
             onTeamChange={onTeamChange}
             onCreateTeam={onCreateTeam}
+            collapsed={collapsed}
           />
         </div>
 
         <nav className="flex-1 space-y-2">
-          <SidebarItem
-            icon={Layers}
-            label={t('sidebar.resources')}
-            active={currentView === 'resources'}
-            onClick={() => handleNav('resources')}
-          />
-          <SidebarItem
-            icon={FolderKanban}
-            label={t('sidebar.projects')}
-            active={currentView === 'mediatrack'}
-            onClick={() => handleNav('mediatrack')}
-          />
-          <SidebarItem
-            icon={ListTodo}
-            label={t('sidebar.todolist')}
-            active={currentView === 'todolist'}
-            onClick={() => handleNav('todolist')}
-          />
-          <SidebarItem
-            icon={Share2}
-            label={t('sidebar.shared')}
-            active={currentView === 'shared'}
-            onClick={() => handleNav('shared')}
-          />
+          <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
+          <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
           {hasPermission(permissions, 'member.view') && (
             <>
               <SidebarItem
                 icon={Settings}
                 label={t('sidebar.management')}
                 active={currentView === 'members' || currentView === 'billing'}
-                onClick={() => setIsManagementOpen(!isManagementOpen)}
-                hasSubmenu
+                onClick={() => collapsed ? handleNav('members') : setIsManagementOpen(!isManagementOpen)}
+                hasSubmenu={!collapsed}
                 isOpen={isManagementOpen}
+                collapsed={collapsed}
               />
-              {isManagementOpen && (
+              {isManagementOpen && !collapsed && (
                 <div className="space-y-0.5">
-                  <SidebarSubItem
-                    icon={Users}
-                    label={t('sidebar.members')}
-                    active={currentView === 'members'}
-                    onClick={() => handleNav('members')}
-                  />
-                  <SidebarSubItem
-                    icon={CreditCard}
-                    label={t('sidebar.billing')}
-                    active={currentView === 'billing'}
-                    onClick={() => handleNav('billing')}
-                  />
+                  <SidebarSubItem icon={Users} label={t('sidebar.members')} active={currentView === 'members'} onClick={() => handleNav('members')} />
+                  <SidebarSubItem icon={CreditCard} label={t('sidebar.billing')} active={currentView === 'billing'} onClick={() => handleNav('billing')} />
                 </div>
               )}
             </>
           )}
         </nav>
 
-        <VersionFooter />
+        <VersionFooter collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -419,8 +388,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // PERSONAL MODE (default)
   // ===================================================================
   return (
-    <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800 bg-zinc-950 p-6 fixed h-full z-10">
-      <Logo />
+    <aside className={`hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-zinc-800 bg-zinc-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+      <Logo collapsed={collapsed} />
 
       <div className="mb-2">
         <WorkspaceSwitcher
@@ -431,52 +400,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           userName={userName}
           onTeamChange={onTeamChange}
           onCreateTeam={onCreateTeam}
+          collapsed={collapsed}
         />
       </div>
 
       <nav className="flex-1 space-y-2">
-        <SidebarItem
-          icon={Search}
-          label={t('nav.linkParser')}
-          active={currentView === 'parser'}
-          onClick={() => handleNav('parser')}
-        />
-        <SidebarItem
-          icon={Layers}
-          label={t('sidebar.resources')}
-          active={currentView === 'resources'}
-          onClick={() => handleNav('resources')}
-        />
-        <SidebarItem
-          icon={FolderKanban}
-          label={t('sidebar.projects')}
-          active={currentView === 'mediatrack'}
-          onClick={() => handleNav('mediatrack')}
-        />
-        <SidebarItem
-          icon={ListTodo}
-          label={t('sidebar.todolist')}
-          active={currentView === 'todolist'}
-          onClick={() => handleNav('todolist')}
-        />
-        <SidebarItem
-          icon={Share2}
-          label={t('sidebar.shared')}
-          active={currentView === 'shared'}
-          onClick={() => handleNav('shared')}
-        />
+        <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
+        <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
+        <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+        <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+        <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
 
         <Divider />
 
-        <SidebarItem
-          icon={Coins}
-          label={t('sidebar.points')}
-          active={currentView === 'points'}
-          onClick={() => handleNav('points')}
-        />
+        <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
       </nav>
 
-      <VersionFooter />
+      <VersionFooter collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </aside>
   );
 };
