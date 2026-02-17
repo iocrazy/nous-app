@@ -324,7 +324,7 @@
     "sharedManagement": "分享管理",
     "quickAccess": "快速访问",
     "myResources": "我的资源",
-    "downloads": "RipVault",
+    "downloads": "我的下载",
     "noDownloads": "暂无下载内容",
     "noDownloadsHint": "使用解析器下载媒体后会显示在这里",
     "dropToUploadHint": "松开即可开始上传",
@@ -412,7 +412,13 @@
     "taskList": "任务列表",
     "uploadingCount": "正在上传 {{current}}/{{total}}",
     "estimatedRemaining": "预计剩余: {{time}}",
-    "comingSoon": "即将推出"
+    "comingSoon": "即将推出",
+    "confirmPermanentDelete": "确认永久删除",
+    "permanentDeleteWarning": "这将永久删除此文件及所有关联数据，此操作不可撤销。",
+    "deleteForever": "永久删除",
+    "permanentDeleteSuccess": "已永久删除",
+    "permanentDeleteFailed": "永久删除失败",
+    "movedToTrash": "已移至回收站"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

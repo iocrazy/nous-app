@@ -324,7 +324,7 @@
     "sharedManagement": "Shared",
     "quickAccess": "Quick Access",
     "myResources": "My Resources",
-    "downloads": "RipVault",
+    "downloads": "My Downloads",
     "noDownloads": "No downloaded content yet",
     "noDownloadsHint": "Use Parser to download media and they will appear here",
     "dropToUploadHint": "Release to start uploading",
@@ -412,7 +412,13 @@
     "taskList": "Task List",
     "uploadingCount": "Uploading {{current}}/{{total}}",
     "estimatedRemaining": "est: {{time}}",
-    "comingSoon": "Coming soon"
+    "comingSoon": "Coming soon",
+    "confirmPermanentDelete": "Confirm Permanent Delete",
+    "permanentDeleteWarning": "This will permanently delete this file and all associated data. This action cannot be undone.",
+    "deleteForever": "Delete Forever",
+    "permanentDeleteSuccess": "Permanently deleted",
+    "permanentDeleteFailed": "Failed to permanently delete",
+    "movedToTrash": "Moved to Recycle Bin"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

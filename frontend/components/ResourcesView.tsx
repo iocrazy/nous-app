@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   FolderOpen,
   Loader2,
   Upload,
@@ -181,6 +182,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Recycle bin
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
+  const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
+  const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
 
   // Downloads (parser-created resources)
   const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
@@ -697,12 +700,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } catch { /* ignore */ }
   }, []);
 
-  const handlePermanentDelete = useCallback(async (resourceId: string) => {
-    try {
-      await permanentDeleteResource(resourceId);
-      setTrashedResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
-    } catch { /* ignore */ }
+  const handlePermanentDelete = useCallback((resourceId: string) => {
+    setPendingPermanentDelete(resourceId);
   }, []);
+
+  const confirmPermanentDelete = useCallback(async () => {
+    const ids = pendingBatchPermanentDelete || (pendingPermanentDelete ? [pendingPermanentDelete] : []);
+    if (ids.length === 0) return;
+    try {
+      for (const id of ids) {
+        await permanentDeleteResource(id);
+      }
+      setTrashedResources((prev) => prev.filter((r) => !ids.includes(String(r.resource?.id))));
+      setSelectedIds(new Set());
+      addToast(t('resources.permanentDeleteSuccess'), 'success');
+    } catch {
+      addToast(t('resources.permanentDeleteFailed'), 'error');
+    }
+    setPendingPermanentDelete(null);
+    setPendingBatchPermanentDelete(null);
+  }, [pendingPermanentDelete, pendingBatchPermanentDelete, addToast, t]);
 
   // ─── Resource selection & detail panel ───────────────
 
@@ -1673,7 +1690,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </>
           ) : (
             <>
-              {/* Personal mode: RipVault + My Resources */}
+              {/* Personal mode: My Downloads + My Resources */}
               <button
                 onClick={() => navigate(resPath('/resources/downloads'))}
                 className={sidebarItemClass(isDownloadsView)}
@@ -1790,7 +1807,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         ) : (
         <>
         {/* Toolbar */}
-        <div className="px-6 py-3 border-b border-zinc-800/80">
+        <div
+          className="px-6 py-3 border-b border-zinc-800/80"
+          style={{ paddingRight: selectedResource?.resource && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+        >
           {/* Single row: Breadcrumb + controls */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -2432,15 +2452,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 {t('resources.batchRestore')}
               </button>
               <button
-                onClick={async () => {
+                onClick={() => {
                   const resourceIds = currentItems
                     .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
                     .map((i) => String(i.resource!.id));
-                  for (const id of resourceIds) {
-                    await permanentDeleteResource(id);
-                  }
-                  setTrashedResources((prev) => prev.filter((r) => !resourceIds.includes(String(r.resource?.id))));
-                  setSelectedIds(new Set());
+                  setPendingBatchPermanentDelete(resourceIds);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
               >
@@ -2560,6 +2576,43 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           currentLibraryId={selectedLibraryId}
           excludeFolderIds={operationTargetFolders.map((f) => f.id)}
         />
+      )}
+
+      {/* ── Permanent Delete Confirmation Dialog ── */}
+      {(pendingPermanentDelete || pendingBatchPermanentDelete) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); }}
+          />
+          <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="text-red-500" size={24} />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">
+                {t('resources.confirmPermanentDelete')}
+              </h3>
+              <p className="text-sm text-zinc-400">
+                {t('resources.permanentDeleteWarning')}
+              </p>
+            </div>
+            <div className="flex gap-3 p-4 border-t border-zinc-800">
+              <button
+                onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); }}
+                className="flex-1 px-4 py-2 text-sm font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={confirmPermanentDelete}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+              >
+                {t('resources.deleteForever')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

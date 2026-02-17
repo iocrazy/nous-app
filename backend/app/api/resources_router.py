@@ -442,6 +442,87 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
         raise HTTPException(status_code=500, detail="Failed to update resource")
 
 
+@router.post("/by-platform-id/{platform_id}/trash")
+async def trash_resource_by_platform_id(
+    platform_id: str,
+    auth: AuthDep,
+    scope_type: str = Query("personal", pattern="^(personal|team)$"),
+    scope_id: Optional[str] = Query(None),
+):
+    """Soft-delete a downloaded video by moving it to the recycle bin."""
+    try:
+        svc = ResourcesService()
+        resource = await svc.repo.get_resource_by_platform_id(platform_id)
+        if not resource:
+            raise ValueError("No resource found for this platform_id")
+
+        resource_id = str(resource["id"])
+        if resource["creator_id"] != auth.user_id:
+            raise PermissionError("Only the creator can trash this resource")
+
+        await svc.repo.update_resource(
+            resource_id,
+            {
+                "is_trashed": True,
+                "trashed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return {"success": True, "message": "Resource moved to trash"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to trash resource by platform_id {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trash resource")
+
+
+@router.delete("/by-platform-id/{platform_id}")
+async def unlink_resource_by_platform_id(
+    platform_id: str,
+    auth: AuthDep,
+    scope_type: str = Query("personal", pattern="^(personal|team)$"),
+    scope_id: Optional[str] = Query(None),
+):
+    """Remove a downloaded video from the user's library by platform_id.
+
+    1. If a resource_item exists in the given scope → unlink it.
+    2. Otherwise → delete the videos record (legacy / orphan case).
+    """
+    try:
+        svc = ResourcesService()
+        resource = await svc.repo.get_resource_by_platform_id(platform_id)
+
+        if resource:
+            # Try to find & remove the resource_item in the requested scope
+            target_scope_id = scope_id or auth.user_id
+            item = await svc.repo.get_resource_item(
+                str(resource["id"]), scope_type, target_scope_id,
+            )
+            if item:
+                await svc.repo.delete_resource_item(item["id"])
+                return {"success": True, "message": "Resource unlinked from library"}
+
+        # Fallback: no resource or no resource_item → delete video record
+        from app.db.supabase_client import get_async_supabase_admin
+        client = await get_async_supabase_admin()
+        result = await (
+            client.table("videos")
+            .delete()
+            .eq("platform_id", platform_id)
+            .eq("user_id", auth.user_id)
+            .execute()
+        )
+        if not result.data:
+            raise ValueError("No video found for this platform_id")
+        return {"success": True, "message": "Video record deleted"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to unlink resource by platform_id {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to unlink resource")
+
+
 @router.delete("/{resource_id}")
 async def delete_resource(
     resource_id: str,
