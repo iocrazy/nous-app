@@ -156,10 +156,10 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800 border rounded-lg cursor-pointer transition-all duration-200 group relative ${
+        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
           isChecked || isSelected
-            ? 'bg-indigo-500/10 border-indigo-500/30'
-            : 'bg-zinc-800/40 border-zinc-700/20 hover:border-zinc-600'
+            ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30'
+            : ''
         } ${dropRing}`}
       >
         {checkbox}
@@ -213,15 +213,15 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative cursor-pointer transition-all duration-200 group ${dropRing}`}
+      className={`relative cursor-pointer group ${dropRing}`}
     >
       {/* ── Folder tab (ear) ── */}
       <div className="flex items-end">
-        <div className="w-[38%] h-3 bg-zinc-800/60 group-hover:bg-zinc-700/80 rounded-t-lg border-t border-l border-r border-zinc-700/30 group-hover:border-amber-500/30 transition-all" />
+        <div className="w-[38%] h-3 bg-zinc-800/60 group-hover:bg-zinc-700/80 rounded-t-lg border-t border-l border-r border-zinc-700/30 group-hover:border-amber-500/30" />
         <div className="flex-1" />
       </div>
       {/* ── Card body (flush with tab) ── */}
-      <div className="relative bg-zinc-800/60 group-hover:bg-zinc-800 border border-zinc-700/30 group-hover:border-amber-500/30 rounded-b-xl rounded-tr-xl overflow-hidden transition-all hover:shadow-lg hover:shadow-amber-500/5">
+      <div className="relative bg-zinc-800/60 group-hover:bg-zinc-800 border border-zinc-700/30 group-hover:border-amber-500/30 rounded-b-xl rounded-tr-xl overflow-hidden transition-[background-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-amber-500/5">
         {checkbox}
         {moreButton}
         {/* Preview area — 2x2 thumbnail grid */}

@@ -2122,18 +2122,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
           )}
 
-          {/* Upload progress bar (overall) */}
-          {uploading && (
-            <div className="mb-4">
-              <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-indigo-500 transition-all duration-300"
-                  style={{ width: `${upload.overallProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
           {/* Shared view placeholder */}
           {isSharedView && (
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
@@ -2581,6 +2569,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           excludeFolderIds={operationTargetFolders.map((f) => f.id)}
         />
       )}
+
     </div>
   );
 };
