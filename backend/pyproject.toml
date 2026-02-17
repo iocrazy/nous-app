@@ -1,6 +1,6 @@
 [project]
 name = "mediahub-backend"
-version = "0.7.3"
+version = "0.7.4"
 description = "MediaHub - Multi-source media analysis and download platform powered by FastAPI + Supabase"
 authors = [
     {name = "heygo", email = "8512939@qq.com"}
