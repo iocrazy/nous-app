@@ -239,7 +239,7 @@ class ThumbnailService:
             )
 
             # Get public URL
-            public_url = bucket.get_public_url(storage_path)
+            public_url = await bucket.get_public_url(storage_path)
             return public_url
 
         except Exception as e:
