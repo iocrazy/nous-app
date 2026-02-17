@@ -160,9 +160,10 @@ export async function fetchResources(
 ): Promise<ResourceItem[]> {
   let query = supabase
     .from('resource_items')
-    .select('*, resource:resources(*)')
+    .select('*, resource:resources!inner(*)')
     .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId);
+    .eq('scope_id', scopeId)
+    .eq('resources.is_trashed', false);
 
   if (folderId) {
     query = query.eq('folder_id', folderId);
@@ -188,9 +189,10 @@ export async function fetchResourceCount(
 ): Promise<number> {
   const { count, error } = await supabase
     .from('resource_items')
-    .select('*', { count: 'exact', head: true })
+    .select('*, resource:resources!inner(*)', { count: 'exact', head: true })
     .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId);
+    .eq('scope_id', scopeId)
+    .eq('resources.is_trashed', false);
 
   if (error) throw error;
   return count || 0;
@@ -497,9 +499,10 @@ export async function fetchSmartFolderResources(
 ): Promise<ResourceItem[]> {
   let query = supabase
     .from('resource_items')
-    .select('*, resource:resources(*)')
+    .select('*, resource:resources!inner(*)')
     .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId);
+    .eq('scope_id', scopeId)
+    .eq('resources.is_trashed', false);
 
   for (const cond of (rules.conditions || [])) {
     const col = `resource.${cond.field}`;
@@ -609,7 +612,7 @@ export async function getFolderPreview(
     .from('resource_items')
     .select('resource:resources(thumbnail_path, mime_type)')
     .eq('folder_id', folderId)
-    .limit(3);
+    .limit(4);
   if (error) throw error;
   return (data || []).map((item: any) => ({
     thumbnail_path: item.resource?.thumbnail_path ?? null,

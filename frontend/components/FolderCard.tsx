@@ -24,8 +24,11 @@ interface FolderCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  forceShowCheckbox?: boolean;
   // Double-click rename
   onStartRename?: () => void;
+  // Double-click to enter folder
+  onDoubleClick?: (e?: React.MouseEvent) => void;
   // Drop target
   onDropItems?: (ids: string[]) => void;
   // Folder preview
@@ -76,16 +79,16 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   onRenameCancel,
   childCount,
   onStartRename,
+  onDoubleClick,
   selectable = false,
   isChecked = false,
   onToggleSelect,
+  forceShowCheckbox = false,
   onDropItems,
   previewItems,
 }) => {
   const { t } = useTranslation();
   const [dragHover, setDragHover] = useState(false);
-  const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
-  const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
   const dropRing = dragHover ? 'ring-2 ring-indigo-500 bg-indigo-500/10' : '';
 
   // ─── Drop target handlers ─────────────────────────────
@@ -122,9 +125,9 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
       className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
         isChecked
-          ? 'bg-indigo-500 text-white'
-          : 'bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 opacity-0 group-hover:opacity-100'
-      } ${isChecked ? 'opacity-100' : ''}`}
+          ? 'bg-indigo-500 text-white opacity-100'
+          : `bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 ${forceShowCheckbox ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`
+      }`}
     >
       <Check size={12} />
     </button>
@@ -148,11 +151,16 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       <div
         data-context-item
         onClick={(e) => onClick(e)}
+        onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
         onContextMenu={onContextMenu}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 hover:ring-1 hover:ring-zinc-700 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing} ${dropRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800 border rounded-lg cursor-pointer transition-all duration-200 group relative ${
+          isChecked || isSelected
+            ? 'bg-indigo-500/10 border-indigo-500/30'
+            : 'bg-zinc-800/40 border-zinc-700/20 hover:border-zinc-600'
+        } ${dropRing}`}
       >
         {checkbox}
         <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-500/20 transition-colors">
@@ -193,78 +201,84 @@ export const FolderCard: React.FC<FolderCardProps> = ({
     );
   }
 
-  // Grid mode
+  // Grid mode — Folder card with tab ear at top
+  const previewSlots = previewItems ? previewItems.slice(0, 4) : [];
+
   return (
     <div
       data-context-item
       onClick={(e) => onClick(e)}
+      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
       onContextMenu={onContextMenu}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-amber-500/30 hover:ring-1 hover:ring-zinc-700 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-amber-500/5 ${selectedRing} ${checkedRing} ${dropRing}`}
+      className={`relative cursor-pointer transition-all duration-200 group ${dropRing}`}
     >
-      {checkbox}
-      {moreButton}
-      {/* Folder icon area */}
-      <div className="relative h-28 flex items-center bg-gradient-to-b from-amber-500/8 to-amber-500/3">
-        {/* Left: folder icon */}
-        <div className="flex-1 flex items-center justify-center">
-          <FolderIcon
-            size={52}
-            className="text-amber-500 group-hover:text-amber-400 transition-all duration-300 group-hover:scale-105"
-            fill="currentColor"
-            fillOpacity={0.3}
-          />
-        </div>
-        {/* Right: preview thumbnails */}
-        {hasPreview && (
-          <div className="w-[40%] flex flex-col gap-1 p-2 h-full justify-center">
-            {previewItems!.slice(0, 2).map((pi, idx) => {
-              if (pi.thumbnail_path) {
-                return (
-                  <img
-                    key={idx}
-                    src={pi.thumbnail_path}
-                    alt=""
-                    className="rounded object-cover h-[calc(50%-2px)] w-full"
-                    loading="lazy"
-                  />
-                );
-              }
-              const { icon: PreviewIcon, color: previewColor } = getPreviewIcon(pi.mime_type);
-              return (
-                <div
-                  key={idx}
-                  className="rounded bg-zinc-800/60 flex items-center justify-center h-[calc(50%-2px)]"
-                >
-                  <PreviewIcon size={16} className={`${previewColor} opacity-50`} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {childCount != null && childCount > 0 && (
-          <span className="absolute top-2.5 right-2.5 text-[10px] text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded-md">
-            {childCount}
-          </span>
-        )}
+      {/* ── Folder tab (ear) ── */}
+      <div className="flex items-end">
+        <div className="w-[38%] h-3 bg-zinc-800/60 group-hover:bg-zinc-700/80 rounded-t-lg border-t border-l border-r border-zinc-700/30 group-hover:border-amber-500/30 transition-all" />
+        <div className="flex-1" />
       </div>
-      {/* Info */}
-      <div className="px-3 py-2.5 border-t border-zinc-700/20">
-        {renaming ? (
-          <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
-        ) : (
-          <p
-            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
-            onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
-          >
-            {folder.name}
+      {/* ── Card body (flush with tab) ── */}
+      <div className="relative bg-zinc-800/60 group-hover:bg-zinc-800 border border-zinc-700/30 group-hover:border-amber-500/30 rounded-b-xl rounded-tr-xl overflow-hidden transition-all hover:shadow-lg hover:shadow-amber-500/5">
+        {checkbox}
+        {moreButton}
+        {/* Preview area — 2x2 thumbnail grid */}
+        <div className="relative h-28 bg-zinc-900/80 overflow-hidden">
+          {previewSlots.length > 0 ? (
+            <div className="grid grid-cols-2 grid-rows-2 gap-[2px] w-full h-full p-[2px]">
+              {[0, 1, 2, 3].map((idx) => {
+                const pi = previewSlots[idx];
+                if (pi?.thumbnail_path) {
+                  return (
+                    <img key={idx} src={pi.thumbnail_path} alt="" className="w-full h-full object-cover rounded-sm" loading="lazy" />
+                  );
+                }
+                if (pi) {
+                  const { icon: PreviewIcon, color: previewColor } = getPreviewIcon(pi.mime_type);
+                  return (
+                    <div key={idx} className="w-full h-full bg-zinc-800/60 flex items-center justify-center rounded-sm">
+                      <PreviewIcon size={18} className={`${previewColor} opacity-50`} />
+                    </div>
+                  );
+                }
+                return <div key={idx} className="w-full h-full bg-zinc-800/40 rounded-sm" />;
+              })}
+            </div>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-900/15 via-zinc-900/60 to-zinc-900/80">
+              <FolderIcon
+                size={40}
+                className="text-amber-500/60 group-hover:text-amber-400/80 transition-all duration-300 group-hover:scale-105 drop-shadow-lg"
+                fill="currentColor"
+                fillOpacity={0.25}
+              />
+            </div>
+          )}
+          {/* Item count badge */}
+          {childCount != null && childCount > 0 && (
+            <span className="absolute top-1.5 right-1.5 text-[10px] text-zinc-300 bg-zinc-900/80 backdrop-blur-sm px-1.5 py-0.5 rounded-md font-medium">
+              {childCount}
+            </span>
+          )}
+        </div>
+        {/* Info */}
+        <div className="px-3 py-2 border-t border-zinc-700/20">
+          {renaming ? (
+            <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
+          ) : (
+            <p
+              className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+              onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
+            >
+              {folder.name}
+            </p>
+          )}
+          <p className="text-[11px] text-zinc-600 mt-0.5">
+            {formatDate(folder.created_at)}
           </p>
-        )}
-        <p className="text-[11px] text-zinc-600 mt-1">
-          {formatDate(folder.created_at)}
-        </p>
+        </div>
       </div>
     </div>
   );

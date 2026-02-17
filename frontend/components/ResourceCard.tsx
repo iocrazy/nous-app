@@ -23,8 +23,11 @@ interface ResourceCardProps {
   selectable?: boolean;
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
+  forceShowCheckbox?: boolean;
   // Double-click rename
   onStartRename?: () => void;
+  // Double-click to open detail
+  onDoubleClick?: (e?: React.MouseEvent) => void;
   // Drag support
   selectedIds?: Set<string>;
   compositeId?: string;
@@ -86,9 +89,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   onRenameConfirm,
   onRenameCancel,
   onStartRename,
+  onDoubleClick,
   selectable = false,
   isChecked = false,
   onToggleSelect,
+  forceShowCheckbox = false,
   selectedIds,
   compositeId,
 }) => {
@@ -109,8 +114,6 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     return null;
   }, [resource?.thumbnail_path, resource?.cover_image_path, resource?.id]);
 
-  const selectedRing = isSelected ? 'ring-2 ring-indigo-500' : '';
-  const checkedRing = isChecked ? 'ring-2 ring-indigo-500' : '';
 
   // ─── Drag support ────────────────────────────────────
   const handleDragStart = useCallback((e: React.DragEvent) => {
@@ -145,9 +148,9 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
       className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
         isChecked
-          ? 'bg-indigo-500 text-white'
-          : 'bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 opacity-0 group-hover:opacity-100'
-      } ${isChecked ? 'opacity-100' : ''}`}
+          ? 'bg-indigo-500 text-white opacity-100'
+          : `bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 ${forceShowCheckbox ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`
+      }`}
     >
       <Check size={12} />
     </button>
@@ -171,8 +174,13 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         draggable
         onDragStart={handleDragStart}
         onClick={(e) => onClick(e)}
+        onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-700/20 hover:border-zinc-600 hover:ring-1 hover:ring-zinc-700 rounded-lg cursor-pointer transition-all duration-200 group relative ${selectedRing} ${checkedRing}`}
+        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800 border rounded-lg cursor-pointer transition-all duration-200 group relative ${
+          isChecked || isSelected
+            ? 'bg-indigo-500/10 border-indigo-500/30'
+            : 'bg-zinc-800/40 border-zinc-700/20 hover:border-zinc-600'
+        }`}
       >
         {checkbox}
         <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -249,8 +257,13 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       draggable
       onDragStart={handleDragStart}
       onClick={(e) => onClick(e)}
+      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
       onContextMenu={onContextMenu}
-      className={`relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:ring-1 hover:ring-zinc-700 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${selectedRing} ${checkedRing}`}
+      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${
+        isChecked || isSelected
+          ? 'bg-indigo-500/10 border-indigo-500/30'
+          : 'bg-zinc-800/60 border-zinc-700/30 hover:border-zinc-600'
+      }`}
     >
       {checkbox}
       {/* Thumbnail */}

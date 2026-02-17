@@ -8,14 +8,15 @@ import {
   LayoutGrid,
   LayoutList,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Share2,
   Download,
   Plus,
   Zap,
   FolderPlus,
+  FolderSearch,
   Check,
-  CheckCircle2,
-  XCircle,
   X,
   UploadCloud,
   BookOpen,
@@ -26,6 +27,11 @@ import {
   RefreshCw,
   Filter,
   Search,
+  FileText,
+  Table2,
+  Presentation,
+  Globe,
+  Sparkles,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
@@ -73,6 +79,7 @@ import { FolderPickerModal } from './FolderPickerModal';
 import { SidebarFolderTree } from './SidebarFolderTree';
 import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
+import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -82,14 +89,6 @@ const BLOCKED_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
-
-interface UploadFileProgress {
-  id: string;
-  filename: string;
-  percent: number;
-  status: 'uploading' | 'complete' | 'error';
-  error?: string;
-}
 
 function validateFile(file: File): string | null {
   const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -174,15 +173,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [savingFolder, setSavingFolder] = useState(false);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
 
-  // Upload state
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  // Upload state (shared via context so TopBar TaskCenter can display transfers)
+  const upload = useUpload();
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Per-file upload tracking
-  const [fileUploadProgress, setFileUploadProgress] = useState<UploadFileProgress[]>([]);
-  const [showUploadPanel, setShowUploadPanel] = useState(false);
   const dragCounterRef = useRef(0);
 
   // Recycle bin
@@ -220,6 +214,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
   const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
+  const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [infoPanelWidth, setInfoPanelWidth] = useState(320);
+  const isResizingPanelRef = useRef(false);
+  const resizeStartRef = useRef({ x: 0, width: 0 });
+
+  // Multi-select mode (triggered by checkbox click)
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+
+  // Upload dropdown
+  const [showUploadDropdown, setShowUploadDropdown] = useState(false);
+  const uploadDropdownRef = useRef<HTMLDivElement>(null);
+
+  // New dropdown
+  const [showNewDropdown, setShowNewDropdown] = useState(false);
+  const newDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Aliases for readability
+  const uploading = upload.isUploading;
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{
@@ -543,6 +555,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           percent: 0,
           status: 'error',
           error: t(`resources.${validationError}`),
+          fileSize: file.size,
+          bytesUploaded: 0,
+          speed: 0,
         });
       } else {
         validFiles.push(file);
@@ -551,21 +566,26 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           filename: file.name,
           percent: 0,
           status: 'uploading',
+          fileSize: file.size,
+          bytesUploaded: 0,
+          speed: 0,
         });
       }
     }
 
     if (validFiles.length === 0 && initialProgress.length > 0) {
       // All files failed validation — show errors briefly
-      setFileUploadProgress(initialProgress);
-      setShowUploadPanel(true);
+      upload.setItems(initialProgress);
       return;
     }
 
-    setFileUploadProgress(initialProgress);
-    setShowUploadPanel(true);
-    setUploading(true);
-    setUploadProgress(0);
+    // Append new items to existing history (don't replace)
+    upload.setItems((prev) => [...prev, ...initialProgress]);
+    upload.setIsUploading(true);
+    upload.setOverallProgress(0);
+
+    const batchStartTime = Date.now();
+    upload.setUploadStartTime(batchStartTime);
 
     let completedCount = 0;
     // Map valid files to their progress entry IDs
@@ -576,6 +596,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
       const entryId = validFileEntryIds[i];
+      const fileStartTime = Date.now();
 
       try {
         await uploadResource(
@@ -584,22 +605,27 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           scopeId,
           selectedFolderId,
           (progress) => {
-            // Update per-file progress
-            setFileUploadProgress((prev) =>
-              prev.map((p) => p.id === entryId ? { ...p, percent: progress } : p)
+            const fileEntry = initialProgress.find((p) => p.id === entryId);
+            const fileSz = fileEntry?.fileSize || 0;
+            const bytesUploaded = Math.round(fileSz * progress / 100);
+            const elapsedSec = Math.max((Date.now() - fileStartTime) / 1000, 0.5);
+            const speed = bytesUploaded > 0 ? Math.round(bytesUploaded / elapsedSec) : 0;
+            upload.setItems((prev) =>
+              prev.map((p) => p.id === entryId ? { ...p, percent: progress, bytesUploaded, speed } : p)
             );
-            // Update overall progress
             const overall = Math.round(((completedCount + progress / 100) / validFiles.length) * 100);
-            setUploadProgress(overall);
+            upload.setOverallProgress(overall);
           },
         );
 
         completedCount++;
-        setFileUploadProgress((prev) =>
-          prev.map((p) => p.id === entryId ? { ...p, percent: 100, status: 'complete' } : p)
+        const fileEntry = initialProgress.find((p) => p.id === entryId);
+        const fileSz = fileEntry?.fileSize || 0;
+        upload.setItems((prev) =>
+          prev.map((p) => p.id === entryId ? { ...p, percent: 100, status: 'complete', bytesUploaded: fileSz, speed: 0 } : p)
         );
       } catch {
-        setFileUploadProgress((prev) =>
+        upload.setItems((prev) =>
           prev.map((p) => p.id === entryId
             ? { ...p, status: 'error', error: t('resources.uploadFailed') }
             : p
@@ -614,18 +640,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setResources(items);
     } catch { /* ignore */ }
 
-    setUploading(false);
-    setUploadProgress(0);
-
-    // Auto-dismiss panel after a delay if all succeeded
-    const allDone = completedCount === validFiles.length;
-    if (allDone) {
-      setTimeout(() => {
-        setFileUploadProgress([]);
-        setShowUploadPanel(false);
-      }, 3000);
-    }
-  }, [scopeType, scopeId, selectedFolderId, uploading, t]);
+    upload.setIsUploading(false);
+    upload.setOverallProgress(0);
+  }, [scopeType, scopeId, selectedFolderId, uploading, t, upload]);
 
   // ─── Drag & drop (robust nested-element handling) ────
 
@@ -690,18 +707,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Resource selection & detail panel ───────────────
 
   const handleResourceClick = useCallback((item: ResourceItem) => {
-    // Navigate to detail page for primary click action
-    if (item.resource?.id) {
-      navigate(resPath(`/resources/file/${item.resource.id}`));
-      return;
-    }
-    // Fallback: toggle info panel
+    // Single click: toggle — click same item to deselect
     if (selectedResource?.id === item.id) {
       setSelectedResource(null);
+      setSelectedIds(new Set());
     } else {
       setSelectedResource(item);
     }
-  }, [navigate, resPath, selectedResource]);
+  }, [selectedResource]);
+
+  // Double click: navigate to detail page
+  const handleResourceDoubleClick = useCallback((item: ResourceItem) => {
+    if (item.resource?.id) {
+      navigate(resPath(`/resources/file/${item.resource.id}`));
+    }
+  }, [navigate, resPath]);
 
   // Load tags when selected resource changes
   useEffect(() => {
@@ -714,14 +734,78 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       .catch(() => setSelectedResourceTags([]));
   }, [selectedResource?.resource?.id]);
 
-  // ESC to close panel
+  // ESC to close panel / exit multi-select
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedResource(null);
+      if (e.key === 'Escape') {
+        if (multiSelectMode) {
+          setMultiSelectMode(false);
+          setSelectedIds(new Set());
+        }
+        setSelectedResource(null);
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [multiSelectMode]);
+
+  // Auto-exit multi-select when no items selected
+  useEffect(() => {
+    if (multiSelectMode && selectedIds.size === 0) {
+      setMultiSelectMode(false);
+    }
+  }, [multiSelectMode, selectedIds.size]);
+
+  // Click outside to close upload dropdown
+  useEffect(() => {
+    if (!showUploadDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(e.target as Node)) {
+        setShowUploadDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showUploadDropdown]);
+
+  // Click outside to close new dropdown
+  useEffect(() => {
+    if (!showNewDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (newDropdownRef.current && !newDropdownRef.current.contains(e.target as Node)) {
+        setShowNewDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNewDropdown]);
+
+  // Resize info panel handler
+  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingPanelRef.current = true;
+    resizeStartRef.current = { x: e.clientX, width: infoPanelWidth };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizingPanelRef.current) return;
+      const delta = resizeStartRef.current.x - ev.clientX;
+      const newWidth = Math.max(240, Math.min(600, resizeStartRef.current.width + delta));
+      setInfoPanelWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      isResizingPanelRef.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [infoPanelWidth]);
 
   // Debounce search
   useEffect(() => {
@@ -1324,6 +1408,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   }, [filteredFolders, sortedItems]);
 
   const handleToggleSelect = useCallback((compositeId: string, e: React.MouseEvent) => {
+    // Checkbox click always enters multi-select mode
+    setMultiSelectMode(true);
     if (e.shiftKey && lastClickedId) {
       const allIds = allSelectableIds;
       const startIdx = allIds.indexOf(lastClickedId);
@@ -1336,30 +1422,28 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           return next;
         });
       }
-    } else if (e.metaKey || e.ctrlKey) {
+    } else {
+      // Toggle this item (no need for Cmd/Ctrl in multi-select mode)
       setSelectedIds((prev) => {
         const next = new Set(prev);
         if (next.has(compositeId)) next.delete(compositeId);
         else next.add(compositeId);
         return next;
       });
-    } else {
-      setSelectedIds(new Set([compositeId]));
     }
     setLastClickedId(compositeId);
   }, [lastClickedId, allSelectableIds]);
 
-  const handleCardClick = useCallback((compositeId: string, originalAction: () => void, e?: React.MouseEvent) => {
+  const handleCardClick = useCallback((compositeId: string, e?: React.MouseEvent) => {
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) {
       handleToggleSelect(compositeId, e);
       return;
     }
-    if (selectedIds.size > 0) {
-      setSelectedIds(new Set());
-      return;
-    }
-    originalAction();
-  }, [selectedIds, handleToggleSelect]);
+    // Normal click exits multi-select mode → single select
+    setMultiSelectMode(false);
+    setSelectedIds(new Set([compositeId]));
+    setLastClickedId(compositeId);
+  }, [handleToggleSelect]);
 
   // ─── Keyboard shortcuts ─────────────────────────────
 
@@ -1698,7 +1782,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       </div>
 
       {/* ── Center panel: Main content ── */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div
+        className="flex-1 min-w-0 flex flex-col"
+      >
         {isDownloadsView ? (
           <RipVaultView />
         ) : (
@@ -1821,25 +1907,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 )}
               </div>
 
-              {/* View toggle */}
-              <div className="flex bg-zinc-800/60 rounded-lg p-0.5">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <LayoutGrid size={14} />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <LayoutList size={14} />
-                </button>
-              </div>
+              {/* View toggle — single button */}
+              <button
+                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                className="p-1.5 rounded-lg bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors"
+                title={viewMode === 'grid' ? t('resources.listView') : t('resources.gridView')}
+              >
+                {viewMode === 'grid' ? <LayoutList size={14} /> : <LayoutGrid size={14} />}
+              </button>
 
               {/* Upload button (only on resources view) */}
               {canUpload && (
@@ -1877,59 +1952,146 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
                     >
                       <Loader2 size={14} className="animate-spin" />
-                      <span>{uploadProgress}%</span>
+                      <span>{upload.overallProgress}%</span>
                     </button>
                   ) : (
-                    <div className="relative group/upload">
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
-                      >
-                        <Upload size={14} />
-                        <span>{t('resources.upload')}</span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const menu = (e.currentTarget.nextElementSibling as HTMLElement);
-                          if (menu) menu.classList.toggle('hidden');
-                        }}
-                        className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
-                      >
-                        <ChevronDown size={12} />
-                      </button>
-                      <div className="hidden absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                    <div className="relative" ref={uploadDropdownRef}>
+                      <div className="flex">
                         <button
-                          onClick={() => { fileInputRef.current?.click(); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
                         >
-                          <Upload size={12} />
-                          {t('resources.uploadFile')}
+                          <Upload size={14} />
+                          <span>{t('resources.upload')}</span>
                         </button>
                         <button
-                          onClick={() => { folderInputRef.current?.click(); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          onClick={() => setShowUploadDropdown(prev => !prev)}
+                          className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
                         >
-                          <FolderOpen size={12} />
-                          {t('resources.uploadFolder')}
+                          <ChevronDown size={12} />
                         </button>
                       </div>
+                      {showUploadDropdown && (
+                        <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                          <button
+                            onClick={() => { fileInputRef.current?.click(); setShowUploadDropdown(false); }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          >
+                            <Upload size={12} />
+                            {t('resources.uploadFile')}
+                          </button>
+                          <button
+                            onClick={() => { folderInputRef.current?.click(); setShowUploadDropdown(false); }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          >
+                            <FolderOpen size={12} />
+                            {t('resources.uploadFolder')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* New Folder button */}
-                  <button
-                    onClick={() => setCreatingFolder(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 border border-zinc-700/50 rounded-lg transition-colors"
-                  >
-                    <FolderPlus size={14} />
-                    <span>{t('resources.newFolder')}</span>
-                  </button>
+                  {/* New dropdown button */}
+                  <div className="relative" ref={newDropdownRef}>
+                    <button
+                      onClick={() => setShowNewDropdown(prev => !prev)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
+                    >
+                      <Sparkles size={14} />
+                      <span>{t('resources.new')}</span>
+                      <ChevronDown size={12} />
+                    </button>
+                    {showNewDropdown && (
+                      <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                        {/* Group 1 — Containers */}
+                        <button
+                          onClick={() => { setCreatingFolder(true); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <FolderPlus size={14} className="text-amber-400" />
+                          {t('resources.newFolder')}
+                        </button>
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <LayoutGrid size={14} className="text-blue-400" />
+                          {t('resources.newProject')}
+                        </button>
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <FolderSearch size={14} className="text-purple-400" />
+                          {t('resources.newSmartFolder')}
+                        </button>
+                        {/* Divider */}
+                        <div className="border-t border-zinc-800 my-1" />
+                        {/* Group 2 — Documents */}
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <FileText size={14} className="text-emerald-400" />
+                          {t('resources.newDocument')}
+                        </button>
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <Table2 size={14} className="text-cyan-400" />
+                          {t('resources.newSpreadsheet')}
+                        </button>
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <Presentation size={14} className="text-orange-400" />
+                          {t('resources.newPresentation')}
+                        </button>
+                        {/* Divider */}
+                        <div className="border-t border-zinc-800 my-1" />
+                        {/* Group 3 — Other */}
+                        <button
+                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        >
+                          <Globe size={14} className="text-indigo-400" />
+                          {t('resources.newWebUrl')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
           </div>
         </div>
+
+        {/* Multi-select mode toolbar */}
+        {multiSelectMode && (
+          <div className="px-6 py-2 border-b border-zinc-800/80 bg-zinc-900/80 flex items-center gap-3">
+            <button
+              onClick={() => setSelectedIds(new Set(allSelectableIds))}
+              className="px-3 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+            >
+              {t('resources.selectAll')}
+            </button>
+            <button
+              onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); setSelectedResource(null); }}
+              className="px-3 py-1 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+            >
+              {t('common.cancel')}
+            </button>
+            <span className="text-xs text-zinc-500">
+              {t('resources.multiSelectCount', {
+                total: filteredFolders.length + sortedItems.length,
+                selected: selectedIds.size,
+              })}
+            </span>
+          </div>
+        )}
 
         {/* Content area */}
         <div
@@ -1939,6 +2101,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onDragLeave={canUpload ? handleDragLeave : undefined}
           onDrop={canUpload ? handleDrop : undefined}
           onContextMenu={canUpload ? handleEmptyAreaContextMenu : undefined}
+          onClick={(e) => {
+            // Click on empty area → deselect all
+            const target = e.target as HTMLElement;
+            if (!target.closest('[data-context-item]')) {
+              if (selectedIds.size > 0 || multiSelectMode) {
+                setSelectedIds(new Set());
+                setMultiSelectMode(false);
+              }
+              setSelectedResource(null);
+            }
+          }}
         >
           {/* ── Drag-and-drop overlay ── */}
           {dragOver && canUpload && (
@@ -1955,7 +2128,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-indigo-500 transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
+                  style={{ width: `${upload.overallProgress}%` }}
                 />
               </div>
             </div>
@@ -2019,13 +2192,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
-                            onClick={(e?: any) => handleCardClick(`folder:${folder.id}`, () => {
+                            onClick={(e?: any) => {
+                              handleCardClick(`folder:${folder.id}`, e);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) setSelectedResource(null);
+                            }}
+                            onDoubleClick={() => {
                               if (selectedLibraryId) {
                                 navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                               } else {
                                 navigate(resPath(`/resources/folder/${folder.id}`));
                               }
-                            }, e)}
+                            }}
                             viewMode="grid"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -2037,6 +2214,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
+                            forceShowCheckbox={multiSelectMode}
                             onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
                             previewItems={folderPreviews[folder.id]}
                           />
@@ -2048,13 +2226,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             key={`folder-${folder.id}`}
                             folder={folder}
-                            onClick={(e?: any) => handleCardClick(`folder:${folder.id}`, () => {
+                            onClick={(e?: any) => {
+                              handleCardClick(`folder:${folder.id}`, e);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) setSelectedResource(null);
+                            }}
+                            onDoubleClick={() => {
                               if (selectedLibraryId) {
                                 navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                               } else {
                                 navigate(resPath(`/resources/folder/${folder.id}`));
                               }
-                            }, e)}
+                            }}
                             viewMode="list"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -2066,6 +2248,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable
                             isChecked={selectedIds.has(`folder:${folder.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
+                            forceShowCheckbox={multiSelectMode}
                             onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
                             previewItems={folderPreviews[folder.id]}
                           />
@@ -2102,7 +2285,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <ResourceCard
                             key={item.id}
                             item={item}
-                            onClick={(e?: any) => handleCardClick(`item:${item.id}`, () => handleResourceClick(item), e)}
+                            onClick={(e?: any) => {
+                              handleCardClick(`item:${item.id}`, e);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
+                            }}
+                            onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="grid"
                             isSelected={selectedResource?.id === item.id}
                             showRestoreAction={isRecycleView}
@@ -2119,6 +2306,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
+                            forceShowCheckbox={multiSelectMode}
                             selectedIds={selectedIds}
                             compositeId={`item:${item.id}`}
                           />
@@ -2130,7 +2318,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <ResourceCard
                             key={item.id}
                             item={item}
-                            onClick={(e?: any) => handleCardClick(`item:${item.id}`, () => handleResourceClick(item), e)}
+                            onClick={(e?: any) => {
+                              handleCardClick(`item:${item.id}`, e);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
+                            }}
+                            onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="list"
                             isSelected={selectedResource?.id === item.id}
                             showRestoreAction={isRecycleView}
@@ -2147,6 +2339,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             selectable={!isRecycleView}
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
+                            forceShowCheckbox={multiSelectMode}
                             selectedIds={selectedIds}
                             compositeId={`item:${item.id}`}
                           />
@@ -2179,16 +2372,58 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         )}
       </div>
 
-      {/* ── Right panel: Resource Info ── */}
+      {/* ── Right panel: Flex-based, content area adapts when panel opens ── */}
       {selectedResource?.resource && (
-        <ResourceInfoPanel
-          resource={selectedResource.resource}
-          allTags={allTags}
-          assignedTags={selectedResourceTags}
-          onClose={() => setSelectedResource(null)}
-          onAddTag={handleAddTag}
-          onRemoveTag={handleRemoveTag}
-        />
+        <div
+          className="shrink-0 relative transition-[width] duration-300 ease-in-out"
+          style={{ width: showInfoPanel ? `${infoPanelWidth}px` : '0px' }}
+        >
+          {/* Collapse tab — positioned outside overflow area */}
+          {showInfoPanel && (
+            <button
+              onClick={() => setShowInfoPanel(false)}
+              className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
+              title={t('resources.toggleInfoPanel')}
+            >
+              <ChevronRight size={20} />
+            </button>
+          )}
+
+          {/* Panel content — overflow hidden for smooth width animation */}
+          <div className="h-full overflow-hidden">
+            <div
+              className="h-full flex bg-zinc-900 border-l border-zinc-800"
+              style={{ width: `${infoPanelWidth}px` }}
+            >
+              {/* Resize handle — left edge blue line on hover */}
+              <div
+                onMouseDown={handlePanelResizeStart}
+                className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
+              />
+
+              {/* Panel content */}
+              <ResourceInfoPanel
+                resource={selectedResource.resource}
+                allTags={allTags}
+                assignedTags={selectedResourceTags}
+                onClose={() => setSelectedResource(null)}
+                onAddTag={handleAddTag}
+                onRemoveTag={handleRemoveTag}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
+      {selectedResource?.resource && !showInfoPanel && (
+        <button
+          onClick={() => setShowInfoPanel(true)}
+          className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
+          title={t('resources.toggleInfoPanel')}
+        >
+          <ChevronLeft size={20} />
+        </button>
       )}
 
       {/* ── Batch Selection Toolbar ── */}
@@ -2198,50 +2433,89 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             {t('resources.selected', { count: selectedIds.size })}
           </span>
           <div className="w-px h-5 bg-zinc-700" />
-          <button
-            onClick={() => {
-              const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
-              const flds = childFolders.filter((f) => selectedIds.has(`folder:${f.id}`));
-              setOperationTargetItems(items);
-              setOperationTargetFolders(flds);
-              setFolderPickerMode('move');
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-          >
-            <Move size={14} />
-            {t('resources.batchMove')}
-          </button>
-          <button
-            onClick={() => {
-              const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
-              setOperationTargetItems(items);
-              setOperationTargetFolders([]);
-              setFolderPickerMode('copy');
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-          >
-            <Copy size={14} />
-            {t('resources.batchCopy')}
-          </button>
-          <button
-            onClick={async () => {
-              const resourceIds = sortedItems
-                .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
-                .map((i) => String(i.resource!.id));
-              if (resourceIds.length > 0) {
-                try {
-                  await trashResources(resourceIds);
-                  const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-                  setResources(items);
+          {isRecycleView ? (
+            <>
+              <button
+                onClick={async () => {
+                  const resourceIds = currentItems
+                    .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+                    .map((i) => String(i.resource!.id));
+                  for (const id of resourceIds) {
+                    await restoreResource(id);
+                  }
+                  setTrashedResources((prev) => prev.filter((r) => !resourceIds.includes(String(r.resource?.id))));
                   setSelectedIds(new Set());
-                } catch { /* ignore */ }
-              }
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
-          >
-            <Trash2 size={14} />
-            {t('resources.batchDelete')}
-          </button>
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 rounded-lg transition-colors"
+              >
+                <RefreshCw size={14} />
+                {t('resources.batchRestore')}
+              </button>
+              <button
+                onClick={async () => {
+                  const resourceIds = currentItems
+                    .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+                    .map((i) => String(i.resource!.id));
+                  for (const id of resourceIds) {
+                    await permanentDeleteResource(id);
+                  }
+                  setTrashedResources((prev) => prev.filter((r) => !resourceIds.includes(String(r.resource?.id))));
+                  setSelectedIds(new Set());
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+              >
+                <Trash2 size={14} />
+                {t('resources.batchPermanentDelete')}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+                  const flds = childFolders.filter((f) => selectedIds.has(`folder:${f.id}`));
+                  setOperationTargetItems(items);
+                  setOperationTargetFolders(flds);
+                  setFolderPickerMode('move');
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <Move size={14} />
+                {t('resources.batchMove')}
+              </button>
+              <button
+                onClick={() => {
+                  const items = sortedItems.filter((i) => selectedIds.has(`item:${i.id}`));
+                  setOperationTargetItems(items);
+                  setOperationTargetFolders([]);
+                  setFolderPickerMode('copy');
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <Copy size={14} />
+                {t('resources.batchCopy')}
+              </button>
+              <button
+                onClick={async () => {
+                  const resourceIds = sortedItems
+                    .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+                    .map((i) => String(i.resource!.id));
+                  if (resourceIds.length > 0) {
+                    try {
+                      await trashResources(resourceIds);
+                      const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+                      setResources(items);
+                      setSelectedIds(new Set());
+                    } catch { /* ignore */ }
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+              >
+                <Trash2 size={14} />
+                {t('resources.batchDelete')}
+              </button>
+            </>
+          )}
           <div className="w-px h-5 bg-zinc-700" />
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -2260,82 +2534,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           items={contextMenuItems}
           onClose={closeContextMenu}
         />
-      )}
-
-      {/* ── Floating upload progress panel ── */}
-      {showUploadPanel && fileUploadProgress.length > 0 && (
-        <div className="fixed bottom-4 right-4 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-            <p className="text-sm font-medium text-white">
-              {uploading
-                ? t('resources.uploadProgress', { count: fileUploadProgress.filter((f) => f.status === 'uploading').length })
-                : fileUploadProgress.every((f) => f.status === 'complete')
-                  ? t('resources.uploadComplete')
-                  : t('resources.uploadProgress', { count: fileUploadProgress.length })
-              }
-            </p>
-            <button
-              onClick={() => {
-                if (!uploading) {
-                  setFileUploadProgress([]);
-                  setShowUploadPanel(false);
-                }
-              }}
-              className={`p-1 rounded transition-colors ${
-                uploading
-                  ? 'text-zinc-600 cursor-not-allowed'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-              }`}
-              disabled={uploading}
-            >
-              <X size={14} />
-            </button>
-          </div>
-
-          {/* File list */}
-          <div className="max-h-60 overflow-y-auto p-3 space-y-3">
-            {fileUploadProgress.map((item) => (
-              <div key={item.id}>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="text-zinc-400 truncate max-w-[200px]">{item.filename}</span>
-                  <span className="shrink-0 ml-2">
-                    {item.status === 'complete' && (
-                      <CheckCircle2 size={14} className="text-emerald-400" />
-                    )}
-                    {item.status === 'error' && (
-                      <span className="flex items-center gap-1 text-red-400">
-                        <XCircle size={14} />
-                        <span>{item.error}</span>
-                      </span>
-                    )}
-                    {item.status === 'uploading' && (
-                      <span className="text-zinc-500">{item.percent}%</span>
-                    )}
-                  </span>
-                </div>
-                {item.status === 'uploading' && (
-                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                      style={{ width: `${item.percent}%` }}
-                    />
-                  </div>
-                )}
-                {item.status === 'complete' && (
-                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-500 rounded-full w-full" />
-                  </div>
-                )}
-                {item.status === 'error' && (
-                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-red-500 rounded-full w-full" />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* ── Smart Folder Editor (Create) ── */}

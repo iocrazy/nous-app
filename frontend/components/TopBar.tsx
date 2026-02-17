@@ -8,9 +8,14 @@ import {
   Settings,
   HelpCircle,
   Inbox,
+  CheckCircle2,
+  XCircle,
+  X,
+  FileText,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { useUpload, formatSpeed, formatFileSize, formatTimeRemaining, getFileTypeIcon } from '../contexts/UploadContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +27,7 @@ interface TopBarProps {
   onNavigate?: (view: string, tab?: string) => void;
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
+  sidebarCollapsed?: boolean;
 }
 
 type PanelType = 'taskCenter' | 'notifications' | 'avatar' | null;
@@ -107,31 +113,135 @@ const PanelShell: React.FC<{
 const TaskCenterPanel: React.FC = () => {
   const { t } = useTranslation();
   const [tab, setTab] = useState<'transfers' | 'tasks'>('transfers');
+  const upload = useUpload();
+
+  const uploadingFiles = upload.items.filter((f) => f.status === 'uploading');
+  const completedFiles = upload.items.filter((f) => f.status === 'complete');
+  const totalSpeed = uploadingFiles.reduce((sum, f) => sum + f.speed, 0);
+  const totalRemaining = totalSpeed > 0
+    ? uploadingFiles.reduce((sum, f) => sum + (f.fileSize - f.bytesUploaded), 0) / totalSpeed
+    : 0;
+  const hasItems = upload.items.length > 0;
 
   return (
-    <PanelShell className="w-80">
+    <PanelShell className="w-96">
       {/* Tab bar */}
       <div className="flex border-b border-zinc-800">
         {(['transfers', 'tasks'] as const).map((key) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+            className={`flex-1 px-4 py-2.5 text-xs font-medium transition-colors ${
               tab === key
                 ? 'text-indigo-400 border-b-2 border-indigo-400'
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
             {t(`topbar.${key}`)}
+            {key === 'transfers' && hasItems && (
+              <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-zinc-800 rounded-full">
+                {upload.items.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* Empty state */}
-      <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-        <Inbox size={28} className="mb-2 text-zinc-600" />
-        <span className="text-sm">{t('topbar.noItems')}</span>
-      </div>
+      {tab === 'transfers' ? (
+        hasItems ? (
+          <>
+            {/* File list */}
+            <div className="max-h-72 overflow-y-auto">
+              {upload.items.map((item) => {
+                const fileType = getFileTypeIcon(item.filename);
+                return (
+                  <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0">
+                    <div className="flex items-center gap-2.5">
+                      {/* File type icon */}
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        fileType === 'video' ? 'bg-purple-500/20 text-purple-400' :
+                        fileType === 'image' ? 'bg-blue-500/20 text-blue-400' :
+                        fileType === 'audio' ? 'bg-pink-500/20 text-pink-400' :
+                        fileType === 'document' ? 'bg-emerald-500/20 text-emerald-400' :
+                        'bg-zinc-700/50 text-zinc-400'
+                      }`}>
+                        <FileText size={14} />
+                      </div>
+                      {/* File info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            {item.status === 'uploading' && (
+                              <>
+                                <span className="text-[10px] text-zinc-500">{item.percent}%</span>
+                                <span className="text-[10px] text-zinc-600">{formatSpeed(item.speed)}</span>
+                              </>
+                            )}
+                            {item.status === 'complete' && (
+                              <CheckCircle2 size={14} className="text-emerald-400" />
+                            )}
+                            {item.status === 'error' && (
+                              <XCircle size={14} className="text-red-400" />
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-zinc-600 mt-0.5">{formatFileSize(item.fileSize)}</div>
+                        {item.error && (
+                          <div className="text-[10px] text-red-400 mt-0.5">{item.error}</div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          item.status === 'complete' ? 'bg-emerald-500 w-full' :
+                          item.status === 'error' ? 'bg-red-500 w-full' :
+                          'bg-indigo-500'
+                        }`}
+                        style={item.status === 'uploading' ? { width: `${item.percent}%` } : undefined}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom status bar */}
+            <div className="flex items-center justify-between px-3 py-2 border-t border-zinc-800 bg-zinc-900/80">
+              <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                <span>{t('resources.uploadingCount', { current: completedFiles.length, total: upload.items.length })}</span>
+                {upload.isUploading && totalSpeed > 0 && (
+                  <>
+                    <span>{formatSpeed(totalSpeed)}</span>
+                    <span>({t('resources.estimatedRemaining', { time: formatTimeRemaining(totalRemaining) })})</span>
+                  </>
+                )}
+              </div>
+              {!upload.isUploading && (
+                <button
+                  onClick={() => upload.clearCompleted()}
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
+            <Inbox size={28} className="mb-2 text-zinc-600" />
+            <span className="text-sm">{t('topbar.noItems')}</span>
+          </div>
+        )
+      ) : (
+        /* Tasks tab — empty state */
+        <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
+          <Inbox size={28} className="mb-2 text-zinc-600" />
+          <span className="text-sm">{t('topbar.noItems')}</span>
+        </div>
+      )}
     </PanelShell>
   );
 };
@@ -263,9 +373,18 @@ const UserAvatar: React.FC<{
 // TopBar
 // ---------------------------------------------------------------------------
 
-export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings }) => {
+export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
+  const upload = useUpload();
+  const uploadingCount = upload.items.filter(f => f.status === 'uploading').length;
+
+  // Auto-open task center panel when upload starts
+  useEffect(() => {
+    if (upload.isUploading && openPanel !== 'taskCenter') {
+      setOpenPanel('taskCenter');
+    }
+  }, [upload.isUploading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const taskCenterRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
@@ -284,7 +403,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className="fixed top-0 right-0 left-64 h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-6 gap-2">
+    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-6 gap-2 transition-[left] duration-300`}>
       {/* Language Switcher */}
       <LanguageSwitcher />
 
@@ -302,6 +421,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           title={t('topbar.taskCenter')}
           onClick={() => togglePanel('taskCenter')}
           active={openPanel === 'taskCenter'}
+          badge={uploadingCount > 0 ? uploadingCount : undefined}
         >
           <ListTodo size={18} />
         </IconButton>

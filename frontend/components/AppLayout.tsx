@@ -14,6 +14,7 @@ import { useLibrary } from '../hooks/useLibrary';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
+import { UploadProvider } from '../contexts/UploadContext';
 import { UserProfileModal } from './UserProfileModal';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
@@ -106,16 +107,28 @@ export function AppLayout() {
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
 
+  // Sidebar collapse state with localStorage persistence
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebar-collapsed') === 'true'; } catch { return false; }
+  });
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sidebar-collapsed', String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   const handleAuthLogout = async () => {
     await handleLogout();
     navigate('/login');
   };
 
   // Main content padding
-  const mainContentClass = `flex-1 md:ml-64 w-full ${
+  const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'library'
-      ? 'p-0 md:p-8 md:pt-20 pb-20 md:pb-8'
-      : 'p-4 md:p-8 md:pt-20 pb-24 md:pb-8'
+      ? 'p-0 sm:p-8 sm:pt-20 pb-20 sm:pb-8'
+      : 'p-4 sm:p-8 sm:pt-20 pb-24 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -171,6 +184,7 @@ export function AppLayout() {
 
   return (
     <ToastProvider>
+    <UploadProvider>
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
 
       {/* User Profile Modal */}
@@ -218,7 +232,7 @@ export function AppLayout() {
       />
 
       {/* Mobile Nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
         {/* Parser */}
         <button
           onClick={() => handleMobileNavClick('parser')}
@@ -336,6 +350,8 @@ export function AppLayout() {
         mode={sidebarMode}
         view={view}
         settingsTab={settingsTab}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleSidebar}
         teams={teams}
         activeTeamId={selectedTeamId}
         personalTeamId={personalTeamId}
@@ -373,19 +389,20 @@ export function AppLayout() {
         onProjectSelect={setSelectedProject}
       />
 
+      {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
+      <TopBar
+        user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
+        unreadCount={notifications.filter(n => !n.read).length}
+        onSignOut={handleAuthLogout}
+        onOpenSettings={(tab) => {
+          setSettingsModalInitialTab(tab || 'personal');
+          setIsSettingsModalOpen(true);
+        }}
+        sidebarCollapsed={sidebarCollapsed}
+      />
+
       {/* Main Content */}
       <main className={mainContentClass}>
-        {/* TopBar */}
-        <TopBar
-          user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
-          unreadCount={notifications.filter(n => !n.read).length}
-          onSignOut={handleAuthLogout}
-          onOpenSettings={(tab) => {
-            setSettingsModalInitialTab(tab || 'personal');
-            setIsSettingsModalOpen(true);
-          }}
-        />
-
         {/* Routed content */}
         <Outlet />
       </main>
@@ -413,6 +430,7 @@ export function AppLayout() {
         }}
       />
     </div>
+    </UploadProvider>
     </ToastProvider>
   );
 }
