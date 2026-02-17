@@ -30,6 +30,14 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
+def _update_visual_status(video_id: str, status: str):
+    """Update visual_analysis_status on the videos table."""
+    from app.repositories.ai_repository import AIRepository
+
+    ai_repo = AIRepository()
+    run_async(ai_repo.update_video_ai_status(video_id, "visual_analysis_status", status))
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def analyze_video_l1_task(
     self, video_id: int, cover_url: str, title: str = "", description: str = ""
@@ -104,6 +112,7 @@ def analyze_video_l1_task(
             await analysis_repo.update_embedding(video_id, embedding, embedding_text)
             logger.info(f"Generated embedding for video {video_id}")
 
+        _update_visual_status(video_id, "completed")
         logger.info(
             f"Completed L1 analysis for video {video_id}, cost: ${result.cost:.4f}"
         )
@@ -113,6 +122,7 @@ def analyze_video_l1_task(
         return run_async(_analyze())
     except Exception as e:
         logger.error(f"L1 analysis failed for video {video_id}: {e}")
+        _update_visual_status(video_id, "failed")
         raise self.retry(exc=e)
 
 
@@ -244,6 +254,7 @@ def analyze_video_l2_task(
                         video_id, embedding, embedding_text
                     )
 
+                _update_visual_status(video_id, "completed")
                 logger.info(
                     f"Completed L2 analysis for video {video_id}, cost: ${result.cost:.4f}"
                 )
@@ -255,15 +266,18 @@ def analyze_video_l2_task(
 
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg failed for video {video_id}: {e}")
+            _update_visual_status(video_id, "failed")
             return None
         except FileNotFoundError:
             logger.error(f"Video file not found: {video_path}")
+            _update_visual_status(video_id, "failed")
             return None
 
     try:
         return run_async(_analyze())
     except Exception as e:
         logger.error(f"L2 analysis failed for video {video_id}: {e}")
+        _update_visual_status(video_id, "failed")
         raise self.retry(exc=e)
 
 

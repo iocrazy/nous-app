@@ -122,11 +122,12 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
 
 @router.post("/analyze/{platform_id}")
 async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
-    """Manually trigger visual analysis for a video.
+    """Manually trigger visual analysis (L1: cover image) for a video.
 
-    (Placeholder - visual analysis is not yet implemented.)
+    Queues L1 analysis via Celery. If a local video file exists,
+    L2 analysis (cover + keyframes) is queued instead.
     """
-    await _get_video_or_404(platform_id)
+    video = await _get_video_or_404(platform_id)
 
     # === Points check ===
     points_service = PointsService()
@@ -144,11 +145,49 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
             raise HTTPException(status_code=402, detail=points_result["reason"])
     # === End points check ===
 
-    # Visual analysis is planned for a future iteration
-    raise HTTPException(
-        status_code=501,
-        detail="Visual analysis is not yet implemented",
-    )
+    video_id = video["id"]
+    cover_urls = video.get("cover_urls") or []
+    cover_url = cover_urls[0] if cover_urls else ""
+    if not cover_url:
+        raise HTTPException(status_code=400, detail="Video has no cover image for analysis")
+
+    title = video.get("title", "")
+    description = video.get("description", "")
+    download_path = video.get("download_path")
+
+    # Update status to processing
+    repo = VideoRepository()
+    await repo.update(platform_id, {"visual_analysis_status": "processing"})
+
+    from app.tasks.analysis_tasks import analyze_video_l1_task, analyze_video_l2_task
+
+    if download_path:
+        # L2: cover + keyframes (richer analysis)
+        analyze_video_l2_task.delay(
+            video_id=video_id,
+            cover_url=cover_url,
+            video_path=download_path,
+            title=title,
+            description=description,
+        )
+        return {
+            "message": "L2 visual analysis queued (cover + keyframes)",
+            "platform_id": platform_id,
+            "level": "L2",
+        }
+    else:
+        # L1: cover only
+        analyze_video_l1_task.delay(
+            video_id=video_id,
+            cover_url=cover_url,
+            title=title,
+            description=description,
+        )
+        return {
+            "message": "L1 visual analysis queued (cover image)",
+            "platform_id": platform_id,
+            "level": "L1",
+        }
 
 
 # ------------------------------------------------------------------
