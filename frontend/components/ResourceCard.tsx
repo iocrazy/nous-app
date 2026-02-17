@@ -213,10 +213,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         onClick={(e) => onClick(e)}
         onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800 border rounded-lg cursor-pointer transition-all duration-200 group relative ${
+        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
           isChecked || isSelected
-            ? 'bg-indigo-500/10 border-indigo-500/30'
-            : 'bg-zinc-800/40 border-zinc-700/20 hover:border-zinc-600'
+            ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30'
+            : ''
         }`}
       >
         {checkbox}
@@ -296,7 +296,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       onClick={(e) => onClick(e)}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
       onContextMenu={onContextMenu}
-      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${
+      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${
         isChecked || isSelected
           ? 'bg-indigo-500/10 border-indigo-500/30'
           : 'bg-zinc-800/60 border-zinc-700/30 hover:border-zinc-600'
@@ -306,7 +306,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       {/* Thumbnail + Hover Scrub */}
       <div
         ref={thumbRef}
-        className={`relative h-28 flex items-center justify-center ${bg}`}
+        className={`relative h-28 flex items-center justify-center bg-black ${!thumbnailSrc ? bg : ''}`}
         onMouseEnter={handleThumbMouseEnter}
         onMouseLeave={handleThumbMouseLeave}
         onMouseMove={handleThumbMouseMove}
@@ -315,7 +315,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           <img
             src={thumbnailSrc}
             alt={filename}
-            className={`w-full h-full object-cover transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
+            className={`w-full h-full object-contain transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
             loading="lazy"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
@@ -325,11 +325,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         {/* Sprite scrub overlay */}
         {isHovering && spriteLoaded && spriteImgRef.current && (
           <div
-            className="absolute inset-0 bg-no-repeat"
+            className="absolute inset-0 bg-no-repeat bg-black"
             style={{
               backgroundImage: `url(${spriteUrl})`,
-              backgroundSize: `${10 * 100}% 100%`,
-              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% 0`,
+              backgroundSize: `auto 100%`,
+              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% center`,
             }}
           />
         )}
