@@ -115,7 +115,7 @@ type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smalles
 // ─── Skeleton ─────────────────────────────────────────
 
 const SkeletonGrid: React.FC = () => (
-  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
         <div className="h-32 bg-zinc-800" />
@@ -2187,7 +2187,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
                         {filteredFolders.map((folder) => (
                           <FolderCard
                             key={`folder-${folder.id}`}
@@ -2280,7 +2280,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       </div>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
                         {sortedItems.map((item) => (
                           <ResourceCard
                             key={item.id}
@@ -2372,46 +2372,46 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         )}
       </div>
 
-      {/* ── Right panel: Flex-based, content area adapts when panel opens ── */}
+      {/* ── Right panel spacer: occupies flex space so content area shrinks ── */}
       {selectedResource?.resource && (
         <div
-          className="shrink-0 relative transition-[width] duration-300 ease-in-out"
+          className="shrink-0 transition-[width] duration-300 ease-in-out"
           style={{ width: showInfoPanel ? `${infoPanelWidth}px` : '0px' }}
+        />
+      )}
+
+      {/* ── Right panel: Fixed full-height, from TopBar bottom to viewport bottom ── */}
+      {selectedResource?.resource && (
+        <div
+          className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
+            showInfoPanel ? 'translate-x-0' : 'translate-x-full'
+          }`}
+          style={{ width: `${infoPanelWidth}px` }}
         >
-          {/* Collapse tab — positioned outside overflow area */}
-          {showInfoPanel && (
-            <button
-              onClick={() => setShowInfoPanel(false)}
-              className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
-              title={t('resources.toggleInfoPanel')}
-            >
-              <ChevronRight size={20} />
-            </button>
-          )}
+          {/* Collapse tab — attached to left edge of panel */}
+          <button
+            onClick={() => setShowInfoPanel(false)}
+            className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
+            title={t('resources.toggleInfoPanel')}
+          >
+            <ChevronRight size={20} />
+          </button>
 
-          {/* Panel content — overflow hidden for smooth width animation */}
-          <div className="h-full overflow-hidden">
-            <div
-              className="h-full flex bg-zinc-900 border-l border-zinc-800"
-              style={{ width: `${infoPanelWidth}px` }}
-            >
-              {/* Resize handle — left edge blue line on hover */}
-              <div
-                onMouseDown={handlePanelResizeStart}
-                className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
-              />
+          {/* Resize handle — left edge blue line on hover */}
+          <div
+            onMouseDown={handlePanelResizeStart}
+            className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
+          />
 
-              {/* Panel content */}
-              <ResourceInfoPanel
-                resource={selectedResource.resource}
-                allTags={allTags}
-                assignedTags={selectedResourceTags}
-                onClose={() => setSelectedResource(null)}
-                onAddTag={handleAddTag}
-                onRemoveTag={handleRemoveTag}
-              />
-            </div>
-          </div>
+          {/* Panel content */}
+          <ResourceInfoPanel
+            resource={selectedResource.resource}
+            allTags={allTags}
+            assignedTags={selectedResourceTags}
+            onClose={() => setSelectedResource(null)}
+            onAddTag={handleAddTag}
+            onRemoveTag={handleRemoveTag}
+          />
         </div>
       )}
 
