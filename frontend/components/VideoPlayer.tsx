@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 
 interface VideoPlayerProps {
@@ -9,6 +9,7 @@ interface VideoPlayerProps {
   onTimeUpdate: (seconds: number) => void;
   onDurationChange: (seconds: number) => void;
   playerRef: React.RefObject<HTMLVideoElement | null>;
+  onToggleShortcuts?: () => void;
 }
 
 const formatTime = (seconds: number): string => {
@@ -34,6 +35,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   onDurationChange,
   playerRef,
+  onToggleShortcuts,
 }) => {
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,6 +49,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
 
   const effectiveFps = fps || 30;
   const isHls = src.endsWith('.m3u8');
@@ -62,6 +66,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setCurrentTime(newTime);
     onTimeUpdate(newTime);
   }, [playerRef, effectiveFps, onTimeUpdate]);
+
+  // Seek relative to current position (works in both playing and paused states)
+  const seekRelative = useCallback((seconds: number) => {
+    const video = playerRef.current;
+    if (!video) return;
+    const newTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
+    video.currentTime = newTime;
+    setCurrentTime(newTime);
+    onTimeUpdate(newTime);
+  }, [playerRef, onTimeUpdate]);
+
+  // Change playback speed
+  const changeSpeed = useCallback((rate: number) => {
+    const video = playerRef.current;
+    if (!video) return;
+    const clamped = Math.max(0.25, Math.min(3, rate));
+    video.playbackRate = clamped;
+    setPlaybackRate(clamped);
+    setShowSpeedMenu(false);
+  }, [playerRef]);
 
   // Attach or detach HLS / native source
   useEffect(() => {
@@ -167,29 +191,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [playerRef, onTimeUpdate, onDurationChange]);
 
-  // Keyboard shortcuts for frame stepping
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const video = playerRef.current;
-      if (!video || !video.paused) return;
-
-      // Ignore if user is typing in an input/textarea
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        stepFrame(-1, e.shiftKey ? 10 : 1);
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        stepFrame(1, e.shiftKey ? 10 : 1);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [playerRef, stepFrame]);
-
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
     setShowControls(true);
@@ -276,6 +277,78 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, []);
 
+  // Comprehensive keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const video = playerRef.current;
+      if (!video) return;
+
+      // Ignore if user is typing in an input/textarea
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          togglePlayPause();
+          break;
+        case 'f':
+          e.preventDefault();
+          handleFullscreen();
+          break;
+        case 'm':
+          e.preventDefault();
+          toggleMute();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          seekRelative(-5);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          seekRelative(5);
+          break;
+        case ',':
+          e.preventDefault();
+          if (video.paused) stepFrame(-1, 1);
+          break;
+        case '.':
+          e.preventDefault();
+          if (video.paused) stepFrame(1, 1);
+          break;
+        case '<':
+          e.preventDefault();
+          if (video.paused) stepFrame(-1, 10);
+          break;
+        case '>':
+          e.preventDefault();
+          if (video.paused) stepFrame(1, 10);
+          break;
+        case '[':
+          e.preventDefault();
+          changeSpeed(playbackRate - 0.25);
+          break;
+        case ']':
+          e.preventDefault();
+          changeSpeed(playbackRate + 0.25);
+          break;
+        case '\\':
+          e.preventDefault();
+          changeSpeed(1);
+          break;
+        case '?':
+          e.preventDefault();
+          onToggleShortcuts?.();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [playerRef, stepFrame, seekRelative, togglePlayPause, handleFullscreen, toggleMute, changeSpeed, playbackRate, onToggleShortcuts]);
+
   const seekProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const frameNumber = Math.floor((currentTime || 0) * effectiveFps);
 
@@ -301,19 +374,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
           <div className="w-10 h-10 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
-        </div>
-      )}
-
-      {/* Resolution badge */}
-      {resolution && showControls && (
-        <div className="absolute top-3 right-3 px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded text-xs font-mono text-zinc-300 pointer-events-none">
-          {resolution.width}x{resolution.height}
-          {resolution.height >= 2160 && (
-            <span className="ml-1 text-amber-400 font-semibold">4K</span>
-          )}
-          {resolution.height >= 1080 && resolution.height < 2160 && (
-            <span className="ml-1 text-emerald-400 font-semibold">HD</span>
-          )}
         </div>
       )}
 
@@ -352,7 +412,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={() => stepFrame(-1)}
               className="p-1.5 text-zinc-400 hover:text-white transition-colors"
               aria-label="Previous Frame"
-              title="Previous Frame (Left Arrow)"
+              title="Previous Frame (,)"
             >
               <SkipBack size={14} />
             </button>
@@ -373,7 +433,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={() => stepFrame(1)}
               className="p-1.5 text-zinc-400 hover:text-white transition-colors"
               aria-label="Next Frame"
-              title="Next Frame (Right Arrow)"
+              title="Next Frame (.)"
             >
               <SkipForward size={14} />
             </button>
@@ -419,6 +479,59 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* Spacer */}
           <div className="flex-1" />
+
+          {/* Speed control */}
+          <div className="relative">
+            {showSpeedMenu && (
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setShowSpeedMenu(false)}
+              />
+            )}
+            <button
+              onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+              className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
+              title="Playback Speed"
+            >
+              {playbackRate === 1 ? '1.0x' : `${playbackRate}x`}
+            </button>
+            {showSpeedMenu && (
+              <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl py-1 min-w-[80px] z-20">
+                {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((rate) => (
+                  <button
+                    key={rate}
+                    onClick={() => changeSpeed(rate)}
+                    className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                      playbackRate === rate
+                        ? 'text-indigo-400 bg-indigo-500/10'
+                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                    }`}
+                  >
+                    {rate}x
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Resolution label */}
+          {resolution && (
+            <span className="px-2 py-1 text-xs font-mono text-zinc-400">
+              {resolution.height >= 2160 ? '4K' : resolution.height >= 1080 ? '1080p' : resolution.height >= 720 ? '720p' : `${resolution.height}p`}
+            </span>
+          )}
+
+          {/* Settings — opens shortcuts help */}
+          {onToggleShortcuts && (
+            <button
+              onClick={onToggleShortcuts}
+              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              aria-label="Keyboard Shortcuts"
+              title="Keyboard Shortcuts (?)"
+            >
+              <Settings size={16} />
+            </button>
+          )}
 
           {/* Fullscreen */}
           <button
