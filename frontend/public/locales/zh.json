@@ -633,6 +633,27 @@
     "noComments": "暂无评论",
     "anonymous": "匿名"
   },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "player": "播放器",
+    "navigation": "导航",
+    "speed": "速度",
+    "playPause": "播放 / 暂停",
+    "fullscreen": "全屏",
+    "mute": "静音",
+    "forward": "快进 5 秒",
+    "backward": "快退 5 秒",
+    "nextFrame": "下一帧",
+    "prevFrame": "上一帧",
+    "forward10": "+10 帧",
+    "backward10": "-10 帧",
+    "prevFile": "上一个文件",
+    "nextFile": "下一个文件",
+    "speedUp": "加速",
+    "speedDown": "减速",
+    "resetSpeed": "重置速度",
+    "showShortcuts": "显示快捷键"
+  },
   "shared": {
     "title": "我的分享",
     "empty": "暂无分享",

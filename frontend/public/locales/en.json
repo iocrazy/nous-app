@@ -633,6 +633,27 @@
     "noComments": "No comments yet",
     "anonymous": "Anonymous"
   },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "player": "Player",
+    "navigation": "Navigation",
+    "speed": "Speed",
+    "playPause": "Play / Pause",
+    "fullscreen": "Fullscreen",
+    "mute": "Mute",
+    "forward": "Forward 5s",
+    "backward": "Backward 5s",
+    "nextFrame": "Next Frame",
+    "prevFrame": "Prev Frame",
+    "forward10": "+10 Frames",
+    "backward10": "-10 Frames",
+    "prevFile": "Prev File",
+    "nextFile": "Next File",
+    "speedUp": "Speed Up",
+    "speedDown": "Speed Down",
+    "resetSpeed": "Reset Speed",
+    "showShortcuts": "Show Shortcuts"
+  },
   "shared": {
     "title": "My Shares",
     "empty": "No Shares Yet",

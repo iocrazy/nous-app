@@ -38,6 +38,8 @@ import { fetchTags } from '../services/tagsService';
 import { getSupabaseAccessToken } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { ShareModal } from './ShareModal';
+import VideoPlayer from './VideoPlayer';
+import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 
 // ─── Utility functions ──────────────────────────────────
 
@@ -200,6 +202,8 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -256,16 +260,17 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < siblingFiles.length - 1;
 
-  // Keyboard ← → navigation
+  // Keyboard ← → navigation (disabled for video — VideoPlayer uses arrows for seeking)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (resource?.mime_type?.startsWith('video/')) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToSibling('prev'); }
       if (e.key === 'ArrowRight') { e.preventDefault(); navigateToSibling('next'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [navigateToSibling]);
+  }, [navigateToSibling, resource]);
 
   // Reset notes when file changes
   useEffect(() => { setNotes(''); }, [resourceId]);
@@ -571,8 +576,23 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         )}
 
         {/* Preview area */}
-        <div className="flex-1 flex items-center justify-center bg-zinc-950 p-6 min-w-0 overflow-hidden">
-          <FilePreview resource={resource} fileUrl={fileUrl} />
+        <div className="flex-1 flex items-center justify-center bg-zinc-950 min-w-0 overflow-hidden">
+          {isVideo && fileUrl ? (
+            <div className="w-full h-full">
+              <VideoPlayer
+                src={fileUrl}
+                mimeType={resource.mime_type || undefined}
+                playerRef={videoRef}
+                onTimeUpdate={() => {}}
+                onDurationChange={() => {}}
+                onToggleShortcuts={() => setShowShortcuts((s) => !s)}
+              />
+            </div>
+          ) : (
+            <div className="p-6">
+              <FilePreview resource={resource} fileUrl={fileUrl} />
+            </div>
+          )}
         </div>
 
         {/* Right: Inspector panel (Eagle style) */}
@@ -778,6 +798,12 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           resourceId={resourceId}
         />
       )}
+
+      {/* Keyboard Shortcuts Dialog */}
+      <KeyboardShortcutsDialog
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 };
