@@ -173,6 +173,24 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource_item: {e}")
             return None
 
+    async def get_first_resource_item(
+        self, resource_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get the first resource_item for a resource (any scope)."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_ITEMS)
+                .select("*")
+                .eq("resource_id", resource_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get first resource_item: {e}")
+            return None
+
     async def update_resource_item(
         self, item_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:

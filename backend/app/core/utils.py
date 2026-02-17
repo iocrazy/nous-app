@@ -186,9 +186,9 @@ class Utils:
     @classmethod
     def create_web_resource_path(cls, platform: str, external_id: str) -> tuple[Path, str]:
         """
-        Create storage path for Parser downloads (design doc §3.2).
+        Create storage path for Parser downloads.
 
-        Path structure: {DOWNLOAD_PATH}/resources/web/{platform}/{external_id}/
+        Path structure: {DOWNLOAD_PATH}/global/web/{platform}/{external_id}/
 
         Args:
             platform: Source platform (e.g. 'douyin', 'bilibili')
@@ -196,10 +196,10 @@ class Utils:
 
         Returns:
             tuple[Path, str]: (full_path, relative_path_prefix)
-            e.g. (/Volumes/.../resources/web/douyin/12345/, resources/web/douyin/12345)
+            e.g. (/Volumes/.../global/web/douyin/12345/, global/web/douyin/12345)
         """
         base_path = cls.get_download_base_path()
-        relative = f"resources/web/{platform}/{external_id}"
+        relative = f"global/web/{platform}/{external_id}"
         full_path = Path(base_path) / relative
         os.makedirs(full_path, exist_ok=True)
         return full_path, relative
