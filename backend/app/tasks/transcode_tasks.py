@@ -1,0 +1,116 @@
+# app/tasks/transcode_tasks.py
+
+"""
+HLS Transcode Celery Tasks
+
+Async task for transcoding video resources to multi-bitrate HLS.
+Triggered after upload or parser download for video/* mime types.
+"""
+
+import asyncio
+
+from celery import shared_task
+from loguru import logger
+
+
+def run_async(coro):
+    """Run async coroutine in synchronous Celery environment."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=60)
+def transcode_to_hls(self, resource_id: str, version_id: str):
+    """
+    Celery task: transcode a resource version to HLS multi-bitrate.
+
+    Args:
+        resource_id: Resource UUID
+        version_id: ResourceVersion UUID
+
+    Returns:
+        dict with status and hls_path
+    """
+    logger.info(f"[Transcode] Starting HLS transcode: resource={resource_id}, version={version_id}")
+
+    try:
+        from app.services.transcode_service import TranscodeService
+
+        svc = TranscodeService()
+        hls_path = run_async(svc.transcode_version(resource_id, version_id))
+
+        if hls_path:
+            logger.success(f"[Transcode] Completed: {resource_id} → {hls_path}")
+            return {
+                "status": "completed",
+                "resource_id": resource_id,
+                "version_id": version_id,
+                "hls_path": hls_path,
+            }
+        else:
+            logger.warning(f"[Transcode] Failed for resource={resource_id}, version={version_id}")
+            return {
+                "status": "failed",
+                "resource_id": resource_id,
+                "version_id": version_id,
+            }
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[Transcode] Error: resource={resource_id}, error={error_msg}")
+
+        if self.request.retries < self.max_retries:
+            countdown = 60 * (2 ** self.request.retries)
+            logger.info(
+                f"[Transcode] Retry {self.request.retries + 1}/{self.max_retries} "
+                f"in {countdown}s for {resource_id}"
+            )
+            raise self.retry(exc=e, countdown=countdown)
+
+        # Mark as failed after max retries
+        try:
+            from app.repositories.resources_repository import ResourcesRepository
+            repo = ResourcesRepository()
+            run_async(repo.update_version(version_id, {"transcode_status": "failed"}))
+        except Exception:
+            pass
+
+        return {
+            "status": "failed",
+            "resource_id": resource_id,
+            "version_id": version_id,
+            "error": error_msg,
+        }
+
+
+def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str):
+    """
+    Helper: trigger HLS transcoding if the file is a video.
+
+    Call this after upload or download completion.
+    """
+    if not mime_type or not mime_type.startswith("video/"):
+        return
+
+    try:
+        # Mark as pending first
+        from app.repositories.resources_repository import ResourcesRepository
+        repo = ResourcesRepository()
+        run_async(repo.update_version(version_id, {"transcode_status": "pending"}))
+
+        # Dispatch Celery task
+        transcode_to_hls.delay(resource_id, version_id)
+        logger.info(
+            f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
+        )
+    except Exception as e:
+        logger.warning(f"[Transcode] Failed to queue transcode for {resource_id}: {e}")

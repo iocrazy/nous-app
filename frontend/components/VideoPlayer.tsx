@@ -2,14 +2,22 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 
+interface HlsLevel {
+  height: number;
+  width: number;
+  bitrate: number;
+}
+
 interface VideoPlayerProps {
   src: string;
   mimeType?: string;
   fps?: number;
+  authToken?: string;
   onTimeUpdate: (seconds: number) => void;
   onDurationChange: (seconds: number) => void;
   playerRef: React.RefObject<HTMLVideoElement | null>;
   onToggleShortcuts?: () => void;
+  commentMarkers?: Array<{ time: number; color?: string }>;
 }
 
 const formatTime = (seconds: number): string => {
@@ -32,10 +40,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   src,
   mimeType,
   fps = 30,
+  authToken,
   onTimeUpdate,
   onDurationChange,
   playerRef,
   onToggleShortcuts,
+  commentMarkers,
 }) => {
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +61,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [hlsLevels, setHlsLevels] = useState<HlsLevel[]>([]);
+  const [currentHlsLevel, setCurrentHlsLevel] = useState(-1);
+  const [isAutoQuality, setIsAutoQuality] = useState(true);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const effectiveFps = fps || 30;
   const isHls = src.endsWith('.m3u8');
@@ -87,6 +101,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setShowSpeedMenu(false);
   }, [playerRef]);
 
+  // Change HLS quality level (-1 = auto)
+  const changeQuality = useCallback((levelIndex: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = levelIndex;
+      setIsAutoQuality(levelIndex === -1);
+    }
+    setShowQualityMenu(false);
+  }, []);
+
   // Attach or detach HLS / native source
   useEffect(() => {
     const video = playerRef.current;
@@ -97,14 +120,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setCurrentTime(0);
     setDuration(0);
     setResolution(null);
+    setHlsLevels([]);
+    setCurrentHlsLevel(-1);
+    setIsAutoQuality(true);
 
     if (isHls && Hls.isSupported()) {
-      const hls = new Hls();
+      const hlsConfig: Partial<Hls['config']> = {};
+      if (authToken) {
+        hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
+          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+        };
+      }
+      const hls = new Hls(hlsConfig);
       hlsRef.current = hls;
       hls.loadSource(src);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         setIsLoading(false);
+        setHlsLevels(
+          data.levels.map((l) => ({
+            height: l.height,
+            width: l.width,
+            bitrate: l.bitrate,
+          })),
+        );
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        setCurrentHlsLevel(data.level);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
@@ -124,7 +166,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [src, isHls, playerRef]);
+  }, [src, isHls, authToken, playerRef]);
 
   // Video event listeners
   useEffect(() => {
@@ -401,6 +443,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             >
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity shadow-md" />
             </div>
+            {/* Comment timeline markers */}
+            {commentMarkers && duration > 0 && commentMarkers.map((marker, idx) => (
+              <div
+                key={idx}
+                className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full pointer-events-none"
+                style={{
+                  left: `${Math.min(100, (marker.time / duration) * 100)}%`,
+                  backgroundColor: marker.color || '#818cf8',
+                }}
+              />
+            ))}
           </div>
         </div>
 
@@ -514,12 +567,62 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </div>
 
-          {/* Resolution label */}
-          {resolution && (
+          {/* Quality selector (HLS) or static resolution label */}
+          {hlsLevels.length > 1 ? (
+            <div className="relative">
+              {showQualityMenu && (
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowQualityMenu(false)}
+                />
+              )}
+              <button
+                onClick={() => setShowQualityMenu(!showQualityMenu)}
+                className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
+                title="Quality"
+              >
+                {isAutoQuality
+                  ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].height}p)` : ''}`
+                  : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
+                    ? `${hlsLevels[currentHlsLevel].height}p`
+                    : 'Auto'}
+              </button>
+              {showQualityMenu && (
+                <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl py-1 min-w-[100px] z-20">
+                  <button
+                    onClick={() => changeQuality(-1)}
+                    className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                      isAutoQuality
+                        ? 'text-indigo-400 bg-indigo-500/10'
+                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  {hlsLevels
+                    .map((level, idx) => ({ level, idx }))
+                    .sort((a, b) => b.level.height - a.level.height)
+                    .map(({ level, idx }) => (
+                      <button
+                        key={idx}
+                        onClick={() => changeQuality(idx)}
+                        className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                          !isAutoQuality && currentHlsLevel === idx
+                            ? 'text-indigo-400 bg-indigo-500/10'
+                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        }`}
+                      >
+                        {level.height}p
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          ) : resolution ? (
             <span className="px-2 py-1 text-xs font-mono text-zinc-400">
               {resolution.height >= 2160 ? '4K' : resolution.height >= 1080 ? '1080p' : resolution.height >= 720 ? '720p' : `${resolution.height}p`}
             </span>
-          )}
+          ) : null}
 
           {/* Settings — opens shortcuts help */}
           {onToggleShortcuts && (

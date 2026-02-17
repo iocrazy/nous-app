@@ -36,6 +36,35 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
+def _maybe_chain_transcode(platform_id: str, user_id: str):
+    """Chain HLS transcoding after download if the resource is a video."""
+    try:
+        from app.repositories.resources_repository import ResourcesRepository
+
+        repo = ResourcesRepository()
+        resource = run_async(repo.get_resource_by_platform_id(platform_id))
+        if not resource:
+            return
+
+        mime = resource.get("mime_type", "")
+        if not mime.startswith("video/"):
+            return
+
+        resource_id = str(resource["id"])
+        versions = run_async(repo.get_versions(resource_id))
+        if not versions:
+            return
+
+        # Transcode the latest version
+        latest = versions[0]
+        version_id = str(latest["id"])
+
+        from app.tasks.transcode_tasks import maybe_trigger_transcode
+        maybe_trigger_transcode(resource_id, version_id, mime)
+    except Exception as e:
+        logger.warning(f"[Celery] Failed to chain transcode for {platform_id}: {e}")
+
+
 def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
     """Chain AI tasks after download if user has auto-transcribe/summarize enabled."""
     try:
@@ -252,6 +281,9 @@ def download_media_task(
                     logger.warning(
                         f"[Celery] Failed to create resource record for {platform_id}: {e}"
                     )
+
+                # Chain HLS transcode for video files
+                _maybe_chain_transcode(platform_id, user_id)
 
                 # Chain AI pipeline if user has auto-transcribe enabled
                 _maybe_chain_ai_pipeline(platform_id, user_id)
@@ -522,6 +554,9 @@ def download_ytdlp_task(
             logger.warning(
                 f"[Celery/yt-dlp] Failed to create resource record for {platform_id}: {e}"
             )
+
+        # Chain HLS transcode for video files
+        _maybe_chain_transcode(platform_id, user_id)
 
         # Log success
         run_async(

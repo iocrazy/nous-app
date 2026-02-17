@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -30,16 +31,22 @@ import {
   addResourceTag,
   removeResourceTag,
   getResourceFileUrl,
+  getVersionFileUrl,
+  getVersionHlsUrl,
   fetchResourceContext,
   fetchResources,
   getResourceCoverUrl,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
-import { getSupabaseAccessToken } from '../supabaseClient';
+import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { ShareModal } from './ShareModal';
+import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
+import { ResourceReviewPanel } from './ResourceReviewPanel';
+import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
+import { fetchComments } from '../services/reviewService';
 
 // ─── Utility functions ──────────────────────────────────
 
@@ -203,7 +210,12 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showVersionDropdown, setShowVersionDropdown] = useState(false);
+  const [showVersionManager, setShowVersionManager] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const versionDropdownRef = useRef<HTMLDivElement>(null);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -218,6 +230,15 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [showTagDropdown, setShowTagDropdown] = useState(false);
   const [tagSearch, setTagSearch] = useState('');
   const tagDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Review state
+  const [rightTab, setRightTab] = useState<'info' | 'review'>('info');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [annotationActive, setAnnotationActive] = useState(false);
+  const [pendingAnnotations, setPendingAnnotations] = useState<NormalizedAnnotation[]>([]);
+  const [viewAnnotations, setViewAnnotations] = useState<NormalizedAnnotation[] | undefined>();
+  const [commentMarkers, setCommentMarkers] = useState<Array<{ time: number }>>([]);
 
   // Load sibling files for file list panel
   useEffect(() => {
@@ -282,6 +303,9 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         setShowTagDropdown(false);
         setTagSearch('');
       }
+      if (versionDropdownRef.current && !versionDropdownRef.current.contains(e.target as Node)) {
+        setShowVersionDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -293,24 +317,68 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       )
     : siblingFiles;
 
-  // Build authenticated file URL
+  // Build authenticated file URL (for current resource or selected version)
+  // Prefer HLS URL when transcode is completed for the viewing version
   useEffect(() => {
     let cancelled = false;
     const buildUrl = async () => {
       try {
         const token = await getSupabaseAccessToken();
-        if (!cancelled) {
+        if (cancelled) return;
+        setAuthToken(token);
+
+        // Determine which version we're looking at
+        const viewingVersion = selectedVersionId
+          ? versions.find((v) => v.id === selectedVersionId)
+          : versions.find((v) => v.version_number === resource?.current_version);
+
+        // If the version has HLS ready, use HLS URL for video
+        if (
+          viewingVersion?.hls_path &&
+          viewingVersion.transcode_status === 'completed' &&
+          resource?.mime_type?.startsWith('video/')
+        ) {
+          setFileUrl(getVersionHlsUrl(resourceId, viewingVersion.id, token || undefined));
+        } else if (selectedVersionId) {
+          setFileUrl(getVersionFileUrl(resourceId, selectedVersionId, token || undefined));
+        } else {
           setFileUrl(getResourceFileUrl(resourceId, token || undefined));
         }
       } catch {
-        if (!cancelled) {
+        if (cancelled) return;
+        if (selectedVersionId) {
+          setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
+        } else {
           setFileUrl(getResourceFileUrl(resourceId));
         }
       }
     };
     buildUrl();
     return () => { cancelled = true; };
+  }, [resourceId, selectedVersionId, versions, resource?.current_version, resource?.mime_type]);
+
+  // Handle version change from VersionManagerModal (re-fetch resource + versions)
+  const handleVersionChange = useCallback(async () => {
+    try {
+      const [res, vers] = await Promise.all([
+        fetchResourceById(resourceId),
+        fetchResourceVersions(resourceId).catch(() => []),
+      ]);
+      setResource(res);
+      setVersions(vers);
+      setSelectedVersionId(null);
+    } catch { /* ignore */ }
   }, [resourceId]);
+
+  // Select a specific version to preview
+  const handleSelectVersion = useCallback((version: ResourceVersion) => {
+    if (version.version_number === resource?.current_version) {
+      setSelectedVersionId(null);
+    } else {
+      setSelectedVersionId(version.id);
+    }
+    setShowVersionDropdown(false);
+  }, [resource]);
 
   // Fetch resource data
   useEffect(() => {
@@ -363,6 +431,35 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     } catch { /* ignore */ }
   }, [resourceId]);
 
+  // Get current user ID for review panel
+  useEffect(() => {
+    const loadUser = async () => {
+      const client = getSupabaseClient();
+      if (!client) return;
+      try {
+        const { data: { user } } = await client.auth.getUser();
+        if (user) setCurrentUserId(user.id);
+      } catch { /* ignore */ }
+    };
+    loadUser();
+  }, []);
+
+  // Load comment markers for video timeline
+  const refreshCommentMarkers = useCallback(async () => {
+    try {
+      const cmts = await fetchComments(resourceId);
+      setCommentMarkers(
+        cmts.filter((c) => c.timecode != null).map((c) => ({ time: c.timecode! })),
+      );
+    } catch { /* ignore */ }
+  }, [resourceId]);
+
+  useEffect(() => {
+    if (resource?.mime_type?.startsWith('video/')) {
+      refreshCommentMarkers();
+    }
+  }, [resource?.mime_type, refreshCommentMarkers]);
+
   const handleBack = useCallback(() => {
     navigate(-1);
   }, [navigate]);
@@ -397,6 +494,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const { icon: FileIcon, color: iconColor, bg: iconBg } = getFileIcon(resource.mime_type);
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
+  const viewingVersion = selectedVersionId
+    ? versions.find((v) => v.id === selectedVersionId)
+    : versions.find((v) => v.version_number === resource.current_version);
+  const transcodeStatus = viewingVersion?.transcode_status;
   const assignedTagIds = new Set(assignedTags.map((t) => t.tag?.id).filter(Boolean));
   const fileExt = getFileExtension(resource.filename);
   const availableTags = allTags.filter((tag) => !assignedTagIds.has(tag.id));
@@ -445,6 +546,105 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
             <span className="text-sm text-zinc-200 font-medium max-w-[300px] truncate">
               {resource.filename}
             </span>
+            {/* Version dropdown */}
+            {versions.length > 0 && (
+              <div className="relative" ref={versionDropdownRef}>
+                <button
+                  onClick={() => setShowVersionDropdown(!showVersionDropdown)}
+                  className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
+                    selectedVersionId
+                      ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                      : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                  }`}
+                >
+                  <Layers size={12} />
+                  <span>
+                    {selectedVersionId
+                      ? `v${versions.find(v => v.id === selectedVersionId)?.version_number ?? '?'}`
+                      : `v${resource.current_version}`}
+                  </span>
+                  <ChevronDown size={12} />
+                </button>
+                {showVersionDropdown && (
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-56 py-1">
+                    <div className="px-3 py-1.5 border-b border-zinc-800">
+                      <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">
+                        {t('resources.versions', 'Versions')}
+                      </p>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto py-1">
+                      {versions
+                        .sort((a, b) => b.version_number - a.version_number)
+                        .map((ver) => {
+                          const isCurrentVer = ver.version_number === resource.current_version;
+                          const isSelected = selectedVersionId ? ver.id === selectedVersionId : isCurrentVer;
+                          return (
+                            <button
+                              key={ver.id}
+                              onClick={() => handleSelectVersion(ver)}
+                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                                isSelected
+                                  ? 'bg-indigo-500/10 text-indigo-300'
+                                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                              }`}
+                            >
+                              <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
+                                v{ver.version_number}
+                              </span>
+                              <span className="truncate flex-1 text-left">{ver.filename}</span>
+                              {ver.transcode_status === 'completed' && (
+                                <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                  HLS
+                                </span>
+                              )}
+                              {(ver.transcode_status === 'pending' || ver.transcode_status === 'processing') && (
+                                <Loader2 size={10} className="animate-spin text-amber-400 shrink-0" />
+                              )}
+                              {isCurrentVer && (
+                                <span className="text-[9px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">
+                                  current
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                    </div>
+                    <div className="border-t border-zinc-800 px-2 py-1.5">
+                      <button
+                        onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
+                      >
+                        <Layers size={12} />
+                        {t('resources.manageVersions', 'Manage Versions')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Transcoding status badge */}
+            {isVideo && transcodeStatus === 'pending' && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                <Loader2 size={10} className="animate-spin" />
+                {t('resources.transcoding', 'Transcoding...')}
+              </span>
+            )}
+            {isVideo && transcodeStatus === 'processing' && (
+              <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-400 rounded-md">
+                <Loader2 size={10} className="animate-spin" />
+                {t('resources.transcoding', 'Transcoding...')}
+              </span>
+            )}
+            {isVideo && transcodeStatus === 'failed' && (
+              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 rounded-md">
+                {t('resources.transcodeFailed', 'Transcode Failed')}
+              </span>
+            )}
+            {isVideo && transcodeStatus === 'completed' && (
+              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 rounded-md">
+                HLS
+              </span>
+            )}
             {currentIndex >= 0 && siblingFiles.length > 0 && (
               <span className="text-xs text-zinc-500">
                 ({currentIndex + 1}/{siblingFiles.length})
@@ -576,16 +776,43 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         )}
 
         {/* Preview area */}
-        <div className="flex-1 flex items-center justify-center bg-zinc-950 min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden">
+          {/* Version preview banner */}
+          {selectedVersionId && (
+            <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
+              <Layers size={12} />
+              <span>
+                {t('resources.viewingVersion', 'Viewing version')} v{versions.find(v => v.id === selectedVersionId)?.version_number}
+              </span>
+              <button
+                onClick={() => setSelectedVersionId(null)}
+                className="ml-2 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded text-amber-200 transition-colors"
+              >
+                {t('resources.backToCurrent', 'Back to current')}
+              </button>
+            </div>
+          )}
+          <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden">
           {isVideo && fileUrl ? (
-            <div className="w-full h-full">
+            <div className="w-full h-full relative">
               <VideoPlayer
                 src={fileUrl}
                 mimeType={resource.mime_type || undefined}
+                authToken={authToken || undefined}
                 playerRef={videoRef}
-                onTimeUpdate={() => {}}
+                onTimeUpdate={(t) => setVideoCurrentTime(t)}
                 onDurationChange={() => {}}
                 onToggleShortcuts={() => setShowShortcuts((s) => !s)}
+                commentMarkers={commentMarkers}
+              />
+              <ResourceAnnotationOverlay
+                isActive={annotationActive}
+                viewAnnotations={viewAnnotations}
+                onDone={(anns) => {
+                  setPendingAnnotations(anns);
+                  setAnnotationActive(false);
+                }}
+                onCancel={() => setAnnotationActive(false)}
               />
             </div>
           ) : (
@@ -593,11 +820,37 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               <FilePreview resource={resource} fileUrl={fileUrl} />
             </div>
           )}
+          </div>
         </div>
 
         {/* Right: Inspector panel (Eagle style) */}
-        <div className="w-80 border-l border-zinc-800 overflow-y-auto shrink-0">
+        <div className="w-80 border-l border-zinc-800 flex flex-col shrink-0">
+          {/* Tab bar */}
+          <div className="flex border-b border-zinc-800 shrink-0">
+            <button
+              onClick={() => setRightTab('info')}
+              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                rightTab === 'info'
+                  ? 'text-zinc-200 border-b-2 border-indigo-500'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Info
+            </button>
+            <button
+              onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
+              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                rightTab === 'review'
+                  ? 'text-zinc-200 border-b-2 border-indigo-500'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Review
+            </button>
+          </div>
 
+          {rightTab === 'info' ? (
+          <div className="overflow-y-auto flex-1">
           {/* Section 1 — File Header */}
           <div className="px-4 py-4">
             <div className="flex items-start gap-3">
@@ -752,40 +1005,72 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           {/* Section 6 — Versions */}
           {versions.length > 0 && (
             <div className="px-4 py-3 border-t border-zinc-800">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-                {t('resources.versions')}
-              </h4>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
+                  {t('resources.versions')}
+                </h4>
+                <button
+                  onClick={() => setShowVersionManager(true)}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  {t('resources.manageVersions', 'Manage')}
+                </button>
+              </div>
               <div className="space-y-1">
                 {versions
                   .sort((a, b) => b.version_number - a.version_number)
-                  .map((ver) => (
-                    <div
-                      key={ver.id}
-                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-zinc-800/70 ${
-                        ver.version_number === resource.current_version
-                          ? 'bg-indigo-500/10 border border-indigo-500/20'
-                          : 'bg-transparent'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className={`font-medium ${
-                          ver.version_number === resource.current_version
-                            ? 'text-indigo-400'
-                            : 'text-zinc-300'
-                        }`}>
-                          v{ver.version_number}
+                  .map((ver) => {
+                    const isCurrentVer = ver.version_number === resource.current_version;
+                    const isViewing = selectedVersionId ? ver.id === selectedVersionId : isCurrentVer;
+                    return (
+                      <button
+                        key={ver.id}
+                        onClick={() => handleSelectVersion(ver)}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-zinc-800/70 ${
+                          isViewing
+                            ? 'bg-indigo-500/10 border border-indigo-500/20'
+                            : 'bg-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-medium ${
+                            isViewing ? 'text-indigo-400' : 'text-zinc-300'
+                          }`}>
+                            v{ver.version_number}
+                          </span>
+                          {isCurrentVer && (
+                            <span className="text-emerald-400/60 text-[10px]">current</span>
+                          )}
+                          {isViewing && !isCurrentVer && (
+                            <span className="text-amber-400/60 text-[10px]">viewing</span>
+                          )}
+                        </div>
+                        <span className="text-zinc-500 text-[10px]">
+                          {formatDate(ver.created_at)}
                         </span>
-                        {ver.version_number === resource.current_version && (
-                          <span className="text-indigo-400/60 text-[10px]">current</span>
-                        )}
-                      </div>
-                      <span className="text-zinc-500 text-[10px]">
-                        {formatDate(ver.created_at)}
-                      </span>
-                    </div>
-                  ))}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
+          )}
+          </div>
+          ) : (
+            <ResourceReviewPanel
+              resourceId={resourceId}
+              versionId={selectedVersionId || viewingVersion?.id}
+              currentUserId={currentUserId}
+              currentTime={videoCurrentTime}
+              isVideo={!!isVideo}
+              onSeekTo={(s) => { if (videoRef.current) videoRef.current.currentTime = s; }}
+              onStartAnnotation={() => { setAnnotationActive(true); setViewAnnotations(undefined); }}
+              pendingAnnotations={pendingAnnotations}
+              onClearAnnotations={() => setPendingAnnotations([])}
+              onViewAnnotations={(annotations) => {
+                setViewAnnotations(annotations.map(a => ({ tool_type: a.tool_type, data: a.data })));
+              }}
+              onCommentChange={refreshCommentMarkers}
+            />
           )}
         </div>
       </div>
@@ -798,6 +1083,15 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           resourceId={resourceId}
         />
       )}
+
+      {/* Version Manager Modal */}
+      <VersionManagerModal
+        isOpen={showVersionManager}
+        onClose={() => setShowVersionManager(false)}
+        resourceId={resourceId}
+        currentVersionNumber={resource.current_version}
+        onVersionChange={handleVersionChange}
+      />
 
       {/* Keyboard Shortcuts Dialog */}
       <KeyboardShortcutsDialog

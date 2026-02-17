@@ -118,7 +118,7 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Video 
 export const fetchVideoByAwemeId = fetchVideoByPlatformId;
 
 /**
- * Fetch a single video by display_id (Snowflake ID for URL-friendly access)
+ * Fetch a single video by id (Snowflake BIGINT)
  */
 export const fetchVideoByDisplayId = async (displayId: string): Promise<Video | null> => {
   const supabase = getSupabaseClient();
@@ -133,18 +133,18 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<Video | 
     const { data, error } = await supabase
       .from(VIEW_NAME)
       .select('*')
-      .eq('display_id', displayId)
+      .eq('id', displayId)
       .eq('user_id', user.id)
       .maybeSingle();
 
     if (error) {
-      console.error('Failed to fetch video by display_id:', error);
+      console.error('Failed to fetch video by id:', error);
       return null;
     }
 
     return data as Video | null;
   } catch (e) {
-    console.error('Error fetching video by display_id:', e);
+    console.error('Error fetching video by id:', e);
     return null;
   }
 };

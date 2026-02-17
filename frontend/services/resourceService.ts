@@ -337,6 +337,59 @@ export async function fetchResourceVersions(resourceId: string): Promise<Resourc
   return json.data || [];
 }
 
+// ─── Version Management ─────────────────────────────────
+
+export async function uploadNewVersion(
+  resourceId: string,
+  file: File,
+  notes?: string,
+): Promise<ResourceVersion> {
+  const apiUrl = getApiUrl();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const authHeaders = await getAuthHeaders();
+  Object.entries(authHeaders).forEach(([k, v]) => {
+    if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
+  });
+
+  const params = new URLSearchParams();
+  if (notes) params.set('notes', notes);
+
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/versions?${params}`,
+    { method: 'POST', headers, body: formData },
+  );
+  if (!response.ok) throw new Error('Failed to upload new version');
+  const json = await response.json();
+  return json.data;
+}
+
+export async function setCurrentVersion(
+  resourceId: string,
+  versionNumber: number,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionNumber}/set-current`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error('Failed to set current version');
+}
+
+export async function deleteVersion(
+  resourceId: string,
+  versionId: string,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}`,
+    { method: 'DELETE', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error('Failed to delete version');
+}
+
 // ─── File URL ───────────────────────────────────────────
 
 export function getResourceFileUrl(resourceId: string, token?: string): string {
@@ -351,6 +404,24 @@ export function getResourceFileUrl(resourceId: string, token?: string): string {
 export function getResourceCoverUrl(resourceId: string, token?: string): string {
   const apiUrl = getApiUrl();
   const base = `${apiUrl}/api/v1/resources/${resourceId}/cover`;
+  if (token) {
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+  return base;
+}
+
+export function getVersionFileUrl(resourceId: string, versionId: string, token?: string): string {
+  const apiUrl = getApiUrl();
+  const base = `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}/file`;
+  if (token) {
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+  return base;
+}
+
+export function getVersionHlsUrl(resourceId: string, versionId: string, token?: string): string {
+  const apiUrl = getApiUrl();
+  const base = `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}/hls/master.m3u8`;
   if (token) {
     return `${base}?token=${encodeURIComponent(token)}`;
   }
