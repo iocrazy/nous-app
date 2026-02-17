@@ -1,8 +1,8 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import { File, Film, Image, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
-import { getResourceCoverUrl } from '../services/resourceService';
+import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
 import { formatDateShort } from '../utils/formatDate';
 
 interface ResourceCardProps {
@@ -105,14 +105,51 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const createdAt = resource?.created_at ?? item.created_at;
   const { icon: IconComponent, color, bg } = getFileIcon(mimeType);
 
-  // Determine thumbnail source: thumbnail_path (Supabase URL) > cover endpoint
+  // Determine thumbnail source: always use cover API endpoint
   const thumbnailSrc = React.useMemo(() => {
-    if (resource?.thumbnail_path) return resource.thumbnail_path;
-    if (resource?.cover_image_path && resource?.id) {
+    if ((resource?.thumbnail_path || resource?.cover_image_path) && resource?.id) {
       return getResourceCoverUrl(String(resource.id));
     }
     return null;
   }, [resource?.thumbnail_path, resource?.cover_image_path, resource?.id]);
+
+  // Hover scrub state for video cards
+  const isVideo = mimeType?.startsWith('video/') ?? false;
+  const [isHovering, setIsHovering] = useState(false);
+  const [spriteLoaded, setSpriteLoaded] = useState(false);
+  const [spriteError, setSpriteError] = useState(false);
+  const [scrubPercent, setScrubPercent] = useState(0);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const spriteImgRef = useRef<HTMLImageElement | null>(null);
+
+  const spriteUrl = React.useMemo(() => {
+    if (isVideo && resource?.id) return getPreviewSpriteUrl(String(resource.id));
+    return null;
+  }, [isVideo, resource?.id]);
+
+  // Preload sprite on first hover
+  const handleThumbMouseEnter = useCallback(() => {
+    if (!isVideo || spriteError) return;
+    setIsHovering(true);
+    if (!spriteImgRef.current && spriteUrl) {
+      const img = new window.Image();
+      img.onload = () => { spriteImgRef.current = img; setSpriteLoaded(true); };
+      img.onerror = () => { setSpriteError(true); };
+      img.src = spriteUrl;
+    }
+  }, [isVideo, spriteUrl, spriteError]);
+
+  const handleThumbMouseLeave = useCallback(() => {
+    setIsHovering(false);
+    setScrubPercent(0);
+  }, []);
+
+  const handleThumbMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isHovering || !spriteLoaded || !thumbRef.current) return;
+    const rect = thumbRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    setScrubPercent(x / rect.width);
+  }, [isHovering, spriteLoaded]);
 
 
   // ─── Drag support ────────────────────────────────────
@@ -266,22 +303,53 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       }`}
     >
       {checkbox}
-      {/* Thumbnail */}
-      <div className={`relative h-28 flex items-center justify-center ${bg}`}>
+      {/* Thumbnail + Hover Scrub */}
+      <div
+        ref={thumbRef}
+        className={`relative h-28 flex items-center justify-center ${bg}`}
+        onMouseEnter={handleThumbMouseEnter}
+        onMouseLeave={handleThumbMouseLeave}
+        onMouseMove={handleThumbMouseMove}
+      >
         {thumbnailSrc ? (
           <img
             src={thumbnailSrc}
             alt={filename}
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-cover transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
             loading="lazy"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         ) : (
           <IconComponent size={36} className={`${color} opacity-50 group-hover:opacity-80 transition-opacity`} />
         )}
+        {/* Sprite scrub overlay */}
+        {isHovering && spriteLoaded && spriteImgRef.current && (
+          <div
+            className="absolute inset-0 bg-no-repeat"
+            style={{
+              backgroundImage: `url(${spriteUrl})`,
+              backgroundSize: `${10 * 100}% 100%`,
+              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% 0`,
+            }}
+          />
+        )}
+        {/* Scrub progress bar */}
+        {isHovering && spriteLoaded && (
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-black/30">
+            <div className="h-full bg-white/80 transition-none" style={{ width: `${scrubPercent * 100}%` }} />
+          </div>
+        )}
         {mimeType?.startsWith('video/') && resource?.duration_seconds != null && (
+          <span className={`absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums ${isHovering && spriteLoaded ? 'hidden' : ''}`}>
+            {isHovering && spriteLoaded
+              ? formatDuration(Math.floor(scrubPercent * resource.duration_seconds))
+              : formatDuration(resource.duration_seconds)}
+          </span>
+        )}
+        {/* Scrub timestamp */}
+        {isHovering && spriteLoaded && resource?.duration_seconds != null && (
           <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums">
-            {formatDuration(resource.duration_seconds)}
+            {formatDuration(Math.floor(scrubPercent * resource.duration_seconds))}
           </span>
         )}
       </div>

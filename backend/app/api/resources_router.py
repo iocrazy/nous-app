@@ -349,36 +349,72 @@ async def serve_resource_file(
 
 @router.get("/{resource_id}/cover")
 async def serve_resource_cover(resource_id: str):
-    """Serve cover image for a resource (used as thumbnail, no auth required)."""
+    """Serve cover/thumbnail image for a resource (no auth required).
+
+    Priority: thumbnail_path > cover_image_path.
+    Both are relative paths resolved against DOWNLOAD_PATH.
+    """
     try:
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        cover_path = resource.get("cover_image_path")
-        if not cover_path:
-            raise HTTPException(status_code=404, detail="No cover image available")
-
         from app.core.config import settings
 
-        full_path = Path(settings.DOWNLOAD_PATH) / cover_path
+        # Try thumbnail first, then cover image
+        for field in ("thumbnail_path", "cover_image_path"):
+            rel_path = resource.get(field)
+            if not rel_path:
+                continue
+            # Skip old Supabase Storage URLs (http://...)
+            if rel_path.startswith("http"):
+                continue
+            full_path = Path(settings.DOWNLOAD_PATH) / rel_path
+            if full_path.exists():
+                import mimetypes
+                mime, _ = mimetypes.guess_type(str(full_path))
+                return FileResponse(
+                    path=str(full_path),
+                    media_type=mime or "image/jpeg",
+                )
 
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail="Cover image not found on disk")
-
-        import mimetypes
-
-        mime, _ = mimetypes.guess_type(str(full_path))
-        return FileResponse(
-            path=str(full_path),
-            media_type=mime or "image/jpeg",
-        )
+        raise HTTPException(status_code=404, detail="No cover image available")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to serve cover for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve cover image")
+
+
+@router.get("/{resource_id}/preview-sprite")
+async def serve_preview_sprite(resource_id: str):
+    """Serve preview sprite sheet for hover scrub (no auth required)."""
+    try:
+        repo = ResourcesRepository()
+        resource = await repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        file_path = resource.get("file_path")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="No file path")
+
+        from app.core.config import settings
+
+        sprite_path = Path(settings.DOWNLOAD_PATH) / Path(file_path).parent / "preview_sprite.jpg"
+        if not sprite_path.exists():
+            raise HTTPException(status_code=404, detail="Preview sprite not found")
+
+        return FileResponse(
+            path=str(sprite_path),
+            media_type="image/jpeg",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve sprite for resource {resource_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve preview sprite")
 
 
 @router.patch("/{resource_id}")

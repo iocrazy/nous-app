@@ -355,6 +355,11 @@ export function getResourceCoverUrl(resourceId: string, token?: string): string 
   return base;
 }
 
+export function getPreviewSpriteUrl(resourceId: string): string {
+  const apiUrl = getApiUrl();
+  return `${apiUrl}/api/v1/resources/${resourceId}/preview-sprite`;
+}
+
 // ─── Tags ────────────────────────────────────────────────
 
 export async function fetchResourceTags(resourceId: string) {
