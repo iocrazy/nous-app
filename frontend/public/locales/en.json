@@ -418,7 +418,8 @@
     "deleteForever": "Delete Forever",
     "permanentDeleteSuccess": "Permanently deleted",
     "permanentDeleteFailed": "Failed to permanently delete",
-    "movedToTrash": "Moved to Recycle Bin"
+    "movedToTrash": "Moved to Recycle Bin",
+    "recycleBinAutoCleanup": "Items in the recycle bin will be automatically deleted after 15 days."
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

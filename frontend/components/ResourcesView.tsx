@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
+  Clock,
   FolderOpen,
   Loader2,
   Upload,
@@ -2139,6 +2140,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
               <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
               <p className="text-sm text-zinc-400 mt-1">{t('resources.dropToUploadHint')}</p>
+            </div>
+          )}
+
+          {/* Recycle bin auto-cleanup notice */}
+          {isRecycleView && (
+            <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-zinc-800/50 border border-zinc-700/50 rounded-lg text-xs text-zinc-400">
+              <Clock size={14} className="shrink-0 text-zinc-500" />
+              <span>{t('resources.recycleBinAutoCleanup')}</span>
             </div>
           )}
 
