@@ -347,7 +347,7 @@ class ResourcesService:
 
         if file_path:
             full_path = base / file_path
-            # If file is in a dedicated directory (resources/web/{platform}/{id}/),
+            # If file is in a dedicated directory (global/resources/web/{platform}/{id}/),
             # remove the entire directory
             parent = full_path.parent
             if parent != base and parent.exists() and parent.name != base.name:

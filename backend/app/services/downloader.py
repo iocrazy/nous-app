@@ -376,7 +376,7 @@ class DownloaderService:
 
             logger.info(f"准备下载视频: {platform_id}")
 
-            # Create structured path: resources/web/{platform}/{external_id}/
+            # Create structured path: global/resources/web/{platform}/{external_id}/
             source_platform = video_data.get("source_platform", "douyin")
             full_path, relative_prefix = Utils.create_web_resource_path(
                 source_platform, platform_id
@@ -535,7 +535,7 @@ class DownloaderService:
 
             logger.info(f"准备下载 {platform_id} 的图片集")
 
-            # Create structured path: resources/web/{platform}/{external_id}/
+            # Create structured path: global/resources/web/{platform}/{external_id}/
             source_platform = video_data.get("source_platform", "douyin")
             sub_download_full_path, sub_download_relative_path = (
                 Utils.create_web_resource_path(source_platform, platform_id)
@@ -730,7 +730,7 @@ class DownloaderService:
             # Get music URL list from dict
             music_urls = music_data.get("music_download_urls", [])
 
-            # Create structured path: resources/web/{platform}/{external_id}/
+            # Create structured path: global/resources/web/{platform}/{external_id}/
             # Note: music_data doesn't have source_platform, default to douyin
             full_path, relative_prefix = Utils.create_web_resource_path(
                 "douyin", platform_id
@@ -873,7 +873,7 @@ class DownloaderService:
                 result.error = "没有封面 URL"
                 return result
 
-            # Create structured path: resources/web/{platform}/{external_id}/
+            # Create structured path: global/resources/web/{platform}/{external_id}/
             full_path, relative_prefix = Utils.create_web_resource_path(
                 source_platform, platform_id
             )

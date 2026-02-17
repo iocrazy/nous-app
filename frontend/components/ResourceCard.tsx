@@ -328,8 +328,8 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             className="absolute inset-0 bg-no-repeat bg-black"
             style={{
               backgroundImage: `url(${spriteUrl})`,
-              backgroundSize: `auto 100%`,
-              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% center`,
+              backgroundSize: `${10 * 100}% 100%`,
+              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% 0`,
             }}
           />
         )}

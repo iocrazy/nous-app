@@ -2360,15 +2360,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         )}
       </div>
 
-      {/* ── Right panel spacer: occupies flex space so content area shrinks ── */}
-      {selectedResource?.resource && (
-        <div
-          className="shrink-0 transition-[width] duration-300 ease-in-out"
-          style={{ width: showInfoPanel ? `${infoPanelWidth}px` : '0px' }}
-        />
-      )}
-
-      {/* ── Right panel: Fixed full-height, from TopBar bottom to viewport bottom ── */}
+      {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
       {selectedResource?.resource && (
         <div
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
