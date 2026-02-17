@@ -68,16 +68,16 @@ class ResourcesService:
             "current_version": 1,
         }
         resource = await self.repo.create_resource(resource_data)
-        resource_id = resource["id"]
+        resource_id = str(resource["id"])
 
-        # Save to disk
-        save_dir = Path(settings.DOWNLOAD_PATH) / "resources" / resource_id
+        # Save to disk — teams/{scope_id}/uploads/{resource_id}/
+        save_dir = Path(settings.DOWNLOAD_PATH) / "teams" / scope_id / "uploads" / resource_id
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
         with open(target, "wb") as f:
             f.write(content)
 
-        relative_path = f"resources/{resource_id}/{safe_name}"
+        relative_path = f"teams/{scope_id}/uploads/{resource_id}/{safe_name}"
 
         # Extract video metadata
         metadata = {}
@@ -134,8 +134,15 @@ class ResourcesService:
         safe_name = self._sanitize_filename(file.filename)
         content = await file.read()
 
+        # Version files stored alongside the resource
+        # Need scope_id from resource_items to build path
+        item = await self.repo.get_first_resource_item(resource_id)
+        if not item:
+            raise ValueError("Resource has no scope association")
+        version_scope_id = item["scope_id"]
+
         save_dir = (
-            Path(settings.DOWNLOAD_PATH) / "resources" / resource_id / "versions"
+            Path(settings.DOWNLOAD_PATH) / "teams" / version_scope_id / "uploads" / resource_id / "versions"
         )
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / f"v{next_version}_{safe_name}"
@@ -149,7 +156,7 @@ class ResourcesService:
             metadata = await self._extract_video_metadata(str(target))
 
         relative_path = (
-            f"resources/{resource_id}/versions/v{next_version}_{safe_name}"
+            f"teams/{version_scope_id}/uploads/{resource_id}/versions/v{next_version}_{safe_name}"
         )
         version_data = {
             "resource_id": resource_id,
