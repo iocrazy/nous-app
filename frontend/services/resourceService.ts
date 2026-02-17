@@ -163,7 +163,8 @@ export async function fetchResources(
     .select('*, resource:resources!inner(*)')
     .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
-    .eq('resources.is_trashed', false);
+    .eq('resources.is_trashed', false)
+    .neq('resource.source_type', 'web');
 
   if (folderId) {
     query = query.eq('folder_id', folderId);
@@ -192,7 +193,8 @@ export async function fetchResourceCount(
     .select('*, resource:resources!inner(*)', { count: 'exact', head: true })
     .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
-    .eq('resources.is_trashed', false);
+    .eq('resources.is_trashed', false)
+    .neq('resource.source_type', 'web');
 
   if (error) throw error;
   return count || 0;
@@ -623,6 +625,52 @@ export async function getFolderPreview(
     thumbnail_path: item.resource?.thumbnail_path ?? null,
     mime_type: item.resource?.mime_type ?? null,
   }));
+}
+
+// Soft-delete a downloaded video by moving it to the recycle bin (by platform_id).
+export async function trashResourceByPlatformId(
+  platformId: string,
+  scopeType: 'personal' | 'team' = 'personal',
+  scopeId?: string,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_type: scopeType });
+  if (scopeId) params.set('scope_id', scopeId);
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/by-platform-id/${platformId}/trash?${params}`,
+    {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+    },
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Trash failed' }));
+    throw new Error(err.detail || 'Failed to trash resource');
+  }
+}
+
+// Unlink a downloaded video's resource from the user's scope (by video_id).
+// Does NOT delete the douyin_videos record or physical files.
+// The DB orphan-GC trigger auto-trashes the resource if no references remain.
+export async function unlinkResourceByPlatformId(
+  platformId: string,
+  scopeType: 'personal' | 'team' = 'personal',
+  scopeId?: string,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_type: scopeType });
+  if (scopeId) params.set('scope_id', scopeId);
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/by-platform-id/${platformId}?${params}`,
+    {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    },
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Unlink failed' }));
+    throw new Error(err.detail || 'Failed to unlink resource');
+  }
 }
 
 // 批量删除

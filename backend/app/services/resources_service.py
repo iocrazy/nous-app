@@ -313,7 +313,14 @@ class ResourcesService:
             raise PermissionError("Only the creator can delete this resource")
 
         self._delete_physical_files(resource)
-        return await self.repo.delete_resource(resource_id)
+
+        video_id = resource.get("video_id")
+        result = await self.repo.delete_resource(resource_id)
+
+        if video_id:
+            await self._delete_video_record(video_id)
+
+        return result
 
     async def cleanup_expired_trash(self, older_than_days: int = 30) -> int:
         """
@@ -327,7 +334,10 @@ class ResourcesService:
         for resource in expired:
             try:
                 self._delete_physical_files(resource)
+                video_id = resource.get("video_id")
                 await self.repo.delete_resource(resource["id"])
+                if video_id:
+                    await self._delete_video_record(video_id)
                 cleaned += 1
             except Exception as e:
                 logger.error(
@@ -375,6 +385,17 @@ class ResourcesService:
                     logger.info(f"Deleted cover: {cover_full}")
                 except Exception as e:
                     logger.warning(f"Failed to delete cover {cover_full}: {e}")
+
+    async def _delete_video_record(self, video_id: str) -> None:
+        """Delete the videos table record (orphaned after resource deletion)."""
+        try:
+            from app.db.supabase_client import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            await client.table("videos").delete().eq("id", video_id).execute()
+            logger.info(f"Deleted video record: {video_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete video record {video_id}: {e}")
 
     # ------------------------------------------------------------------ #
     # Move resource to folder

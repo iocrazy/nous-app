@@ -380,13 +380,13 @@ def health_check():
 
 @shared_task
 def cleanup_trashed_resources():
-    """Permanently delete trashed resources older than 30 days."""
+    """Permanently delete trashed resources older than 15 days."""
     logger.info("[Celery Beat] Starting trashed resource cleanup...")
     try:
         from app.services.resources_service import ResourcesService
 
         svc = ResourcesService()
-        cleaned = run_async(svc.cleanup_expired_trash(older_than_days=30))
+        cleaned = run_async(svc.cleanup_expired_trash(older_than_days=15))
         logger.success(
             f"[Celery Beat] Trashed resource cleanup done: {cleaned} deleted"
         )
