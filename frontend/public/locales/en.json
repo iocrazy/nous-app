@@ -419,7 +419,8 @@
     "permanentDeleteSuccess": "Permanently deleted",
     "permanentDeleteFailed": "Failed to permanently delete",
     "movedToTrash": "Moved to Recycle Bin",
-    "recycleBinAutoCleanup": "Items in the recycle bin will be automatically deleted after 15 days."
+    "recycleBinAutoCleanup": "Items in the recycle bin will be automatically deleted after 15 days.",
+    "daysLeft": "{{count}}d left"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
