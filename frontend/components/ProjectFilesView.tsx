@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon } from 'lucide-react';
+import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, ProjectFolder } from '../types';
 import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile } from '../services/projectsService';
@@ -32,6 +32,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [folderChain, setFolderChain] = useState<ProjectFolder[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -165,6 +166,10 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
   const filteredAndSorted = useMemo(() => {
     let result = files.filter(f => !f.is_trashed);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(f => (f.filename || '').toLowerCase().includes(q));
+    }
     if (filterType !== 'all') {
       result = result.filter(f => getFileCategory(f) === filterType);
     }
@@ -174,7 +179,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
     });
     return result;
-  }, [files, filterType, sortBy]);
+  }, [files, filterType, sortBy, searchQuery]);
 
   return (
     <div className="flex h-full">
@@ -190,8 +195,34 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <ArrowLeft size={20} />
             </button>
             <h1 className="text-2xl font-bold text-white">{project.name}</h1>
+            {project.announcement && (
+              <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded-lg max-w-[200px] truncate">
+                {project.announcement}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Member avatars placeholder */}
+            <div className="flex items-center -space-x-2">
+              <div className="w-7 h-7 rounded-full bg-indigo-500/30 flex items-center justify-center text-[10px] text-indigo-300 border-2 border-zinc-900">
+                <Users size={12} />
+              </div>
+              <button className="w-7 h-7 rounded-full bg-zinc-800 border-2 border-zinc-900 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors">
+                <Plus size={12} />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder={t('projects.header.searchFiles', 'Search files...')}
+                className="w-40 pl-8 pr-3 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:w-56 transition-all"
+              />
+            </div>
+
             {/* Link Video */}
             <button
               onClick={() => setIsLinkModalOpen(true)}
