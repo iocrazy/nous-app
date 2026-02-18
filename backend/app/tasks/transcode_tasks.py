@@ -29,18 +29,38 @@ def run_async(coro):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def transcode_to_hls(self, resource_id: str, version_id: str):
+def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = None):
     """
     Celery task: transcode a resource version to HLS multi-bitrate.
 
     Args:
         resource_id: Resource UUID
         version_id: ResourceVersion UUID
+        user_id: Optional user ID for unified task tracking
 
     Returns:
         dict with status and hls_path
     """
+    task_id = self.request.id
     logger.info(f"[Transcode] Starting HLS transcode: resource={resource_id}, version={version_id}")
+
+    # ── Unified task tracking ──
+    unified_task_id = None
+    if user_id:
+        try:
+            from app.services.task_tracker import get_task_tracker
+            tracker = get_task_tracker()
+            unified_task_id = run_async(tracker.create(
+                user_id=user_id,
+                task_type="transcode",
+                title=f"HLS Transcode",
+                subtitle=version_id[:8],
+                resource_id=resource_id,
+                celery_task_id=task_id,
+            ))
+            run_async(tracker.start(unified_task_id))
+        except Exception as e:
+            logger.warning(f"[Transcode] Unified tracker create failed: {e}")
 
     try:
         from app.services.transcode_service import TranscodeService
@@ -50,6 +70,12 @@ def transcode_to_hls(self, resource_id: str, version_id: str):
 
         if hls_path:
             logger.success(f"[Transcode] Completed: {resource_id} → {hls_path}")
+            if unified_task_id:
+                try:
+                    from app.services.task_tracker import get_task_tracker
+                    run_async(get_task_tracker().complete(unified_task_id))
+                except Exception:
+                    pass
             return {
                 "status": "completed",
                 "resource_id": resource_id,
@@ -58,6 +84,12 @@ def transcode_to_hls(self, resource_id: str, version_id: str):
             }
         else:
             logger.warning(f"[Transcode] Failed for resource={resource_id}, version={version_id}")
+            if unified_task_id:
+                try:
+                    from app.services.task_tracker import get_task_tracker
+                    run_async(get_task_tracker().fail(unified_task_id, "Transcode returned no output"))
+                except Exception:
+                    pass
             return {
                 "status": "failed",
                 "resource_id": resource_id,
@@ -77,6 +109,13 @@ def transcode_to_hls(self, resource_id: str, version_id: str):
             raise self.retry(exc=e, countdown=countdown)
 
         # Mark as failed after max retries
+        if unified_task_id:
+            try:
+                from app.services.task_tracker import get_task_tracker
+                run_async(get_task_tracker().fail(unified_task_id, error_msg[:500]))
+            except Exception:
+                pass
+
         try:
             from app.repositories.resources_repository import ResourcesRepository
             repo = ResourcesRepository()
@@ -92,7 +131,7 @@ def transcode_to_hls(self, resource_id: str, version_id: str):
         }
 
 
-def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str):
+def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str, user_id: str = None):
     """
     Helper: trigger HLS transcoding if the file is a video.
 
@@ -108,7 +147,7 @@ def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str):
         run_async(repo.update_version(version_id, {"transcode_status": "pending"}))
 
         # Dispatch Celery task
-        transcode_to_hls.delay(resource_id, version_id)
+        transcode_to_hls.delay(resource_id, version_id, user_id)
         logger.info(
             f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
         )

@@ -217,7 +217,11 @@
     "notifications": "通知",
     "noNotifications": "暂无通知",
     "account": "账户",
-    "helpDocs": "帮助与文档"
+    "helpDocs": "帮助与文档",
+    "active": "进行中",
+    "activeCount": "{{count}} 个进行中",
+    "allComplete": "所有任务已完成",
+    "clearCompleted": "清除"
   },
   "plans": {
     "free": "免费"

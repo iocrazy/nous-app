@@ -310,6 +310,40 @@ def reset_monthly_quotas():
 
 
 @shared_task
+def cleanup_old_unified_tasks():
+    """
+    Clean up old completed/failed/cancelled unified tasks.
+
+    Removes tasks older than 7 days that are in terminal state.
+    Runs once daily.
+    """
+    logger.info("[Celery Beat] Starting unified_tasks cleanup...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _cleanup():
+            supabase = await get_async_supabase_admin()
+            cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+            result = (
+                await supabase.table("unified_tasks")
+                .delete()
+                .in_("status", ["completed", "failed", "cancelled"])
+                .lt("updated_at", cutoff)
+                .execute()
+            )
+            return len(result.data) if result.data else 0
+
+        deleted = run_async(_cleanup())
+        logger.success(f"[Celery Beat] Unified tasks cleanup: {deleted} old tasks removed")
+        return {"status": "success", "deleted": deleted}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Unified tasks cleanup failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def health_check():
     """
     Health check task

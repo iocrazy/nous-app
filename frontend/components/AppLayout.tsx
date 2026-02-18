@@ -15,6 +15,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
 import { UploadProvider } from '../contexts/UploadContext';
+import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
@@ -184,6 +185,7 @@ export function AppLayout() {
 
   return (
     <ToastProvider>
+    <TaskManagerProvider>
     <UploadProvider>
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
 
@@ -431,6 +433,7 @@ export function AppLayout() {
       />
     </div>
     </UploadProvider>
+    </TaskManagerProvider>
     </ToastProvider>
   );
 }

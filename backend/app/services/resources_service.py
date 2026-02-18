@@ -121,7 +121,7 @@ class ResourcesService:
         if file_type == "video":
             versions = await self.repo.get_versions(resource_id)
             if versions:
-                self._trigger_transcode(resource_id, str(versions[0]["id"]), mime)
+                self._trigger_transcode(resource_id, str(versions[0]["id"]), mime, user_id=user_id)
 
         return resource
 
@@ -209,7 +209,7 @@ class ResourcesService:
 
         # Trigger HLS transcode for video files
         if file_type == "video":
-            self._trigger_transcode(resource_id, str(version["id"]), mime)
+            self._trigger_transcode(resource_id, str(version["id"]), mime, user_id=user_id)
 
         return version
 
@@ -542,11 +542,11 @@ class ResourcesService:
             return "audio"
         return "document"
 
-    def _trigger_transcode(self, resource_id: str, version_id: str, mime_type: str):
+    def _trigger_transcode(self, resource_id: str, version_id: str, mime_type: str, user_id: str = None):
         """Queue HLS transcoding for a video version."""
         try:
             from app.tasks.transcode_tasks import maybe_trigger_transcode
-            maybe_trigger_transcode(resource_id, version_id, mime_type)
+            maybe_trigger_transcode(resource_id, version_id, mime_type, user_id=user_id)
         except Exception as e:
             logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
 
