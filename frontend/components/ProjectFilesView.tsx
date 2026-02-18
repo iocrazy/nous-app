@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus } from 'lucide-react';
+import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile } from '../types';
-import { fetchProjectFiles, uploadFile } from '../services/projectsService';
+import { Project, ProjectFile, ProjectFolder } from '../types';
+import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder } from '../services/projectsService';
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
@@ -27,6 +27,9 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [sortBy, setSortBy] = useState<SortField>('updated_at');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<ProjectFolder[]>([]);
+  const [folderChain, setFolderChain] = useState<ProjectFolder[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -43,18 +46,46 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   }, [uploadMenuOpen]);
 
   useEffect(() => {
-    loadFiles();
-  }, [project.id]);
+    loadContent();
+  }, [project.id, currentFolderId]);
 
-  const loadFiles = async () => {
+  const loadContent = async () => {
     setIsLoading(true);
     try {
-      const data = await fetchProjectFiles(project.id);
-      setFiles(data);
+      const [filesData, foldersData] = await Promise.all([
+        fetchProjectFiles(project.id, false, currentFolderId),
+        fetchProjectFolders(project.id, currentFolderId),
+      ]);
+      setFiles(filesData);
+      setFolders(foldersData);
     } catch (err) {
-      console.error('Failed to load files:', err);
+      console.error('Failed to load content:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Build breadcrumb chain when navigating into a folder
+  const navigateToFolder = (folderId: string | null, folder?: ProjectFolder) => {
+    if (folderId === null) {
+      setFolderChain([]);
+    } else if (folder) {
+      const existingIdx = folderChain.findIndex(f => f.id === folderId);
+      if (existingIdx >= 0) {
+        setFolderChain(folderChain.slice(0, existingIdx + 1));
+      } else {
+        setFolderChain([...folderChain, folder]);
+      }
+    }
+    setCurrentFolderId(folderId);
+  };
+
+  const handleCreateFolder = async () => {
+    try {
+      await createProjectFolder(project.id, 'New Folder', currentFolderId);
+      await loadContent();
+    } catch (err) {
+      console.error('Failed to create folder:', err);
     }
   };
 
@@ -76,7 +107,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       for (const file of Array.from(filesList)) {
         await uploadFile(project.id, file);
       }
-      await loadFiles();
+      await loadContent();
     } catch (err) {
       console.error('Failed to upload file:', err);
     } finally {
@@ -215,11 +246,45 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               )}
             </div>
 
+            {/* New Folder */}
+            <button
+              onClick={handleCreateFolder}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus size={14} />
+              {t('projects.toolbar.newFolder', 'New Folder')}
+            </button>
+
             {/* Hidden inputs */}
             <input ref={fileInputRef} type="file" multiple onChange={handleUpload} className="hidden" />
             <input ref={folderInputRef} type="file" {...{ webkitdirectory: '', directory: '' } as any} multiple onChange={handleUpload} className="hidden" />
           </div>
         </div>
+
+        {/* Breadcrumb */}
+        {folderChain.length > 0 && (
+          <nav className="flex items-center gap-1 text-sm mb-3">
+            <button
+              onClick={() => navigateToFolder(null)}
+              className="text-zinc-400 hover:text-white transition-colors"
+            >
+              {project.name}
+            </button>
+            {folderChain.map((f) => (
+              <React.Fragment key={f.id}>
+                <ChevronRight size={14} className="text-zinc-600" />
+                <button
+                  onClick={() => navigateToFolder(f.id, f)}
+                  className={`transition-colors ${
+                    f.id === currentFolderId ? 'text-white' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {f.name}
+                </button>
+              </React.Fragment>
+            ))}
+          </nav>
+        )}
 
         {/* Loading */}
         {isLoading && (
@@ -229,7 +294,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         )}
 
         {/* Empty state */}
-        {!isLoading && filteredAndSorted.length === 0 && (
+        {!isLoading && folders.length === 0 && filteredAndSorted.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="p-4 bg-zinc-800 rounded-2xl mb-4">
               <FolderOpen size={40} className="text-zinc-500" />
@@ -256,8 +321,18 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         )}
 
         {/* Grid view */}
-        {!isLoading && filteredAndSorted.length > 0 && viewMode === 'grid' && (
+        {!isLoading && (folders.length > 0 || filteredAndSorted.length > 0) && viewMode === 'grid' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {folders.map(folder => (
+              <div
+                key={folder.id}
+                onClick={() => navigateToFolder(folder.id, folder)}
+                className="group bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 rounded-xl p-4 cursor-pointer transition-colors flex flex-col items-center gap-2"
+              >
+                <FolderIcon size={44} className="text-amber-400" />
+                <p className="text-sm text-zinc-200 truncate w-full text-center">{folder.name}</p>
+              </div>
+            ))}
             {filteredAndSorted.map(file => (
               <FileCard
                 key={file.id}
@@ -270,8 +345,18 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         )}
 
         {/* List view */}
-        {!isLoading && filteredAndSorted.length > 0 && viewMode === 'list' && (
+        {!isLoading && (folders.length > 0 || filteredAndSorted.length > 0) && viewMode === 'list' && (
           <div className="space-y-2">
+            {folders.map(folder => (
+              <div
+                key={folder.id}
+                onClick={() => navigateToFolder(folder.id, folder)}
+                className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 rounded-xl cursor-pointer transition-colors"
+              >
+                <FolderIcon size={20} className="text-amber-400 shrink-0" />
+                <span className="text-sm text-zinc-200 truncate">{folder.name}</span>
+              </div>
+            ))}
             {filteredAndSorted.map(file => (
               <FileCard
                 key={file.id}
@@ -299,7 +384,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         projectId={project.id}
         onLinked={() => {
           setIsLinkModalOpen(false);
-          loadFiles();
+          loadContent();
         }}
       />
     </div>

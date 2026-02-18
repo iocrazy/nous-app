@@ -567,6 +567,16 @@ export interface Project {
   updated_at: string;
 }
 
+export interface ProjectFolder {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
 
 export interface FileVersion {
