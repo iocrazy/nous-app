@@ -1126,7 +1126,7 @@ async def _handle_ytdlp_fetch(
         raise HTTPException(status_code=400, detail=str(e))
 
     # Step 2: Map yt-dlp metadata to our Video schema
-    parsed_data = YtdlpService._map_metadata_to_video(ytdlp_info, url)
+    parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
 
     # Step 2.5: Enrich Bilibili stats (favorite_count, share_count)
     if platform == "bilibili" and parsed_data.get("external_id"):

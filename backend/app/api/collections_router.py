@@ -10,7 +10,7 @@ from app.schemas.collections import (
     CollectionResponse,
     CollectionRules,
     CollectionUpdate,
-    CollectionVideosResponse,
+    CollectionMediaResponse,
 )
 from app.services.collections_service import CollectionsService
 
@@ -45,7 +45,7 @@ async def list_collections(
                 rules=CollectionRules(
                     **c.get("rules", {"match": "all", "conditions": []})
                 ),
-                video_count=c.get("cached_count", 0),
+                media_count=c.get("cached_count", 0),
                 cached_at=c.get("cached_at"),
                 is_preset=c.get("is_preset", False),
                 is_active=c.get("is_active", True),
@@ -92,7 +92,7 @@ async def create_collection(
         rules=CollectionRules(
             **created.get("rules", {"match": "all", "conditions": []})
         ),
-        video_count=created.get("cached_count", 0),
+        media_count=created.get("cached_count", 0),
         cached_at=created.get("cached_at"),
         is_preset=created.get("is_preset", False),
         is_active=created.get("is_active", True),
@@ -127,7 +127,7 @@ async def get_collection(
         rules=CollectionRules(
             **collection.get("rules", {"match": "all", "conditions": []})
         ),
-        video_count=collection.get("cached_count", 0),
+        media_count=collection.get("cached_count", 0),
         cached_at=collection.get("cached_at"),
         is_preset=collection.get("is_preset", False),
         is_active=collection.get("is_active", True),
@@ -189,7 +189,7 @@ async def update_collection(
         rules=CollectionRules(
             **updated.get("rules", {"match": "all", "conditions": []})
         ),
-        video_count=updated.get("cached_count", 0),
+        media_count=updated.get("cached_count", 0),
         cached_at=updated.get("cached_at"),
         is_preset=updated.get("is_preset", False),
         is_active=updated.get("is_active", True),
@@ -232,8 +232,8 @@ async def delete_collection(
         )
 
 
-@router.get("/{collection_id}/videos", response_model=CollectionVideosResponse)
-async def get_collection_videos(
+@router.get("/{collection_id}/media", response_model=CollectionMediaResponse)
+async def get_collection_media(
     collection_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -254,7 +254,7 @@ async def get_collection_videos(
             status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
-    videos, total = await service.get_collection_videos(
+    media, total = await service.get_collection_media(
         collection_id=collection_id,
         user_id=auth.user_id,
         page=page,
@@ -262,10 +262,10 @@ async def get_collection_videos(
         use_cache=not refresh,
     )
 
-    return CollectionVideosResponse(
+    return CollectionMediaResponse(
         collection_id=collection["id"],
         collection_name=collection["name"],
-        videos=videos,
+        media=media,
         total=total,
         page=page,
         page_size=page_size,
@@ -292,7 +292,7 @@ async def refresh_collection(
     return {
         "message": "Collection refreshed",
         "collection_id": collection_id,
-        "video_count": count,
+        "media_count": count,
     }
 
 

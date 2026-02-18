@@ -13,20 +13,20 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.ai_repository import AIRepository
-from app.repositories.video_repository import VideoRepository
+from app.repositories.media_repository import MediaRepository
 from app.schemas.ai import SummaryResponse, TranscriptResponse
 from app.services.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 
-async def _get_video_or_404(platform_id: str) -> dict:
-    """Look up video by platform_id or raise 404."""
-    repo = VideoRepository()
-    video = await repo.get_by_platform_id(platform_id)
-    if not video:
-        raise HTTPException(status_code=404, detail=f"Video not found: {platform_id}")
-    return video
+async def _get_media_or_404(platform_id: str) -> dict:
+    """Look up media by platform_id or raise 404."""
+    repo = MediaRepository()
+    media = await repo.get_by_platform_id(platform_id)
+    if not media:
+        raise HTTPException(status_code=404, detail=f"Media not found: {platform_id}")
+    return media
 
 
 # ------------------------------------------------------------------
@@ -40,7 +40,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
 
     Queues the extract_audio → transcribe chain via Celery.
     """
-    await _get_video_or_404(platform_id)
+    await _get_media_or_404(platform_id)
 
     # === Points check ===
     points_service = PointsService()
@@ -129,11 +129,11 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    video = await _get_video_or_404(platform_id)
-    video_id = video["id"]
+    media = await _get_media_or_404(platform_id)
+    media_id = media["id"]
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(video_id)
+    transcript = await ai_repo.get_transcript(media_id)
 
     try:
         if transcript and transcript.get("full_text"):
@@ -183,7 +183,7 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
     (Placeholder - visual analysis is not yet implemented.)
     """
-    await _get_video_or_404(platform_id)
+    await _get_media_or_404(platform_id)
 
     # === Points check ===
     points_service = PointsService()
@@ -236,18 +236,18 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
 @router.get("/transcript/{platform_id}", response_model=TranscriptResponse)
 async def get_transcript(platform_id: str, auth: AuthDep):
-    """Get transcript for a video."""
-    video = await _get_video_or_404(platform_id)
-    video_id = video["id"]
+    """Get transcript for a media item."""
+    media = await _get_media_or_404(platform_id)
+    media_id = media["id"]
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(video_id)
+    transcript = await ai_repo.get_transcript(media_id)
 
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     return TranscriptResponse(
-        video_id=video_id,
+        video_id=media_id,
         language=transcript.get("language"),
         full_text=transcript.get("full_text"),
         segments=transcript.get("segments"),
@@ -259,18 +259,18 @@ async def get_transcript(platform_id: str, auth: AuthDep):
 
 @router.get("/summary/{platform_id}", response_model=SummaryResponse)
 async def get_summary(platform_id: str, auth: AuthDep):
-    """Get summary for a video."""
-    video = await _get_video_or_404(platform_id)
-    video_id = video["id"]
+    """Get summary for a media item."""
+    media = await _get_media_or_404(platform_id)
+    media_id = media["id"]
 
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(video_id)
+    summary = await ai_repo.get_summary(media_id)
 
     if not summary:
         raise HTTPException(status_code=404, detail="Summary not found")
 
     return SummaryResponse(
-        video_id=video_id,
+        video_id=media_id,
         summary_type=summary.get("summary_type"),
         summary_text=summary.get("summary_text"),
         key_points=summary.get("key_points"),

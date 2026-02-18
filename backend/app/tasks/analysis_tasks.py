@@ -75,7 +75,7 @@ def analyze_video_l1_task(
         if result.category and result.category != "Other":
             tag = await tags_repo.get_tag_by_name(result.category)
             if tag:
-                await tags_repo.add_tag_to_video(
+                await tags_repo.add_tag_to_media(
                     video_id=video_id,
                     tag_id=tag["id"],
                     confidence=0.8,  # AI-based confidence
@@ -85,7 +85,7 @@ def analyze_video_l1_task(
 
         # Generate embedding
         # Get existing tags for this video
-        video_tags = await tags_repo.get_video_tags(video_id)
+        video_tags = await tags_repo.get_media_tags(video_id)
         tag_names = [t["tags"]["name"] for t in video_tags if t.get("tags")]
 
         embedding_text = embedding_service.build_embedding_text(
@@ -216,7 +216,7 @@ def analyze_video_l2_task(
                 if result.category and result.category != "Other":
                     tag = await tags_repo.get_tag_by_name(result.category)
                     if tag:
-                        await tags_repo.add_tag_to_video(
+                        await tags_repo.add_tag_to_media(
                             video_id=video_id,
                             tag_id=tag["id"],
                             confidence=0.9,  # Higher confidence for L2
@@ -224,7 +224,7 @@ def analyze_video_l2_task(
                         )
 
                 # Regenerate embedding
-                video_tags = await tags_repo.get_video_tags(video_id)
+                video_tags = await tags_repo.get_media_tags(video_id)
                 tag_names = [t["tags"]["name"] for t in video_tags if t.get("tags")]
 
                 embedding_text = embedding_service.build_embedding_text(
@@ -286,7 +286,7 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
         for video_id in video_ids[:batch_size]:
             # Get video info
             result = (
-                await supabase.table("videos")
+                await supabase.table("parsed_media")
                 .select("id, title, description, cover_url")
                 .eq("id", video_id)
                 .maybe_single()

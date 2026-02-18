@@ -48,7 +48,7 @@ async def get_cleanup_data(
     return CleanupDataResponse(
         suggestions=[
             CleanupSuggestionSchema(
-                video_id=s.video_id,
+                media_id=s.media_id,
                 title=s.title,
                 cover_url=s.cover_url,
                 author=s.author,
@@ -106,7 +106,7 @@ async def get_cleanup_suggestions(
     return CleanupSuggestionsResponse(
         suggestions=[
             CleanupSuggestionSchema(
-                video_id=s.video_id,
+                media_id=s.media_id,
                 title=s.title,
                 cover_url=s.cover_url,
                 author=s.author,
@@ -140,9 +140,9 @@ async def get_cleanup_stats(auth: AuthDep = None):
     return CleanupStats(**stats)
 
 
-@router.post("/videos/{video_id}/action")
+@router.post("/media/{media_id}/action")
 async def take_cleanup_action(
-    video_id: int,
+    media_id: int,
     action: CleanupAction,
     auth: AuthDep = None,
 ):
@@ -150,41 +150,41 @@ async def take_cleanup_action(
     Take action on a cleanup suggestion.
 
     Actions:
-    - **keep_forever**: Mark video to never be suggested for cleanup
+    - **keep_forever**: Mark media item to never be suggested for cleanup
     - **dismiss**: Ignore this suggestion (temporary)
-    - **delete**: Delete the video (moves to trash or permanent delete)
+    - **delete**: Delete the media item (moves to trash or permanent delete)
     """
     service = CleanupService()
 
     if action.action == "keep_forever":
-        success = await service.mark_keep_forever(video_id, auth.user_id)
+        success = await service.mark_keep_forever(media_id, auth.user_id)
         if success:
-            return {"message": "Video marked to keep forever", "video_id": video_id}
-        raise HTTPException(status_code=404, detail="Video not found")
+            return {"message": "Media marked to keep forever", "media_id": media_id}
+        raise HTTPException(status_code=404, detail="Media not found")
 
     elif action.action == "dismiss":
         # For dismiss, we just return success - frontend handles hiding
-        return {"message": "Suggestion dismissed", "video_id": video_id}
+        return {"message": "Suggestion dismissed", "media_id": media_id}
 
     elif action.action == "delete":
-        # Delete video
+        # Delete media
         from app.db.supabase_client import get_async_supabase_admin
 
         supabase = await get_async_supabase_admin()
 
         result = (
-            await supabase.table("videos")
+            await supabase.table("parsed_media")
             .delete()
-            .eq("id", video_id)
+            .eq("id", media_id)
             .eq("user_id", auth.user_id)
             .execute()
         )
 
         if result.data:
-            logger.info(f"Deleted video {video_id} via cleanup")
-            return {"message": "Video deleted", "video_id": video_id}
+            logger.info(f"Deleted media {media_id} via cleanup")
+            return {"message": "Media deleted", "media_id": media_id}
 
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(status_code=404, detail="Media not found")
 
 
 @router.post("/batch")
@@ -195,26 +195,26 @@ async def batch_cleanup_action(
     """
     Take action on multiple cleanup suggestions at once.
 
-    Maximum 100 videos per batch.
+    Maximum 100 media items per batch.
     """
-    if len(action.video_ids) > 100:
-        raise HTTPException(status_code=400, detail="Maximum 100 videos per batch")
+    if len(action.media_ids) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 media items per batch")
 
     service = CleanupService()
     results = {"success": [], "failed": []}
 
-    for video_id in action.video_ids:
+    for media_id in action.media_ids:
         try:
             if action.action == "keep_forever":
-                success = await service.mark_keep_forever(video_id, auth.user_id)
+                success = await service.mark_keep_forever(media_id, auth.user_id)
             elif action.action == "delete":
                 from app.db.supabase_client import get_async_supabase_admin
 
                 supabase = await get_async_supabase_admin()
                 result = (
-                    await supabase.table("videos")
+                    await supabase.table("parsed_media")
                     .delete()
-                    .eq("id", video_id)
+                    .eq("id", media_id)
                     .eq("user_id", auth.user_id)
                     .execute()
                 )
@@ -223,16 +223,16 @@ async def batch_cleanup_action(
                 success = True
 
             if success:
-                results["success"].append(video_id)
+                results["success"].append(media_id)
             else:
-                results["failed"].append(video_id)
+                results["failed"].append(media_id)
 
         except Exception as e:
-            logger.error(f"Batch action failed for video {video_id}: {e}")
-            results["failed"].append(video_id)
+            logger.error(f"Batch action failed for media {media_id}: {e}")
+            results["failed"].append(media_id)
 
     return {
-        "message": f"Processed {len(action.video_ids)} videos",
+        "message": f"Processed {len(action.media_ids)} media items",
         "action": action.action,
         "success_count": len(results["success"]),
         "failed_count": len(results["failed"]),
@@ -240,34 +240,34 @@ async def batch_cleanup_action(
     }
 
 
-@router.post("/videos/{video_id}/keep")
+@router.post("/media/{media_id}/keep")
 async def mark_keep_forever(
-    video_id: int,
+    media_id: int,
     auth: AuthDep = None,
 ):
-    """Shortcut to mark a video as keep forever."""
+    """Shortcut to mark a media item as keep forever."""
     service = CleanupService()
-    success = await service.mark_keep_forever(video_id, auth.user_id)
+    success = await service.mark_keep_forever(media_id, auth.user_id)
 
     if success:
-        return {"message": "Video marked to keep forever", "video_id": video_id}
+        return {"message": "Media marked to keep forever", "media_id": media_id}
 
-    raise HTTPException(status_code=404, detail="Video not found")
+    raise HTTPException(status_code=404, detail="Media not found")
 
 
-@router.delete("/videos/{video_id}/keep")
+@router.delete("/media/{media_id}/keep")
 async def unmark_keep_forever(
-    video_id: int,
+    media_id: int,
     auth: AuthDep = None,
 ):
-    """Remove keep forever mark from a video."""
+    """Remove keep forever mark from a media item."""
     service = CleanupService()
-    success = await service.unmark_keep_forever(video_id, auth.user_id)
+    success = await service.unmark_keep_forever(media_id, auth.user_id)
 
     if success:
-        return {"message": "Keep forever mark removed", "video_id": video_id}
+        return {"message": "Keep forever mark removed", "media_id": media_id}
 
-    raise HTTPException(status_code=404, detail="Video not found")
+    raise HTTPException(status_code=404, detail="Media not found")
 
 
 @router.get("/storage")
@@ -283,7 +283,7 @@ async def get_storage_breakdown(auth: AuthDep = None):
 
     # Get all videos with storage info
     result = (
-        await supabase.table("videos")
+        await supabase.table("parsed_media")
         .select("id, storage_size, media_type, created_at")
         .eq("user_id", auth.user_id)
         .execute()
