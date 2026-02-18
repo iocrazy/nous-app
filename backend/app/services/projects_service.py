@@ -199,46 +199,46 @@ class ProjectsService:
         return created_file
 
     # ------------------------------------------------------------------ #
-    # Link video
+    # Link media
     # ------------------------------------------------------------------ #
 
-    async def link_video(self, project_id: str, video_id: str, user_id: str) -> dict:
+    async def link_media(self, project_id: str, media_id: str, user_id: str) -> dict:
         """
-        Link an existing video from the videos table to a project.
+        Link an existing media from the parsed_media table to a project.
 
         Args:
             project_id: UUID of the project.
-            video_id: UUID of the video.
+            media_id: UUID of the media.
             user_id: UUID of the authenticated user.
 
         Returns:
             Created file dict.
 
         Raises:
-            ValueError: If project or video not found.
+            ValueError: If project or media not found.
         """
         project = await self.repo.get_project_by_id(project_id)
         if not project:
             raise ValueError("Project not found")
 
-        video = await self.repo.get_video_metadata(video_id)
-        if not video:
-            raise ValueError("Video not found")
+        media = await self.repo.get_media_metadata(media_id)
+        if not media:
+            raise ValueError("Media not found")
 
         file_data = {
             "project_id": project_id,
-            "filename": video.get("title", "Untitled") or "Untitled",
+            "filename": media.get("title", "Untitled") or "Untitled",
             "file_type": "video",
             "mime_type": "video/mp4",
-            "file_path": video.get("download_path"),
-            "file_size_bytes": video.get("datasize_bytes"),
-            "video_id": video_id,
+            "file_path": media.get("download_path"),
+            "file_size_bytes": media.get("datasize_bytes"),
+            "media_id": media_id,
             "duration_seconds": (
-                int(video["duration"]) if video.get("duration") else None
+                int(media["duration"]) if media.get("duration") else None
             ),
-            "resolution": video.get("resolution"),
+            "resolution": media.get("resolution"),
             "uploaded_by": user_id,
-            "cover_image_path": video.get("cover_download_path"),
+            "cover_image_path": media.get("cover_download_path"),
         }
         return await self.repo.create_file(file_data)
 

@@ -21,8 +21,8 @@ from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import log_user_action
-from app.repositories.video_repository import VideoRepository
-from app.schemas.video import (
+from app.repositories.media_repository import MediaRepository
+from app.schemas.media import (
     DownloadCoverResult,
     DownloadImagesResult,
     DownloadMusicResult,
@@ -364,7 +364,7 @@ class DownloaderService:
         try:
 
             # Establish database connection
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
             video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
@@ -428,7 +428,7 @@ class DownloaderService:
                         )
 
                         # Store relative path and file size to database
-                        await repo.mark_video_as_downloaded(
+                        await repo.mark_media_as_downloaded(
                             platform_id=platform_id,
                             download_path=video_relative_path,  # Use relative path
                             duration=download_duration,
@@ -523,7 +523,7 @@ class DownloaderService:
 
         try:
             # Establish database connection
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
             video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
@@ -709,7 +709,7 @@ class DownloaderService:
         headers = Utils.get_headers()
 
         try:
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video ID
             logger.info(f"准备下载媒体 {platform_id} 的音乐")
@@ -840,7 +840,7 @@ class DownloaderService:
         headers = Utils.get_headers()
 
         try:
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
             video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)

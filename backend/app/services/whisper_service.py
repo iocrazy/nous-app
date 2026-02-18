@@ -73,18 +73,18 @@ class WhisperService:
 
     async def transcribe_and_save(
         self,
-        video_id: str,
+        media_id: str,
         audio_path: str,
         language: str = "auto",
         whisper_model: str = "whisper-1",
     ) -> Optional[TranscriptResult]:
         """Transcribe audio and persist the result to the database.
 
-        Updates video status to 'processing' before starting and
+        Updates media status to 'processing' before starting and
         'completed' or 'failed' after.
         """
-        await self._repo.update_video_ai_status(
-            video_id, "transcript_status", "processing"
+        await self._repo.update_media_ai_status(
+            media_id, "transcript_status", "processing"
         )
 
         try:
@@ -97,7 +97,7 @@ class WhisperService:
             ]
 
             await self._repo.save_transcript(
-                video_id,
+                media_id,
                 {
                     "language": result.language,
                     "full_text": result.text,
@@ -107,15 +107,15 @@ class WhisperService:
                 },
             )
 
-            await self._repo.update_video_ai_status(
-                video_id, "transcript_status", "completed"
+            await self._repo.update_media_ai_status(
+                media_id, "transcript_status", "completed"
             )
-            logger.info(f"Transcript saved for video {video_id}")
+            logger.info(f"Transcript saved for media {media_id}")
             return result
 
         except Exception as e:
-            logger.error(f"Transcription failed for video {video_id}: {e}")
-            await self._repo.update_video_ai_status(
-                video_id, "transcript_status", "failed"
+            logger.error(f"Transcription failed for media {media_id}: {e}")
+            await self._repo.update_media_ai_status(
+                media_id, "transcript_status", "failed"
             )
             raise

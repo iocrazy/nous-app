@@ -241,16 +241,16 @@ class YtdlpService:
         }
 
     @staticmethod
-    def _map_metadata_to_video(ytdlp_info: dict, url: str) -> dict:
+    def _map_metadata_to_media(ytdlp_info: dict, url: str) -> dict:
         """
-        Map yt-dlp info_dict to our Video schema fields.
+        Map yt-dlp info_dict to our Media schema fields.
 
         Args:
             ytdlp_info: yt-dlp --dump-json output
             url: Original input URL
 
         Returns:
-            dict: Data compatible with VideoCreate schema
+            dict: Data compatible with MediaCreate schema
         """
         platform, handler_type = URLRouter.detect_platform(url)
 

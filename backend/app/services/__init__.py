@@ -12,7 +12,7 @@ from app.services.supabase_auth_service import (
     SupabaseAdminAuthService,
     SupabaseAuthService,
 )
-from app.services.video_service import VideoService
+from app.services.media_service import MediaService
 from app.services.visual_analysis_service import (
     VisualAnalysisResult,
     VisualAnalysisService,
@@ -22,7 +22,7 @@ __all__ = [
     "DouyinAnalysis",
     "DouyinParser",
     "DownloaderService",
-    "VideoService",
+    "MediaService",
     "SupabaseAuthService",
     "SupabaseAdminAuthService",
     "VisualAnalysisService",
