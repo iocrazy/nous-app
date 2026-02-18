@@ -33,6 +33,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   const [waveform, setWaveform] = useState<number[]>([]);
   const [isDecoding, setIsDecoding] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   // Decode audio to extract waveform data
   useEffect(() => {
@@ -236,6 +237,17 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     setIsSeeking(false);
   }, []);
 
+  // Playback rate
+  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const cycleRate = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const idx = RATES.indexOf(playbackRate);
+    const next = RATES[(idx + 1) % RATES.length];
+    audio.playbackRate = next;
+    setPlaybackRate(next);
+  }, [playbackRate]);
+
   // Volume
   const toggleMute = useCallback(() => {
     const audio = audioRef.current;
@@ -330,6 +342,14 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         <span className="text-xs text-zinc-500 truncate flex-1 min-w-0">
           {filename}
         </span>
+
+        {/* Playback rate */}
+        <button
+          onClick={cycleRate}
+          className="px-2 py-0.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors tabular-nums min-w-[40px]"
+        >
+          {playbackRate === 1 ? '1x' : `${playbackRate}x`}
+        </button>
 
         {/* Volume */}
         <div className="flex items-center gap-2">
