@@ -67,7 +67,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const effectiveFps = fps || 30;
-  const isHls = src.endsWith('.m3u8');
+  const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
 
   // Frame stepping
   const stepFrame = useCallback((direction: 1 | -1, count: number = 1) => {
@@ -397,7 +397,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full bg-black rounded-lg overflow-hidden group"
+      className="relative w-full h-full bg-black rounded-lg overflow-hidden group"
       onMouseMove={resetHideTimer}
       onMouseLeave={() => {
         if (isPlaying) setShowControls(false);
@@ -406,7 +406,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Video element */}
       <video
         ref={playerRef}
-        className="w-full h-full object-contain cursor-pointer"
+        className="absolute inset-0 w-full h-full object-contain cursor-pointer"
         onClick={togglePlayPause}
         playsInline
         preload="metadata"
