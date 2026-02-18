@@ -801,6 +801,25 @@
       "message": "删除项目「{{name}}」后，所有文件和评论将永久删除，此操作不可撤销。",
       "confirm": "确认删除",
       "cancel": "取消"
+    },
+    "share": {
+      "title": "分享文件",
+      "type": "分享类型",
+      "typeLink": "链接",
+      "typeReview": "审阅",
+      "password": "密码保护",
+      "passwordPlaceholder": "设置密码",
+      "allowDownload": "允许下载",
+      "expiration": "有效期",
+      "noExpiry": "永不过期",
+      "expiry24h": "24 小时",
+      "expiry3d": "3 天",
+      "expiry7d": "7 天",
+      "expiry30d": "30 天",
+      "creating": "创建中...",
+      "create": "创建分享链接",
+      "created": "分享链接已创建！",
+      "passwordHint": "密码：{{password}}"
     }
   }
 }

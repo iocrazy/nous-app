@@ -331,6 +331,68 @@ async def list_project_shares(project_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to list project shares")
 
 
+class CreateShareRequest(BaseModel):
+    file_id: str
+    share_type: str = "link"
+    share_name: Optional[str] = None
+    password: Optional[str] = None
+    allow_download: bool = True
+    expires_hours: Optional[int] = None
+
+
+@router.post("/{project_id}/shares")
+async def create_share(project_id: str, data: CreateShareRequest, auth: AuthDep):
+    """Create a share link for a project file."""
+    import secrets
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+
+        # Verify file belongs to project
+        file_result = (
+            await sb.table("project_files")
+            .select("id, filename")
+            .eq("id", data.file_id)
+            .eq("project_id", project_id)
+            .single()
+            .execute()
+        )
+        if not file_result.data:
+            raise HTTPException(status_code=404, detail="File not found in project")
+
+        share_code = secrets.token_urlsafe(8)[:12]
+        share_name = data.share_name or file_result.data["filename"]
+
+        share_data: Dict[str, Any] = {
+            "project_file_id": data.file_id,
+            "share_type": data.share_type,
+            "shared_by": auth.user_id,
+            "share_name": share_name,
+            "share_code": share_code,
+            "password": data.password,
+            "allow_download": data.allow_download,
+            "status": "active",
+        }
+        if data.expires_hours:
+            share_data["expires_at"] = (
+                datetime.now(timezone.utc) + timedelta(hours=data.expires_hours)
+            ).isoformat()
+
+        result = await sb.table("shares").insert(share_data).execute()
+        share = result.data[0] if result.data else None
+        if not share:
+            raise HTTPException(status_code=500, detail="Failed to create share")
+        return {"success": True, "data": share}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create share for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create share")
+
+
 # ============================================
 # Folder endpoints
 # ============================================
