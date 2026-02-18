@@ -562,6 +562,7 @@ export interface Project {
   project_group: string | null;
   announcement: string | null;
   is_starred: boolean;
+  color_label: string | null;
   file_count: number;
   created_at: string;
   updated_at: string;

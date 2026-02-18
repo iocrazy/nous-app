@@ -127,7 +127,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     if (!window.confirm(t('projects.batch.confirmTrash', `Move ${selectedIds.size} files to trash?`))) return;
     try {
       for (const fileId of selectedIds) {
-        await updateFile(project.id, fileId, { is_trashed: true } as any);
+        await updateFile(project.id, fileId, { is_trashed: true });
       }
       setSelectedIds(new Set());
       await loadContent();

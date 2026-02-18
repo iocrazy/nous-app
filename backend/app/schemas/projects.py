@@ -36,6 +36,7 @@ class ProjectUpdate(BaseModel):
     project_group: Optional[str] = Field(None, max_length=100)
     is_starred: Optional[bool] = None
     announcement: Optional[str] = Field(None, max_length=100)
+    color_label: Optional[str] = Field(None, max_length=20)
 
 
 class ProjectResponse(BaseModel):
@@ -50,6 +51,7 @@ class ProjectResponse(BaseModel):
     project_group: Optional[str] = None
     announcement: Optional[str] = None
     is_starred: bool = False
+    color_label: Optional[str] = None
     file_count: int = 0
     created_at: datetime
     updated_at: datetime

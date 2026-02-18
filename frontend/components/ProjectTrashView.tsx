@@ -32,7 +32,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
 
   const handleRestore = async (file: ProjectFile) => {
     try {
-      await updateFile(projectId, file.id, { is_trashed: false } as any);
+      await updateFile(projectId, file.id, { is_trashed: false });
       loadTrashed();
     } catch (err) {
       console.error('Failed to restore file:', err);

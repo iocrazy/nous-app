@@ -70,7 +70,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const handleColorLabel = async (project: Project, color: string | null) => {
     try {
-      await updateProject(project.id, { color_label: color } as any);
+      await updateProject(project.id, { color_label: color });
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to set color label:', err);
@@ -286,8 +286,8 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      {(project as any).color_label && colorLabelDots[(project as any).color_label] && (
-                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[(project as any).color_label]}`} />
+                      {project.color_label && colorLabelDots[project.color_label] && (
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
                       <span className="text-sm text-white font-medium">{project.name}</span>
                     </div>

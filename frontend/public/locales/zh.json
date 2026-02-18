@@ -761,6 +761,18 @@
       "submit": "创建并添加成员"
     },
     "toolbar": {
+      "items": "个项目",
+      "sortUpdated": "最近更新",
+      "sortName": "名称",
+      "sortSize": "大小",
+      "filterAll": "全部类型",
+      "filterVideo": "视频",
+      "filterImage": "图片",
+      "filterAudio": "音频",
+      "filterDocument": "文档",
+      "uploadFiles": "上传文件",
+      "uploadFolder": "上传文件夹",
+      "newFolder": "新建文件夹",
       "statusAll": "全部状态",
       "statusPending": "待审阅",
       "statusInReview": "审阅中",
@@ -845,6 +857,40 @@
       "create": "创建分享链接",
       "created": "分享链接已创建！",
       "passwordHint": "密码：{{password}}"
+    },
+    "trash": {
+      "empty": "回收站为空",
+      "emptyHint": "删除的文件将显示在此处",
+      "hint": "回收站中的文件可以恢复或永久删除",
+      "confirmPermanentDelete": "永久删除「{{filename}}」？此操作不可撤销。",
+      "fileName": "文件名",
+      "type": "类型",
+      "deletedAt": "删除时间",
+      "actions": "操作",
+      "restore": "恢复",
+      "deletePermanently": "永久删除"
+    },
+    "shares": {
+      "empty": "暂无分享",
+      "emptyHint": "分享项目文件与他人协作",
+      "code": "分享代码",
+      "type": "类型",
+      "views": "浏览次数",
+      "status": "状态",
+      "created": "创建时间",
+      "actions": "操作",
+      "protected": "受保护",
+      "copyLink": "复制链接",
+      "openLink": "打开链接"
+    },
+    "batch": {
+      "confirmTrash": "将 {{count}} 个文件移至回收站？",
+      "selected": "已选择",
+      "trash": "移至回收站",
+      "cancel": "取消"
+    },
+    "header": {
+      "searchFiles": "搜索文件..."
     }
   }
 }

@@ -44,8 +44,8 @@ const formatRelativeTime = (dateStr: string): string => {
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onToggleStar, onContextMenu }) => {
   const { t } = useTranslation();
   const colors = typeColors[project.project_type] || typeColors.personal;
-  const borderColor = (project as any).color_label
-    ? colorLabelBorders[(project as any).color_label] || colors.border
+  const borderColor = project.color_label
+    ? colorLabelBorders[project.color_label] || colors.border
     : colors.border;
 
   return (
