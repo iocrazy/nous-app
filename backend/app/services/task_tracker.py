@@ -10,6 +10,7 @@ Progress updates are throttled to max 1 DB write per second per task.
 """
 
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
@@ -75,7 +76,7 @@ class TaskTracker:
         client = await self._get_client()
         await client.table("unified_tasks").update({
             "status": "processing",
-            "started_at": "now()",
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", task_id).execute()
         logger.debug(f"[TaskTracker] Started {task_id}")
 
@@ -114,10 +115,11 @@ class TaskTracker:
     async def complete(self, task_id: str, *, metadata_patch: Optional[dict] = None):
         """Mark task as completed."""
         client = await self._get_client()
+        now_iso = datetime.now(timezone.utc).isoformat()
         updates: dict = {
             "status": "completed",
             "progress": 100,
-            "completed_at": "now()",
+            "completed_at": now_iso,
         }
         if metadata_patch:
             existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
@@ -134,20 +136,35 @@ class TaskTracker:
         await client.table("unified_tasks").update({
             "status": "failed",
             "error_msg": error_msg[:500] if error_msg else "Unknown error",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", task_id).execute()
         self._last_progress.pop(task_id, None)
         logger.debug(f"[TaskTracker] Failed {task_id}: {error_msg[:80]}")
 
-    async def cancel(self, task_id: str):
+    async def cancel(self, task_id: str, user_id: str):
         """Mark task as cancelled and revoke Celery task if possible."""
         client = await self._get_client()
-        # Get celery_task_id before updating
-        result = await client.table("unified_tasks").select("celery_task_id").eq("id", task_id).single().execute()
-        celery_id = result.data.get("celery_task_id") if result.data else None
+        # Get celery_task_id before updating (scoped to user)
+        result = (
+            await client.table("unified_tasks")
+            .select("celery_task_id")
+            .eq("id", task_id)
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+        )
+        if not result.data:
+            logger.warning(f"[TaskTracker] Cancel: task {task_id} not found for user {user_id}")
+            return
+        celery_id = result.data.get("celery_task_id")
 
-        await client.table("unified_tasks").update({
-            "status": "cancelled",
-        }).eq("id", task_id).execute()
+        await (
+            client.table("unified_tasks")
+            .update({"status": "cancelled"})
+            .eq("id", task_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         self._last_progress.pop(task_id, None)
 
         # Revoke Celery task
