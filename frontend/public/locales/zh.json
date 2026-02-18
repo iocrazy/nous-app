@@ -891,6 +891,13 @@
     },
     "header": {
       "searchFiles": "搜索文件..."
+    },
+    "versions": {
+      "title": "版本历史",
+      "empty": "暂无版本",
+      "current": "当前版本",
+      "uploading": "上传中...",
+      "upload": "上传新版本"
     }
   }
 }
