@@ -13,21 +13,22 @@ import {
   Eye,
 } from 'lucide-react';
 import { getSupabaseClient } from '../supabaseClient';
-import { triggerTranscription, triggerSummary, triggerVisualAnalysis } from '../services/aiService';
+import { triggerTranscriptionByResource, triggerSummaryByResource, triggerVisualAnalysisByResource } from '../services/aiService';
 import { formatRelativeTime } from '../services/taskService';
 import { useToast } from './Toast';
+import { useAuth } from '../contexts/AuthContext';
 
-type AIStatus = 'pending' | 'processing' | 'completed' | 'failed';
+type AIStatus = 'none' | 'pending' | 'processing' | 'completed' | 'failed';
 type TaskTypeFilter = 'all' | 'transcription' | 'summary' | 'visual_analysis';
-type StatusFilter = '' | AIStatus;
+type StatusFilter = '' | Exclude<AIStatus, 'none'>;
 
-interface AITaskVideo {
+interface AIResource {
   id: string;
-  platform_id: string;
-  title: string;
-  transcript_status: AIStatus | null;
-  summary_status: AIStatus | null;
-  visual_analysis_status: AIStatus | null;
+  filename: string;
+  resource_id?: string;
+  transcript_status: AIStatus;
+  summary_status: AIStatus;
+  visual_analysis_status: AIStatus;
   updated_at: string;
 }
 
@@ -40,18 +41,19 @@ interface AITaskStats {
 
 // Map task types to UI labels
 const TASK_LABELS: Record<string, string> = {
-  transcription: 'Extract',
-  summary: 'Rewrite',
+  transcription: 'Transcribe',
+  summary: 'Summarize',
   visual_analysis: 'Analyze',
 };
 
-const getOverallStatus = (video: AITaskVideo): AIStatus => {
+const getOverallStatus = (resource: AIResource): Exclude<AIStatus, 'none'> => {
   const statuses = [
-    video.transcript_status,
-    video.summary_status,
-    video.visual_analysis_status,
-  ].filter(Boolean) as AIStatus[];
+    resource.transcript_status,
+    resource.summary_status,
+    resource.visual_analysis_status,
+  ].filter((s) => s && s !== 'none') as Exclude<AIStatus, 'none'>[];
 
+  if (statuses.length === 0) return 'completed';
   if (statuses.includes('processing')) return 'processing';
   if (statuses.includes('failed')) return 'failed';
   if (statuses.includes('pending')) return 'pending';
@@ -74,9 +76,9 @@ const getStatusIcon = (status: AIStatus | null) => {
 };
 
 const getStatusBadge = (status: AIStatus | null) => {
-  if (!status) return <span className="text-xs text-zinc-600">-</span>;
+  if (!status || status === 'none') return <span className="text-xs text-zinc-600">-</span>;
 
-  const styles: Record<AIStatus, string> = {
+  const styles: Record<string, string> = {
     pending: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
     processing: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
     completed: 'bg-green-500/10 text-green-400 border-green-500/20',
@@ -84,7 +86,7 @@ const getStatusBadge = (status: AIStatus | null) => {
   };
 
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border ${styles[status]}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border ${styles[status] || ''}`}>
       {getStatusIcon(status)}
       {status}
     </span>
@@ -92,7 +94,7 @@ const getStatusBadge = (status: AIStatus | null) => {
 };
 
 export const AITasksPanel: React.FC = () => {
-  const [videos, setVideos] = useState<AITaskVideo[]>([]);
+  const [resources, setResources] = useState<AIResource[]>([]);
   const [stats, setStats] = useState<AITaskStats>({ processing: 0, completed: 0, failed: 0, pending: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,11 +104,12 @@ export const AITasksPanel: React.FC = () => {
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
   const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
   const { addToast } = useToast();
+  const { currentUserId } = useAuth();
 
   const fetchData = useCallback(async () => {
     const supabase = getSupabaseClient();
-    if (!supabase) {
-      setError('Supabase not configured');
+    if (!supabase || !currentUserId) {
+      setError(!currentUserId ? 'Not authenticated' : 'Supabase not configured');
       setLoading(false);
       return;
     }
@@ -114,50 +117,51 @@ export const AITasksPanel: React.FC = () => {
     try {
       setIsRefreshing(true);
 
-      // Build query for videos with any AI task activity
+      // Query resources table for per-user AI status
       let query = supabase
-        .from('parsed_media')
-        .select('id, platform_id, title, transcript_status, summary_status, visual_analysis_status, updated_at')
-        .or('transcript_status.neq.pending,summary_status.neq.pending,visual_analysis_status.neq.pending')
+        .from('resources')
+        .select('id, filename, transcript_status, summary_status, visual_analysis_status, updated_at')
+        .eq('creator_id', currentUserId)
+        .or('transcript_status.neq.none,summary_status.neq.none,visual_analysis_status.neq.none')
         .order('updated_at', { ascending: false })
         .limit(50);
 
       // Apply type filter
       if (typeFilter === 'transcription') {
-        query = query.neq('transcript_status', 'pending');
+        query = query.neq('transcript_status', 'none');
       } else if (typeFilter === 'summary') {
-        query = query.neq('summary_status', 'pending');
+        query = query.neq('summary_status', 'none');
       } else if (typeFilter === 'visual_analysis') {
-        query = query.neq('visual_analysis_status', 'pending');
+        query = query.neq('visual_analysis_status', 'none');
       }
 
       const { data, error: fetchError } = await query;
 
       if (fetchError) throw fetchError;
 
-      let filtered = (data || []) as AITaskVideo[];
+      let filtered = (data || []) as AIResource[];
 
       // Apply status filter client-side
       if (statusFilter) {
-        filtered = filtered.filter((v) => {
-          if (typeFilter === 'transcription') return v.transcript_status === statusFilter;
-          if (typeFilter === 'summary') return v.summary_status === statusFilter;
-          if (typeFilter === 'visual_analysis') return v.visual_analysis_status === statusFilter;
-          return getOverallStatus(v) === statusFilter;
+        filtered = filtered.filter((r) => {
+          if (typeFilter === 'transcription') return r.transcript_status === statusFilter;
+          if (typeFilter === 'summary') return r.summary_status === statusFilter;
+          if (typeFilter === 'visual_analysis') return r.visual_analysis_status === statusFilter;
+          return getOverallStatus(r) === statusFilter;
         });
       }
 
-      setVideos(filtered);
+      setResources(filtered);
 
       // Compute stats from all data (unfiltered)
-      const allVideos = (data || []) as AITaskVideo[];
+      const allResources = (data || []) as AIResource[];
       const newStats: AITaskStats = { processing: 0, completed: 0, failed: 0, pending: 0 };
-      allVideos.forEach((v) => {
-        const statuses = [v.transcript_status, v.summary_status, v.visual_analysis_status];
+      allResources.forEach((r) => {
+        const statuses = [r.transcript_status, r.summary_status, r.visual_analysis_status];
         if (statuses.includes('processing')) newStats.processing++;
         if (statuses.includes('failed')) newStats.failed++;
         if (statuses.includes('completed')) newStats.completed++;
-        if (statuses.includes('pending') && statuses.some((s) => s && s !== 'pending')) newStats.pending++;
+        if (statuses.includes('pending') && statuses.some((s) => s && s !== 'none')) newStats.pending++;
       });
       setStats(newStats);
       setError(null);
@@ -167,7 +171,7 @@ export const AITasksPanel: React.FC = () => {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [typeFilter, statusFilter]);
+  }, [typeFilter, statusFilter, currentUserId]);
 
   useEffect(() => {
     fetchData();
@@ -175,10 +179,9 @@ export const AITasksPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const handleRetry = async (video: AITaskVideo, taskType: 'transcription' | 'summary' | 'visual_analysis') => {
-    const key = `${video.platform_id}-${taskType}`;
+  const handleRetry = async (resource: AIResource, taskType: 'transcription' | 'summary' | 'visual_analysis') => {
+    const key = `${resource.id}-${taskType}`;
     setRetryingIds((prev) => new Set(prev).add(key));
-    // Clear previous error for this key
     setRetryErrors((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -187,11 +190,11 @@ export const AITasksPanel: React.FC = () => {
 
     try {
       if (taskType === 'transcription') {
-        await triggerTranscription(video.platform_id);
+        await triggerTranscriptionByResource(resource.id);
       } else if (taskType === 'summary') {
-        await triggerSummary(video.platform_id);
+        await triggerSummaryByResource(resource.id);
       } else {
-        await triggerVisualAnalysis(video.platform_id);
+        await triggerVisualAnalysisByResource(resource.id);
       }
       addToast(`${TASK_LABELS[taskType]} task restarted`, 'success');
       setTimeout(fetchData, 2000);
@@ -209,16 +212,16 @@ export const AITasksPanel: React.FC = () => {
   };
 
   const renderRetryButton = (
-    video: AITaskVideo,
+    resource: AIResource,
     taskType: 'transcription' | 'summary' | 'visual_analysis',
     icon: React.ReactNode
   ) => {
-    const key = `${video.platform_id}-${taskType}`;
+    const key = `${resource.id}-${taskType}`;
     const isRetrying = retryingIds.has(key);
 
     return (
       <button
-        onClick={() => handleRetry(video, taskType)}
+        onClick={() => handleRetry(resource, taskType)}
         disabled={isRetrying}
         className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500/10 text-orange-400 rounded text-xs hover:bg-orange-500/20 transition-colors disabled:opacity-50"
         title={`Retry ${TASK_LABELS[taskType]}`}
@@ -242,12 +245,12 @@ export const AITasksPanel: React.FC = () => {
     );
   }
 
-  // Collect all failed videos with retry errors
-  const failedWithErrors = videos.filter((v) => {
+  // Collect all failed resources with retry errors
+  const failedWithErrors = resources.filter((r) => {
     const keys = [
-      `${v.platform_id}-transcription`,
-      `${v.platform_id}-summary`,
-      `${v.platform_id}-visual_analysis`,
+      `${r.id}-transcription`,
+      `${r.id}-summary`,
+      `${r.id}-visual_analysis`,
     ];
     return keys.some((k) => retryErrors[k]);
   });
@@ -262,7 +265,7 @@ export const AITasksPanel: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-white">AI Tasks</h2>
-            <p className="text-sm text-zinc-400">Monitor AI processing status</p>
+            <p className="text-sm text-zinc-400">Per-resource AI processing status</p>
           </div>
         </div>
         <button
@@ -280,7 +283,7 @@ export const AITasksPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Stats Cards - compact on mobile */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
         <div className="p-2.5 md:p-4 bg-zinc-900 rounded-lg border border-zinc-800">
           <div className="flex items-center gap-2 mb-1 md:mb-2">
@@ -312,7 +315,7 @@ export const AITasksPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters - compact */}
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 md:gap-4">
         <div className="flex items-center gap-2">
           <Filter size={16} className="text-zinc-400" />
@@ -322,8 +325,8 @@ export const AITasksPanel: React.FC = () => {
             className="px-3 py-1.5 md:py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-500"
           >
             <option value="all">All Types</option>
-            <option value="transcription">Extract</option>
-            <option value="summary">Rewrite</option>
+            <option value="transcription">Transcribe</option>
+            <option value="summary">Summarize</option>
             <option value="visual_analysis">Analyze</option>
           </select>
         </div>
@@ -340,24 +343,24 @@ export const AITasksPanel: React.FC = () => {
         </select>
       </div>
 
-      {/* Task Table - scrollable on mobile */}
+      {/* Task Table */}
       <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden max-h-[40vh] md:max-h-none overflow-y-auto">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-zinc-800 text-left">
                 <th className="px-4 py-3 text-sm font-medium text-zinc-400">Status</th>
-                <th className="px-4 py-3 text-sm font-medium text-zinc-400">Video</th>
+                <th className="px-4 py-3 text-sm font-medium text-zinc-400">Resource</th>
                 <th className="px-4 py-3 text-sm font-medium text-zinc-400">
                   <div className="flex items-center gap-1">
                     <FileText size={14} />
-                    Extract
+                    Transcribe
                   </div>
                 </th>
                 <th className="px-4 py-3 text-sm font-medium text-zinc-400">
                   <div className="flex items-center gap-1">
                     <PenTool size={14} />
-                    Rewrite
+                    Summarize
                   </div>
                 </th>
                 <th className="px-4 py-3 text-sm font-medium text-zinc-400">
@@ -371,18 +374,18 @@ export const AITasksPanel: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {videos.length === 0 ? (
+              {resources.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">
                     No AI tasks found
                   </td>
                 </tr>
               ) : (
-                videos.map((video) => {
-                  const overall = getOverallStatus(video);
+                resources.map((resource) => {
+                  const overall = getOverallStatus(resource);
 
                   return (
-                    <tr key={video.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                    <tr key={resource.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {getStatusIcon(overall)}
@@ -397,25 +400,24 @@ export const AITasksPanel: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="max-w-[200px] truncate text-sm text-white" title={video.title}>
-                          {video.title || 'Untitled'}
+                        <div className="max-w-[200px] truncate text-sm text-white" title={resource.filename}>
+                          {resource.filename || 'Untitled'}
                         </div>
-                        <div className="text-xs text-zinc-500">{video.platform_id}</div>
                       </td>
-                      <td className="px-4 py-3">{getStatusBadge(video.transcript_status)}</td>
-                      <td className="px-4 py-3">{getStatusBadge(video.summary_status)}</td>
-                      <td className="px-4 py-3">{getStatusBadge(video.visual_analysis_status)}</td>
+                      <td className="px-4 py-3">{getStatusBadge(resource.transcript_status)}</td>
+                      <td className="px-4 py-3">{getStatusBadge(resource.summary_status)}</td>
+                      <td className="px-4 py-3">{getStatusBadge(resource.visual_analysis_status)}</td>
                       <td className="px-4 py-3 text-sm text-zinc-500">
-                        {formatRelativeTime(video.updated_at)}
+                        {formatRelativeTime(resource.updated_at)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-1">
-                          {video.transcript_status === 'failed' &&
-                            renderRetryButton(video, 'transcription', <FileText size={12} />)}
-                          {video.summary_status === 'failed' &&
-                            renderRetryButton(video, 'summary', <PenTool size={12} />)}
-                          {video.visual_analysis_status === 'failed' &&
-                            renderRetryButton(video, 'visual_analysis', <Eye size={12} />)}
+                          {resource.transcript_status === 'failed' &&
+                            renderRetryButton(resource, 'transcription', <FileText size={12} />)}
+                          {resource.summary_status === 'failed' &&
+                            renderRetryButton(resource, 'summary', <PenTool size={12} />)}
+                          {resource.visual_analysis_status === 'failed' &&
+                            renderRetryButton(resource, 'visual_analysis', <Eye size={12} />)}
                         </div>
                       </td>
                     </tr>
@@ -431,14 +433,14 @@ export const AITasksPanel: React.FC = () => {
       {failedWithErrors.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-zinc-400">Retry Error Details</h3>
-          {failedWithErrors.map((video) => {
+          {failedWithErrors.map((resource) => {
             const errors = (['transcription', 'summary', 'visual_analysis'] as const)
-              .map((t) => ({ type: t, error: retryErrors[`${video.platform_id}-${t}`] }))
+              .map((t) => ({ type: t, error: retryErrors[`${resource.id}-${t}`] }))
               .filter((e) => e.error);
 
             return (
-              <div key={video.id} className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-                <div className="text-sm text-white truncate">{video.title || video.platform_id}</div>
+              <div key={resource.id} className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                <div className="text-sm text-white truncate">{resource.filename || resource.id}</div>
                 {errors.map((e) => (
                   <div key={e.type} className="text-xs text-red-400 mt-1">
                     {TASK_LABELS[e.type]}: {e.error}

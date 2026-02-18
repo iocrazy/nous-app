@@ -10,9 +10,9 @@ export type TaskType =
   | 'upload'
   | 'transcode'
   | 'ai_pipeline'
-  | 'ai_transcribe'
-  | 'ai_summarize'
-  | 'ai_visual_analysis';
+  | 'ai_extract'
+  | 'ai_transcription'
+  | 'ai_summary';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -51,9 +51,9 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'transcode':
       return 'processing';
     case 'ai_pipeline':
-    case 'ai_transcribe':
-    case 'ai_summarize':
-    case 'ai_visual_analysis':
+    case 'ai_extract':
+    case 'ai_transcription':
+    case 'ai_summary':
       return 'ai';
     default:
       return 'processing';
@@ -62,7 +62,7 @@ export function getTaskCategory(type: TaskType): TaskCategory {
 
 /** Check if a task type is an AI sub-task */
 export function isAISubTask(type: TaskType): boolean {
-  return type === 'ai_transcribe' || type === 'ai_summarize' || type === 'ai_visual_analysis';
+  return type === 'ai_extract' || type === 'ai_transcription' || type === 'ai_summary';
 }
 
 export interface TaskManagerState {
@@ -263,9 +263,9 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     upload: 0,
     transcode: 0,
     ai_pipeline: 0,
-    ai_transcribe: 0,
-    ai_summarize: 0,
-    ai_visual_analysis: 0,
+    ai_extract: 0,
+    ai_transcription: 0,
+    ai_summary: 0,
   };
   for (const t of activeTasks) {
     if (t.task_type in activeCounts) {
@@ -346,9 +346,9 @@ export function taskTypeIcon(type: TaskType): string {
     case 'download': return '\u2193';            // ↓
     case 'transcode': return '\u27F3';           // ⟳
     case 'ai_pipeline': return '\u2726';         // ✦
-    case 'ai_transcribe': return '\uD83C\uDFA4'; // 🎤 (speech)
-    case 'ai_summarize': return '\uD83D\uDCDD';  // 📝 (memo)
-    case 'ai_visual_analysis': return '\uD83D\uDC41'; // 👁 (eye)
+    case 'ai_extract': return '\uD83C\uDFA4';    // 🎤 (audio extract)
+    case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
+    case 'ai_summary': return '\u2726';           // ✦ (summary)
     default: return '\u2022';
   }
 }
@@ -359,9 +359,9 @@ export function taskTypeLabel(type: TaskType): string {
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
     case 'ai_pipeline': return 'AI Pipeline';
-    case 'ai_transcribe': return 'Transcribe';
-    case 'ai_summarize': return 'Summarize';
-    case 'ai_visual_analysis': return 'Visual Analysis';
+    case 'ai_extract': return 'Audio Extract';
+    case 'ai_transcription': return 'Transcription';
+    case 'ai_summary': return 'Summary';
     default: return type;
   }
 }

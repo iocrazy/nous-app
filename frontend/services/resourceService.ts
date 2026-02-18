@@ -753,8 +753,10 @@ export async function getFolderPreview(
 ): Promise<Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>> {
   const { data, error } = await supabase
     .from('resource_items')
-    .select('resource:resources(id, thumbnail_path, cover_image_path, mime_type)')
+    .select('resource:resources!inner(id, thumbnail_path, cover_image_path, mime_type)')
     .eq('folder_id', folderId)
+    .eq('resource.is_trashed', false)
+    .neq('resource.source_type', 'web')
     .limit(4);
   if (error) throw error;
   return (data || []).map((item: any) => ({
