@@ -7,6 +7,8 @@ interface FileCardProps {
   file: ProjectFile;
   onClick: () => void;
   viewMode: 'grid' | 'list';
+  isSelected?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
 }
 
 const getFileIcon = (fileType: string | null) => {
@@ -52,15 +54,37 @@ const StatusBadge: React.FC<{ status: ReviewStatus }> = ({ status }) => {
   );
 };
 
-export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode }) => {
+export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isSelected, onToggleSelect }) => {
   const { icon: IconComponent, color, bg } = getFileIcon(file.file_type);
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      onToggleSelect?.(e);
+    } else {
+      onClick();
+    }
+  };
 
   if (viewMode === 'list') {
     return (
       <div
-        onClick={onClick}
-        className="flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group"
+        onClick={handleClick}
+        className={`flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group ${
+          isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-zinc-700/30 hover:border-zinc-600'
+        }`}
       >
+        {onToggleSelect && (
+          <div
+            onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }}
+            className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center cursor-pointer transition-colors ${
+              isSelected
+                ? 'bg-indigo-500 border-indigo-500 text-white'
+                : 'border-zinc-600 hover:border-zinc-400'
+            }`}
+          >
+            {isSelected && <span className="text-[10px] font-bold">✓</span>}
+          </div>
+        )}
         <div className={`p-2 rounded-lg ${bg} flex-shrink-0`}>
           <IconComponent size={18} className={color} />
         </div>
@@ -87,9 +111,24 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode }) =
 
   return (
     <div
-      onClick={onClick}
-      className="bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden"
+      onClick={handleClick}
+      className={`bg-zinc-800/80 hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden relative ${
+        isSelected ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-zinc-700/50 hover:border-zinc-600'
+      }`}
     >
+      {/* Selection checkbox */}
+      {onToggleSelect && (
+        <div
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }}
+          className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all ${
+            isSelected
+              ? 'bg-indigo-500 border-indigo-500 text-white opacity-100'
+              : 'border-zinc-500 opacity-0 group-hover:opacity-100 hover:border-zinc-300'
+          }`}
+        >
+          {isSelected && <span className="text-[10px] font-bold">✓</span>}
+        </div>
+      )}
       {/* Thumbnail area */}
       <div className={`h-32 flex items-center justify-center ${bg}`}>
         <IconComponent size={40} className={`${color} opacity-60 group-hover:opacity-100 transition-opacity`} />
