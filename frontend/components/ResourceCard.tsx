@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useState } from 'react';
-import { File, Film, Image, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
+import { File, Film, Image, Music, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
@@ -66,6 +66,7 @@ function getFileIcon(mimeType: string | null | undefined) {
   if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
+  if (mimeType.startsWith('audio/')) return { icon: Music, color: 'text-cyan-400', bg: 'bg-cyan-500/20' };
   // PDF
   if (mimeType.includes('pdf'))
     return { icon: FileType, color: 'text-red-400', bg: 'bg-red-500/20' };
@@ -398,7 +399,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             <div className="h-full bg-white/80 transition-none" style={{ width: `${scrubPercent * 100}%` }} />
           </div>
         )}
-        {mimeType?.startsWith('video/') && resource?.duration_seconds != null && (
+        {(mimeType?.startsWith('video/') || mimeType?.startsWith('audio/')) && resource?.duration_seconds != null && (
           <span className={`absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums ${isHovering && spriteLoaded ? 'hidden' : ''}`}>
             {isHovering && spriteLoaded
               ? formatDuration(Math.floor(scrubPercent * resource.duration_seconds))

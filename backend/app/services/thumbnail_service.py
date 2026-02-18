@@ -9,7 +9,8 @@ All generated files are saved to the same directory as the source file on disk.
 - Video thumbnail: Extract frame at 1s via ffmpeg, scale to 320px width
 - Video sprite: Extract N frames evenly, combine into horizontal strip
 - Image thumbnail: Resize to max 320px via Pillow
-- Audio/Document: Skip (return None)
+- Audio thumbnail: Generate waveform visualization via ffmpeg + Pillow
+- Document: Skip (return None)
 
 Storage layout (same dir as source file):
   uploads/{resource_id}/
@@ -19,11 +20,12 @@ Storage layout (same dir as source file):
 """
 
 import asyncio
+import struct
 from pathlib import Path
 from typing import Optional
 
 from loguru import logger
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
@@ -33,6 +35,14 @@ THUMBNAIL_QUALITY = 85
 SPRITE_FRAME_WIDTH = 200
 SPRITE_FRAME_COUNT = 10
 SPRITE_QUALITY = 75
+
+# Audio waveform settings
+WAVEFORM_WIDTH = 320
+WAVEFORM_HEIGHT = 180
+WAVEFORM_BAR_COUNT = 160
+WAVEFORM_BG_COLOR = (15, 15, 23)       # near-black
+WAVEFORM_BAR_COLOR = (99, 102, 241)    # indigo-500
+WAVEFORM_BAR_BRIGHT = (139, 142, 255)  # lighter bar center
 
 
 class ThumbnailService:
@@ -80,6 +90,10 @@ class ThumbnailService:
                 await self._generate_video_sprite(str(abs_path), str(sprite_abs))
             elif mime_type.startswith("image/"):
                 ok = await self._generate_image_thumbnail(str(abs_path), str(thumb_abs))
+            elif mime_type.startswith("audio/"):
+                # Save as PNG for waveform (better for sharp lines)
+                thumb_abs = abs_path.parent / "thumbnail.png"
+                ok = await self._generate_audio_thumbnail(str(abs_path), str(thumb_abs))
             else:
                 logger.debug(
                     f"Thumbnail skipped for resource {resource_id}: "
@@ -293,4 +307,133 @@ class ThumbnailService:
 
         except Exception as e:
             logger.warning(f"Pillow resize failed for {src_path}: {e}")
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Audio thumbnail: waveform visualization
+    # ------------------------------------------------------------------ #
+
+    async def _generate_audio_thumbnail(
+        self, src_path: str, dst_path: str
+    ) -> bool:
+        """Generate waveform visualization thumbnail for audio files."""
+        try:
+            # Extract raw PCM data: mono, 8kHz, 16-bit signed LE
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y",
+                "-i", src_path,
+                "-ac", "1",
+                "-ar", "8000",
+                "-f", "s16le",
+                "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode != 0 or not stdout:
+                logger.warning(
+                    f"ffmpeg audio PCM extraction failed for {src_path}: "
+                    f"{stderr.decode(errors='replace')[:300]}"
+                )
+                return False
+
+            # Parse PCM samples
+            sample_count = len(stdout) // 2
+            if sample_count < 100:
+                logger.warning(f"Audio too short for waveform: {src_path}")
+                return False
+
+            samples = struct.unpack(f"<{sample_count}h", stdout)
+
+            # Draw waveform in thread (CPU-bound)
+            ok = await asyncio.to_thread(self._draw_waveform, samples, dst_path)
+
+            if ok:
+                out = Path(dst_path)
+                if not out.exists() or out.stat().st_size == 0:
+                    return False
+
+            return ok
+
+        except Exception as e:
+            logger.warning(f"Audio thumbnail failed for {src_path}: {e}")
+            return False
+
+    def _draw_waveform(self, samples: tuple, dst_path: str) -> bool:
+        """Draw Eagle-style waveform visualization using Pillow."""
+        try:
+            W = WAVEFORM_WIDTH
+            H = WAVEFORM_HEIGHT
+            BAR_COUNT = WAVEFORM_BAR_COUNT
+
+            img = Image.new("RGB", (W, H), WAVEFORM_BG_COLOR)
+            draw = ImageDraw.Draw(img)
+
+            # Downsample: compute RMS amplitude per chunk
+            chunk_size = max(1, len(samples) // BAR_COUNT)
+            amplitudes = []
+            for i in range(BAR_COUNT):
+                start = i * chunk_size
+                end = min(start + chunk_size, len(samples))
+                if start >= len(samples):
+                    amplitudes.append(0.0)
+                    continue
+                chunk = samples[start:end]
+                rms = (sum(s * s for s in chunk) / len(chunk)) ** 0.5
+                amplitudes.append(rms)
+
+            # Normalize to 0..1
+            max_amp = max(amplitudes) if amplitudes else 1.0
+            if max_amp < 1.0:
+                max_amp = 1.0
+            normalized = [a / max_amp for a in amplitudes]
+
+            # Draw symmetric waveform bars
+            center_y = H // 2
+            max_bar_h = (H - 16) // 2  # leave top/bottom margin
+            bar_w = max(1, W // BAR_COUNT)
+            gap = (W - bar_w * BAR_COUNT) // 2  # center horizontally
+
+            for i, amp in enumerate(normalized):
+                x = gap + i * bar_w
+                bar_h = max(1, int(amp * max_bar_h))
+
+                # Color gradient: brighter at center, darker at tips
+                if amp > 0.6:
+                    color = WAVEFORM_BAR_BRIGHT
+                elif amp > 0.3:
+                    color = WAVEFORM_BAR_COLOR
+                else:
+                    # Dim bars for quiet parts
+                    color = (
+                        WAVEFORM_BAR_COLOR[0] * 2 // 3,
+                        WAVEFORM_BAR_COLOR[1] * 2 // 3,
+                        WAVEFORM_BAR_COLOR[2] * 2 // 3,
+                    )
+
+                # Draw upper half
+                draw.rectangle(
+                    [x, center_y - bar_h, x + bar_w - 1, center_y - 1],
+                    fill=color,
+                )
+                # Draw lower half (mirror)
+                draw.rectangle(
+                    [x, center_y + 1, x + bar_w - 1, center_y + bar_h],
+                    fill=color,
+                )
+
+            # Thin center line
+            draw.line(
+                [(gap, center_y), (gap + bar_w * BAR_COUNT - 1, center_y)],
+                fill=(50, 50, 70),
+                width=1,
+            )
+
+            img.save(dst_path, format="PNG")
+            img.close()
+            return True
+
+        except Exception as e:
+            logger.warning(f"Waveform draw failed: {e}")
             return False
