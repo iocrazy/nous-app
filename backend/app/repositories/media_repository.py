@@ -89,7 +89,7 @@ class MediaRepository:
         """
         try:
             client = await self._get_client()
-            # Use videos_with_tags view which includes tags array
+            # Use parsed_media_with_tags view which includes tags array
             query = (
                 client.table("parsed_media_with_tags")
                 .select("*")
@@ -342,7 +342,7 @@ class MediaRepository:
         """
         try:
             client = await self._get_client()
-            # Use videos_with_tags view which includes tags array
+            # Use parsed_media_with_tags view which includes tags array
             query = client.table("parsed_media_with_tags").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
