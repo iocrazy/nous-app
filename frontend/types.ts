@@ -567,6 +567,16 @@ export interface Project {
   updated_at: string;
 }
 
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: 'admin' | 'editor' | 'viewer';
+  invited_by: string | null;
+  email?: string;
+  created_at: string;
+}
+
 export interface ProjectFolder {
   id: string;
   project_id: string;

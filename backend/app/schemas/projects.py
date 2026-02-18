@@ -174,3 +174,16 @@ class ReviewStatusUpdate(BaseModel):
         pattern="^(pending_review|in_review|feedback_collected|approved)$",
         description="Set to null to remove status",
     )
+
+
+class AddMemberRequest(BaseModel):
+    """Request body for adding a project member"""
+
+    user_id: str
+    role: str = Field(default="viewer", pattern="^(admin|editor|viewer)$")
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    """Request body for updating a member's role"""
+
+    role: str = Field(..., pattern="^(admin|editor|viewer)$")

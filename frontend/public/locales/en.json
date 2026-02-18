@@ -760,6 +760,19 @@
       "noGroup": "No group",
       "submit": "Create & Add Members"
     },
+    "members": {
+      "title": "Members",
+      "owner": "Owner",
+      "ownerRole": "Project Owner",
+      "invite": "Invite Member",
+      "userIdPlaceholder": "User ID",
+      "addMember": "Add Member",
+      "memberList": "Members",
+      "noMembers": "No members yet",
+      "roleAdmin": "Admin",
+      "roleEditor": "Editor",
+      "roleViewer": "Viewer"
+    },
     "settings": {
       "title": "Project Settings",
       "name": "Project Name",

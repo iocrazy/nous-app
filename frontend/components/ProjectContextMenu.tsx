@@ -81,7 +81,7 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
         onClick={onSettings} />
       <MenuItem icon={<Users size={14} />}
         label={t('projects.contextMenu.members', 'Members')}
-        onClick={onMembers} disabled />
+        onClick={onMembers} />
 
       <div className="border-t border-zinc-800/50 my-1" />
 
