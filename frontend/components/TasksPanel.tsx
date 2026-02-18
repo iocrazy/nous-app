@@ -1,4 +1,4 @@
-// components/TasksPanel.tsx — Unified task history (all task types)
+// components/TasksPanel.tsx — Unified task history (all task types) + AI Tasks tab
 
 import React, { useState, useMemo } from 'react';
 import {
@@ -26,6 +26,7 @@ import {
   formatFileSize,
   taskTypeLabel,
 } from '../contexts/TaskManagerContext';
+import { AITasksPanel } from './AITasksPanel';
 
 // ─── Helpers ──────────────────────────────────────────
 
@@ -103,9 +104,50 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   return date.toLocaleDateString();
 }
 
-// ─── Component ────────────────────────────────────────
+// ─── Main Component with Tabs ─────────────────────────
+
+type MainTab = 'tasks' | 'ai';
 
 export const TasksPanel: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<MainTab>('tasks');
+
+  return (
+    <div className="space-y-6">
+      {/* Tab Switcher */}
+      <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800 w-fit">
+        <button
+          onClick={() => setActiveTab('tasks')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'tasks'
+              ? 'bg-indigo-500/20 text-indigo-400'
+              : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+          }`}
+        >
+          <ListTodo size={16} />
+          Tasks
+        </button>
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'ai'
+              ? 'bg-purple-500/20 text-purple-400'
+              : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+          }`}
+        >
+          <Brain size={16} />
+          AI Tasks
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'tasks' ? <UnifiedTasksView /> : <AITasksPanel />}
+    </div>
+  );
+};
+
+// ─── Unified Tasks View ───────────────────────────────
+
+const UnifiedTasksView: React.FC = () => {
   const {
     tasks,
     isLoading,
