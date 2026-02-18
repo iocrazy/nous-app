@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile, ProjectFolder } from '../types';
-import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile } from '../services/projectsService';
+import { Project, ProjectFile, ProjectFolder, ReviewStatus } from '../types';
+import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus } from '../services/projectsService';
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
 import { ProjectShareModal } from './ProjectShareModal';
+import { ProjectFileContextMenu } from './ProjectFileContextMenu';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -37,6 +38,9 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [shareFile, setShareFile] = useState<ProjectFile | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ file: ProjectFile; x: number; y: number } | null>(null);
+  const [renameFile, setRenameFile] = useState<ProjectFile | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -191,6 +195,45 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     });
     return result;
   }, [files, filterType, statusFilter, sortBy, searchQuery]);
+
+  const handleFileContextMenu = (e: React.MouseEvent, file: ProjectFile) => {
+    e.preventDefault();
+    setContextMenu({ file, x: e.clientX, y: e.clientY });
+  };
+
+  const handleDownload = (file: ProjectFile) => {
+    if (file.file_path) {
+      window.open(file.file_path, '_blank');
+    }
+  };
+
+  const handleRenameStart = (file: ProjectFile) => {
+    setRenameFile(file);
+    setRenameValue(file.filename || '');
+  };
+
+  const handleRenameSubmit = async () => {
+    if (!renameFile || !renameValue.trim()) return;
+    try {
+      await updateFile(project.id, renameFile.id, { filename: renameValue.trim() });
+      await loadContent();
+    } catch { /* silent */ }
+    setRenameFile(null);
+  };
+
+  const handleSetStatus = async (file: ProjectFile, status: ReviewStatus | null) => {
+    try {
+      await updateReviewStatus(project.id, file.id, status);
+      await loadContent();
+    } catch { /* silent */ }
+  };
+
+  const handleDeleteFile = async (file: ProjectFile) => {
+    try {
+      await deleteFile(project.id, file.id);
+      await loadContent();
+    } catch { /* silent */ }
+  };
 
   return (
     <div className="flex h-full">
@@ -426,14 +469,15 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               </div>
             ))}
             {filteredAndSorted.map(file => (
-              <FileCard
-                key={file.id}
-                file={file}
-                onClick={() => handleFileClick(file)}
-                viewMode="grid"
-                isSelected={selectedIds.has(file.id)}
-                onToggleSelect={(e) => toggleSelect(file.id, e)}
-              />
+              <div key={file.id} onContextMenu={(e) => handleFileContextMenu(e, file)}>
+                <FileCard
+                  file={file}
+                  onClick={() => handleFileClick(file)}
+                  viewMode="grid"
+                  isSelected={selectedIds.has(file.id)}
+                  onToggleSelect={(e) => toggleSelect(file.id, e)}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -452,14 +496,15 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               </div>
             ))}
             {filteredAndSorted.map(file => (
-              <FileCard
-                key={file.id}
-                file={file}
-                onClick={() => handleFileClick(file)}
-                viewMode="list"
-                isSelected={selectedIds.has(file.id)}
-                onToggleSelect={(e) => toggleSelect(file.id, e)}
-              />
+              <div key={file.id} onContextMenu={(e) => handleFileContextMenu(e, file)}>
+                <FileCard
+                  file={file}
+                  onClick={() => handleFileClick(file)}
+                  viewMode="list"
+                  isSelected={selectedIds.has(file.id)}
+                  onToggleSelect={(e) => toggleSelect(file.id, e)}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -514,6 +559,48 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           onClose={() => setShareFile(null)}
           onCreated={() => {}}
         />
+      )}
+
+      {/* File Context Menu */}
+      {contextMenu && (
+        <ProjectFileContextMenu
+          file={contextMenu.file}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onDownload={handleDownload}
+          onRename={handleRenameStart}
+          onMove={() => {}}
+          onSetStatus={handleSetStatus}
+          onVersionHistory={(f) => setSelectedFile(f)}
+          onFileInfo={(f) => setSelectedFile(f)}
+          onShare={(f) => setShareFile(f)}
+          onDelete={handleDeleteFile}
+        />
+      )}
+
+      {/* Rename Dialog */}
+      {renameFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setRenameFile(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium text-zinc-200 mb-3">{t('projects.fileMenu.rename', 'Rename')}</h3>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameFile(null); }}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setRenameFile(null)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button onClick={handleRenameSubmit} className="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">
+                {t('common.save', 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
