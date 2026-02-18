@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users } from 'lucide-react';
+import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users, Inbox } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, ProjectFolder, ReviewStatus } from '../types';
 import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus } from '../services/projectsService';
@@ -8,6 +8,7 @@ import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
 import { ProjectShareModal } from './ProjectShareModal';
 import { ProjectFileContextMenu } from './ProjectFileContextMenu';
+import { ProjectCollectModal } from './ProjectCollectModal';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -39,6 +40,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [shareFile, setShareFile] = useState<ProjectFile | null>(null);
   const [contextMenu, setContextMenu] = useState<{ file: ProjectFile; x: number; y: number } | null>(null);
+  const [isCollectOpen, setIsCollectOpen] = useState(false);
   const [renameFile, setRenameFile] = useState<ProjectFile | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -276,6 +278,15 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                 className="w-40 pl-8 pr-3 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:w-56 transition-all"
               />
             </div>
+
+            {/* Collect */}
+            <button
+              onClick={() => setIsCollectOpen(true)}
+              className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors text-sm border border-zinc-700"
+            >
+              <Inbox size={14} />
+              {t('projects.collect.title', 'Collect')}
+            </button>
 
             {/* Link Video */}
             <button
@@ -578,6 +589,13 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           onDelete={handleDeleteFile}
         />
       )}
+
+      {/* Collect Modal */}
+      <ProjectCollectModal
+        projectId={project.id}
+        isOpen={isCollectOpen}
+        onClose={() => setIsCollectOpen(false)}
+      />
 
       {/* Rename Dialog */}
       {renameFile && (

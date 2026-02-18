@@ -817,6 +817,16 @@
       "share": "Share",
       "delete": "Delete"
     },
+    "collect": {
+      "title": "File Collection",
+      "empty": "No collection links yet",
+      "namePlaceholder": "Collection name",
+      "deadline": "Deadline",
+      "maxSize": "Max File Size (MB)",
+      "creating": "Creating...",
+      "create": "Create",
+      "newCollection": "New Collection Link"
+    },
     "share": {
       "title": "Share File",
       "type": "Share Type",
