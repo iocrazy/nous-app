@@ -590,6 +590,18 @@ export interface ProjectFolder {
 
 export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
 
+export interface ProjectShare {
+  id: string;
+  project_file_id: string | null;
+  share_type: string;
+  share_code: string;
+  password: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  view_count: number;
+  created_at: string;
+}
+
 export interface FileVersion {
   id: string;
   file_id: string;

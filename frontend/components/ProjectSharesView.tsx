@@ -1,49 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Share2, Copy, ExternalLink, XCircle } from 'lucide-react';
-import { getAuthHeaders } from '../services/parserService';
-
-interface Share {
-  id: string;
-  project_file_id: string | null;
-  share_type: string;
-  share_code: string;
-  password: string | null;
-  expires_at: string | null;
-  is_active: boolean;
-  view_count: number;
-  created_at: string;
-}
+import { Share2, Copy, ExternalLink } from 'lucide-react';
+import { ProjectShare } from '../types';
+import { fetchProjectShares } from '../services/projectsService';
 
 interface ProjectSharesViewProps {
   projectId: string;
   onCountChange?: (count: number) => void;
 }
 
-const getApiUrl = (): string => {
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in (import.meta as any).env) {
-    return (import.meta as any).env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
-
 export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId, onCountChange }) => {
   const { t } = useTranslation();
-  const [shares, setShares] = useState<Share[]>([]);
+  const [shares, setShares] = useState<ProjectShare[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadShares = async () => {
     try {
       setLoading(true);
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/shares`, {
-        headers: await getAuthHeaders(),
-      });
-      if (!response.ok) throw new Error('Failed to fetch shares');
-      const json = await response.json();
-      const data = json.data || [];
+      const data = await fetchProjectShares(projectId);
       setShares(data);
-      onCountChange?.(data.filter((s: Share) => s.is_active).length);
+      onCountChange?.(data.filter(s => s.is_active).length);
     } catch (err) {
       console.error('Failed to load project shares:', err);
     } finally {
@@ -53,7 +29,7 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
 
   useEffect(() => { loadShares(); }, [projectId]);
 
-  const copyShareLink = (share: Share) => {
+  const copyShareLink = (share: ProjectShare) => {
     const url = `${window.location.origin}/share/${share.share_code}`;
     navigator.clipboard.writeText(url);
   };
