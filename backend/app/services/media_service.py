@@ -1,9 +1,9 @@
-# backend/app/services/video_service.py
+# backend/app/services/media_service.py
 
 """
-Video service module
+Media service module
 
-Integrates video data fetching, parsing, storage (Supabase) and download functionality.
+Integrates parsed media data fetching, parsing, storage (Supabase) and download functionality.
 """
 
 import asyncio
@@ -13,13 +13,13 @@ from loguru import logger
 
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
-from app.repositories.video_repository import VideoRepository
-from app.schemas.video import VideoCreate
+from app.repositories.media_repository import MediaRepository
+from app.schemas.media import MediaCreate
 from app.services.downloader import DownloaderService
 
 
-class VideoService:
-    """Video service, integrates data fetching, parsing, storage and download functionality"""
+class MediaService:
+    """Media service, integrates data fetching, parsing, storage and download functionality"""
 
     @staticmethod
     async def process_video(platform_id: str, parsed_data: dict) -> Dict[str, Any]:
@@ -39,7 +39,7 @@ class VideoService:
 
             # Store to Supabase
             logger.info("开始存储到 Supabase...")
-            db_result = await VideoService._store_to_supabase(parsed_data)
+            db_result = await MediaService._store_to_supabase(parsed_data)
 
             # Process download tasks
             logger.info("开始处理下载任务...")
@@ -64,7 +64,7 @@ class VideoService:
                         f"开始执行下载任务 Video:{platform_id}_{title}, media_type: {media_type}"
                     )
                     # Directly await download tasks
-                    await VideoService._execute_downloads(
+                    await MediaService._execute_downloads(
                         platform_id,
                         to_download_video,
                         to_download_music,
@@ -88,7 +88,7 @@ class VideoService:
             logger.success(f"{message}")
 
             # Auto-create resource record for the resource library (dedup)
-            await VideoService._create_resource_record(platform_id, user_id)
+            await MediaService._create_resource_record(platform_id, user_id)
 
             return {
                 "success": True,
@@ -122,7 +122,7 @@ class VideoService:
 
         # Data validation
         try:
-            video_data = VideoCreate(**parsed_data)
+            video_data = MediaCreate(**parsed_data)
             logger.success(
                 f"数据验证通过: platform_id={platform_id}, user_id={user_id}"
             )
@@ -131,7 +131,7 @@ class VideoService:
             return {"success": False, "message": f"存储失败: {str(e)}"}
 
         try:
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Check current user's video status (with user_id for data isolation)
             existing_video = await repo.get_by_platform_id(platform_id, user_id=user_id)
@@ -376,7 +376,7 @@ class VideoService:
     async def _create_resource_record(platform_id: str, user_id: str = None):
         """
         Auto-create a resource record from a downloaded video.
-        Uses dedup logic: if resource with same video_id exists,
+        Uses dedup logic: if resource with same media_id exists,
         only creates a resource_item reference (zero-copy).
         """
         if not user_id:
@@ -386,18 +386,18 @@ class VideoService:
         try:
             from app.services.resources_service import ResourcesService
 
-            repo = VideoRepository()
-            video = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video:
+            repo = MediaRepository()
+            media = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            if not media:
                 return
 
-            video_id = video.get("id")
-            if not video_id:
+            media_id = media.get("id")
+            if not media_id:
                 return
 
             # Parse duration string ("MM:SS" or "HH:MM:SS" or plain seconds)
             duration_seconds = None
-            dur = video.get("duration")
+            dur = media.get("duration")
             if dur:
                 try:
                     parts = str(dur).split(":")
@@ -411,19 +411,19 @@ class VideoService:
                     pass
 
             resources_svc = ResourcesService()
-            await resources_svc.create_from_video(
-                video_id=video_id,
+            await resources_svc.create_from_media(
+                media_id=media_id,
                 user_id=user_id,
-                filename=video.get("title") or "Untitled",
-                file_path=video.get("download_path"),
-                file_size_bytes=video.get("datasize_bytes"),
+                filename=media.get("title") or "Untitled",
+                file_path=media.get("download_path"),
+                file_size_bytes=media.get("datasize_bytes"),
                 duration_seconds=duration_seconds,
-                resolution=video.get("resolution"),
-                cover_image_path=video.get("cover_download_path"),
+                resolution=media.get("resolution"),
+                cover_image_path=media.get("cover_download_path"),
                 scope_type="personal",
                 scope_id=user_id,
             )
-            logger.info(f"Auto-created resource record for video {platform_id}")
+            logger.info(f"Auto-created resource record for media {platform_id}")
         except Exception as e:
             # Non-critical: don't fail the main workflow
             logger.warning(f"Failed to create resource record for {platform_id}: {e}")
@@ -433,7 +433,7 @@ class VideoService:
         """Sync wrapper for use in FastAPI background_tasks or Celery tasks"""
         import asyncio
 
-        asyncio.run(VideoService._create_resource_record(platform_id, user_id))
+        asyncio.run(MediaService._create_resource_record(platform_id, user_id))
 
     @staticmethod
     async def save_metadata_only(platform_id: str, parsed_data: dict) -> Dict[str, Any]:
@@ -458,7 +458,7 @@ class VideoService:
 
             # Data validation
             try:
-                video_data = VideoCreate(**parsed_data)
+                video_data = MediaCreate(**parsed_data)
                 logger.success(
                     f"数据验证通过: platform_id={platform_id}, user_id={user_id}"
                 )
@@ -466,7 +466,7 @@ class VideoService:
                 logger.error(f"数据验证失败: {str(e)}")
                 return {"success": False, "message": f"存储失败: {str(e)}"}
 
-            repo = VideoRepository()
+            repo = MediaRepository()
             data_dict = video_data.model_dump()
 
             # Check if already exists

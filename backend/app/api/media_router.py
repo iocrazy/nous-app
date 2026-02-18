@@ -1,9 +1,9 @@
-# backend/app/api/videos_router.py
+# backend/app/api/media_router.py
 
 """
-Videos Router
+Media Router
 
-Video processing API endpoints based on Supabase.
+Parsed media processing API endpoints based on Supabase.
 Requires authentication (JWT or API Key).
 """
 
@@ -21,13 +21,13 @@ from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
-from app.repositories.video_repository import VideoRepository
+from app.repositories.media_repository import MediaRepository
 from app.services.douyin_analysis import DouyinAnalysis
 from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
-from app.services.video_service import VideoService
+from app.services.media_service import MediaService
 from app.services.ytdlp_service import YtdlpService
 
 router = APIRouter(prefix="/videos")
@@ -276,7 +276,7 @@ async def fetch_video(
         parsed_data["user_id"] = auth.user_id
 
         # Save metadata to database first (must wait for completion, otherwise Celery task can't find data)
-        save_result = await VideoService.save_metadata_only(platform_id, parsed_data)
+        save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
         if not save_result.get("success"):
             logger.error(f"Failed to save metadata: {save_result.get('message')}")
             raise HTTPException(
@@ -294,7 +294,7 @@ async def fetch_video(
         if dedup_hit:
             # Auto-create resource record immediately for dedup hits
             background_tasks.add_task(
-                VideoService._create_resource_record_sync,
+                MediaService._create_resource_record_sync,
                 platform_id,
                 auth.user_id,
             )
@@ -359,7 +359,7 @@ async def fetch_video(
                     )
                 # Auto-create resource record after background downloads
                 background_tasks.add_task(
-                    VideoService._create_resource_record_sync,
+                    MediaService._create_resource_record_sync,
                     platform_id,
                     auth.user_id,
                 )
@@ -608,7 +608,7 @@ async def fetch_videos_batch(
                     # Add user ID
                     parsed_data["user_id"] = auth.user_id
                     background_tasks.add_task(
-                        VideoService.process_video, platform_id, parsed_data
+                        MediaService.process_video, platform_id, parsed_data
                     )
 
                     # Handle datetime objects to string
@@ -704,7 +704,7 @@ async def list_videos(
     Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         videos = await repo.get_all(
             user_id=auth.user_id,
             skip=skip,
@@ -730,7 +730,7 @@ async def get_video(platform_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
 
         if not video:
@@ -764,7 +764,7 @@ async def delete_video(
     Authentication: Bearer Token or API Key (requires `videos:videos:write` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Get video info for logging and file deletion
         video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
@@ -856,7 +856,7 @@ async def search_videos(
     Authentication: Bearer Token or API Key (requires `videos:search` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         status = None
         if request.status:
@@ -894,7 +894,7 @@ async def get_statistics(auth: AuthDep):
     Authentication: Bearer Token or API Key (requires `videos:statistics` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         stats = await repo.get_statistics(user_id=auth.user_id)
         return {"success": True, "statistics": stats}
     except Exception as e:
@@ -914,7 +914,7 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
     Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         videos = await repo.get_pending_downloads(
             user_id=auth.user_id, status=DownloadStatus.PENDING, limit=limit
         )
@@ -940,7 +940,7 @@ async def retry_download(
     Authentication: Bearer Token or API Key (requires `videos:retry` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
 
         if not video:
@@ -997,7 +997,7 @@ async def download_video_file(platform_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
 
         if not video:
@@ -1046,7 +1046,7 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
     """
     try:
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
 
         if not video:
@@ -1150,7 +1150,7 @@ async def _handle_ytdlp_fetch(
     parsed_data["need_download_cover"] = request.cover_bool
 
     # Step 3: Save metadata to database
-    save_result = await VideoService.save_metadata_only(platform_id, parsed_data)
+    save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
     if not save_result.get("success"):
         logger.error(f"Failed to save metadata: {save_result.get('message')}")
         raise HTTPException(
@@ -1200,10 +1200,10 @@ async def _handle_ytdlp_fetch(
                 """Background task for yt-dlp download"""
                 from app.core.enums import DownloadStatus
                 from app.core.utils import Utils
-                from app.repositories.video_repository import VideoRepository
+                from app.repositories.media_repository import MediaRepository
                 from app.services.downloader import DownloaderService
 
-                repo = VideoRepository()
+                repo = MediaRepository()
 
                 # Use structured path
                 from app.services.url_router import URLRouter
@@ -1245,7 +1245,7 @@ async def _handle_ytdlp_fetch(
                         )
 
                     # Auto-create resource record
-                    await VideoService._create_resource_record(platform_id, user_id)
+                    await MediaService._create_resource_record(platform_id, user_id)
 
                 except Exception as e:
                     logger.error(f"[yt-dlp] Background download failed: {e}")
@@ -1331,6 +1331,6 @@ legacy_router = APIRouter(prefix="/douyin")
     "/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False
 )
 async def legacy_douyin_redirect(path: str, request: Request):
-    """Redirect legacy /douyin/ routes to /videos/"""
+    """Redirect legacy /douyin/ routes to /media/"""
     new_url = str(request.url).replace("/douyin/", "/videos/", 1)
     return RedirectResponse(url=new_url, status_code=308)
