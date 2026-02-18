@@ -19,6 +19,7 @@ import {
   FileQuestion,
   PanelLeft,
   Plus,
+  RefreshCw,
   Search,
   Share2,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ import {
   fetchResourceContext,
   fetchResources,
   getResourceCoverUrl,
+  retryTranscode,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
@@ -635,10 +637,29 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 {t('resources.transcoding', 'Transcoding...')}
               </span>
             )}
-            {isVideo && transcodeStatus === 'failed' && (
-              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 rounded-md">
+            {isVideo && transcodeStatus === 'failed' && viewingVersion && (
+              <button
+                onClick={async () => {
+                  try {
+                    await retryTranscode(resourceId, viewingVersion.id);
+                    // Optimistic update: show as pending
+                    setVersions((prev) =>
+                      prev.map((v) =>
+                        v.id === viewingVersion.id
+                          ? { ...v, transcode_status: 'pending' }
+                          : v,
+                      ),
+                    );
+                  } catch {
+                    // silently fail — user sees it stays as "failed"
+                  }
+                }}
+                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 rounded-md transition-colors cursor-pointer"
+                title={t('resources.retryTranscode', 'Retry')}
+              >
+                <RefreshCw size={10} />
                 {t('resources.transcodeFailed', 'Transcode Failed')}
-              </span>
+              </button>
             )}
             {isVideo && transcodeStatus === 'completed' && (
               <span className="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/15 text-emerald-400 rounded-md">
@@ -711,7 +732,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* File list panel */}
         {showFileList && (
           <div className="w-64 border-r border-zinc-800/80 flex flex-col shrink-0">
@@ -792,7 +813,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               </button>
             </div>
           )}
-          <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden">
+          <div className="flex-1 flex items-center justify-center min-h-0 min-w-0 overflow-hidden">
           {isVideo && fileUrl ? (
             <div className="w-full h-full relative">
               <VideoPlayer

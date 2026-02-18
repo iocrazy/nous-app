@@ -32,9 +32,9 @@ class TranscodeTier:
 
 # Quality tiers — only tiers at or below original resolution are used
 TIERS = [
-    TranscodeTier(name="480p", width=854, height=480, bitrate=800, audio_bitrate=96),
-    TranscodeTier(name="720p", width=1280, height=720, bitrate=2500, audio_bitrate=128),
-    TranscodeTier(name="1080p", width=1920, height=1080, bitrate=5000, audio_bitrate=192),
+    TranscodeTier(name="480p", width=854, height=480, bitrate=1500, audio_bitrate=128),
+    TranscodeTier(name="720p", width=1280, height=720, bitrate=4000, audio_bitrate=128),
+    TranscodeTier(name="1080p", width=1920, height=1080, bitrate=8000, audio_bitrate=192),
 ]
 
 
@@ -113,8 +113,19 @@ class TranscodeService:
                     await self.repo.update_version(version_id, {"transcode_status": "failed"})
                     return None
 
+            # Add passthrough "Original" tier (copy codec, no re-encoding)
+            source_bitrate = await self._probe_bitrate(str(source))
+            passthrough_ok = await self._transcode_passthrough(str(source), hls_dir)
+
             # Generate master playlist
-            self._write_master_playlist(hls_dir, applicable)
+            self._write_master_playlist(
+                hls_dir,
+                applicable,
+                passthrough=passthrough_ok,
+                source_width=width,
+                source_height=height,
+                source_bitrate=source_bitrate,
+            )
 
             # Build relative path
             master_path = hls_dir / "master.m3u8"
@@ -170,6 +181,28 @@ class TranscodeService:
         except Exception as e:
             logger.warning(f"ffprobe failed for {filepath}: {e}")
             return None, None
+
+    async def _probe_bitrate(self, filepath: str) -> Optional[int]:
+        """Probe video file for overall bitrate (bps)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None
+            info = json.loads(stdout)
+            br = info.get("format", {}).get("bit_rate")
+            return int(br) if br else None
+        except Exception as e:
+            logger.warning(f"ffprobe bitrate failed for {filepath}: {e}")
+            return None
 
     # ------------------------------------------------------------------ #
     # Tier selection
@@ -237,11 +270,67 @@ class TranscodeService:
             return False
 
     # ------------------------------------------------------------------ #
+    # Passthrough (original quality, no re-encoding)
+    # ------------------------------------------------------------------ #
+
+    async def _transcode_passthrough(self, source: str, hls_dir: Path) -> bool:
+        """Remux source into HLS segments without re-encoding (preserves original quality)."""
+        out_dir = hls_dir / "source"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        segment_path = f"{out_dir}/segment_%03d.ts"
+        playlist_path = f"{out_dir}/stream.m3u8"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", source,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-f", "hls",
+            "-hls_time", "6",
+            "-hls_list_size", "0",
+            "-hls_segment_filename", segment_path,
+            "-hls_playlist_type", "vod",
+            playlist_path,
+        ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                # Passthrough failed (e.g. non-H.264 source) — not critical, skip it
+                logger.warning(
+                    f"Passthrough remux failed (codec incompatible?): {stderr.decode()[-300:]}"
+                )
+                shutil.rmtree(out_dir, ignore_errors=True)
+                return False
+
+            logger.info(f"Passthrough tier (Original) created → {playlist_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Passthrough execution error: {e}")
+            shutil.rmtree(out_dir, ignore_errors=True)
+            return False
+
+    # ------------------------------------------------------------------ #
     # Master playlist
     # ------------------------------------------------------------------ #
 
     def _write_master_playlist(
-        self, hls_dir: Path, tiers: List[TranscodeTier]
+        self,
+        hls_dir: Path,
+        tiers: List[TranscodeTier],
+        *,
+        passthrough: bool = False,
+        source_width: Optional[int] = None,
+        source_height: Optional[int] = None,
+        source_bitrate: Optional[int] = None,
     ) -> None:
         """Write the multi-bitrate master.m3u8 playlist."""
         lines = ["#EXTM3U"]
@@ -253,6 +342,17 @@ class TranscodeService:
                 f"NAME=\"{tier.name}\""
             )
             lines.append(f"{tier.name}/stream.m3u8")
+
+        # Passthrough tier — original quality, highest bandwidth
+        if passthrough and source_width and source_height:
+            # Use probed bitrate or a generous fallback
+            bw = source_bitrate if source_bitrate else 20_000_000
+            lines.append(
+                f"#EXT-X-STREAM-INF:BANDWIDTH={bw},"
+                f"RESOLUTION={source_width}x{source_height},"
+                f"NAME=\"Original\""
+            )
+            lines.append("source/stream.m3u8")
 
         master = hls_dir / "master.m3u8"
         master.write_text("\n".join(lines) + "\n")

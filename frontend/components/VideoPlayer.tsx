@@ -6,6 +6,7 @@ interface HlsLevel {
   height: number;
   width: number;
   bitrate: number;
+  name?: string;
 }
 
 interface VideoPlayerProps {
@@ -142,6 +143,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             height: l.height,
             width: l.width,
             bitrate: l.bitrate,
+            name: (l as unknown as Record<string, unknown>).attrs
+              ? ((l as unknown as Record<string, Record<string, string>>).attrs?.NAME || undefined)
+              : undefined,
           })),
         );
       });
@@ -582,9 +586,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 title="Quality"
               >
                 {isAutoQuality
-                  ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].height}p)` : ''}`
+                  ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].name === 'Original' ? 'Original' : hlsLevels[currentHlsLevel].height + 'p'})` : ''}`
                   : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
-                    ? `${hlsLevels[currentHlsLevel].height}p`
+                    ? hlsLevels[currentHlsLevel].name === 'Original'
+                      ? 'Original'
+                      : `${hlsLevels[currentHlsLevel].height}p`
                     : 'Auto'}
               </button>
               {showQualityMenu && (
@@ -601,20 +607,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   {hlsLevels
                     .map((level, idx) => ({ level, idx }))
-                    .sort((a, b) => b.level.height - a.level.height)
-                    .map(({ level, idx }) => (
-                      <button
-                        key={idx}
-                        onClick={() => changeQuality(idx)}
-                        className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                          !isAutoQuality && currentHlsLevel === idx
-                            ? 'text-indigo-400 bg-indigo-500/10'
-                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-                        }`}
-                      >
-                        {level.height}p
-                      </button>
-                    ))}
+                    .sort((a, b) => b.level.bitrate - a.level.bitrate)
+                    .map(({ level, idx }) => {
+                      const isOriginal = level.name === 'Original';
+                      const label = isOriginal ? `Original (${level.height}p)` : `${level.height}p`;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => changeQuality(idx)}
+                          className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                            !isAutoQuality && currentHlsLevel === idx
+                              ? 'text-indigo-400 bg-indigo-500/10'
+                              : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                 </div>
               )}
             </div>
