@@ -66,6 +66,7 @@ import {
   trashResources,
   renameResource,
   getFolderPreview,
+  uploadNewVersion,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -233,6 +234,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // New dropdown
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const newDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Version upload via context menu
+  const versionInputRef = useRef<HTMLInputElement>(null);
+  const [versionTargetId, setVersionTargetId] = useState<string | null>(null);
 
   // Aliases for readability
   const uploading = upload.isUploading;
@@ -984,6 +989,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [scopeType, scopeId, selectedSmartFolderId, navigate, resPath, t]);
 
+  // Handle version file selection from hidden input
+  const handleVersionFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !versionTargetId) return;
+    try {
+      await uploadNewVersion(versionTargetId, file);
+      addToast(t('resources.versionUploadSuccess'), 'success');
+    } catch {
+      addToast(t('resources.versionUploadFailed'), 'error');
+    }
+    setVersionTargetId(null);
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+  }, [versionTargetId, addToast, t]);
+
   // Build context menu items based on type
   const contextMenuItems = useMemo((): ContextMenuItem[] => {
     if (!contextMenu) return [];
@@ -1027,6 +1047,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             if (resourceId) {
               setRenamingResourceId(item.id);
               setRenameValue(item.resource?.filename ?? '');
+            }
+          },
+        });
+        items.push({
+          label: t('resources.uploadNewVersion'),
+          icon: <Upload size={14} />,
+          onClick: () => {
+            if (resourceId) {
+              setVersionTargetId(String(resourceId));
+              // Trigger hidden file input after a tick so context menu closes first
+              setTimeout(() => versionInputRef.current?.click(), 0);
             }
           },
           divider: true,
@@ -2120,6 +2151,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         {/* Content area */}
         <div
           className="flex-1 overflow-y-auto p-6 relative"
+          style={{ paddingRight: selectedResource?.resource && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
           onDragEnter={canUpload ? handleDragEnter : undefined}
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
@@ -2543,6 +2575,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onClose={closeContextMenu}
         />
       )}
+
+      {/* Hidden file input for version upload via context menu */}
+      <input
+        ref={versionInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleVersionFileSelected}
+      />
 
       {/* ── Smart Folder Editor (Create) ── */}
       {showSmartFolderEditor && (

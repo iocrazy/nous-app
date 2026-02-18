@@ -429,6 +429,8 @@
     "confirmDeleteVersion": "删除版本",
     "deleteVersionWarning": "这将永久删除 V{{version}} 及其文件，此操作不可撤销。",
     "uploadNewVersion": "上传新版本",
+    "versionUploadSuccess": "新版本上传成功",
+    "versionUploadFailed": "新版本上传失败",
     "uploadingVersion": "上传中...",
     "viewingVersion": "正在查看版本",
     "backToCurrent": "返回当前版本",

@@ -429,6 +429,8 @@
     "confirmDeleteVersion": "Delete Version",
     "deleteVersionWarning": "This will permanently delete V{{version}} and its files. This action cannot be undone.",
     "uploadNewVersion": "Upload New Version",
+    "versionUploadSuccess": "New version uploaded successfully",
+    "versionUploadFailed": "Failed to upload new version",
     "uploadingVersion": "Uploading...",
     "viewingVersion": "Viewing version",
     "backToCurrent": "Back to current",
