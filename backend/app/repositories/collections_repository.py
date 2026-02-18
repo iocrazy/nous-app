@@ -114,14 +114,14 @@ class CollectionsRepository:
         return len(result.data) > 0
 
     async def update_cache(
-        self, collection_id: str, video_ids: List[int], count: int
+        self, collection_id: str, media_ids: List[int], count: int
     ) -> dict:
-        """Update the cached video IDs and count for a collection."""
+        """Update the cached media IDs and count for a collection."""
         table = await self._get_table()
         result = (
             await table.update(
                 {
-                    "cached_video_ids": video_ids,
+                    "cached_media_ids": media_ids,
                     "cached_count": count,
                     "cached_at": datetime.utcnow().isoformat(),
                 }

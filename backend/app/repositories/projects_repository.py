@@ -19,7 +19,7 @@ class ProjectsRepository:
 
     TABLE_PROJECTS = "projects"
     TABLE_FILES = "project_files"
-    TABLE_VIDEOS = "videos"
+    TABLE_MEDIA = "parsed_media"
     TABLE_VERSIONS = "file_versions"
     TABLE_COMMENTS = "review_comments"
 
@@ -301,30 +301,30 @@ class ProjectsRepository:
             raise
 
     # ------------------------------------------------------------------ #
-    # Video metadata (for link-video feature)
+    # Media metadata (for link-media feature)
     # ------------------------------------------------------------------ #
 
-    async def get_video_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
+    async def get_media_metadata(self, media_id: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch video metadata from the videos table for linking.
+        Fetch media metadata from the parsed_media table for linking.
 
         Args:
-            video_id: UUID of the video.
+            media_id: UUID of the media.
 
         Returns:
-            Video row dict or None.
+            Media row dict or None.
         """
         try:
             client = await self._get_client()
             result = (
-                await client.table(self.TABLE_VIDEOS)
+                await client.table(self.TABLE_MEDIA)
                 .select("*")
-                .eq("id", video_id)
+                .eq("id", media_id)
                 .execute()
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get video metadata {video_id}: {e}")
+            logger.error(f"Failed to get media metadata {media_id}: {e}")
             return None
 
     # ------------------------------------------------------------------ #

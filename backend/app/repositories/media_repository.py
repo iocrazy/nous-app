@@ -204,13 +204,13 @@ class MediaRepository:
             logger.error(f"查找已下载视频失败: {e}")
             return None
 
-    async def check_video_existence(self, platform_id: str) -> bool:
-        """检查视频是否存在"""
+    async def check_media_existence(self, platform_id: str) -> bool:
+        """检查媒体是否存在"""
         result = await self.get_by_platform_id(platform_id)
         return result is not None
 
-    async def check_video_downloaded(self, platform_id: str) -> bool:
-        """检查视频是否已下载"""
+    async def check_media_downloaded(self, platform_id: str) -> bool:
+        """检查媒体是否已下载"""
         result = await self.get_by_platform_id(platform_id)
         if result:
             return result.get("video_download_status") == DownloadStatus.COMPLETED.value
@@ -230,7 +230,7 @@ class MediaRepository:
             return result.get("cover_download_status") == DownloadStatus.COMPLETED.value
         return False
 
-    async def mark_video_as_downloaded(
+    async def mark_media_as_downloaded(
         self,
         platform_id: str,
         download_path: str,
@@ -406,7 +406,7 @@ class MediaRepository:
             if media_type:
                 query = query.eq("media_type", media_type)
 
-            # TODO: category search needs to be reimplemented via video_tags table
+            # TODO: category search needs to be reimplemented via media_tags table
             # if category:
             #     query = query.ilike("video_categories", f"%{category}%")
 

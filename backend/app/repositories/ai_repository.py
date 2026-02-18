@@ -3,8 +3,8 @@
 """
 AI data access layer.
 
-Handles CRUD operations for video_transcripts, video_summaries,
-and AI-related status fields on the videos table.
+Handles CRUD operations for media_transcripts, media_summaries,
+and AI-related status fields on the parsed_media table.
 """
 
 from typing import Any, Dict, List, Optional
@@ -30,102 +30,102 @@ class AIRepository:
     # ------------------------------------------------------------------
 
     async def save_transcript(
-        self, video_id: str, data: Dict[str, Any]
+        self, media_id: str, data: Dict[str, Any]
     ) -> Optional[Dict]:
         """Save a transcript record for a video.
 
         Args:
-            video_id: UUID of the video.
+            media_id: UUID of the video.
             data: Dict with keys: language, full_text, segments (JSONB),
                   whisper_model, duration_seconds.
         """
         try:
             client = await self._get_client()
-            row = {"video_id": video_id, **data}
+            row = {"media_id": media_id, **data}
             result = (
-                await client.table("video_transcripts")
-                .upsert(row, on_conflict="video_id")
+                await client.table("media_transcripts")
+                .upsert(row, on_conflict="media_id")
                 .execute()
             )
             if result.data:
-                logger.info(f"Saved transcript for video {video_id}")
+                logger.info(f"Saved transcript for video {media_id}")
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save transcript for video {video_id}: {e}")
+            logger.error(f"Failed to save transcript for video {media_id}: {e}")
             return None
 
-    async def get_transcript(self, video_id: str) -> Optional[Dict]:
+    async def get_transcript(self, media_id: str) -> Optional[Dict]:
         """Get transcript for a video."""
         try:
             client = await self._get_client()
             result = (
-                await client.table("video_transcripts")
+                await client.table("media_transcripts")
                 .select("*")
-                .eq("video_id", video_id)
+                .eq("media_id", media_id)
                 .maybe_single()
                 .execute()
             )
             return result.data
         except Exception as e:
-            logger.error(f"Failed to get transcript for video {video_id}: {e}")
+            logger.error(f"Failed to get transcript for video {media_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
     # Summaries
     # ------------------------------------------------------------------
 
-    async def save_summary(self, video_id: str, data: Dict[str, Any]) -> Optional[Dict]:
+    async def save_summary(self, media_id: str, data: Dict[str, Any]) -> Optional[Dict]:
         """Save a summary record for a video.
 
         Args:
-            video_id: UUID of the video.
+            media_id: UUID of the video.
             data: Dict with keys: summary_type, summary_text, key_points (JSONB),
                   topics (JSONB), llm_model, llm_provider.
         """
         try:
             client = await self._get_client()
-            row = {"video_id": video_id, **data}
+            row = {"media_id": media_id, **data}
             result = (
-                await client.table("video_summaries")
-                .upsert(row, on_conflict="video_id")
+                await client.table("media_summaries")
+                .upsert(row, on_conflict="media_id")
                 .execute()
             )
             if result.data:
-                logger.info(f"Saved summary for video {video_id}")
+                logger.info(f"Saved summary for video {media_id}")
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save summary for video {video_id}: {e}")
+            logger.error(f"Failed to save summary for video {media_id}: {e}")
             return None
 
-    async def get_summary(self, video_id: str) -> Optional[Dict]:
+    async def get_summary(self, media_id: str) -> Optional[Dict]:
         """Get summary for a video."""
         try:
             client = await self._get_client()
             result = (
-                await client.table("video_summaries")
+                await client.table("media_summaries")
                 .select("*")
-                .eq("video_id", video_id)
+                .eq("media_id", media_id)
                 .maybe_single()
                 .execute()
             )
             return result.data
         except Exception as e:
-            logger.error(f"Failed to get summary for video {video_id}: {e}")
+            logger.error(f"Failed to get summary for video {media_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
     # Video AI status
     # ------------------------------------------------------------------
 
-    async def update_video_ai_status(
-        self, video_id: str, field: str, status: str
+    async def update_media_ai_status(
+        self, media_id: str, field: str, status: str
     ) -> bool:
-        """Update an AI status field on the videos table.
+        """Update an AI status field on the parsed_media table.
 
         Args:
-            video_id: UUID of the video.
+            media_id: UUID of the media.
             field: One of 'transcript_status', 'summary_status', 'visual_analysis_status'.
             status: One of 'pending', 'processing', 'completed', 'failed', 'skipped'.
         """
@@ -138,15 +138,15 @@ class AIRepository:
         try:
             client = await self._get_client()
             await (
-                client.table("videos")
+                client.table("parsed_media")
                 .update({field: status})
-                .eq("id", video_id)
+                .eq("id", media_id)
                 .execute()
             )
-            logger.info(f"Updated video {video_id} {field} = {status}")
+            logger.info(f"Updated media {media_id} {field} = {status}")
             return True
         except Exception as e:
-            logger.error(f"Failed to update {field} for video {video_id}: {e}")
+            logger.error(f"Failed to update {field} for media {media_id}: {e}")
             return False
 
     async def get_videos_needing_transcription(self, limit: int = 20) -> List[Dict]:
@@ -154,7 +154,7 @@ class AIRepository:
         try:
             client = await self._get_client()
             result = (
-                await client.table("videos")
+                await client.table("parsed_media")
                 .select(
                     "id, platform_id, title, download_path, duration, source_platform"
                 )
@@ -174,7 +174,7 @@ class AIRepository:
         try:
             client = await self._get_client()
             result = (
-                await client.table("videos")
+                await client.table("parsed_media")
                 .select("id, platform_id, title, description, source_platform")
                 .eq("transcript_status", "completed")
                 .eq("summary_status", "pending")

@@ -60,41 +60,41 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource {resource_id}: {e}")
             return None
 
-    async def get_resource_by_video_id(self, video_id: str) -> Optional[Dict[str, Any]]:
+    async def get_resource_by_media_id(self, media_id: str) -> Optional[Dict[str, Any]]:
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_RESOURCES)
                 .select("*")
-                .eq("video_id", video_id)
+                .eq("media_id", media_id)
                 .limit(1)
                 .execute()
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource by video_id {video_id}: {e}")
+            logger.error(f"Failed to get resource by media_id {media_id}: {e}")
             return None
 
     async def get_resource_by_platform_id(self, platform_id: str) -> Optional[Dict[str, Any]]:
         """Look up resource by the external platform content ID (e.g. douyin aweme_id).
 
-        Two-step: videos.platform_id → videos.id → resources.video_id
+        Two-step: parsed_media.platform_id -> parsed_media.id -> resources.media_id
         """
         try:
             client = await self._get_client()
-            # Step 1: find the video by platform_id
-            video_result = (
-                await client.table("videos")
+            # Step 1: find the media by platform_id
+            media_result = (
+                await client.table("parsed_media")
                 .select("id")
                 .eq("platform_id", platform_id)
                 .limit(1)
                 .execute()
             )
-            if not video_result.data:
+            if not media_result.data:
                 return None
-            video_uuid = video_result.data[0]["id"]
-            # Step 2: find the resource by video_id
-            return await self.get_resource_by_video_id(video_uuid)
+            media_uuid = media_result.data[0]["id"]
+            # Step 2: find the resource by media_id
+            return await self.get_resource_by_media_id(media_uuid)
         except Exception as e:
             logger.error(f"Failed to get resource by platform_id {platform_id}: {e}")
             return None
