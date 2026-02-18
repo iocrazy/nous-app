@@ -86,17 +86,30 @@ def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
             )
             return
 
+        # Look up resource_id from platform_id
+        resource_id = None
+        try:
+            from app.repositories.resources_repository import ResourcesRepository
+
+            res_repo = ResourcesRepository()
+            resource = run_async(res_repo.get_resource_by_platform_id(platform_id))
+            if resource:
+                resource_id = str(resource["id"])
+        except Exception as e:
+            logger.debug(f"[AI] Could not resolve resource_id for {platform_id}: {e}")
+
         from app.tasks.ai_tasks import chain_ai_pipeline
 
         chain_ai_pipeline(
             platform_id=platform_id,
             user_id=user_id,
+            resource_id=resource_id,
             transcript_bool=transcript_bool,
             summary_bool=summary_bool,
         )
         logger.info(
             f"[AI] Pipeline chained after download: {platform_id} "
-            f"(transcribe={transcript_bool}, summarize={summary_bool})"
+            f"(transcribe={transcript_bool}, summarize={summary_bool}, resource={resource_id})"
         )
 
     except Exception as e:

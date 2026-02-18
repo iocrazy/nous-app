@@ -103,6 +103,29 @@ class MediaRepository:
             logger.error(f"获取视频记录失败: {e}")
             return None
 
+    async def get_by_id(self, media_id: str) -> Optional[Dict[str, Any]]:
+        """Get a parsed_media record by its primary key (UUID).
+
+        Args:
+            media_id: The parsed_media UUID.
+
+        Returns:
+            Media record or None.
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("id", media_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get media by id {media_id}: {e}")
+            return None
+
     async def update(
         self, platform_id: str, data: Dict[str, Any], user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
