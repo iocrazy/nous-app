@@ -802,6 +802,21 @@
       "confirm": "确认删除",
       "cancel": "取消"
     },
+    "fileMenu": {
+      "download": "下载",
+      "rename": "重命名",
+      "move": "移动到...",
+      "setStatus": "设置状态",
+      "statusNone": "无状态",
+      "statusPending": "待审核",
+      "statusInReview": "审核中",
+      "statusFeedback": "已反馈",
+      "statusApproved": "已通过",
+      "versionHistory": "版本历史",
+      "fileInfo": "文件信息",
+      "share": "分享",
+      "delete": "删除"
+    },
     "share": {
       "title": "分享文件",
       "type": "分享类型",

@@ -802,6 +802,21 @@
       "confirm": "Delete",
       "cancel": "Cancel"
     },
+    "fileMenu": {
+      "download": "Download",
+      "rename": "Rename",
+      "move": "Move To...",
+      "setStatus": "Set Status",
+      "statusNone": "No Status",
+      "statusPending": "Pending Review",
+      "statusInReview": "In Review",
+      "statusFeedback": "Feedback",
+      "statusApproved": "Approved",
+      "versionHistory": "Version History",
+      "fileInfo": "File Info",
+      "share": "Share",
+      "delete": "Delete"
+    },
     "share": {
       "title": "Share File",
       "type": "Share Type",
