@@ -48,6 +48,7 @@ import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
+import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
 
 // ─── Utility functions ──────────────────────────────────
@@ -126,13 +127,11 @@ const FilePreview: React.FC<{
 
   if (mime.startsWith('audio/')) {
     return (
-      <div className="flex flex-col items-center gap-6">
-        <div className="w-32 h-32 rounded-full bg-orange-500/10 flex items-center justify-center">
-          <Music size={48} className="text-orange-400" />
-        </div>
-        <p className="text-zinc-300 text-sm font-medium">{resource.filename}</p>
-        <audio src={fileUrl} controls className="w-80" />
-      </div>
+      <AudioWaveformPlayer
+        src={fileUrl}
+        filename={resource.filename}
+        duration={resource.duration_seconds ?? undefined}
+      />
     );
   }
 
@@ -835,6 +834,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 }}
                 onCancel={() => setAnnotationActive(false)}
               />
+            </div>
+          ) : isAudio && fileUrl ? (
+            <div className="w-full h-full">
+              <FilePreview resource={resource} fileUrl={fileUrl} />
             </div>
           ) : (
             <div className="p-6">
