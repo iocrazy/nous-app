@@ -110,7 +110,7 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Get video_id from platform_id
+  // Get media_id from platform_id
   const { data: video } = await supabase
     .from('parsed_media')
     .select('id')
@@ -134,7 +134,7 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  // Get video_id from platform_id
+  // Get media_id from platform_id
   const { data: video } = await supabase
     .from('parsed_media')
     .select('id')
@@ -156,7 +156,7 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  // Get video_id from platform_id
+  // Get media_id from platform_id
   const { data: video } = await supabase
     .from('parsed_media')
     .select('id')

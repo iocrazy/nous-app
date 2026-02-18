@@ -139,7 +139,7 @@ export const getVideoTags = async (videoId: string): Promise<Tag[]> => {
   }
 
   const data = await response.json();
-  // Backend returns { video_id, tags: [{ tag: {...}, confidence, source, created_at }] }
+  // Backend returns { media_id, tags: [{ tag: {...}, confidence, source, created_at }] }
   return (data.tags || []).map((item: { tag: Tag }) => item.tag);
 };
 

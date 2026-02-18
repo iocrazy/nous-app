@@ -116,7 +116,7 @@ export const AITasksPanel: React.FC = () => {
 
       // Build query for videos with any AI task activity
       let query = supabase
-        .from('videos')
+        .from('parsed_media')
         .select('id, platform_id, title, transcript_status, summary_status, visual_analysis_status, updated_at')
         .or('transcript_status.neq.pending,summary_status.neq.pending,visual_analysis_status.neq.pending')
         .order('updated_at', { ascending: false })
