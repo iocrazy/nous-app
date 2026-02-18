@@ -1010,9 +1010,9 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 {resource.source_type === 'web' ? t('resources.webDownload') : t('resources.uploaded')}
               </span>
             </div>
-            {resource.video_id && (
+            {resource.media_id && (
               <a
-                href={`/resources/video/${resource.video_id}`}
+                href={`/resources/media/${resource.media_id}`}
                 className="inline-flex items-center gap-1.5 mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"

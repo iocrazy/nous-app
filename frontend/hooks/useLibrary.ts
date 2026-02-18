@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Video, Collection } from '../types';
+import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { fetchLibraryPaginated, updateItem, deleteItem } from '../services/dataService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
@@ -184,14 +184,14 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       const supabase = getSupabaseClient();
       if (supabase) {
         const { data } = await supabase
-          .from('video_collections')
-          .select('video_id')
+          .from('media_collections')
+          .select('media_id')
           .eq('collection_id', parseInt(collectionId));
         if (data) {
-          const videoIds = data.map(v => v.video_id);
+          const videoIds = data.map(v => v.media_id);
           if (videoIds.length > 0) {
             const { data: videos } = await supabase
-              .from('videos')
+              .from('parsed_media')
               .select('platform_id')
               .in('id', videoIds);
             setCollectionVideoIds(videos?.map(v => v.platform_id) || []);
@@ -224,13 +224,13 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           }
           const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
           const { data } = await supabase
-            .from('video_collections')
-            .select('video_id')
+            .from('media_collections')
+            .select('media_id')
             .in('collection_id', teamCollectionIds);
           if (data && data.length > 0) {
-            const videoIds = [...new Set(data.map(v => v.video_id))];
+            const videoIds = [...new Set(data.map(v => v.media_id))];
             const { data: videos } = await supabase
-              .from('videos')
+              .from('parsed_media')
               .select('platform_id')
               .in('id', videoIds);
             setTeamLibraryVideoIds(videos?.map(v => v.platform_id) || []);
@@ -259,13 +259,13 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     }
     const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
     const { data } = await supabase
-      .from('video_collections')
-      .select('video_id')
+      .from('media_collections')
+      .select('media_id')
       .in('collection_id', teamCollectionIds);
     if (data && data.length > 0) {
-      const videoIds = [...new Set(data.map(v => v.video_id))];
+      const videoIds = [...new Set(data.map(v => v.media_id))];
       const { data: videos } = await supabase
-        .from('videos')
+        .from('parsed_media')
         .select('platform_id')
         .in('id', videoIds);
       setSharedVideoIds(videos?.map(v => v.platform_id) || []);
@@ -286,10 +286,10 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const channel = supabase
-      .channel('videos_realtime')
+      .channel('parsed_media_realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'videos' },
+        { event: '*', schema: 'public', table: 'parsed_media' },
         async (payload) => {
           console.log('Realtime update:', payload.eventType, payload);
           const { data: { user } } = await supabase.auth.getUser();
@@ -332,14 +332,14 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const collectionChannel = supabase
-      .channel('video_collections_realtime')
+      .channel('media_collections_realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'video_collections' },
+        { event: '*', schema: 'public', table: 'media_collections' },
         async (payload) => {
-          console.log('Collection videos realtime update:', payload.eventType, payload);
-          const newRecord = payload.new as { collection_id: number; video_id: number };
-          const oldRecord = payload.old as { collection_id: number; video_id: number };
+          console.log('Media collections realtime update:', payload.eventType, payload);
+          const newRecord = payload.new as { collection_id: number; media_id: number };
+          const oldRecord = payload.old as { collection_id: number; media_id: number };
           const changedCollectionId = newRecord?.collection_id || oldRecord?.collection_id;
 
           if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
@@ -372,19 +372,19 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const tagsChannel = supabase
-      .channel('video_tags_realtime')
+      .channel('media_tags_realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'video_tags' },
+        { event: '*', schema: 'public', table: 'media_tags' },
         async (payload) => {
-          console.log('Video tags realtime update:', payload.eventType, payload);
-          const newRecord = payload.new as { video_id: string; tag_id: string };
-          const oldRecord = payload.old as { video_id: string; tag_id: string };
-          const videoId = newRecord?.video_id || oldRecord?.video_id;
+          console.log('Media tags realtime update:', payload.eventType, payload);
+          const newRecord = payload.new as { media_id: string; tag_id: string };
+          const oldRecord = payload.old as { media_id: string; tag_id: string };
+          const videoId = newRecord?.media_id || oldRecord?.media_id;
           if (!videoId) return;
 
           const { data: updatedVideo, error } = await supabase
-            .from('videos_with_tags')
+            .from('parsed_media_with_tags')
             .select('*')
             .eq('id', videoId)
             .single();

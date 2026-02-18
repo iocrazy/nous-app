@@ -787,8 +787,8 @@ export async function trashResourceByPlatformId(
   }
 }
 
-// Unlink a downloaded video's resource from the user's scope (by video_id).
-// Does NOT delete the douyin_videos record or physical files.
+// Unlink a downloaded video's resource from the user's scope (by media_id).
+// Does NOT delete the parsed_media record or physical files.
 // The DB orphan-GC trigger auto-trashes the resource if no references remain.
 export async function unlinkResourceByPlatformId(
   platformId: string,

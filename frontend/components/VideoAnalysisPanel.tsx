@@ -22,7 +22,7 @@ import {
   getVideoAnalysis,
   triggerAnalysis,
   suggestTags,
-  VideoAnalysis,
+  VideoAnalysisResult,
   AnalysisStatus,
 } from '../services/analysisService';
 
@@ -39,7 +39,7 @@ export const VideoAnalysisPanel: React.FC<VideoAnalysisPanelProps> = ({
   onTagsSuggested,
   compact = false,
 }) => {
-  const [analysis, setAnalysis] = useState<VideoAnalysis | null>(null);
+  const [analysis, setAnalysis] = useState<VideoAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
