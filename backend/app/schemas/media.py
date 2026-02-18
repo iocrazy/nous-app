@@ -1,9 +1,9 @@
-# app/schemas/video.py
+# app/schemas/media.py
 
 """
-Video data validation schema module
+Parsed media data validation schema module
 
-Defines Pydantic 2.0 validation schemas for video data used in API request
+Defines Pydantic 2.0 validation schemas for parsed media data used in API request
 and response validation. Includes schemas for create, update, query, and
 other operations.
 """
@@ -16,11 +16,11 @@ from pydantic import BaseModel, Field, model_validator
 from app.core.enums import DownloadStatus
 
 
-class VideoBase(BaseModel):
-    """Base video schema"""
+class MediaBase(BaseModel):
+    """Base parsed media schema"""
 
-    # Unique video identifier
-    platform_id: str = Field(..., description="Unique video identifier from platform")
+    # Unique media identifier
+    platform_id: str = Field(..., description="Unique media identifier from platform")
 
     # User association
     user_id: Optional[str] = Field(None, description="User ID")
@@ -31,20 +31,20 @@ class VideoBase(BaseModel):
     share_count: Optional[int] = Field(None, description="Share count")
     favorite_count: Optional[int] = Field(None, description="Favorite/bookmark count")
 
-    # Video metadata
-    original_url: str = Field(..., description="Original video URL")
-    duration: Optional[str] = Field(None, description="Video duration (seconds)")
-    resolution: Optional[str] = Field(None, description="Video resolution")
+    # Media metadata
+    original_url: str = Field(..., description="Original media URL")
+    duration: Optional[str] = Field(None, description="Media duration (seconds)")
+    resolution: Optional[str] = Field(None, description="Media resolution")
     datasize: Optional[str] = Field(
-        None, description="Video file size (human readable)"
+        None, description="Media file size (human readable)"
     )
-    datasize_bytes: Optional[int] = Field(None, description="Video file size in bytes")
+    datasize_bytes: Optional[int] = Field(None, description="Media file size in bytes")
     hashtags: Optional[str] = Field(None, description="Hashtag names")
-    published_at: Optional[datetime] = Field(None, description="Video publish time")
+    published_at: Optional[datetime] = Field(None, description="Media publish time")
     author: Optional[str] = Field(None, description="Author name")
-    title: Optional[str] = Field(None, description="Video title")
+    title: Optional[str] = Field(None, description="Media title")
     media_type: Optional[str] = Field(None, description="Media type")
-    description: Optional[str] = Field(None, description="Video description")
+    description: Optional[str] = Field(None, description="Media description")
 
     # Platform identification
     source_platform: Optional[str] = Field(
@@ -114,8 +114,8 @@ class VideoBase(BaseModel):
     download_time: Optional[datetime] = Field(None, description="Download time")
 
 
-class VideoCreate(VideoBase):
-    """Schema for creating a video record"""
+class MediaCreate(MediaBase):
+    """Schema for creating a parsed media record"""
 
     # Set default download statuses
     video_download_status: Optional[DownloadStatus] = Field(
@@ -140,12 +140,12 @@ class VideoCreate(VideoBase):
         return self
 
 
-class VideoUpdate(VideoBase):
-    """Schema for updating a video record"""
+class MediaUpdate(MediaBase):
+    """Schema for updating a parsed media record"""
 
     # Override required fields from base to make them optional
     platform_id: Optional[str] = Field(
-        None, description="Unique video identifier from platform"
+        None, description="Unique media identifier from platform"
     )
 
     @model_validator(mode="after")
@@ -158,8 +158,8 @@ class VideoUpdate(VideoBase):
         return self
 
 
-class VideoInDB(VideoBase):
-    """Schema for video data as stored in the database"""
+class MediaInDB(MediaBase):
+    """Schema for parsed media data as stored in the database"""
 
     id: str = Field(..., description="Record ID (UUID)")
     video_download_status: DownloadStatus = Field(
@@ -175,8 +175,8 @@ class VideoInDB(VideoBase):
     model_config = {"from_attributes": True}
 
 
-class VideoSearchParams(BaseModel):
-    """Video search parameters"""
+class MediaSearchParams(BaseModel):
+    """Parsed media search parameters"""
 
     keyword: Optional[str] = Field(None, min_length=1, description="Search keyword")
     author: Optional[str] = Field(None, description="Author name")
@@ -265,10 +265,10 @@ class DownloadCoverResult(BaseModel):
         )
 
 
-class VideoFetchRequest(BaseModel):
-    """Video fetch request model"""
+class MediaFetchRequest(BaseModel):
+    """Media fetch request model"""
 
-    url: str = Field(..., description="Text containing a video URL")
+    url: str = Field(..., description="Text containing a media URL")
     video_bool: bool = Field(default=True, description="Whether to download video")
     music_bool: bool = Field(default=False, description="Whether to download audio")
     transcript_bool: bool = Field(

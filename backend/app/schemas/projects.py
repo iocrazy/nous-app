@@ -79,7 +79,7 @@ class ProjectFileResponse(BaseModel):
     mime_type: Optional[str] = None
     file_path: Optional[str] = None
     file_size_bytes: Optional[int] = None
-    video_id: Optional[str] = None
+    media_id: Optional[str] = None
     duration_seconds: Optional[int] = None
     resolution: Optional[str] = None
     fps: Optional[float] = None
@@ -103,10 +103,10 @@ class ProjectFileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class LinkVideoRequest(BaseModel):
-    """Request body for linking a video to a project"""
+class LinkMediaRequest(BaseModel):
+    """Request body for linking a media item to a project"""
 
-    video_id: str = Field(..., description="ID of the video to link")
+    media_id: str = Field(..., description="ID of the media to link")
 
 
 class FileVersionResponse(BaseModel):
