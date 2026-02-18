@@ -675,11 +675,15 @@ export async function moveResourceItem(
 ): Promise<void> {
   const update: Record<string, any> = { folder_id: targetFolderId };
   if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('resource_items')
     .update(update)
-    .eq('id', resourceItemId);
+    .eq('id', resourceItemId)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Move failed: item not found or permission denied');
+  }
 }
 
 // 批量移动
@@ -690,11 +694,15 @@ export async function moveResourceItems(
 ): Promise<void> {
   const update: Record<string, any> = { folder_id: targetFolderId };
   if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('resource_items')
     .update(update)
-    .in('id', resourceItemIds);
+    .in('id', resourceItemIds)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Move failed: items not found or permission denied');
+  }
 }
 
 // 复制文件（创建新 resource_item 指向同一个 resource）
