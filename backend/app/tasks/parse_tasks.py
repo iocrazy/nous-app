@@ -169,7 +169,7 @@ def parse_single_link_task(
 
                 added_tags = run_async(
                     ClassificationService.auto_tag_media(
-                        video_id=video_db_id,
+                        media_id=video_db_id,
                         title=video_title or "",
                         description=parsed_data.get("description", ""),
                         original_tags=original_tags,
@@ -216,7 +216,7 @@ def parse_single_link_task(
                 from app.tasks.analysis_tasks import analyze_video_l1_task
 
                 analyze_video_l1_task.delay(
-                    video_id=video_db_id,
+                    media_id=video_db_id,
                     cover_url=cover_url,
                     title=video_title or "",
                     description=parsed_data.get("description", ""),

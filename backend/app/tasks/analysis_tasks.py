@@ -32,7 +32,7 @@ def run_async(coro):
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def analyze_video_l1_task(
-    self, video_id: int, cover_url: str, title: str = "", description: str = ""
+    self, media_id: int, cover_url: str, title: str = "", description: str = ""
 ):
     """
     L1 Analysis: Analyze video cover image.
@@ -43,7 +43,7 @@ def analyze_video_l1_task(
     3. Updates tags based on detected category
     4. Generates embedding for semantic search
     """
-    logger.info(f"Starting L1 analysis for video {video_id}")
+    logger.info(f"Starting L1 analysis for media {media_id}")
 
     async def _analyze():
         analysis_service = VisualAnalysisService()
@@ -55,12 +55,12 @@ def analyze_video_l1_task(
         result = await analysis_service.analyze_l1(cover_url)
 
         if not result:
-            logger.warning(f"L1 analysis returned no result for video {video_id}")
+            logger.warning(f"L1 analysis returned no result for media {media_id}")
             return None
 
         # Store analysis results
         await analysis_repo.upsert_analysis(
-            video_id=video_id,
+            media_id=media_id,
             analysis_level="L1",
             visual_description=result.visual_description,
             detected_objects=result.detected_objects,
@@ -76,17 +76,17 @@ def analyze_video_l1_task(
             tag = await tags_repo.get_tag_by_name(result.category)
             if tag:
                 await tags_repo.add_tag_to_media(
-                    video_id=video_id,
+                    media_id=media_id,
                     tag_id=tag["id"],
                     confidence=0.8,  # AI-based confidence
                     source="ai",
                 )
-                logger.info(f"Added AI tag '{result.category}' to video {video_id}")
+                logger.info(f"Added AI tag '{result.category}' to media {media_id}")
 
         # Generate embedding
-        # Get existing tags for this video
-        video_tags = await tags_repo.get_media_tags(video_id)
-        tag_names = [t["tags"]["name"] for t in video_tags if t.get("tags")]
+        # Get existing tags for this media
+        media_tags = await tags_repo.get_media_tags(media_id)
+        tag_names = [t["tags"]["name"] for t in media_tags if t.get("tags")]
 
         embedding_text = embedding_service.build_embedding_text(
             title=title,
@@ -101,25 +101,25 @@ def analyze_video_l1_task(
         embedding = await embedding_service.generate_embedding(embedding_text)
 
         if embedding:
-            await analysis_repo.update_embedding(video_id, embedding, embedding_text)
-            logger.info(f"Generated embedding for video {video_id}")
+            await analysis_repo.update_embedding(media_id, embedding, embedding_text)
+            logger.info(f"Generated embedding for media {media_id}")
 
         logger.info(
-            f"Completed L1 analysis for video {video_id}, cost: ${result.cost:.4f}"
+            f"Completed L1 analysis for media {media_id}, cost: ${result.cost:.4f}"
         )
-        return {"video_id": video_id, "category": result.category, "cost": result.cost}
+        return {"media_id": media_id, "category": result.category, "cost": result.cost}
 
     try:
         return run_async(_analyze())
     except Exception as e:
-        logger.error(f"L1 analysis failed for video {video_id}: {e}")
+        logger.error(f"L1 analysis failed for media {media_id}: {e}")
         raise self.retry(exc=e)
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=120)
 def analyze_video_l2_task(
     self,
-    video_id: int,
+    media_id: int,
     cover_url: str,
     video_path: str,
     title: str = "",
@@ -134,7 +134,7 @@ def analyze_video_l2_task(
     3. Updates analysis record
     4. Regenerates embedding with richer data
     """
-    logger.info(f"Starting L2 analysis for video {video_id}")
+    logger.info(f"Starting L2 analysis for media {media_id}")
 
     async def _analyze():
         analysis_service = VisualAnalysisService()
@@ -187,7 +187,7 @@ def analyze_video_l2_task(
                         keyframe_paths.append(output_path)
 
                 logger.info(
-                    f"Extracted {len(keyframe_paths)} keyframes for video {video_id}"
+                    f"Extracted {len(keyframe_paths)} keyframes for media {media_id}"
                 )
 
                 # Run L2 analysis
@@ -195,13 +195,13 @@ def analyze_video_l2_task(
 
                 if not result:
                     logger.warning(
-                        f"L2 analysis returned no result for video {video_id}"
+                        f"L2 analysis returned no result for media {media_id}"
                     )
                     return None
 
                 # Update analysis results
                 await analysis_repo.upsert_analysis(
-                    video_id=video_id,
+                    media_id=media_id,
                     analysis_level="L2",
                     visual_description=result.visual_description,
                     detected_objects=result.detected_objects,
@@ -217,15 +217,15 @@ def analyze_video_l2_task(
                     tag = await tags_repo.get_tag_by_name(result.category)
                     if tag:
                         await tags_repo.add_tag_to_media(
-                            video_id=video_id,
+                            media_id=media_id,
                             tag_id=tag["id"],
                             confidence=0.9,  # Higher confidence for L2
                             source="ai",
                         )
 
                 # Regenerate embedding
-                video_tags = await tags_repo.get_media_tags(video_id)
-                tag_names = [t["tags"]["name"] for t in video_tags if t.get("tags")]
+                media_tags = await tags_repo.get_media_tags(media_id)
+                tag_names = [t["tags"]["name"] for t in media_tags if t.get("tags")]
 
                 embedding_text = embedding_service.build_embedding_text(
                     title=title,
@@ -241,20 +241,20 @@ def analyze_video_l2_task(
 
                 if embedding:
                     await analysis_repo.update_embedding(
-                        video_id, embedding, embedding_text
+                        media_id, embedding, embedding_text
                     )
 
                 logger.info(
-                    f"Completed L2 analysis for video {video_id}, cost: ${result.cost:.4f}"
+                    f"Completed L2 analysis for media {media_id}, cost: ${result.cost:.4f}"
                 )
                 return {
-                    "video_id": video_id,
+                    "media_id": media_id,
                     "category": result.category,
                     "cost": result.cost,
                 }
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg failed for video {video_id}: {e}")
+            logger.error(f"FFmpeg failed for media {media_id}: {e}")
             return None
         except FileNotFoundError:
             logger.error(f"Video file not found: {video_path}")
@@ -263,14 +263,14 @@ def analyze_video_l2_task(
     try:
         return run_async(_analyze())
     except Exception as e:
-        logger.error(f"L2 analysis failed for video {video_id}: {e}")
+        logger.error(f"L2 analysis failed for media {media_id}: {e}")
         raise self.retry(exc=e)
 
 
 @shared_task
-def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
+def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
     """
-    Batch L1 analysis for multiple videos.
+    Batch L1 analysis for multiple media items.
     Dispatches individual L1 tasks.
 
     Note: Uses run_async helper to work with async Supabase client.
@@ -283,36 +283,36 @@ def batch_analyze_l1_task(video_ids: list, batch_size: int = 10):
         supabase = await get_async_supabase_admin()
         dispatched = 0
 
-        for video_id in video_ids[:batch_size]:
-            # Get video info
+        for media_id in media_ids[:batch_size]:
+            # Get media info
             result = (
                 await supabase.table("parsed_media")
                 .select("id, title, description, cover_url")
-                .eq("id", video_id)
+                .eq("id", media_id)
                 .maybe_single()
                 .execute()
             )
 
             if result.data:
-                video = result.data
-                cover_url = video.get("cover_url", "")
+                media = result.data
+                cover_url = media.get("cover_url", "")
                 if cover_url:
                     analyze_video_l1_task.delay(
-                        video_id=video["id"],
+                        media_id=media["id"],
                         cover_url=cover_url,
-                        title=video.get("title", ""),
-                        description=video.get("description", ""),
+                        title=media.get("title", ""),
+                        description=media.get("description", ""),
                     )
                     dispatched += 1
-                    logger.info(f"Dispatched L1 analysis for video {video_id}")
+                    logger.info(f"Dispatched L1 analysis for media {media_id}")
                 else:
-                    logger.warning(f"Video {video_id} has no cover_url, skipping")
+                    logger.warning(f"Media {media_id} has no cover_url, skipping")
             else:
-                logger.warning(f"Video {video_id} not found, skipping")
+                logger.warning(f"Media {media_id} not found, skipping")
 
         return {
             "dispatched": dispatched,
-            "total_requested": len(video_ids),
+            "total_requested": len(media_ids),
             "message": f"Dispatched {dispatched} L1 analysis tasks",
         }
 
@@ -330,16 +330,16 @@ def analyze_pending_videos_task(limit: int = 50):
         analysis_repo = AnalysisRepository()
         videos = await analysis_repo.get_videos_without_analysis(limit=limit)
 
-        video_ids = [v["id"] for v in videos if v.get("cover_url")]
+        media_ids = [v["id"] for v in videos if v.get("cover_url")]
 
-        if video_ids:
-            batch_analyze_l1_task.delay(video_ids, batch_size=limit)
+        if media_ids:
+            batch_analyze_l1_task.delay(media_ids, batch_size=limit)
             logger.info(
-                f"Dispatched batch analysis for {len(video_ids)} pending videos"
+                f"Dispatched batch analysis for {len(media_ids)} pending media items"
             )
-            return {"dispatched": len(video_ids)}
+            return {"dispatched": len(media_ids)}
 
-        logger.info("No pending videos for analysis")
+        logger.info("No pending media items for analysis")
         return {"dispatched": 0}
 
     return run_async(_dispatch())

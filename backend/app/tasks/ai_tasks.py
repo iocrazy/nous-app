@@ -220,7 +220,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": "Video not found"}
 
-        video_id = video["id"]
+        media_id = video["id"]
 
         if video.get("transcript_status") == "completed":
             logger.info(f"[AI] Transcript already exists for {platform_id}, skipping")
@@ -256,7 +256,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
         result = run_async(
             service.transcribe_and_save(
-                video_id=video_id,
+                media_id=media_id,
                 audio_path=audio_path,
             )
         )
@@ -322,7 +322,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, unified_task_id:
             _update_status(platform_id, "summary_status", "failed")
             return {"status": "failed", "error": "Video not found"}
 
-        video_id = video["id"]
+        media_id = video["id"]
 
         if video.get("summary_status") == "completed":
             logger.info(f"[AI] Summary already exists for {platform_id}, skipping")
@@ -330,7 +330,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, unified_task_id:
 
         # Get transcript
         ai_repo = AIRepository()
-        transcript = run_async(ai_repo.get_transcript(video_id))
+        transcript = run_async(ai_repo.get_transcript(media_id))
         if not transcript or not transcript.get("full_text"):
             logger.warning(f"[AI] No transcript for {platform_id}, cannot summarize")
             _update_status(platform_id, "summary_status", "failed")
@@ -362,7 +362,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, unified_task_id:
 
         result = run_async(
             service.generate_summary_and_save(
-                video_id=video_id,
+                media_id=media_id,
                 transcript_text=transcript["full_text"],
                 video_info=video_info,
                 model=summary_model,
@@ -433,7 +433,7 @@ def chain_ai_pipeline(
             user_id=user_id,
             task_type="ai_pipeline",
             title=f"AI Analysis: {platform_id}",
-            video_id=platform_id,
+            media_id=platform_id,
         ))
         run_async(tracker.start(unified_task_id))
     except Exception as e:

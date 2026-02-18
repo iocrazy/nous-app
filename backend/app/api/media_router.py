@@ -45,7 +45,7 @@ TAGS_LOGS = ["Logs"]  # User action logs
 # ============================================
 
 
-class VideoFetchRequest(BaseModel):
+class MediaFetchRequest(BaseModel):
     """Video fetch request"""
 
     url: str
@@ -55,7 +55,7 @@ class VideoFetchRequest(BaseModel):
     use_celery: bool = False  # Whether to use Celery async tasks
 
 
-class VideoSearchRequest(BaseModel):
+class MediaSearchRequest(BaseModel):
     """Video search request"""
 
     keyword: Optional[str] = None
@@ -84,7 +84,7 @@ class BatchFetchRequest(BaseModel):
 
 @router.post("/fetch", tags=TAGS_FETCH)
 async def fetch_video(
-    request: VideoFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
+    request: MediaFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
 ):
     """
     Fetch a single video
@@ -836,7 +836,7 @@ async def delete_video(
 
 @router.post("/videos/search", tags=TAGS_VIDEOS)
 async def search_videos(
-    request: VideoSearchRequest,
+    request: MediaSearchRequest,
     auth: AuthDep,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -1110,7 +1110,7 @@ async def get_user_logs(
 async def _handle_ytdlp_fetch(
     url: str,
     platform: str,
-    request: VideoFetchRequest,
+    request: MediaFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
 ) -> dict:
