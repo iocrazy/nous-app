@@ -294,7 +294,7 @@ class NotionService:
             }
 
     @classmethod
-    async def check_video_exists(cls, platform_id: str) -> dict:
+    async def check_media_exists(cls, platform_id: str) -> dict:
         """
         检查Notion数据库中是否已存在相同的视频
 
@@ -437,12 +437,12 @@ async def push_to_notion_service(
         raise
 
 
-async def check_video_exists_service(video_id, log_info=True):
+async def check_media_exists_service(platform_id, log_info=True):
     """
-    检查视频是否已存在于Notion中
+    检查媒体是否已存在于Notion中
 
     Args:
-        video_id: 视频ID
+        platform_id: 平台ID
         log_info: 是否记录信息日志，默认为True
 
     Returns:
@@ -453,8 +453,8 @@ async def check_video_exists_service(video_id, log_info=True):
     """
     try:
         if log_info:
-            logger.info(f"检查视频是否已存在: platform_id={video_id}")
-        check_result = await NotionService.check_video_exists(video_id)
+            logger.info(f"检查媒体是否已存在: platform_id={platform_id}")
+        check_result = await NotionService.check_media_exists(platform_id)
         return check_result
     except Exception as e:
-        raise NotionError(f"检查视频是否存在时出错: {str(e)}", {"video_id": video_id})
+        raise NotionError(f"检查媒体是否存在时出错: {str(e)}", {"platform_id": platform_id})

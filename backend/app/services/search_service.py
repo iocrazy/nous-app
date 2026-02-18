@@ -14,7 +14,7 @@ from app.services.embedding_service import EmbeddingService
 class SearchResult:
     """A single search result."""
 
-    video_id: int
+    media_id: int
     platform_id: str
     title: str
     description: Optional[str]
@@ -86,7 +86,7 @@ class SearchService:
         for r in raw_results:
             results.append(
                 SearchResult(
-                    video_id=r["video_id"],
+                    media_id=r["media_id"],
                     platform_id=r.get("platform_id", ""),
                     title=r.get("title", ""),
                     description=r.get("description"),
@@ -131,7 +131,7 @@ class SearchService:
 
             # Build the search query with OR conditions using Supabase's or_ filter
             # We search in: title, description, author, hashtags
-            base_query = client.table("videos").select(
+            base_query = client.table("parsed_media").select(
                 "id, platform_id, title, description, cover_url, author, view_count, created_at, hashtags"
             )
 
@@ -164,33 +164,33 @@ class SearchService:
                 f"Database text search found {len(filtered_videos)} results for: {query_clean}"
             )
 
-            # If no results from basic fields, try searching in video_analysis
+            # If no results from basic fields, try searching in media_analysis
             if not filtered_videos:
                 logger.info(
-                    f"No results in basic fields, searching video_analysis for: {query_clean}"
+                    f"No results in basic fields, searching media_analysis for: {query_clean}"
                 )
 
-                # First get all user's video IDs
+                # First get all user's media IDs
                 if user_id:
-                    user_videos = (
-                        await client.table("videos")
+                    user_media = (
+                        await client.table("parsed_media")
                         .select("id")
                         .eq("user_id", user_id)
                         .execute()
                     )
-                    user_video_ids = [v["id"] for v in user_videos.data]
+                    user_media_ids = [v["id"] for v in user_media.data]
                 else:
-                    user_videos = (
-                        await client.table("videos").select("id").limit(500).execute()
+                    user_media = (
+                        await client.table("parsed_media").select("id").limit(500).execute()
                     )
-                    user_video_ids = [v["id"] for v in user_videos.data]
+                    user_media_ids = [v["id"] for v in user_media.data]
 
-                if user_video_ids:
-                    # Search in video_analysis table
+                if user_media_ids:
+                    # Search in media_analysis table
                     analysis_search = (
-                        await client.table("video_analysis")
-                        .select("video_id")
-                        .in_("video_id", user_video_ids)
+                        await client.table("media_analysis")
+                        .select("media_id")
+                        .in_("media_id", user_media_ids)
                         .or_(
                             f"visual_description.ilike.{search_pattern},"
                             f"detected_text.ilike.{search_pattern}"
@@ -200,37 +200,37 @@ class SearchService:
                     )
 
                     if analysis_search.data:
-                        matched_video_ids = [
-                            a["video_id"] for a in analysis_search.data
+                        matched_media_ids = [
+                            a["media_id"] for a in analysis_search.data
                         ]
-                        # Fetch the full video data for matched IDs
-                        video_result = (
-                            await client.table("videos")
+                        # Fetch the full media data for matched IDs
+                        media_result = (
+                            await client.table("parsed_media")
                             .select(
                                 "id, platform_id, title, description, cover_url, author, view_count, created_at"
                             )
-                            .in_("id", matched_video_ids)
+                            .in_("id", matched_media_ids)
                             .execute()
                         )
-                        filtered_videos = video_result.data
+                        filtered_videos = media_result.data
                         logger.info(
-                            f"Found {len(filtered_videos)} results in video_analysis"
+                            f"Found {len(filtered_videos)} results in media_analysis"
                         )
 
             # Apply tag filter if specified
             if tag_ids and filtered_videos:
-                video_ids = [v["id"] for v in filtered_videos]
+                media_ids = [v["id"] for v in filtered_videos]
                 tag_filter_result = (
-                    await client.table("video_tags")
-                    .select("video_id")
-                    .in_("video_id", video_ids)
+                    await client.table("media_tags")
+                    .select("media_id")
+                    .in_("media_id", media_ids)
                     .in_("tag_id", tag_ids)
                     .execute()
                 )
 
-                tagged_video_ids = set(r["video_id"] for r in tag_filter_result.data)
+                tagged_media_ids = set(r["media_id"] for r in tag_filter_result.data)
                 filtered_videos = [
-                    v for v in filtered_videos if v["id"] in tagged_video_ids
+                    v for v in filtered_videos if v["id"] in tagged_media_ids
                 ]
 
             # Build results
@@ -238,7 +238,7 @@ class SearchService:
             for video in filtered_videos:
                 results.append(
                     SearchResult(
-                        video_id=video["id"],
+                        media_id=video["id"],
                         platform_id=video.get("platform_id", ""),
                         title=video.get("title", ""),
                         description=video.get("description"),
@@ -255,7 +255,7 @@ class SearchService:
             )
 
         # No query, just return filtered results
-        base_query = client.table("videos").select(
+        base_query = client.table("parsed_media").select(
             "id, platform_id, title, description, cover_url, author, view_count, created_at"
         )
 
@@ -270,21 +270,21 @@ class SearchService:
 
         # Apply tag filter if specified
         if tag_ids:
-            # Get video IDs that have the specified tags
+            # Get media IDs that have the specified tags
             tag_filter_result = (
-                await client.table("video_tags")
-                .select("video_id")
+                await client.table("media_tags")
+                .select("media_id")
                 .in_("tag_id", tag_ids)
                 .execute()
             )
-            tagged_video_ids = list(set(r["video_id"] for r in tag_filter_result.data))
+            tagged_media_ids = list(set(r["media_id"] for r in tag_filter_result.data))
 
-            if not tagged_video_ids:
+            if not tagged_media_ids:
                 return SearchResponse(
                     results=[], total=0, query=query or "", search_type="hybrid"
                 )
 
-            base_query = base_query.in_("id", tagged_video_ids)
+            base_query = base_query.in_("id", tagged_media_ids)
 
         filtered_result = await base_query.limit(limit).execute()
         filtered_videos = filtered_result.data
@@ -293,7 +293,7 @@ class SearchService:
         for video in filtered_videos:
             results.append(
                 SearchResult(
-                    video_id=video["id"],
+                    media_id=video["id"],
                     platform_id=video.get("platform_id", ""),
                     title=video.get("title", ""),
                     description=video.get("description"),
@@ -309,23 +309,23 @@ class SearchService:
             results=results, total=len(results), query=query or "", search_type="hybrid"
         )
 
-    async def find_similar_videos(
-        self, video_id: int, limit: int = 10, threshold: float = 0.6
+    async def find_similar_media(
+        self, media_id: int, limit: int = 10, threshold: float = 0.6
     ) -> SearchResponse:
         """
-        Find videos similar to a given video.
+        Find media similar to a given media item.
 
-        Uses the video's embedding to find semantically similar content.
+        Uses the media's embedding to find semantically similar content.
         """
-        # Get the source video's embedding
-        analysis = await self.analysis_repo.get_analysis(video_id)
+        # Get the source media's embedding
+        analysis = await self.analysis_repo.get_analysis(media_id)
 
         if not analysis or not analysis.get("content_embedding"):
-            logger.warning(f"No embedding found for video {video_id}")
+            logger.warning(f"No embedding found for media {media_id}")
             return SearchResponse(
                 results=[],
                 total=0,
-                query=f"similar to video {video_id}",
+                query=f"similar to media {media_id}",
                 search_type="similar",
             )
 
@@ -336,24 +336,24 @@ class SearchService:
             return SearchResponse(
                 results=[],
                 total=0,
-                query=f"similar to video {video_id}",
+                query=f"similar to media {media_id}",
                 search_type="similar",
             )
 
-        # Search for similar videos (excluding the source video)
+        # Search for similar media (excluding the source)
         raw_results = await self.analysis_repo.search_by_embedding(
             embedding=embedding,
             limit=limit + 1,  # +1 to account for self-match
             threshold=threshold,
         )
 
-        # Filter out the source video and transform results
+        # Filter out the source media and transform results
         results = []
         for r in raw_results:
-            if r["video_id"] != video_id:
+            if r["media_id"] != media_id:
                 results.append(
                     SearchResult(
-                        video_id=r["video_id"],
+                        media_id=r["media_id"],
                         platform_id=r.get("platform_id", ""),
                         title=r.get("title", ""),
                         description=r.get("description"),
@@ -370,7 +370,7 @@ class SearchService:
         return SearchResponse(
             results=results,
             total=len(results),
-            query=f"similar to video {video_id}",
+            query=f"similar to media {media_id}",
             search_type="similar",
         )
 

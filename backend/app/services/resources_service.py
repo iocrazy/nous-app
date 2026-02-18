@@ -294,9 +294,9 @@ class ResourcesService:
     # Create resource from parser download (dedup)
     # ------------------------------------------------------------------ #
 
-    async def create_from_video(
+    async def create_from_media(
         self,
-        video_id: str,
+        media_id: str,
         user_id: str,
         filename: str,
         file_path: Optional[str] = None,
@@ -308,12 +308,12 @@ class ResourcesService:
         scope_id: Optional[str] = None,
     ) -> dict:
         """
-        Create a resource record from a parser-downloaded video.
+        Create a resource record from a parser-downloaded media.
 
-        Dedup logic: if resource with same video_id exists, only create
+        Dedup logic: if resource with same media_id exists, only create
         a resource_item reference (zero-copy). Otherwise create new resource.
         """
-        existing = await self.repo.get_resource_by_video_id(video_id)
+        existing = await self.repo.get_resource_by_media_id(media_id)
 
         if existing:
             # Zero-copy: just add a resource_item reference
@@ -336,7 +336,7 @@ class ResourcesService:
         resource_data = {
             "creator_id": user_id,
             "source_type": "web",
-            "video_id": video_id,
+            "media_id": media_id,
             "filename": filename,
             "file_type": "video",
             "mime_type": "video/mp4",
@@ -420,11 +420,11 @@ class ResourcesService:
 
         self._delete_physical_files(resource)
 
-        video_id = resource.get("video_id")
+        media_id = resource.get("media_id")
         result = await self.repo.delete_resource(resource_id)
 
-        if video_id:
-            await self._delete_video_record(video_id)
+        if media_id:
+            await self._delete_media_record(media_id)
 
         return result
 
@@ -440,10 +440,10 @@ class ResourcesService:
         for resource in expired:
             try:
                 self._delete_physical_files(resource)
-                video_id = resource.get("video_id")
+                media_id = resource.get("media_id")
                 await self.repo.delete_resource(resource["id"])
-                if video_id:
-                    await self._delete_video_record(video_id)
+                if media_id:
+                    await self._delete_media_record(media_id)
                 cleaned += 1
             except Exception as e:
                 logger.error(
@@ -492,16 +492,16 @@ class ResourcesService:
                 except Exception as e:
                     logger.warning(f"Failed to delete cover {cover_full}: {e}")
 
-    async def _delete_video_record(self, video_id: str) -> None:
-        """Delete the videos table record (orphaned after resource deletion)."""
+    async def _delete_media_record(self, media_id: str) -> None:
+        """Delete the parsed_media table record (orphaned after resource deletion)."""
         try:
             from app.db.supabase_client import get_async_supabase_admin
 
             client = await get_async_supabase_admin()
-            await client.table("videos").delete().eq("id", video_id).execute()
-            logger.info(f"Deleted video record: {video_id}")
+            await client.table("parsed_media").delete().eq("id", media_id).execute()
+            logger.info(f"Deleted media record: {media_id}")
         except Exception as e:
-            logger.warning(f"Failed to delete video record {video_id}: {e}")
+            logger.warning(f"Failed to delete media record {media_id}: {e}")
 
     # ------------------------------------------------------------------ #
     # Move resource to folder

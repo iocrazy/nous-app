@@ -139,14 +139,14 @@ class MediaService:
 
             # If current user doesn't have this video but it exists (belongs to another user), create new record
             if not data_exists:
-                global_exists = await repo.check_video_existence(platform_id)
+                global_exists = await repo.check_media_existence(platform_id)
                 if global_exists:
                     logger.info(
                         f"视频 {platform_id} 已存在但属于其他用户，为当前用户创建新记录"
                     )
                     data_exists = True
 
-            video_downloaded = await repo.check_video_downloaded(platform_id)
+            video_downloaded = await repo.check_media_downloaded(platform_id)
             music_downloaded = await repo.check_music_downloaded(platform_id)
 
             logger.debug(
@@ -261,7 +261,7 @@ class MediaService:
                 )
 
             # Re-check download status
-            video_downloaded = await repo.check_video_downloaded(platform_id)
+            video_downloaded = await repo.check_media_downloaded(platform_id)
             music_downloaded = await repo.check_music_downloaded(platform_id)
 
             logger.debug(
@@ -516,10 +516,10 @@ class MediaService:
             else:
                 data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
 
-            video_id = None
+            media_id = None
             if existing_video:
                 # Update existing record
-                video_id = existing_video.get("id")
+                media_id = existing_video.get("id")
                 exclude_keys = ["download_duration"]
                 if not dedup_hit:
                     exclude_keys.append("download_path")
@@ -533,7 +533,7 @@ class MediaService:
             else:
                 # Create new record
                 result = await repo.create(data_dict)
-                video_id = result.get("id") if result else None
+                media_id = result.get("id") if result else None
                 message = f"媒体 {platform_id}_{title} 元数据已创建"
 
             logger.info(message)
@@ -542,7 +542,7 @@ class MediaService:
                 "success": True,
                 "message": message,
                 "platform_id": platform_id,
-                "id": video_id,  # Database ID for tag operations
+                "id": media_id,  # Database ID for tag operations
                 "dedup_hit": dedup_hit,
             }
 

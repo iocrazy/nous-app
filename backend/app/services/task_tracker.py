@@ -38,7 +38,7 @@ class TaskTracker:
         title: str,
         *,
         resource_id: Optional[str] = None,
-        video_id: Optional[str] = None,
+        media_id: Optional[str] = None,
         celery_task_id: Optional[str] = None,
         total_bytes: Optional[int] = None,
         subtitle: Optional[str] = None,
@@ -55,8 +55,8 @@ class TaskTracker:
         }
         if resource_id:
             row["resource_id"] = resource_id
-        if video_id:
-            row["video_id"] = video_id
+        if media_id:
+            row["media_id"] = media_id
         if celery_task_id:
             row["celery_task_id"] = celery_task_id
         if total_bytes is not None:
