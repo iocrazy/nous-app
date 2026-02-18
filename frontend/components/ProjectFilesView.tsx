@@ -9,6 +9,7 @@ import { LinkVideoModal } from './LinkVideoModal';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
+type StatusFilter = 'all' | 'pending_review' | 'in_review' | 'feedback_collected' | 'approved' | 'no_status';
 
 interface ProjectFilesViewProps {
   project: Project;
@@ -33,6 +34,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -173,13 +175,20 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     if (filterType !== 'all') {
       result = result.filter(f => getFileCategory(f) === filterType);
     }
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'no_status') {
+        result = result.filter(f => !f.review_status);
+      } else {
+        result = result.filter(f => f.review_status === statusFilter);
+      }
+    }
     result.sort((a, b) => {
       if (sortBy === 'filename') return (a.filename || '').localeCompare(b.filename || '');
       if (sortBy === 'file_size_bytes') return (b.file_size_bytes || 0) - (a.file_size_bytes || 0);
       return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
     });
     return result;
-  }, [files, filterType, sortBy, searchQuery]);
+  }, [files, filterType, statusFilter, sortBy, searchQuery]);
 
   return (
     <div className="flex h-full">
@@ -262,6 +271,20 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <option value="image">{t('projects.toolbar.filterImage', 'Image')}</option>
               <option value="audio">{t('projects.toolbar.filterAudio', 'Audio')}</option>
               <option value="document">{t('projects.toolbar.filterDocument', 'Document')}</option>
+            </select>
+
+            {/* Status filter */}
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+              className="text-xs bg-zinc-800 border border-zinc-700/50 rounded-lg px-2 py-1.5 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+              <option value="all">{t('projects.toolbar.statusAll', 'All Status')}</option>
+              <option value="pending_review">{t('projects.toolbar.statusPending', 'Pending Review')}</option>
+              <option value="in_review">{t('projects.toolbar.statusInReview', 'In Review')}</option>
+              <option value="feedback_collected">{t('projects.toolbar.statusFeedback', 'Feedback')}</option>
+              <option value="approved">{t('projects.toolbar.statusApproved', 'Approved')}</option>
+              <option value="no_status">{t('projects.toolbar.statusNone', 'No Status')}</option>
             </select>
 
             {/* View toggle */}
