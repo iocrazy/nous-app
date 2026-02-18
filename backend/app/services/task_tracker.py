@@ -39,6 +39,7 @@ class TaskTracker:
         *,
         resource_id: Optional[str] = None,
         media_id: Optional[str] = None,
+        group_id: Optional[str] = None,
         celery_task_id: Optional[str] = None,
         total_bytes: Optional[int] = None,
         subtitle: Optional[str] = None,
@@ -57,6 +58,8 @@ class TaskTracker:
             row["resource_id"] = resource_id
         if media_id:
             row["media_id"] = media_id
+        if group_id:
+            row["group_id"] = group_id
         if celery_task_id:
             row["celery_task_id"] = celery_task_id
         if total_bytes is not None:
@@ -230,7 +233,7 @@ class TaskTracker:
         )
 
         stats = {
-            "by_type": {"download": 0, "upload": 0, "transcode": 0, "ai_pipeline": 0},
+            "by_type": {"download": 0, "upload": 0, "transcode": 0, "ai_pipeline": 0, "ai_extract": 0, "ai_transcription": 0, "ai_summary": 0},
             "by_status": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0},
             "active_total": 0,
         }
