@@ -10,8 +10,8 @@ export enum DownloadStatus {
 // AI processing status for transcript/summary/visual analysis
 export type AIStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
 
-export interface Video {
-  // Video Identity
+export interface ParsedMedia {
+  // Media Identity
   id?: string;  // Snowflake BIGINT primary key (was UUID, migrated in 059)
   platform_id: string;
   user_id?: string;
@@ -75,24 +75,21 @@ export interface Video {
   ai_analyze_text?: string;
   ai_generated_at?: string;
 
-  // AI Processing Status (new)
-  transcript_status?: AIStatus;
-  summary_status?: AIStatus;
-  visual_analysis_status?: AIStatus;
-  transcript_bool?: boolean;
-  summary_bool?: boolean;
-
   // HLS Streaming
   hls_path?: string;
   media_format?: 'mp4' | 'hls';
 
-  // Summary preview (joined from video_summaries)
+  // Summary preview (joined from media_summaries)
   summary_text?: string;
 
   // Timestamps
   created_at?: string;
   updated_at?: string;
 }
+
+// Backward-compat alias — allows existing components to keep using `Video`
+// TODO: Remove after all component files are migrated to ParsedMedia
+export type Video = ParsedMedia;
 
 // AI Transcript/Summary Data
 export interface TranscriptSegment {
@@ -117,7 +114,7 @@ export interface SummaryData {
 }
 
 // Keep backward compatibility alias
-export type DouyinBase = Video;
+export type DouyinBase = ParsedMedia;
 
 export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'management' | 'shared';
 
@@ -162,11 +159,14 @@ export interface ApiResponse<T = unknown> {
   data?: T;
 }
 
-export interface VideoListResponse {
+export interface MediaListResponse {
   success: boolean;
   count: number;
-  videos: Video[];
+  media: ParsedMedia[];
 }
+
+// Backward-compat alias
+export type VideoListResponse = MediaListResponse;
 
 export interface StatisticsResponse {
   success: boolean;
@@ -223,17 +223,22 @@ export interface Collection {
   team_id: string | null;
   created_at: string;
   // Computed
+  media_count?: number;
+  /** @deprecated Use media_count */
   video_count?: number;
   is_shared?: boolean;
-  thumbnail_url?: string; // First video's cover
+  thumbnail_url?: string; // First media's cover
 }
 
-export interface CollectionVideo {
+export interface CollectionMedia {
   collection_id: number;
-  video_id: number;
+  media_id: number;
   added_by: string;
   added_at: string;
 }
+
+// Backward-compat alias
+export type CollectionVideo = CollectionMedia;
 
 // Library (team-scoped resource library)
 export interface Library {
@@ -280,7 +285,7 @@ export interface Resource {
   id: string;
   creator_id: string;
   source_type: 'web' | 'upload';
-  video_id: string | null;
+  media_id: string | null;
   filename: string;
   file_type: string | null;
   mime_type: string | null;
@@ -291,6 +296,10 @@ export interface Resource {
   thumbnail_path: string | null;
   cover_image_path: string | null;
   current_version: number;
+  // AI Processing Status (moved from ParsedMedia to Resource)
+  transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   is_trashed: boolean;
   trashed_at: string | null;
   created_at: string;
@@ -406,7 +415,7 @@ export interface CollectionRules {
 export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
 
 export interface CleanupSuggestion {
-  video_id: number;
+  media_id: number;
   title: string;
   cover_url: string | null;
   author: string | null;
@@ -422,7 +431,7 @@ export interface CleanupSuggestion {
 
 // Search
 export interface SearchResult {
-  video_id: number;
+  media_id: number;
   platform_id: string;
   title: string;
   cover_url: string | null;
@@ -435,8 +444,8 @@ export interface SearchResult {
 }
 
 // Analysis
-export interface VideoAnalysis {
-  video_id: number;
+export interface MediaAnalysis {
+  media_id: number;
   platform_id: string;
   visual_analysis: string | null;
   content_categories: string[];
@@ -445,6 +454,9 @@ export interface VideoAnalysis {
   suggested_tags: string[];
   analyzed_at: string | null;
 }
+
+// Backward-compat alias
+export type VideoAnalysis = MediaAnalysis;
 
 // AI Provider settings
 export interface AIProviderConfig {
@@ -617,7 +629,7 @@ export interface ProjectFile {
   mime_type: string | null;
   file_path: string | null;
   file_size_bytes: number | null;
-  video_id: string | null;
+  media_id: string | null;
   duration_seconds: number | null;
   resolution: string | null;
   fps: number | null;
