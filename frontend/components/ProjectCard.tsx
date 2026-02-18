@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Clock, FileText } from 'lucide-react';
+import { Star, Clock, FileText, MoreVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project } from '../types';
 
@@ -7,6 +7,7 @@ interface ProjectCardProps {
   project: Project;
   onClick: () => void;
   onToggleStar: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 const typeColors: Record<string, { border: string; badge: string; text: string }> = {
@@ -30,7 +31,7 @@ const formatRelativeTime = (dateStr: string): string => {
   return date.toLocaleDateString();
 };
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onToggleStar }) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onToggleStar, onContextMenu }) => {
   const { t } = useTranslation();
   const colors = typeColors[project.project_type] || typeColors.personal;
 
@@ -48,15 +49,26 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
             <p className="text-zinc-400 text-sm mt-1 line-clamp-2">{project.description}</p>
           )}
         </div>
-        <button
-          onClick={onToggleStar}
-          className="ml-2 p-1.5 rounded-lg hover:bg-zinc-700 transition-colors flex-shrink-0"
-        >
-          <Star
-            size={16}
-            className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-500 hover:text-yellow-400'}
-          />
-        </button>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button
+            onClick={onToggleStar}
+            className="p-1.5 rounded-lg hover:bg-zinc-700 transition-colors"
+          >
+            <Star
+              size={16}
+              className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-500 hover:text-yellow-400'}
+            />
+          </button>
+          {onContextMenu && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
+              className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-500 hover:text-zinc-200
+                         transition-colors opacity-0 group-hover:opacity-100"
+            >
+              <MoreVertical size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3 mt-4">

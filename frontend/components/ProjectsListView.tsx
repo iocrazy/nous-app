@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Project } from '../types';
 import { updateProject, deleteProject } from '../services/projectsService';
 import { ProjectCard } from './ProjectCard';
+import { ProjectContextMenu } from './ProjectContextMenu';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -27,6 +28,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('updated_at');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [contextMenu, setContextMenu] = useState<{ project: Project; x: number; y: number } | null>(null);
 
   const handleToggleStar = async (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
@@ -36,6 +38,30 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     } catch (err) {
       console.error('Failed to toggle star:', err);
     }
+  };
+
+  const handleToggleStarById = async (project: Project) => {
+    try {
+      await updateProject(project.id, { is_starred: !project.is_starred });
+      onProjectsChange?.();
+    } catch (err) {
+      console.error('Failed to toggle star:', err);
+    }
+  };
+
+  const handleDeleteProject = async (project: Project) => {
+    if (!window.confirm(t('projects.confirmDelete', `Delete "${project.name}"? This cannot be undone.`))) return;
+    try {
+      await deleteProject(project.id);
+      onProjectsChange?.();
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, project: Project) => {
+    e.stopPropagation();
+    setContextMenu({ project, x: e.clientX, y: e.clientY });
   };
 
   const formatRelativeTime = (dateStr: string): string => {
@@ -207,6 +233,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
               project={project}
               onClick={() => onProjectSelect(project)}
               onToggleStar={(e) => handleToggleStar(e, project)}
+              onContextMenu={(e) => handleContextMenu(e, project)}
             />
           ))}
         </div>
@@ -224,6 +251,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                 <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.files', 'Files')}</th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.starred', 'Starred')}</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.updatedAt', 'Updated')}</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-700/30">
@@ -261,11 +289,31 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                   <td className="px-4 py-3 text-right">
                     <span className="text-sm text-zinc-500">{formatRelativeTime(project.updated_at)}</span>
                   </td>
+                  <td className="px-2 py-3 text-center">
+                    <button
+                      onClick={(e) => handleContextMenu(e, project)}
+                      className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-200 transition-colors inline-flex"
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {/* Context Menu */}
+      {contextMenu && (
+        <ProjectContextMenu
+          project={contextMenu.project}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onSettings={() => {}}
+          onMembers={() => {}}
+          onToggleStar={() => handleToggleStarById(contextMenu.project)}
+          onDelete={() => handleDeleteProject(contextMenu.project)}
+        />
       )}
     </div>
   );
