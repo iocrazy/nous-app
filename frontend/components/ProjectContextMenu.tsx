@@ -78,7 +78,7 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
 
       <MenuItem icon={<Settings size={14} />}
         label={t('projects.contextMenu.settings', 'Project Settings')}
-        onClick={onSettings} disabled />
+        onClick={onSettings} />
       <MenuItem icon={<Users size={14} />}
         label={t('projects.contextMenu.members', 'Members')}
         onClick={onMembers} disabled />
