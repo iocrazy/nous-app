@@ -171,7 +171,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Data
   const [folders, setFolders] = useState<Folder[]>([]);
   const [childFolders, setChildFolders] = useState<Folder[]>([]);
-  const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ thumbnail_path: string | null; mime_type: string | null }>>>({});
+  const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>>({});
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -368,7 +368,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       return;
     }
     const loadPreviews = async () => {
-      const previews: Record<string, Array<{ thumbnail_path: string | null; mime_type: string | null }>> = {};
+      const previews: Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>> = {};
       await Promise.all(
         childFolders.map(async (f) => {
           try {

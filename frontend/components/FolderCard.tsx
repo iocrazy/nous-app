@@ -3,9 +3,12 @@ import { Folder as FolderIcon, ChevronRight, Check, MoreVertical, Film, Image, F
 import { useTranslation } from 'react-i18next';
 import { Folder } from '../types';
 import { formatDateShort } from '../utils/formatDate';
+import { getResourceCoverUrl } from '../services/resourceService';
 
 interface FolderPreviewItem {
+  resource_id?: string | null;
   thumbnail_path?: string | null;
+  cover_image_path?: string | null;
   mime_type?: string | null;
 }
 
@@ -230,9 +233,10 @@ export const FolderCard: React.FC<FolderCardProps> = ({
             <div className="grid grid-cols-2 grid-rows-2 gap-[2px] w-full h-full p-[2px]">
               {[0, 1, 2, 3].map((idx) => {
                 const pi = previewSlots[idx];
-                if (pi?.thumbnail_path) {
+                const hasCover = pi?.resource_id && (pi.thumbnail_path || pi.cover_image_path);
+                if (hasCover) {
                   return (
-                    <img key={idx} src={pi.thumbnail_path} alt="" className="w-full h-full object-cover rounded-sm" loading="lazy" />
+                    <img key={idx} src={getResourceCoverUrl(pi.resource_id!)} alt="" className="w-full h-full object-cover rounded-sm" loading="lazy" />
                   );
                 }
                 if (pi) {
