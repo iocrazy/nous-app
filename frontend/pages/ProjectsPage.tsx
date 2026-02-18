@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, KanbanSquare } from 'lucide-react';
 import { Project, ProjectFile } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
+import { fetchProjects } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
+import { ProjectsSidebar } from '../components/ProjectsSidebar';
 import { ProjectFilesView } from '../components/ProjectFilesView';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
@@ -24,6 +26,8 @@ export function ProjectsPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // Read active tab from URL query params, default to 'files'
   const activeTab: ProjectTab = (searchParams.get('tab') as ProjectTab) || 'files';
@@ -38,6 +42,33 @@ export function ProjectsPage() {
       }
       return next;
     });
+  };
+
+  // Load projects for sidebar
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await fetchProjects();
+        setProjects(data);
+      } catch (err) {
+        console.error('Failed to load projects for sidebar:', err);
+      }
+    };
+    load();
+  }, []);
+
+  const handleProjectSelect = (project: Project) => {
+    setSelectedProject(project);
+    navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
+  };
+
+  const refreshProjects = async () => {
+    try {
+      const data = await fetchProjects();
+      setProjects(data);
+    } catch (err) {
+      console.error('Failed to refresh projects:', err);
+    }
   };
 
   // If reviewing a file
@@ -107,17 +138,27 @@ export function ProjectsPage() {
     );
   }
 
-  // Projects list
+  // Projects list with sidebar
   return (
     <>
-      <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <ProjectsListView
-          onProjectSelect={(project) => {
-            setSelectedProject(project);
-            navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
-          }}
+      <div className="flex h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <ProjectsSidebar
+          projects={projects}
+          starredProjects={projects.filter(p => p.is_starred)}
+          selectedProjectId={null}
+          onProjectSelect={handleProjectSelect}
           onCreateProject={() => setIsCreateProjectModalOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
+        <div className="flex-1 min-w-0 px-6 py-4">
+          <ProjectsListView
+            projects={projects}
+            onProjectSelect={handleProjectSelect}
+            onCreateProject={() => setIsCreateProjectModalOpen(true)}
+            onProjectsChange={refreshProjects}
+          />
+        </div>
       </div>
       <CreateProjectModal
         isOpen={isCreateProjectModalOpen}
@@ -125,6 +166,7 @@ export function ProjectsPage() {
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);
+          refreshProjects();
           navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
         }}
       />
