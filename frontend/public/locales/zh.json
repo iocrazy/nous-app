@@ -760,6 +760,14 @@
       "noGroup": "暂无分组",
       "submit": "创建并添加成员"
     },
+    "toolbar": {
+      "statusAll": "全部状态",
+      "statusPending": "待审阅",
+      "statusInReview": "审阅中",
+      "statusFeedback": "已反馈",
+      "statusApproved": "已通过",
+      "statusNone": "无状态"
+    },
     "members": {
       "title": "项目成员",
       "owner": "所有者",

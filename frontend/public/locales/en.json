@@ -760,6 +760,14 @@
       "noGroup": "No group",
       "submit": "Create & Add Members"
     },
+    "toolbar": {
+      "statusAll": "All Status",
+      "statusPending": "Pending Review",
+      "statusInReview": "In Review",
+      "statusFeedback": "Feedback",
+      "statusApproved": "Approved",
+      "statusNone": "No Status"
+    },
     "members": {
       "title": "Members",
       "owner": "Owner",
