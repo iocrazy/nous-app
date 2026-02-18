@@ -760,6 +760,21 @@
       "noGroup": "No group",
       "submit": "Create & Add Members"
     },
+    "settings": {
+      "title": "Project Settings",
+      "name": "Project Name",
+      "announcement": "Announcement",
+      "announcementPlaceholder": "Help new members understand this project",
+      "type": "Project Type",
+      "typeInternal": "Internal",
+      "typeExternal": "External",
+      "typePersonal": "Personal",
+      "group": "Project Group",
+      "noGroup": "No group",
+      "save": "Save Changes",
+      "dangerZone": "Danger Zone",
+      "deleteProject": "Delete Project"
+    },
     "deleteConfirm": {
       "title": "Delete Project",
       "message": "Deleting \"{{name}}\" will permanently remove all files and comments. This cannot be undone.",

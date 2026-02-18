@@ -760,6 +760,21 @@
       "noGroup": "暂无分组",
       "submit": "创建并添加成员"
     },
+    "settings": {
+      "title": "项目设置",
+      "name": "项目名称",
+      "announcement": "项目公告",
+      "announcementPlaceholder": "帮助新成员了解此项目",
+      "type": "项目类型",
+      "typeInternal": "内部",
+      "typeExternal": "外部",
+      "typePersonal": "个人",
+      "group": "项目分组",
+      "noGroup": "暂无分组",
+      "save": "保存更改",
+      "dangerZone": "危险操作",
+      "deleteProject": "删除项目"
+    },
     "deleteConfirm": {
       "title": "确认删除项目",
       "message": "删除项目「{{name}}」后，所有文件和评论将永久删除，此操作不可撤销。",
