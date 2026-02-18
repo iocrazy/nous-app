@@ -36,6 +36,7 @@ const getApiUrl = (): string => {
 
 // --- Transcription ---
 
+/** @deprecated Use triggerTranscriptionByResource instead */
 export const triggerTranscription = async (
   platformId: string
 ): Promise<{ task_id: string }> => {
@@ -54,6 +55,25 @@ export const triggerTranscription = async (
   return response.json();
 };
 
+export const triggerTranscriptionByResource = async (
+  resourceId: string
+): Promise<{ task_id: string }> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/transcribe/resource/${resourceId}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+/** @deprecated Use getTranscriptByResource instead */
 export const getTranscript = async (
   platformId: string
 ): Promise<TranscriptData> => {
@@ -80,8 +100,34 @@ export const getTranscript = async (
   } as TranscriptData;
 };
 
+export const getTranscriptByResource = async (
+  resourceId: string
+): Promise<TranscriptData> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/transcript/resource/${resourceId}`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const raw = await response.json();
+  return {
+    text: raw.full_text || raw.text || '',
+    segments: raw.segments || [],
+    language: raw.language || '',
+    duration: raw.duration_seconds ?? raw.duration ?? 0,
+    created_at: raw.created_at || '',
+  } as TranscriptData;
+};
+
 // --- Summary ---
 
+/** @deprecated Use triggerSummaryByResource instead */
 export const triggerSummary = async (
   platformId: string
 ): Promise<{ task_id: string }> => {
@@ -100,6 +146,25 @@ export const triggerSummary = async (
   return response.json();
 };
 
+export const triggerSummaryByResource = async (
+  resourceId: string
+): Promise<{ task_id: string }> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/summarize/resource/${resourceId}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+/** @deprecated Use getSummaryByResource instead */
 export const getSummary = async (
   platformId: string
 ): Promise<SummaryData> => {
@@ -125,14 +190,57 @@ export const getSummary = async (
   } as SummaryData;
 };
 
+export const getSummaryByResource = async (
+  resourceId: string
+): Promise<SummaryData> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/summary/resource/${resourceId}`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const raw = await response.json();
+  return {
+    summary: raw.summary_text || raw.summary || '',
+    key_points: raw.key_points || [],
+    topics: raw.topics || [],
+    created_at: raw.created_at || '',
+  } as SummaryData;
+};
+
 // --- Visual Analysis ---
 
+/** @deprecated Use triggerVisualAnalysisByResource instead */
 export const triggerVisualAnalysis = async (
   platformId: string
 ): Promise<{ task_id: string }> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/analyze/${platformId}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+export const triggerVisualAnalysisByResource = async (
+  resourceId: string
+): Promise<{ task_id: string }> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/analyze/resource/${resourceId}`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });

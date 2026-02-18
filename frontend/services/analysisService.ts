@@ -16,7 +16,7 @@ const getApiUrl = (): string => {
 
 // Types
 export interface AnalysisStatus {
-  video_id: number;
+  media_id: number;
   platform_id: string;
   status: 'pending' | 'analyzing' | 'completed' | 'failed';
   has_analysis: boolean;
@@ -26,7 +26,7 @@ export interface AnalysisStatus {
 }
 
 export interface VideoAnalysisResult {
-  video_id: number;
+  media_id: number;
   platform_id: string;
   visual_analysis: string | null;
   content_categories: string[];
@@ -38,7 +38,7 @@ export interface VideoAnalysisResult {
 
 export interface AnalyzeResponse {
   message: string;
-  video_id: number;
+  media_id: number;
   status: string;
 }
 
@@ -46,7 +46,7 @@ export interface BatchAnalyzeResponse {
   message: string;
   queued_count: number;
   skipped_count: number;
-  video_ids: number[];
+  media_ids: number[];
 }
 
 export interface AnalysisStats {
@@ -61,10 +61,10 @@ export interface AnalysisStats {
 /**
  * Get analysis status for a video
  */
-export const getAnalysisStatus = async (videoId: number): Promise<AnalysisStatus> => {
+export const getAnalysisStatus = async (mediaId: number): Promise<AnalysisStatus> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/analysis/status/${videoId}`, {
+  const response = await fetch(`${apiUrl}/api/v1/analysis/status/${mediaId}`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -80,10 +80,10 @@ export const getAnalysisStatus = async (videoId: number): Promise<AnalysisStatus
 /**
  * Get full analysis results for a video
  */
-export const getVideoAnalysis = async (videoId: number): Promise<VideoAnalysisResult> => {
+export const getVideoAnalysis = async (mediaId: number): Promise<VideoAnalysisResult> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${videoId}`, {
+  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${mediaId}`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -100,12 +100,12 @@ export const getVideoAnalysis = async (videoId: number): Promise<VideoAnalysisRe
  * Trigger analysis for a single video
  */
 export const analyzeVideo = async (
-  videoId: number,
+  mediaId: number,
   forceReanalyze: boolean = false
 ): Promise<AnalyzeResponse> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/analysis/analyze/${videoId}`, {
+  const response = await fetch(`${apiUrl}/api/v1/analysis/analyze/${mediaId}`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ force_reanalyze: forceReanalyze }),
@@ -123,7 +123,7 @@ export const analyzeVideo = async (
  * Trigger batch analysis for multiple videos
  */
 export const batchAnalyze = async (
-  videoIds?: number[],
+  mediaIds?: number[],
   limit: number = 50,
   forceReanalyze: boolean = false
 ): Promise<BatchAnalyzeResponse> => {
@@ -133,7 +133,7 @@ export const batchAnalyze = async (
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({
-      video_ids: videoIds,
+      media_ids: mediaIds,
       limit,
       force_reanalyze: forceReanalyze,
     }),
@@ -169,10 +169,10 @@ export const getAnalysisStats = async (): Promise<AnalysisStats> => {
 /**
  * Get suggested tags for a video
  */
-export const getSuggestedTags = async (videoId: number): Promise<string[]> => {
+export const getSuggestedTags = async (mediaId: number): Promise<string[]> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${videoId}/suggested-tags`, {
+  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${mediaId}/suggested-tags`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });

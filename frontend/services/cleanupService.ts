@@ -19,7 +19,7 @@ export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' 
 export type CleanupActionType = 'delete' | 'keep_forever' | 'dismiss';
 
 export interface CleanupSuggestion {
-  video_id: number;
+  media_id: number;
   title: string;
   cover_url: string | null;
   author: string | null;
@@ -91,7 +91,7 @@ export interface StorageBreakdown {
 
 export interface CleanupActionResponse {
   message: string;
-  video_id: number;
+  media_id: number;
 }
 
 export interface BatchCleanupResponse {
@@ -200,12 +200,12 @@ export const getStorageBreakdown = async (): Promise<StorageBreakdown> => {
  * Take action on a cleanup suggestion
  */
 export const takeCleanupAction = async (
-  videoId: number,
+  mediaId: number,
   action: CleanupActionType
 ): Promise<CleanupActionResponse> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/action`, {
+  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/action`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ action }),
@@ -223,7 +223,7 @@ export const takeCleanupAction = async (
  * Batch cleanup action on multiple videos
  */
 export const batchCleanupAction = async (
-  videoIds: number[],
+  mediaIds: number[],
   action: CleanupActionType
 ): Promise<BatchCleanupResponse> => {
   const apiUrl = getApiUrl();
@@ -231,7 +231,7 @@ export const batchCleanupAction = async (
   const response = await fetch(`${apiUrl}/api/v1/cleanup/batch`, {
     method: 'POST',
     headers: await getAuthHeaders(),
-    body: JSON.stringify({ video_ids: videoIds, action }),
+    body: JSON.stringify({ media_ids: mediaIds, action }),
   });
 
   if (!response.ok) {
@@ -245,10 +245,10 @@ export const batchCleanupAction = async (
 /**
  * Mark a video to keep forever
  */
-export const markKeepForever = async (videoId: number): Promise<CleanupActionResponse> => {
+export const markKeepForever = async (mediaId: number): Promise<CleanupActionResponse> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/keep`, {
+  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/keep`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });
@@ -264,10 +264,10 @@ export const markKeepForever = async (videoId: number): Promise<CleanupActionRes
 /**
  * Remove keep forever mark from a video
  */
-export const unmarkKeepForever = async (videoId: number): Promise<CleanupActionResponse> => {
+export const unmarkKeepForever = async (mediaId: number): Promise<CleanupActionResponse> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${videoId}/keep`, {
+  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/keep`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });

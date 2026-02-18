@@ -94,12 +94,12 @@ export const uploadFile = async (projectId: string, file: File, notes?: string):
   return json.data;
 };
 
-export const linkVideoToProject = async (projectId: string, videoId: string): Promise<ProjectFile> => {
+export const linkVideoToProject = async (projectId: string, mediaId: string): Promise<ProjectFile> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/link-video`, {
     method: 'POST',
     headers: await getAuthHeaders(),
-    body: JSON.stringify({ video_id: videoId }),
+    body: JSON.stringify({ media_id: mediaId }),
   });
   if (!response.ok) throw new Error('Failed to link video');
   const json = await response.json();

@@ -1,5 +1,5 @@
 
-import { Video, DownloadStatus } from '../types';
+import { ParsedMedia, DownloadStatus } from '../types';
 import { getSupabaseAccessToken } from '../supabaseClient';
 
 // API config
@@ -125,7 +125,7 @@ export const parseBatchLinks = async (
   total: number;
   submitted: number;
   failed: number;
-  results: Array<{ url: string; platform_id: string; status: string; data?: Video }>;
+  results: Array<{ url: string; platform_id: string; status: string; data?: ParsedMedia }>;
   errors: Array<{ url: string; error: string }>;
 }> => {
   const apiUrl = getApiUrl();
@@ -158,7 +158,7 @@ export const fetchVideosFromApi = async (
 ): Promise<{
   success: boolean;
   count: number;
-  videos: Video[];
+  media: ParsedMedia[];
 }> => {
   const apiUrl = getApiUrl();
 
