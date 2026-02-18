@@ -473,6 +473,18 @@ export function getVersionHlsUrl(resourceId: string, versionId: string, token?: 
   return base;
 }
 
+export async function retryTranscode(resourceId: string, versionId: string): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}/transcode`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to queue transcode');
+  }
+}
+
 export function getPreviewSpriteUrl(resourceId: string): string {
   const apiUrl = getApiUrl();
   return `${apiUrl}/api/v1/resources/${resourceId}/preview-sprite`;
