@@ -80,7 +80,7 @@ class TranscriptSegmentSchema(BaseModel):
 class TranscriptResponse(BaseModel):
     """Response body for a video transcript."""
 
-    video_id: str
+    media_id: str
     language: Optional[str] = None
     full_text: Optional[str] = None
     segments: Optional[List[TranscriptSegmentSchema]] = None
@@ -92,7 +92,7 @@ class TranscriptResponse(BaseModel):
 class SummaryResponse(BaseModel):
     """Response body for a video summary."""
 
-    video_id: str
+    media_id: str
     summary_type: Optional[str] = None
     summary_text: Optional[str] = None
     key_points: Optional[List[str]] = None

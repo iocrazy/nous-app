@@ -48,7 +48,7 @@ class TagResponse(TagBase):
     type: Literal["system", "user", "time"]
     user_id: Optional[UUID] = None
     created_at: datetime
-    video_count: Optional[int] = Field(0, description="Number of videos using this tag")
+    media_count: Optional[int] = Field(0, description="Number of media using this tag")
 
     model_config = {"from_attributes": True}
 
@@ -60,8 +60,8 @@ class TagListResponse(BaseModel):
     total: int
 
 
-class VideoTagCreate(BaseModel):
-    """Schema for adding tag to video."""
+class MediaTagCreate(BaseModel):
+    """Schema for adding tag to media."""
 
     tag_id: UUID
     confidence: Optional[float] = Field(
@@ -72,8 +72,8 @@ class VideoTagCreate(BaseModel):
     )
 
 
-class VideoTagResponse(BaseModel):
-    """Schema for video tag association."""
+class MediaTagResponse(BaseModel):
+    """Schema for media tag association."""
 
     tag: TagResponse
     confidence: Optional[float] = Field(None, description="Confidence score")
@@ -83,11 +83,11 @@ class VideoTagResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class VideoTagsResponse(BaseModel):
-    """Schema for video's tags response."""
+class MediaTagsResponse(BaseModel):
+    """Schema for media's tags response."""
 
-    video_id: str = Field(..., description="Video UUID")
-    tags: List[VideoTagResponse]
+    media_id: str = Field(..., description="Media UUID")
+    tags: List[MediaTagResponse]
 
 
 class TagCountItem(BaseModel):
@@ -106,4 +106,4 @@ class TagStatisticsResponse(BaseModel):
 
     success: bool = True
     top_tags: List[TagCountItem]
-    total_tagged_videos: int = 0
+    total_tagged_media: int = 0
