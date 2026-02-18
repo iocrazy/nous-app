@@ -103,7 +103,7 @@ export const uploadFile = async (projectId: string, file: File, notes?: string):
 
 export const linkVideoToProject = async (projectId: string, mediaId: string): Promise<ProjectFile> => {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/link-video`, {
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/link-media`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ media_id: mediaId }),

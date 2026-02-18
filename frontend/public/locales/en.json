@@ -761,6 +761,18 @@
       "submit": "Create & Add Members"
     },
     "toolbar": {
+      "items": "items",
+      "sortUpdated": "Updated",
+      "sortName": "Name",
+      "sortSize": "Size",
+      "filterAll": "All Types",
+      "filterVideo": "Video",
+      "filterImage": "Image",
+      "filterAudio": "Audio",
+      "filterDocument": "Document",
+      "uploadFiles": "Upload Files",
+      "uploadFolder": "Upload Folder",
+      "newFolder": "New Folder",
       "statusAll": "All Status",
       "statusPending": "Pending Review",
       "statusInReview": "In Review",
@@ -845,6 +857,40 @@
       "create": "Create Share Link",
       "created": "Share link created!",
       "passwordHint": "Password: {{password}}"
+    },
+    "trash": {
+      "empty": "Trash is empty",
+      "emptyHint": "Deleted files will appear here",
+      "hint": "Files in trash can be restored or permanently deleted",
+      "confirmPermanentDelete": "Permanently delete \"{{filename}}\"? This cannot be undone.",
+      "fileName": "File Name",
+      "type": "Type",
+      "deletedAt": "Deleted",
+      "actions": "Actions",
+      "restore": "Restore",
+      "deletePermanently": "Delete"
+    },
+    "shares": {
+      "empty": "No Shares Yet",
+      "emptyHint": "Share project files to collaborate with others",
+      "code": "Share Code",
+      "type": "Type",
+      "views": "Views",
+      "status": "Status",
+      "created": "Created",
+      "actions": "Actions",
+      "protected": "Protected",
+      "copyLink": "Copy Link",
+      "openLink": "Open Link"
+    },
+    "batch": {
+      "confirmTrash": "Move {{count}} files to trash?",
+      "selected": "selected",
+      "trash": "Trash",
+      "cancel": "Cancel"
+    },
+    "header": {
+      "searchFiles": "Search files..."
     }
   }
 }
