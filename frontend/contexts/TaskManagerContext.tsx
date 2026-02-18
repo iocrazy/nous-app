@@ -5,7 +5,17 @@ import { getAuthHeaders } from '../services/parserService';
 
 // ─── Types ──────────────────────────────────────────────
 
-export type TaskType = 'download' | 'upload' | 'transcode' | 'ai_pipeline';
+export type TaskType =
+  | 'download'
+  | 'upload'
+  | 'transcode'
+  | 'ai_pipeline'
+  | 'ai_transcribe'
+  | 'ai_summarize'
+  | 'ai_visual_analysis';
+
+export type TaskCategory = 'transfer' | 'processing' | 'ai';
+
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export interface UnifiedTask {
@@ -20,13 +30,39 @@ export interface UnifiedTask {
   total_bytes?: number;
   error_msg?: string;
   resource_id?: string;
+  media_id?: string;
+  /** @deprecated Use media_id instead */
   video_id?: string;
+  group_id?: string;
   celery_task_id?: string;
   metadata: Record<string, unknown>;
   created_at: string;
   started_at?: string;
   completed_at?: string;
   updated_at?: string;
+}
+
+/** Map task_type to its high-level category */
+export function getTaskCategory(type: TaskType): TaskCategory {
+  switch (type) {
+    case 'download':
+    case 'upload':
+      return 'transfer';
+    case 'transcode':
+      return 'processing';
+    case 'ai_pipeline':
+    case 'ai_transcribe':
+    case 'ai_summarize':
+    case 'ai_visual_analysis':
+      return 'ai';
+    default:
+      return 'processing';
+  }
+}
+
+/** Check if a task type is an AI sub-task */
+export function isAISubTask(type: TaskType): boolean {
+  return type === 'ai_transcribe' || type === 'ai_summarize' || type === 'ai_visual_analysis';
 }
 
 export interface TaskManagerState {
@@ -227,6 +263,9 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     upload: 0,
     transcode: 0,
     ai_pipeline: 0,
+    ai_transcribe: 0,
+    ai_summarize: 0,
+    ai_visual_analysis: 0,
   };
   for (const t of activeTasks) {
     if (t.task_type in activeCounts) {
@@ -303,10 +342,13 @@ export function formatFileSize(bytes: number): string {
 
 export function taskTypeIcon(type: TaskType): string {
   switch (type) {
-    case 'upload': return '\u2191';      // ↑
-    case 'download': return '\u2193';    // ↓
-    case 'transcode': return '\u27F3';   // ⟳
-    case 'ai_pipeline': return '\u2726'; // ✦
+    case 'upload': return '\u2191';              // ↑
+    case 'download': return '\u2193';            // ↓
+    case 'transcode': return '\u27F3';           // ⟳
+    case 'ai_pipeline': return '\u2726';         // ✦
+    case 'ai_transcribe': return '\uD83C\uDFA4'; // 🎤 (speech)
+    case 'ai_summarize': return '\uD83D\uDCDD';  // 📝 (memo)
+    case 'ai_visual_analysis': return '\uD83D\uDC41'; // 👁 (eye)
     default: return '\u2022';
   }
 }
@@ -317,6 +359,31 @@ export function taskTypeLabel(type: TaskType): string {
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
     case 'ai_pipeline': return 'AI Pipeline';
+    case 'ai_transcribe': return 'Transcribe';
+    case 'ai_summarize': return 'Summarize';
+    case 'ai_visual_analysis': return 'Visual Analysis';
     default: return type;
   }
+}
+
+export function taskCategoryLabel(category: TaskCategory): string {
+  switch (category) {
+    case 'transfer': return 'Transfer';
+    case 'processing': return 'Processing';
+    case 'ai': return 'AI';
+    default: return category;
+  }
+}
+
+/** Get tasks grouped by their group_id (for AI pipeline sub-tasks) */
+export function getTaskGroups(tasks: UnifiedTask[]): Map<string, UnifiedTask[]> {
+  const groups = new Map<string, UnifiedTask[]>();
+  for (const task of tasks) {
+    if (task.group_id) {
+      const existing = groups.get(task.group_id) || [];
+      existing.push(task);
+      groups.set(task.group_id, existing);
+    }
+  }
+  return groups;
 }
