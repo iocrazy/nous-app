@@ -68,6 +68,15 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     setContextMenu({ project, x: e.clientX, y: e.clientY });
   };
 
+  const handleColorLabel = async (project: Project, color: string | null) => {
+    try {
+      await updateProject(project.id, { color_label: color } as any);
+      onProjectsChange?.();
+    } catch (err) {
+      console.error('Failed to set color label:', err);
+    }
+  };
+
   const formatRelativeTime = (dateStr: string): string => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -87,6 +96,16 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     internal: 'text-blue-400 bg-blue-500/20',
     external: 'text-orange-400 bg-orange-500/20',
     personal: 'text-purple-400 bg-purple-500/20',
+  };
+
+  const colorLabelDots: Record<string, string> = {
+    red: 'bg-red-500',
+    orange: 'bg-orange-500',
+    yellow: 'bg-yellow-500',
+    green: 'bg-green-500',
+    blue: 'bg-blue-500',
+    purple: 'bg-purple-500',
+    pink: 'bg-pink-500',
   };
 
   const filteredProjects = useMemo(() => {
@@ -266,7 +285,12 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                   className="hover:bg-zinc-700/30 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <span className="text-sm text-white font-medium">{project.name}</span>
+                    <div className="flex items-center gap-2">
+                      {(project as any).color_label && colorLabelDots[(project as any).color_label] && (
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[(project as any).color_label]}`} />
+                      )}
+                      <span className="text-sm text-white font-medium">{project.name}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColors[project.project_type] || ''}`}>
@@ -315,6 +339,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           onClose={() => setContextMenu(null)}
           onSettings={() => setSettingsProject(contextMenu.project)}
           onMembers={() => setMembersProject(contextMenu.project)}
+          onColorLabel={(color) => handleColorLabel(contextMenu.project, color)}
           onToggleStar={() => handleToggleStarById(contextMenu.project)}
           onDelete={() => handleDeleteProject(contextMenu.project)}
         />
