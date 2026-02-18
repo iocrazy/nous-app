@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.tasks.parse_tasks",
         "app.tasks.scheduled_tasks",
         "app.tasks.ai_tasks",
+        "app.tasks.transcode_tasks",
     ],
 )
 
