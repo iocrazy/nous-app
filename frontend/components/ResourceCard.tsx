@@ -214,16 +214,44 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     );
     e.dataTransfer.effectAllowed = 'move';
 
-    // Custom drag image showing count
+    // Custom drag image with thumbnail preview
     const dragEl = document.createElement('div');
-    dragEl.style.cssText = 'position:fixed;top:-1000px;left:-1000px;background:#3730a3;color:white;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;z-index:99999;pointer-events:none;';
-    dragEl.textContent = dragIds.length > 1 ? `${dragIds.length} items` : filename;
+    dragEl.style.cssText = 'position:fixed;top:-1000px;left:-1000px;width:140px;background:#27272a;border:1px solid #3f3f46;border-radius:10px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:99999;pointer-events:none;';
+
+    // Thumbnail area
+    const thumbArea = document.createElement('div');
+    thumbArea.style.cssText = 'width:140px;height:90px;background:#18181b;display:flex;align-items:center;justify-content:center;overflow:hidden;';
+    if (thumbnailSrc) {
+      const img = document.createElement('img');
+      img.src = thumbnailSrc;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      thumbArea.appendChild(img);
+    } else {
+      thumbArea.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+    }
+    dragEl.appendChild(thumbArea);
+
+    // Label area
+    const label = document.createElement('div');
+    label.style.cssText = 'padding:6px 8px;font-size:11px;color:#e4e4e7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:system-ui,sans-serif;';
+    label.textContent = dragIds.length > 1 ? `${dragIds.length} items` : filename;
+    dragEl.appendChild(label);
+
+    // Multi-select count badge
+    if (dragIds.length > 1) {
+      const badge = document.createElement('div');
+      badge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#6366f1;color:white;border-radius:999px;min-width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:system-ui,sans-serif;padding:0 5px;';
+      badge.textContent = String(dragIds.length);
+      dragEl.style.position = 'fixed';
+      dragEl.appendChild(badge);
+    }
+
     document.body.appendChild(dragEl);
-    e.dataTransfer.setDragImage(dragEl, 0, 0);
+    e.dataTransfer.setDragImage(dragEl, 70, 45);
     requestAnimationFrame(() => {
       setTimeout(() => document.body.removeChild(dragEl), 0);
     });
-  }, [compositeId, item.id, selectedIds, filename]);
+  }, [compositeId, item.id, selectedIds, filename, thumbnailSrc]);
 
   const checkbox = selectable ? (
     <button

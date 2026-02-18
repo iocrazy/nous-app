@@ -750,15 +750,17 @@ export async function moveFolder(
 
 export async function getFolderPreview(
   folderId: string
-): Promise<Array<{ thumbnail_path: string | null; mime_type: string | null }>> {
+): Promise<Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>> {
   const { data, error } = await supabase
     .from('resource_items')
-    .select('resource:resources(thumbnail_path, mime_type)')
+    .select('resource:resources(id, thumbnail_path, cover_image_path, mime_type)')
     .eq('folder_id', folderId)
     .limit(4);
   if (error) throw error;
   return (data || []).map((item: any) => ({
+    resource_id: item.resource?.id ? String(item.resource.id) : null,
     thumbnail_path: item.resource?.thumbnail_path ?? null,
+    cover_image_path: item.resource?.cover_image_path ?? null,
     mime_type: item.resource?.mime_type ?? null,
   }));
 }
