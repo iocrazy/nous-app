@@ -714,5 +714,57 @@
       "presentation": "Presentation",
       "delivery": "Delivery"
     }
+  },
+  "projects": {
+    "sidebar": {
+      "projectList": "Projects",
+      "starredProjects": "Starred",
+      "noStarred": "No starred projects",
+      "projectGroups": "Groups",
+      "internalProjects": "Internal Projects",
+      "externalProjects": "External Projects"
+    },
+    "tab": {
+      "all": "All Projects",
+      "internal": "Internal",
+      "external": "External"
+    },
+    "tabs": {
+      "files": "Files",
+      "shares": "Shares",
+      "trash": "Trash"
+    },
+    "totalProjects": "{{count}} projects",
+    "searchProjects": "Search projects",
+    "noSearchResults": "No projects match your search",
+    "sortUpdatedAt": "Last active",
+    "sortCreatedAt": "Created",
+    "sortName": "Name",
+    "confirmDelete": "Delete \"{{name}}\"? This cannot be undone.",
+    "contextMenu": {
+      "settings": "Project Settings",
+      "members": "Members",
+      "colorLabel": "Color Label",
+      "star": "Star",
+      "unstar": "Unstar",
+      "delete": "Delete Project"
+    },
+    "create": {
+      "title": "Create Project",
+      "name": "Project Name",
+      "namePlaceholder": "Enter project name",
+      "announcement": "Announcement",
+      "announcementPlaceholder": "Help new members understand this project",
+      "descriptionPlaceholder": "Optional description",
+      "group": "Add to Group",
+      "noGroup": "No group",
+      "submit": "Create & Add Members"
+    },
+    "deleteConfirm": {
+      "title": "Delete Project",
+      "message": "Deleting \"{{name}}\" will permanently remove all files and comments. This cannot be undone.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    }
   }
 }
