@@ -24,7 +24,7 @@ export const fetchProjects = async (params?: { type?: string; starred?: boolean 
   return json.data || [];
 };
 
-export const createProject = async (data: { name: string; description?: string; team_id?: string; project_type?: string; project_group?: string }): Promise<Project> => {
+export const createProject = async (data: { name: string; description?: string; team_id?: string; project_type?: string; project_group?: string; announcement?: string }): Promise<Project> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/projects`, {
     method: 'POST',

@@ -17,23 +17,25 @@ from pydantic import BaseModel, Field
 class ProjectCreate(BaseModel):
     """Request body for creating a new project"""
 
-    name: str = Field(..., min_length=1, max_length=200)
+    name: str = Field(..., min_length=1, max_length=30)
     description: Optional[str] = None
     team_id: Optional[str] = None
     project_type: str = Field(
         default="personal", pattern="^(internal|external|personal)$"
     )
     project_group: Optional[str] = Field(None, max_length=100)
+    announcement: Optional[str] = Field(None, max_length=100)
 
 
 class ProjectUpdate(BaseModel):
     """Request body for updating an existing project"""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    name: Optional[str] = Field(None, min_length=1, max_length=30)
     description: Optional[str] = None
     project_type: Optional[str] = Field(None, pattern="^(internal|external|personal)$")
     project_group: Optional[str] = Field(None, max_length=100)
     is_starred: Optional[bool] = None
+    announcement: Optional[str] = Field(None, max_length=100)
 
 
 class ProjectResponse(BaseModel):
@@ -46,6 +48,7 @@ class ProjectResponse(BaseModel):
     team_id: Optional[str] = None
     project_type: str
     project_group: Optional[str] = None
+    announcement: Optional[str] = None
     is_starred: bool = False
     file_count: int = 0
     created_at: datetime

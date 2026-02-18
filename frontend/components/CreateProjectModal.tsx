@@ -19,6 +19,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const [projectGroup, setProjectGroup] = useState('');
   const [projectType, setProjectType] = useState<'personal' | 'internal' | 'external'>('personal');
   const [teamId, setTeamId] = useState<string>('');
   const [teams, setTeams] = useState<Team[]>([]);
@@ -58,6 +60,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         description: description.trim() || undefined,
         project_type: projectType,
         team_id: teamId || undefined,
+        project_group: projectGroup.trim() || undefined,
+        announcement: announcement.trim() || undefined,
       });
       onProjectCreated(project);
       resetForm();
@@ -73,6 +77,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const resetForm = () => {
     setName('');
     setDescription('');
+    setAnnouncement('');
+    setProjectGroup('');
     setProjectType('personal');
     setTeamId('');
     setError(null);
@@ -115,14 +121,19 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
-              {t('mediatrack.projectName')}
-            </label>
+            <div className="flex justify-between mb-2">
+              <label className="text-sm font-medium text-zinc-300">
+                {t('projects.create.name', 'Project Name')}
+              </label>
+              <span className={`text-xs ${name.length >= 30 ? 'text-red-400' : 'text-zinc-600'}`}>
+                {name.length}/30
+              </span>
+            </div>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter project name"
+              onChange={(e) => setName(e.target.value.slice(0, 30))}
+              placeholder={t('projects.create.namePlaceholder', 'Enter project name')}
               className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               autoFocus
             />
@@ -131,31 +142,64 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-zinc-300 mb-2">
-              {t('mediatrack.projectDescription')}
+              {t('mediatrack.projectDescription', 'Description')}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description"
-              rows={3}
+              placeholder={t('projects.create.descriptionPlaceholder', 'Optional description')}
+              rows={2}
               className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
             />
           </div>
 
-          {/* Project Type */}
+          {/* Announcement */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
-              {t('mediatrack.projectType')}
-            </label>
-            <select
-              value={projectType}
-              onChange={(e) => setProjectType(e.target.value as 'personal' | 'internal' | 'external')}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
-            >
-              <option value="personal">{t('mediatrack.personal')}</option>
-              <option value="internal">{t('mediatrack.internal')}</option>
-              <option value="external">{t('mediatrack.external')}</option>
-            </select>
+            <div className="flex justify-between mb-2">
+              <label className="text-sm font-medium text-zinc-300">
+                {t('projects.create.announcement', 'Announcement')}
+              </label>
+              <span className={`text-xs ${announcement.length >= 100 ? 'text-red-400' : 'text-zinc-600'}`}>
+                {announcement.length}/100
+              </span>
+            </div>
+            <textarea
+              value={announcement}
+              onChange={(e) => setAnnouncement(e.target.value.slice(0, 100))}
+              placeholder={t('projects.create.announcementPlaceholder', 'Help new members understand this project')}
+              rows={2}
+              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+            />
+          </div>
+
+          {/* Project Type + Group (side by side) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">
+                {t('mediatrack.projectType', 'Type')}
+              </label>
+              <select
+                value={projectType}
+                onChange={(e) => setProjectType(e.target.value as 'personal' | 'internal' | 'external')}
+                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+              >
+                <option value="personal">{t('mediatrack.personal')}</option>
+                <option value="internal">{t('mediatrack.internal')}</option>
+                <option value="external">{t('mediatrack.external')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">
+                {t('projects.create.group', 'Group')}
+              </label>
+              <input
+                type="text"
+                value={projectGroup}
+                onChange={(e) => setProjectGroup(e.target.value)}
+                placeholder={t('projects.create.noGroup', 'No group')}
+                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              />
+            </div>
           </div>
 
           {/* Team */}

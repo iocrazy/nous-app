@@ -560,6 +560,7 @@ export interface Project {
   team_id: string | null;
   project_type: 'internal' | 'external' | 'personal';
   project_group: string | null;
+  announcement: string | null;
   is_starred: boolean;
   file_count: number;
   created_at: string;
