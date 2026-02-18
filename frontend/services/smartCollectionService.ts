@@ -3,7 +3,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-import { Video } from '../types';
+import { ParsedMedia } from '../types';
 
 // API configuration - empty string means use relative paths (via Vite proxy)
 const getApiUrl = (): string => {
@@ -65,7 +65,7 @@ export interface SmartCollectionUpdate {
 }
 
 export interface SmartCollectionVideosResponse {
-  videos: Video[];
+  media: ParsedMedia[];
   total: number;
   page: number;
   page_size: number;

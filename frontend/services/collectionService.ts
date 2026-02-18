@@ -17,7 +17,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
 
   let query = supabase
     .from('collections')
-    .select('*, video_collections(count)')
+    .select('*, media_collections(count)')
     .order('created_at', { ascending: false });
 
   if (teamIds.length > 0) {
@@ -36,8 +36,8 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
 
       // Get first video in collection
       const { data: firstVideo } = await supabase
-        .from('video_collections')
-        .select('video_id')
+        .from('media_collections')
+        .select('media_id')
         .eq('collection_id', c.id)
         .order('added_at', { ascending: false })
         .limit(1)
@@ -46,9 +46,9 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
       if (firstVideo) {
         // Get video's cover URL
         const { data: video } = await supabase
-          .from('videos')
+          .from('parsed_media')
           .select('cover_download_path, dynamic_cover_url')
-          .eq('id', firstVideo.video_id)
+          .eq('id', firstVideo.media_id)
           .maybeSingle();
 
         if (video) {
@@ -59,7 +59,8 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
       return {
         ...c,
         id: String(c.id),
-        video_count: c.video_collections?.[0]?.count || 0,
+        media_count: c.media_collections?.[0]?.count || 0,
+        video_count: c.media_collections?.[0]?.count || 0,
         is_shared: !!c.team_id,
         thumbnail_url,
       };
@@ -87,7 +88,7 @@ export const createCollection = async (name: string, teamId?: string): Promise<C
     .single();
 
   if (error) throw error;
-  return { ...data, id: String(data.id), video_count: 0, is_shared: !!teamId };
+  return { ...data, id: String(data.id), media_count: 0, video_count: 0, is_shared: !!teamId };
 };
 
 export const deleteCollection = async (collectionId: string): Promise<void> => {
@@ -111,7 +112,7 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
 
   // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('videos')
+    .from('parsed_media')
     .select('id')
     .eq('platform_id', videoAwemeId)
     .maybeSingle();
@@ -119,10 +120,10 @@ export const addVideoToCollection = async (collectionId: string, videoAwemeId: s
   if (!video) throw new Error('Video not found');
 
   const { error } = await supabase
-    .from('video_collections')
+    .from('media_collections')
     .insert({
       collection_id: parseInt(collectionId),
-      video_id: video.id,
+      media_id: video.id,
       added_by: user.id,
     });
 
@@ -135,7 +136,7 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
 
   // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('videos')
+    .from('parsed_media')
     .select('id')
     .eq('platform_id', videoAwemeId)
     .maybeSingle();
@@ -143,10 +144,10 @@ export const removeVideoFromCollection = async (collectionId: string, videoAweme
   if (!video) throw new Error('Video not found');
 
   const { error } = await supabase
-    .from('video_collections')
+    .from('media_collections')
     .delete()
     .eq('collection_id', parseInt(collectionId))
-    .eq('video_id', video.id);
+    .eq('media_id', video.id);
 
   if (error) throw error;
 };
@@ -157,7 +158,7 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
 
   // Get video_id from platform_id
   const { data: video } = await supabase
-    .from('videos')
+    .from('parsed_media')
     .select('id')
     .eq('platform_id', videoAwemeId)
     .maybeSingle();
@@ -165,9 +166,9 @@ export const fetchVideoCollections = async (videoAwemeId: string): Promise<strin
   if (!video) return [];
 
   const { data, error } = await supabase
-    .from('video_collections')
+    .from('media_collections')
     .select('collection_id')
-    .eq('video_id', video.id);
+    .eq('media_id', video.id);
 
   if (error) throw error;
   return (data || []).map(cv => String(cv.collection_id));

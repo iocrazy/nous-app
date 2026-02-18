@@ -1,8 +1,8 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
-import { Video } from '../types';
+import { ParsedMedia } from '../types';
 
-const TABLE_NAME = 'videos';
-const VIEW_NAME = 'videos_with_tags';  // View that includes tags array
+const TABLE_NAME = 'parsed_media';
+const VIEW_NAME = 'parsed_media_with_tags';  // View that includes tags array
 
 const getApiUrl = (): string => {
   // @ts-ignore
@@ -85,7 +85,7 @@ export const getCoverDownloadUrl = (platformId: string): string => {
 /**
  * Fetch a single video by platform_id
  */
-export const fetchVideoByPlatformId = async (platformId: string): Promise<Video | null> => {
+export const fetchVideoByPlatformId = async (platformId: string): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return null;
@@ -107,7 +107,7 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Video 
       return null;
     }
 
-    return data as Video | null;
+    return data as ParsedMedia | null;
   } catch (e) {
     console.error('Error fetching video by platform_id:', e);
     return null;
@@ -120,7 +120,7 @@ export const fetchVideoByAwemeId = fetchVideoByPlatformId;
 /**
  * Fetch a single video by id (Snowflake BIGINT)
  */
-export const fetchVideoByDisplayId = async (displayId: string): Promise<Video | null> => {
+export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return null;
@@ -142,7 +142,7 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<Video | 
       return null;
     }
 
-    return data as Video | null;
+    return data as ParsedMedia | null;
   } catch (e) {
     console.error('Error fetching video by id:', e);
     return null;
@@ -166,7 +166,7 @@ export interface PaginatedResult<T> {
 export const fetchLibraryPaginated = async (
   page: number = 0,
   pageSize: number = PAGE_SIZE
-): Promise<PaginatedResult<Video>> => {
+): Promise<PaginatedResult<ParsedMedia>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -194,7 +194,7 @@ export const fetchLibraryPaginated = async (
     const hasMore = (page + 1) * pageSize < totalCount;
 
     return {
-      data: (data as Video[]) || [],
+      data: (data as ParsedMedia[]) || [],
       totalCount,
       hasMore,
       page,
@@ -207,7 +207,7 @@ export const fetchLibraryPaginated = async (
 /**
  * Fetch video library (loads first LOCAL_CACHE_SIZE for local search)
  */
-export const fetchLibrary = async (): Promise<Video[]> => {
+export const fetchLibrary = async (): Promise<ParsedMedia[]> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -227,7 +227,7 @@ export const fetchLibrary = async (): Promise<Video[]> => {
       .limit(LOCAL_CACHE_SIZE);
 
     if (error) throw error;
-    return (data as Video[]) || [];
+    return (data as ParsedMedia[]) || [];
   } catch (err: any) {
     throw err;
   }
@@ -260,7 +260,7 @@ export const fetchLibraryCount = async (): Promise<number> => {
   }
 };
 
-export const saveItem = async (item: Video): Promise<Video> => {
+export const saveItem = async (item: ParsedMedia): Promise<ParsedMedia> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -286,10 +286,10 @@ export const saveItem = async (item: Video): Promise<Video> => {
     .single();
 
   if (error) throw error;
-  return data as Video;
+  return data as ParsedMedia;
 };
 
-export const updateItem = async (id: string, updates: Partial<Video>): Promise<Video> => {
+export const updateItem = async (id: string, updates: Partial<ParsedMedia>): Promise<ParsedMedia> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -309,7 +309,7 @@ export const updateItem = async (id: string, updates: Partial<Video>): Promise<V
     .single();
 
   if (error) throw error;
-  return data as Video;
+  return data as ParsedMedia;
 };
 
 export interface DeleteResult {

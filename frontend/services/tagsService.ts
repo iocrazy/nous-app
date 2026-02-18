@@ -41,7 +41,7 @@ export interface TagUpdate {
 }
 
 export interface VideoTagsResponse {
-  video_id: string;
+  media_id: string;
   tags: Tag[];
 }
 
@@ -166,7 +166,7 @@ export const addTagsToVideo = async (videoId: string, tagIds: string[]): Promise
 
   // Return updated tags
   const tags = await getVideoTags(videoId);
-  return { video_id: videoId, tags };
+  return { media_id: videoId, tags };
 };
 
 /**

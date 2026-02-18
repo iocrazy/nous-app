@@ -1,7 +1,7 @@
-import { Video, DownloadStatus } from './types';
+import { ParsedMedia, DownloadStatus } from './types';
 
 // NOTE: In a real app, these would come from your backend API
-export const MOCK_PARSED_DATA: Video = {
+export const MOCK_PARSED_DATA: ParsedMedia = {
   platform_id: "732918237123",
   like_count: 125043,
   comment_count: 4320,
