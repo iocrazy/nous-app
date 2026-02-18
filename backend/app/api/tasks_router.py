@@ -225,10 +225,10 @@ async def retry_task(
     # Trigger download task
     try:
         # Get video info from database
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.tasks.download_tasks import download_media_task
 
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = await repo.get_by_platform_id(aweme_id, user_id=auth.user_id)
 
         if video:
@@ -283,10 +283,10 @@ async def retry_all_failed(
     retried = []
     failed_ids = []
 
-    from app.repositories.video_repository import VideoRepository
+    from app.repositories.media_repository import MediaRepository
     from app.tasks.download_tasks import download_media_task
 
-    repo = VideoRepository()
+    repo = MediaRepository()
 
     for task in failed_tasks:
         aweme_id = task["aweme_id"]

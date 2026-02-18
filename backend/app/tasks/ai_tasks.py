@@ -50,15 +50,15 @@ def _get_provider_config(ai_settings: dict, provider_key: str) -> dict:
 
 
 def _update_status(platform_id: str, field: str, status: str):
-    """Helper to update AI status on the videos table by platform_id."""
+    """Helper to update AI status on the parsed_media table by platform_id."""
     from app.repositories.ai_repository import AIRepository
-    from app.repositories.video_repository import VideoRepository
+    from app.repositories.media_repository import MediaRepository
 
-    repo = VideoRepository()
-    video = run_async(repo.get_by_platform_id(platform_id))
-    if video:
+    repo = MediaRepository()
+    media = run_async(repo.get_by_platform_id(platform_id))
+    if media:
         ai_repo = AIRepository()
-        run_async(ai_repo.update_video_ai_status(video["id"], field, status))
+        run_async(ai_repo.update_media_ai_status(media["id"], field, status))
 
 
 def _update_unified_progress(unified_task_id: str, progress: int, subtitle: str = None):
@@ -106,9 +106,9 @@ def extract_audio_task(self, platform_id: str, user_id: str, unified_task_id: st
 
     try:
         from app.core.utils import Utils
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
 
-        repo = VideoRepository()
+        repo = MediaRepository()
         video = run_async(repo.get_by_platform_id(platform_id))
         if not video:
             logger.error(f"[AI] Video not found: {platform_id}")
@@ -211,10 +211,10 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
     try:
         from app.core.utils import Utils
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.services.whisper_service import WhisperService
 
-        video_repo = VideoRepository()
+        video_repo = MediaRepository()
         video = run_async(video_repo.get_by_platform_id(platform_id))
         if not video:
             _update_status(platform_id, "transcript_status", "failed")
@@ -313,10 +313,10 @@ def generate_summary_task(self, platform_id: str, user_id: str, unified_task_id:
 
     try:
         from app.repositories.ai_repository import AIRepository
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.services.llm_analysis_service import LLMAnalysisService
 
-        video_repo = VideoRepository()
+        video_repo = MediaRepository()
         video = run_async(video_repo.get_by_platform_id(platform_id))
         if not video:
             _update_status(platform_id, "summary_status", "failed")

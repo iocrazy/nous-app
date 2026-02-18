@@ -18,7 +18,7 @@ from app.core.deps import AuthDep
 from app.repositories.projects_repository import ProjectsRepository
 from app.schemas.projects import (
     CreateCommentRequest,
-    LinkVideoRequest,
+    LinkMediaRequest,
     ProjectCreate,
     ProjectFileUpdate,
     ProjectUpdate,
@@ -195,22 +195,22 @@ async def upload_file(
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
 
-@router.post("/{project_id}/files/link-video")
-async def link_video(project_id: str, data: LinkVideoRequest, auth: AuthDep):
-    """Link an existing video from the library to this project."""
+@router.post("/{project_id}/files/link-media")
+async def link_media(project_id: str, data: LinkMediaRequest, auth: AuthDep):
+    """Link an existing media item from the library to this project."""
     try:
         svc = ProjectsService()
-        result = await svc.link_video(
+        result = await svc.link_media(
             project_id=project_id,
-            video_id=data.video_id,
+            media_id=data.media_id,
             user_id=auth.user_id,
         )
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to link video to project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to link video")
+        logger.error(f"Failed to link media to project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to link media")
 
 
 @router.get("/{project_id}/files/{file_id}")

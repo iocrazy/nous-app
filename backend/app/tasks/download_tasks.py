@@ -295,10 +295,10 @@ def download_media_task(
 
                 # Auto-create resource record (dedup-aware)
                 try:
-                    from app.services.video_service import VideoService
+                    from app.services.media_service import MediaService
 
                     run_async(
-                        VideoService._create_resource_record(platform_id, user_id)
+                        MediaService._create_resource_record(platform_id, user_id)
                     )
                 except Exception as e:
                     logger.warning(
@@ -337,9 +337,9 @@ def download_media_task(
 
         # Auto-create resource record (dedup-aware)
         try:
-            from app.services.video_service import VideoService
+            from app.services.media_service import MediaService
 
-            run_async(VideoService._create_resource_record(platform_id, user_id))
+            run_async(MediaService._create_resource_record(platform_id, user_id))
         except Exception as e:
             logger.warning(
                 f"[Celery] Failed to create resource record for {platform_id}: {e}"
@@ -533,7 +533,7 @@ def download_ytdlp_task(
         logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
 
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.services.ytdlp_service import YtdlpService
 
         results = {"video": None, "music": None, "cover": None}
@@ -546,7 +546,7 @@ def download_ytdlp_task(
             detected_platform, platform_id
         )
 
-        repo_class = VideoRepository
+        repo_class = MediaRepository
 
         if download_video:
             logger.info(f"[Celery/yt-dlp] Downloading video: {platform_id}")
@@ -572,7 +572,7 @@ def download_ytdlp_task(
                 relative_path = f"{relative_prefix}/{file_name}"
                 repo = repo_class()
                 run_async(
-                    repo.mark_video_as_downloaded(
+                    repo.mark_media_as_downloaded(
                         platform_id=platform_id,
                         download_path=relative_path,
                         duration=0,
@@ -620,9 +620,9 @@ def download_ytdlp_task(
 
         # Auto-create resource record (dedup-aware)
         try:
-            from app.services.video_service import VideoService
+            from app.services.media_service import MediaService
 
-            run_async(VideoService._create_resource_record(platform_id, user_id))
+            run_async(MediaService._create_resource_record(platform_id, user_id))
         except Exception as e:
             logger.warning(
                 f"[Celery/yt-dlp] Failed to create resource record for {platform_id}: {e}"

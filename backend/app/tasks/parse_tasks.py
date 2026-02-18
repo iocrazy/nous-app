@@ -73,7 +73,7 @@ def parse_single_link_task(
                 "error": f"Invalid URL: {str(e)}",
             }
 
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.services.douyin_analysis import DouyinAnalysis
         from app.services.douyin_parser import DouyinParser
         from app.tasks.download_tasks import download_media_task
@@ -113,16 +113,16 @@ def parse_single_link_task(
 
         # Save metadata to database (without downloading)
         from app.core.enums import DownloadStatus
-        from app.schemas.video import VideoCreate
+        from app.schemas.media import MediaCreate
 
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Check if exists
         existing = run_async(repo.get_by_platform_id(platform_id, user_id=user_id))
 
         # Prepare data
         try:
-            video_data = VideoCreate(**parsed_data)
+            video_data = MediaCreate(**parsed_data)
             data_dict = video_data.model_dump()
         except Exception as e:
             logger.error(f"Data validation failed: {str(e)}")
@@ -168,7 +168,7 @@ def parse_single_link_task(
                     ]
 
                 added_tags = run_async(
-                    ClassificationService.auto_tag_video(
+                    ClassificationService.auto_tag_media(
                         video_id=video_db_id,
                         title=video_title or "",
                         description=parsed_data.get("description", ""),

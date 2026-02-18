@@ -19,9 +19,9 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
 # Request/Response schemas
 class AnalysisResponse(BaseModel):
-    """Response schema for video analysis."""
+    """Response schema for media analysis."""
 
-    video_id: int
+    media_id: int
     analysis_level: str
     visual_description: Optional[str] = None
     detected_objects: List[str] = []
@@ -51,7 +51,7 @@ class AnalyzeRequest(BaseModel):
 class BatchAnalyzeRequest(BaseModel):
     """Request schema for batch analysis."""
 
-    video_ids: List[int]
+    media_ids: List[int]
     level: str = "L1"
 
 
@@ -60,7 +60,7 @@ class TaskStatusResponse(BaseModel):
 
     message: str
     task_id: str
-    video_id: Optional[int] = None
+    media_id: Optional[int] = None
 
 
 @router.get("/stats", response_model=AnalysisStatsResponse)
@@ -74,12 +74,12 @@ async def get_analysis_stats(auth: AuthDep = None):
     supabase = await get_async_supabase_admin()
 
     # Total videos
-    total_result = await supabase.table("videos").select("id", count="exact").execute()
+    total_result = await supabase.table("parsed_media").select("id", count="exact").execute()
     total_videos = total_result.count or 0
 
     # Analyzed videos
     analysis_result = (
-        await supabase.table("video_analysis")
+        await supabase.table("media_analysis")
         .select("analysis_level, analysis_cost")
         .execute()
     )
@@ -122,26 +122,26 @@ async def get_analysis_queue(
     return {"pending_count": len(videos), "videos": videos}
 
 
-@router.get("/{video_id}", response_model=AnalysisResponse)
-async def get_video_analysis(
-    video_id: int,
+@router.get("/{media_id}", response_model=AnalysisResponse)
+async def get_media_analysis(
+    media_id: int,
     auth: AuthDep = None,
 ):
     """
-    Get analysis results for a video.
-    Returns 404 if no analysis exists for the video.
+    Get analysis results for a media item.
+    Returns 404 if no analysis exists for the media.
     """
     repo = AnalysisRepository()
-    analysis = await repo.get_analysis(video_id)
+    analysis = await repo.get_analysis(media_id)
 
     if not analysis:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found for this video",
+            detail="Analysis not found for this media",
         )
 
     return AnalysisResponse(
-        video_id=analysis["video_id"],
+        media_id=analysis["media_id"],
         analysis_level=analysis.get("analysis_level", "none"),
         visual_description=analysis.get("visual_description"),
         detected_objects=analysis.get("detected_objects", []),
@@ -155,12 +155,12 @@ async def get_video_analysis(
 
 
 @router.post(
-    "/{video_id}/analyze",
+    "/{media_id}/analyze",
     response_model=TaskStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def trigger_analysis(
-    video_id: int,
+    media_id: int,
     request: AnalyzeRequest,
     auth: AuthDep = None,
 ):
@@ -177,50 +177,50 @@ async def trigger_analysis(
 
     supabase = await get_async_supabase_admin()
 
-    # Get video info
+    # Get media info
     result = (
-        await supabase.table("videos")
+        await supabase.table("parsed_media")
         .select("id, title, description, cover_url, download_path")
-        .eq("id", video_id)
+        .eq("id", media_id)
         .maybe_single()
         .execute()
     )
 
     if not result.data:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
         )
 
-    video = result.data
+    media = result.data
 
     if request.level == "L1":
-        if not video.get("cover_url"):
+        if not media.get("cover_url"):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Video has no cover URL"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
         task = analyze_video_l1_task.delay(
-            video_id=video_id,
-            cover_url=video["cover_url"],
-            title=video.get("title", ""),
-            description=video.get("description", ""),
+            video_id=media_id,
+            cover_url=media["cover_url"],
+            title=media.get("title", ""),
+            description=media.get("description", ""),
         )
 
         return TaskStatusResponse(
-            message="L1 analysis started", task_id=task.id, video_id=video_id
+            message="L1 analysis started", task_id=task.id, media_id=media_id
         )
 
     elif request.level == "L2":
-        if not video.get("download_path"):
+        if not media.get("download_path"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Video file not downloaded yet. Download the video first, then run L2 analysis.",
+                detail="Media file not downloaded yet. Download it first, then run L2 analysis.",
             )
 
         # Get full path
         try:
             base_path = Utils.get_download_base_path()
-            video_path = f"{base_path}/{video['download_path']}"
+            video_path = f"{base_path}/{media['download_path']}"
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -228,15 +228,15 @@ async def trigger_analysis(
             )
 
         task = analyze_video_l2_task.delay(
-            video_id=video_id,
-            cover_url=video.get("cover_url", ""),
+            video_id=media_id,
+            cover_url=media.get("cover_url", ""),
             video_path=video_path,
-            title=video.get("title", ""),
-            description=video.get("description", ""),
+            title=media.get("title", ""),
+            description=media.get("description", ""),
         )
 
         return TaskStatusResponse(
-            message="L2 analysis started", task_id=task.id, video_id=video_id
+            message="L2 analysis started", task_id=task.id, media_id=media_id
         )
 
     elif request.level == "L3":
@@ -261,10 +261,10 @@ async def trigger_batch_analysis(
     Trigger batch analysis for multiple videos.
     Currently only supports L1 analysis.
     """
-    if len(request.video_ids) > 100:
+    if len(request.media_ids) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum 100 videos per batch",
+            detail="Maximum 100 media items per batch",
         )
 
     if request.level != "L1":
@@ -274,13 +274,13 @@ async def trigger_batch_analysis(
         )
 
     task = batch_analyze_l1_task.delay(
-        video_ids=request.video_ids, batch_size=len(request.video_ids)
+        video_ids=request.media_ids, batch_size=len(request.media_ids)
     )
 
     return {
-        "message": f"Batch {request.level} analysis started for {len(request.video_ids)} videos",
+        "message": f"Batch {request.level} analysis started for {len(request.media_ids)} media items",
         "task_id": task.id,
-        "video_count": len(request.video_ids),
+        "media_count": len(request.media_ids),
     }
 
 
@@ -301,20 +301,20 @@ async def analyze_pending_videos(
     }
 
 
-@router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_video_analysis(
-    video_id: int,
+@router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_media_analysis(
+    media_id: int,
     auth: AuthDep = None,
 ):
     """
-    Delete analysis for a video.
-    Useful for re-analyzing a video.
+    Delete analysis for a media item.
+    Useful for re-analyzing a media item.
     """
     repo = AnalysisRepository()
-    deleted = await repo.delete_analysis(video_id)
+    deleted = await repo.delete_analysis(media_id)
 
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found for this video",
+            detail="Analysis not found for this media",
         )

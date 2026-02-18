@@ -606,7 +606,7 @@ async def unlink_resource_by_platform_id(
         from app.db.supabase_client import get_async_supabase_admin
         client = await get_async_supabase_admin()
         result = await (
-            client.table("videos")
+            client.table("parsed_media")
             .delete()
             .eq("platform_id", platform_id)
             .eq("user_id", auth.user_id)

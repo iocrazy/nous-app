@@ -14,9 +14,9 @@ from app.schemas.tags import (
     TagResponse,
     TagStatisticsResponse,
     TagUpdate,
-    VideoTagCreate,
-    VideoTagResponse,
-    VideoTagsResponse,
+    MediaTagCreate,
+    MediaTagResponse,
+    MediaTagsResponse,
 )
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -194,23 +194,23 @@ async def delete_tag(
         )
 
 
-# Video-Tag association endpoints
+# Media-Tag association endpoints
 
 
-@router.get("/videos/{video_id}/tags", response_model=VideoTagsResponse)
-async def get_video_tags(
-    video_id: str,
+@router.get("/media/{media_id}/tags", response_model=MediaTagsResponse)
+async def get_media_tags(
+    media_id: str,
     auth: AuthDep = None,
 ):
-    """Get all tags associated with a video."""
+    """Get all tags associated with a media item."""
     repo = TagsRepository()
-    tags_data = await repo.get_video_tags(video_id)
+    tags_data = await repo.get_media_tags(media_id)
 
     tags = []
     for item in tags_data:
         if item.get("tags"):
             tags.append(
-                VideoTagResponse(
+                MediaTagResponse(
                     tag=item["tags"],
                     confidence=item.get("confidence"),
                     source=item.get("source", "manual"),
@@ -218,38 +218,38 @@ async def get_video_tags(
                 )
             )
 
-    return VideoTagsResponse(video_id=video_id, tags=tags)
+    return MediaTagsResponse(media_id=media_id, tags=tags)
 
 
-@router.post("/videos/{video_id}/tags", status_code=status.HTTP_201_CREATED)
-async def add_tag_to_video(
-    video_id: str,
-    video_tag: VideoTagCreate,
+@router.post("/media/{media_id}/tags", status_code=status.HTTP_201_CREATED)
+async def add_tag_to_media(
+    media_id: str,
+    media_tag: MediaTagCreate,
     auth: AuthDep = None,
 ):
-    """Add a tag to a video."""
+    """Add a tag to a media item."""
     repo = TagsRepository()
-    result = await repo.add_tag_to_video(
-        video_id=video_id,
-        tag_id=str(video_tag.tag_id),
-        confidence=video_tag.confidence,
-        source=video_tag.source,
+    result = await repo.add_tag_to_media(
+        media_id=media_id,
+        tag_id=str(media_tag.tag_id),
+        confidence=media_tag.confidence,
+        source=media_tag.source,
     )
 
     return {"message": "Tag added successfully", "data": result}
 
 
 @router.delete(
-    "/videos/{video_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/media/{media_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
 )
-async def remove_tag_from_video(
-    video_id: str,
+async def remove_tag_from_media(
+    media_id: str,
     tag_id: str,
     auth: AuthDep = None,
 ):
-    """Remove a tag from a video."""
+    """Remove a tag from a media item."""
     repo = TagsRepository()
-    removed = await repo.remove_tag_from_video(video_id, tag_id)
+    removed = await repo.remove_tag_from_media(media_id, tag_id)
 
     if not removed:
         raise HTTPException(

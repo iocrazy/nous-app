@@ -123,10 +123,10 @@ def retry_failed_downloads():
     logger.info("[Celery Beat] Starting retry of failed downloads...")
 
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
         from app.tasks.download_tasks import download_images_task, download_video_task
 
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Get failed downloads (max 50)
         failed_videos = run_async(
@@ -197,9 +197,9 @@ def update_statistics():
     logger.info("[Celery Beat] Starting statistics update...")
 
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
 
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Get global statistics
         stats = run_async(repo.get_statistics())
@@ -371,9 +371,9 @@ def health_check():
 
     # Check Supabase
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
 
-        repo = VideoRepository()
+        repo = MediaRepository()
         # Simple query to test connection
         run_async(repo.get_statistics())
         checks["supabase"] = "ok"
