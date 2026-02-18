@@ -9,6 +9,7 @@ Reuses upload patterns from projects_service.py.
 """
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import re
@@ -53,6 +54,9 @@ class ResourcesService:
         safe_name = self._sanitize_filename(file.filename)
         content = await file.read()
 
+        # Compute SHA-256 hash for duplicate detection
+        file_hash = hashlib.sha256(content).hexdigest()
+
         # Classify
         mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
         file_type = self._classify_file_type(mime)
@@ -66,6 +70,7 @@ class ResourcesService:
             "mime_type": mime,
             "file_size_bytes": len(content),
             "current_version": 1,
+            "file_hash": file_hash,
         }
         resource = await self.repo.create_resource(resource_data)
         resource_id = str(resource["id"])
@@ -97,6 +102,7 @@ class ResourcesService:
             "file_size_bytes": len(content),
             "mime_type": mime,
             "uploaded_by": user_id,
+            "file_hash": file_hash,
             **metadata,
         }
         await self.repo.create_version(version_data)
@@ -140,6 +146,9 @@ class ResourcesService:
         safe_name = self._sanitize_filename(file.filename)
         content = await file.read()
 
+        # Compute SHA-256 hash for duplicate detection
+        file_hash = hashlib.sha256(content).hexdigest()
+
         # Determine storage base path from existing file_path or resource_items
         existing_path = resource.get("file_path", "")
         if existing_path and "/v" in existing_path:
@@ -181,6 +190,7 @@ class ResourcesService:
             "mime_type": mime,
             "uploaded_by": user_id,
             "notes": notes,
+            "file_hash": file_hash,
             **metadata,
         }
         version = await self.repo.create_version(version_data)
@@ -192,6 +202,7 @@ class ResourcesService:
             "file_size_bytes": len(content),
             "mime_type": mime,
             "filename": safe_name,
+            "file_hash": file_hash,
             **metadata,
         }
         await self.repo.update_resource(resource_id, update_data)

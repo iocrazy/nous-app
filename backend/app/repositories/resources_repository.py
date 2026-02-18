@@ -132,6 +132,57 @@ class ResourcesRepository:
             raise
 
     # ------------------------------------------------------------------ #
+    # Hash-based duplicate lookup
+    # ------------------------------------------------------------------ #
+
+    async def find_by_hash(self, file_hash: str, creator_id: str) -> list[dict]:
+        """Find non-trashed resources with the same file hash for a given creator."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_RESOURCES)
+                .select(
+                    "id, filename, file_type, mime_type, file_size_bytes, "
+                    "thumbnail_path, cover_image_path, created_at"
+                )
+                .eq("file_hash", file_hash)
+                .eq("creator_id", creator_id)
+                .eq("is_trashed", False)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to find resources by hash: {e}")
+            return []
+
+    async def find_resource_item(
+        self,
+        resource_id: str,
+        scope_type: str,
+        scope_id: str,
+        folder_id: str | None = None,
+    ) -> dict | None:
+        """Find a resource_item by resource_id + scope + folder."""
+        try:
+            client = await self._get_client()
+            query = (
+                client.table(self.TABLE_ITEMS)
+                .select("*")
+                .eq("resource_id", resource_id)
+                .eq("scope_type", scope_type)
+                .eq("scope_id", scope_id)
+            )
+            if folder_id:
+                query = query.eq("folder_id", folder_id)
+            else:
+                query = query.is_("folder_id", "null")
+            result = await query.limit(1).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to find resource_item: {e}")
+            return None
+
+    # ------------------------------------------------------------------ #
     # Resource Items (workspace scoping)
     # ------------------------------------------------------------------ #
 

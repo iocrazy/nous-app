@@ -200,6 +200,51 @@ export async function fetchResourceCount(
   return count || 0;
 }
 
+// ─── Duplicate Detection ─────────────────────────────────
+
+export async function checkDuplicate(
+  fileHash: string,
+  fileSize: number,
+): Promise<{ duplicate: boolean; existing: Resource | null }> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({
+    file_hash: fileHash,
+    file_size: String(fileSize),
+  });
+  try {
+    const response = await fetch(`${apiUrl}/api/v1/resources/check-duplicate?${params}`, {
+      headers: await getAuthHeaders(),
+    });
+    if (!response.ok) return { duplicate: false, existing: null };
+    return response.json();
+  } catch {
+    return { duplicate: false, existing: null };
+  }
+}
+
+export async function linkExistingResource(
+  resourceId: string,
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+  folderId?: string | null,
+): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({
+    resource_id: resourceId,
+    scope_type: scopeType,
+    scope_id: scopeId,
+  });
+  if (folderId) params.set('folder_id', folderId);
+
+  const response = await fetch(`${apiUrl}/api/v1/resources/link-existing?${params}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to link resource');
+  const json = await response.json();
+  return json.data;
+}
+
 // ─── Upload ──────────────────────────────────────────────
 
 export async function uploadResource(
