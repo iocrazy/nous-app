@@ -6,6 +6,7 @@ import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
+import { ProjectShareModal } from './ProjectShareModal';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -35,6 +36,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [shareFile, setShareFile] = useState<ProjectFile | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -502,6 +504,17 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           loadContent();
         }}
       />
+
+      {/* Share Modal */}
+      {shareFile && (
+        <ProjectShareModal
+          file={shareFile}
+          projectId={project.id}
+          isOpen={!!shareFile}
+          onClose={() => setShareFile(null)}
+          onCreated={() => {}}
+        />
+      )}
     </div>
   );
 };

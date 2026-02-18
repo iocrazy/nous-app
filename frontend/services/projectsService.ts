@@ -378,3 +378,29 @@ export const removeProjectMember = async (
   });
   if (!response.ok) throw new Error('Failed to remove member');
 };
+
+// ============================================
+// Project shares
+// ============================================
+
+export const createProjectShare = async (
+  projectId: string,
+  data: {
+    file_id: string;
+    share_type?: string;
+    share_name?: string;
+    password?: string;
+    allow_download?: boolean;
+    expires_hours?: number;
+  },
+): Promise<any> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/shares`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error('Failed to create share');
+  const json = await response.json();
+  return json.data;
+};

@@ -801,6 +801,25 @@
       "message": "Deleting \"{{name}}\" will permanently remove all files and comments. This cannot be undone.",
       "confirm": "Delete",
       "cancel": "Cancel"
+    },
+    "share": {
+      "title": "Share File",
+      "type": "Share Type",
+      "typeLink": "Link",
+      "typeReview": "Review",
+      "password": "Password Protection",
+      "passwordPlaceholder": "Set a password",
+      "allowDownload": "Allow Download",
+      "expiration": "Expiration",
+      "noExpiry": "Never",
+      "expiry24h": "24 hours",
+      "expiry3d": "3 days",
+      "expiry7d": "7 days",
+      "expiry30d": "30 days",
+      "creating": "Creating...",
+      "create": "Create Share Link",
+      "created": "Share link created!",
+      "passwordHint": "Password: {{password}}"
     }
   }
 }
