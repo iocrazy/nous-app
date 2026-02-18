@@ -714,5 +714,57 @@
       "presentation": "演示",
       "delivery": "交付"
     }
+  },
+  "projects": {
+    "sidebar": {
+      "projectList": "项目列表",
+      "starredProjects": "星标项目",
+      "noStarred": "暂无星标项目",
+      "projectGroups": "项目分组",
+      "internalProjects": "团队内项目",
+      "externalProjects": "团队外项目"
+    },
+    "tab": {
+      "all": "全部项目",
+      "internal": "内部项目",
+      "external": "外部项目"
+    },
+    "tabs": {
+      "files": "文件",
+      "shares": "分享",
+      "trash": "回收站"
+    },
+    "totalProjects": "共 {{count}} 个项目",
+    "searchProjects": "搜索项目",
+    "noSearchResults": "没有匹配的项目",
+    "sortUpdatedAt": "活跃时间",
+    "sortCreatedAt": "创建时间",
+    "sortName": "名称",
+    "confirmDelete": "删除「{{name}}」？此操作不可撤销。",
+    "contextMenu": {
+      "settings": "项目设置",
+      "members": "项目成员",
+      "colorLabel": "标记颜色",
+      "star": "星标",
+      "unstar": "取消星标",
+      "delete": "删除项目"
+    },
+    "create": {
+      "title": "创建项目",
+      "name": "项目名称",
+      "namePlaceholder": "请输入项目名称",
+      "announcement": "项目公告",
+      "announcementPlaceholder": "项目公告可以帮助新加入项目的成员快速了解项目",
+      "descriptionPlaceholder": "可选描述",
+      "group": "添加至项目分组",
+      "noGroup": "暂无分组",
+      "submit": "创建并添加成员"
+    },
+    "deleteConfirm": {
+      "title": "确认删除项目",
+      "message": "删除项目「{{name}}」后，所有文件和评论将永久删除，此操作不可撤销。",
+      "confirm": "确认删除",
+      "cancel": "取消"
+    }
   }
 }
