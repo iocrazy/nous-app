@@ -267,6 +267,61 @@ async def update_file(
         raise HTTPException(status_code=500, detail="Failed to update file")
 
 
+@router.put("/{project_id}/files/{file_id}/restore")
+async def restore_file(project_id: str, file_id: str, auth: AuthDep):
+    """Restore a trashed file."""
+    try:
+        repo = ProjectsRepository()
+        file_record = await repo.get_file_by_id(file_id)
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        if file_record.get("project_id") != project_id:
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
+        result = await repo.update_file(
+            file_id, {"is_trashed": False, "trashed_at": None}
+        )
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restore file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restore file")
+
+
+@router.get("/{project_id}/shares")
+async def list_project_shares(project_id: str, auth: AuthDep):
+    """List all shares for files in this project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        # Get all file IDs in this project
+        files_result = (
+            await sb.table("project_files")
+            .select("id")
+            .eq("project_id", project_id)
+            .execute()
+        )
+        file_ids = [f["id"] for f in (files_result.data or [])]
+        if not file_ids:
+            return {"success": True, "data": []}
+
+        # Get shares for those files
+        result = (
+            await sb.table("shares")
+            .select("*")
+            .in_("project_file_id", file_ids)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return {"success": True, "data": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to list shares for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list project shares")
+
+
 @router.delete("/{project_id}/files/{file_id}")
 async def delete_file(project_id: str, file_id: str, auth: AuthDep):
     """Permanently delete a file record."""
