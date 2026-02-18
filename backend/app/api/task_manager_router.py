@@ -59,7 +59,7 @@ async def cancel_task(task_id: str, auth: AuthDep):
     """Cancel a pending/processing task and revoke its Celery job."""
     tracker = get_task_tracker()
     try:
-        await tracker.cancel(task_id)
+        await tracker.cancel(task_id, auth.user_id)
         return {"success": True}
     except Exception as e:
         logger.error(f"Failed to cancel task {task_id}: {e}")

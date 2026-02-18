@@ -443,11 +443,9 @@ class DownloadProgressTrackerWithTaskManager:
         # Update unified TaskTracker
         if self.unified_tracker and self.unified_task_id:
             try:
-                speed_bps = downloaded  # rough estimate
                 run_async(self.unified_tracker.update_progress(
                     self.unified_task_id,
                     percent,
-                    speed=speed_bps if total > 0 else None,
                 ))
             except Exception:
                 pass
