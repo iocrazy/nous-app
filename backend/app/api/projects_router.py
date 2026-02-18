@@ -17,12 +17,14 @@ from pydantic import BaseModel
 from app.core.deps import AuthDep
 from app.repositories.projects_repository import ProjectsRepository
 from app.schemas.projects import (
+    AddMemberRequest,
     CreateCommentRequest,
     LinkMediaRequest,
     ProjectCreate,
     ProjectFileUpdate,
     ProjectUpdate,
     ReviewStatusUpdate,
+    UpdateMemberRoleRequest,
 )
 from app.services.projects_service import ProjectsService
 
@@ -791,3 +793,122 @@ async def delete_task(project_id: str, task_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to delete task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete task")
+
+
+# ============================================
+# Project Members
+# ============================================
+
+
+@router.get("/{project_id}/members")
+async def list_members(project_id: str, auth: AuthDep):
+    """List all members of a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        result = (
+            await sb.table("project_members")
+            .select("*")
+            .eq("project_id", project_id)
+            .order("created_at")
+            .execute()
+        )
+
+        # Enrich with user email from auth.users
+        members = result.data or []
+        if members:
+            user_ids = [m["user_id"] for m in members]
+            users_result = await sb.auth.admin.list_users()
+            user_map = {
+                str(u.id): u.email for u in users_result if str(u.id) in user_ids
+            }
+            for m in members:
+                m["email"] = user_map.get(m["user_id"], "")
+
+        return {"success": True, "data": members}
+    except Exception as e:
+        logger.error(f"Failed to list members for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list members")
+
+
+@router.post("/{project_id}/members")
+async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
+    """Add a member to a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+
+        member_data = {
+            "project_id": project_id,
+            "user_id": data.user_id,
+            "role": data.role,
+            "invited_by": auth.user_id,
+        }
+        result = await sb.table("project_members").insert(member_data).execute()
+        member = result.data[0] if result.data else None
+        if not member:
+            raise HTTPException(status_code=500, detail="Failed to add member")
+
+        # Get email
+        try:
+            user = await sb.auth.admin.get_user_by_id(data.user_id)
+            member["email"] = user.user.email if user.user else ""
+        except Exception:
+            member["email"] = ""
+
+        return {"success": True, "data": member}
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "duplicate key" in error_msg or "unique" in error_msg.lower():
+            raise HTTPException(
+                status_code=409, detail="User is already a member of this project"
+            )
+        logger.error(f"Failed to add member to project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to add member")
+
+
+@router.put("/{project_id}/members/{member_id}")
+async def update_member_role(
+    project_id: str, member_id: str, data: UpdateMemberRoleRequest, auth: AuthDep
+):
+    """Update a member's role."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        result = (
+            await sb.table("project_members")
+            .update({"role": data.role})
+            .eq("id", member_id)
+            .eq("project_id", project_id)
+            .execute()
+        )
+        member = result.data[0] if result.data else None
+        if not member:
+            raise HTTPException(status_code=404, detail="Member not found")
+        return {"success": True, "data": member}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update member {member_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update member role")
+
+
+@router.delete("/{project_id}/members/{member_id}")
+async def remove_member(project_id: str, member_id: str, auth: AuthDep):
+    """Remove a member from a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        await sb.table("project_members").delete().eq("id", member_id).eq(
+            "project_id", project_id
+        ).execute()
+        return {"success": True, "message": "Member removed"}
+    except Exception as e:
+        logger.error(f"Failed to remove member {member_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove member")

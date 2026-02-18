@@ -760,6 +760,19 @@
       "noGroup": "暂无分组",
       "submit": "创建并添加成员"
     },
+    "members": {
+      "title": "项目成员",
+      "owner": "所有者",
+      "ownerRole": "项目拥有者",
+      "invite": "邀请成员",
+      "userIdPlaceholder": "用户 ID",
+      "addMember": "添加成员",
+      "memberList": "成员列表",
+      "noMembers": "暂无成员",
+      "roleAdmin": "管理员",
+      "roleEditor": "编辑者",
+      "roleViewer": "查看者"
+    },
     "settings": {
       "title": "项目设置",
       "name": "项目名称",

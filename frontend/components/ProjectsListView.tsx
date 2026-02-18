@@ -9,6 +9,7 @@ import { updateProject, deleteProject } from '../services/projectsService';
 import { ProjectCard } from './ProjectCard';
 import { ProjectContextMenu } from './ProjectContextMenu';
 import { ProjectSettingsPanel } from './ProjectSettingsPanel';
+import { ProjectMembersPanel } from './ProjectMembersPanel';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -31,6 +32,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [contextMenu, setContextMenu] = useState<{ project: Project; x: number; y: number } | null>(null);
   const [settingsProject, setSettingsProject] = useState<Project | null>(null);
+  const [membersProject, setMembersProject] = useState<Project | null>(null);
 
   const handleToggleStar = async (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
@@ -312,7 +314,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
           onSettings={() => setSettingsProject(contextMenu.project)}
-          onMembers={() => {}}
+          onMembers={() => setMembersProject(contextMenu.project)}
           onToggleStar={() => handleToggleStarById(contextMenu.project)}
           onDelete={() => handleDeleteProject(contextMenu.project)}
         />
@@ -331,6 +333,14 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             setSettingsProject(null);
             onProjectsChange?.();
           }}
+        />
+      )}
+      {/* Members Panel */}
+      {membersProject && (
+        <ProjectMembersPanel
+          project={membersProject}
+          isOpen={!!membersProject}
+          onClose={() => setMembersProject(null)}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { Project, ProjectFile, ProjectFolder, FileVersion, ReviewComment, ReviewStatus } from '../types';
+import { Project, ProjectFile, ProjectFolder, ProjectMember, FileVersion, ReviewComment, ReviewStatus } from '../types';
 import { getAuthHeaders } from './parserService';
 
 const getApiUrl = (): string => {
@@ -316,4 +316,65 @@ export const moveFileToFolder = async (
   if (!response.ok) throw new Error('Failed to move file');
   const json = await response.json();
   return json.data;
+};
+
+// ============================================
+// Project members
+// ============================================
+
+export const fetchProjectMembers = async (projectId: string): Promise<ProjectMember[]> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch members');
+  const json = await response.json();
+  return json.data || [];
+};
+
+export const addProjectMember = async (
+  projectId: string,
+  userId: string,
+  role: string = 'viewer',
+): Promise<ProjectMember> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to add member');
+  }
+  const json = await response.json();
+  return json.data;
+};
+
+export const updateMemberRole = async (
+  projectId: string,
+  memberId: string,
+  role: string,
+): Promise<ProjectMember> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members/${memberId}`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ role }),
+  });
+  if (!response.ok) throw new Error('Failed to update member role');
+  const json = await response.json();
+  return json.data;
+};
+
+export const removeProjectMember = async (
+  projectId: string,
+  memberId: string,
+): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members/${memberId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to remove member');
 };
