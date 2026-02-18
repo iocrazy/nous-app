@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  LayoutGrid, Plus, Star, Settings, ChevronDown, ChevronRight,
+  LayoutGrid, Plus, Star, FolderOpen, ChevronDown, ChevronRight,
   Globe, Users, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { Project } from '../types';
@@ -76,6 +76,18 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
   const internalProjects = projects.filter(p => p.project_type !== 'external');
   const externalProjects = projects.filter(p => p.project_type === 'external');
 
+  const groupedProjects = useMemo(() => {
+    const groups: Record<string, Project[]> = {};
+    for (const p of projects) {
+      const group = p.project_group?.trim();
+      if (group) {
+        if (!groups[group]) groups[group] = [];
+        groups[group].push(p);
+      }
+    }
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [projects]);
+
   if (collapsed) {
     return (
       <div className="w-10 border-r border-zinc-800 flex flex-col items-center py-3 shrink-0">
@@ -129,11 +141,27 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
           )}
         </CollapsibleSection>
 
-        {/* Groups placeholder */}
-        <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-500">
-          <Settings size={12} />
-          <span>{t('projects.sidebar.projectGroups', 'Groups')}</span>
-        </div>
+        {/* Groups */}
+        {groupedProjects.length > 0 && (
+          <>
+            {groupedProjects.map(([groupName, groupProjects]) => (
+              <CollapsibleSection
+                key={groupName}
+                title={groupName}
+                icon={<FolderOpen size={12} />}
+                count={groupProjects.length}
+              >
+                {groupProjects.map(p => (
+                  <SidebarProjectItem
+                    key={p.id} project={p}
+                    active={p.id === selectedProjectId}
+                    onClick={() => onProjectSelect(p)}
+                  />
+                ))}
+              </CollapsibleSection>
+            ))}
+          </>
+        )}
 
         <div className="border-t border-zinc-800/50 my-2" />
 
