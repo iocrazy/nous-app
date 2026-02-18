@@ -4,8 +4,8 @@
 AI Provider adapter system.
 
 Provides a unified interface for multiple AI providers (OpenAI, DeepSeek, Doubao,
-Ollama, LM Studio) using the factory pattern. All OpenAI-compatible providers
-share a common base class.
+MiniMax, Kimi, Qwen, Ollama, LM Studio) using the factory pattern. All
+OpenAI-compatible providers share a common base class.
 """
 
 from abc import ABC, abstractmethod
@@ -199,6 +199,48 @@ class LMStudioProvider(OpenAICompatibleProvider):
         )
 
 
+class MiniMaxProvider(OpenAICompatibleProvider):
+    """MiniMax - M2.5 series models."""
+
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "MiniMax-M2.5", **kwargs
+    ):
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url or "https://api.minimax.chat/v1",
+            model=model,
+            **kwargs,
+        )
+
+
+class KimiProvider(OpenAICompatibleProvider):
+    """Kimi (Moonshot AI) - K2 series models."""
+
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "kimi-k2.5", **kwargs
+    ):
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url or "https://api.moonshot.cn/v1",
+            model=model,
+            **kwargs,
+        )
+
+
+class QwenProvider(OpenAICompatibleProvider):
+    """Qwen (Alibaba Cloud) - Qwen3 series models."""
+
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "qwen3.5-plus", **kwargs
+    ):
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model=model,
+            **kwargs,
+        )
+
+
 class AIProviderFactory:
     """Factory for creating AI provider instances."""
 
@@ -206,6 +248,9 @@ class AIProviderFactory:
         "openai": OpenAIProvider,
         "deepseek": DeepSeekProvider,
         "doubao": DoubaoProvider,
+        "minimax": MiniMaxProvider,
+        "kimi": KimiProvider,
+        "qwen": QwenProvider,
         "ollama": OllamaProvider,
         "lmstudio": LMStudioProvider,
     }
@@ -215,7 +260,7 @@ class AIProviderFactory:
         """Get provider instance by key with config.
 
         Args:
-            provider_key: One of 'openai', 'deepseek', 'doubao', 'ollama', 'lmstudio'.
+            provider_key: One of 'openai', 'deepseek', 'doubao', 'minimax', 'kimi', 'qwen', 'ollama', 'lmstudio'.
             config: Dict with optional keys: api_key, base_url, model.
 
         Returns:
