@@ -16,6 +16,16 @@ const typeColors: Record<string, { border: string; badge: string; text: string }
   personal: { border: 'border-l-purple-500', badge: 'bg-purple-500/20 text-purple-400', text: 'Personal' },
 };
 
+const colorLabelBorders: Record<string, string> = {
+  red: 'border-l-red-500',
+  orange: 'border-l-orange-500',
+  yellow: 'border-l-yellow-500',
+  green: 'border-l-green-500',
+  blue: 'border-l-blue-500',
+  purple: 'border-l-purple-500',
+  pink: 'border-l-pink-500',
+};
+
 const formatRelativeTime = (dateStr: string): string => {
   const date = new Date(dateStr);
   const now = new Date();
@@ -34,11 +44,14 @@ const formatRelativeTime = (dateStr: string): string => {
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onToggleStar, onContextMenu }) => {
   const { t } = useTranslation();
   const colors = typeColors[project.project_type] || typeColors.personal;
+  const borderColor = (project as any).color_label
+    ? colorLabelBorders[(project as any).color_label] || colors.border
+    : colors.border;
 
   return (
     <div
       onClick={onClick}
-      className={`bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl p-5 cursor-pointer transition-all duration-200 group border-l-4 ${colors.border}`}
+      className={`bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl p-5 cursor-pointer transition-all duration-200 group border-l-4 ${borderColor}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
