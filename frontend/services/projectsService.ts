@@ -1,4 +1,4 @@
-import { Project, ProjectFile, ProjectFolder, ProjectMember, FileVersion, ReviewComment, ReviewStatus } from '../types';
+import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileVersion, ReviewComment, ReviewStatus } from '../types';
 import { getAuthHeaders } from './parserService';
 
 const getApiUrl = (): string => {
@@ -382,6 +382,16 @@ export const removeProjectMember = async (
 // ============================================
 // Project shares
 // ============================================
+
+export const fetchProjectShares = async (projectId: string): Promise<ProjectShare[]> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/shares`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch shares');
+  const json = await response.json();
+  return json.data || [];
+};
 
 export const createProjectShare = async (
   projectId: string,
