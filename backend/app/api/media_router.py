@@ -1221,7 +1221,7 @@ async def _handle_ytdlp_fetch(
                         if result.get("file_path"):
                             file_name = os.path.basename(result["file_path"])
                             relative_path = f"{relative_prefix}/{file_name}"
-                            await repo.mark_video_as_downloaded(
+                            await repo.mark_media_as_downloaded(
                                 platform_id=platform_id,
                                 download_path=relative_path,
                                 duration=0,
