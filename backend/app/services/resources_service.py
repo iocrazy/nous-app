@@ -84,9 +84,9 @@ class ResourcesService:
 
         relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
-        # Extract video metadata
+        # Extract media metadata (video & audio: duration, resolution, etc.)
         metadata = {}
-        if file_type == "video":
+        if file_type in ("video", "audio"):
             metadata = await self._extract_video_metadata(str(target))
 
         # Update resource with file path and metadata
@@ -177,7 +177,7 @@ class ResourcesService:
         mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
         file_type = self._classify_file_type(mime)
         metadata = {}
-        if file_type == "video":
+        if file_type in ("video", "audio"):
             metadata = await self._extract_video_metadata(str(target))
 
         relative_path = f"{base_relative}/v{next_version}/{safe_name}"
