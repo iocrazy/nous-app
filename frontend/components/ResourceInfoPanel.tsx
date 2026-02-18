@@ -172,10 +172,9 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
   const isVideo = resource.mime_type?.startsWith('video/');
 
-  // Thumbnail source: thumbnail_path (Supabase URL) > cover endpoint > fallback icon
+  // Thumbnail source: always use cover API endpoint (thumbnail_path is a server-local path)
   const thumbnailSrc = React.useMemo(() => {
-    if (resource.thumbnail_path) return resource.thumbnail_path;
-    if (resource.cover_image_path && resource.id) {
+    if ((resource.thumbnail_path || resource.cover_image_path) && resource.id) {
       return getResourceCoverUrl(String(resource.id));
     }
     return null;
