@@ -685,10 +685,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const handleTrash = useCallback(async (resourceId: string) => {
     try {
-      const item = resources.find((r) => r.resource?.id === resourceId);
-      await trashResource(resourceId, scopeType, scopeId);
-      setResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
-      if (selectedResource?.resource?.id === resourceId) setSelectedResource(null);
+      const rid = String(resourceId);
+      const item = resources.find((r) => String(r.resource?.id) === rid);
+      await trashResource(rid, scopeType, scopeId);
+      // Optimistic removal
+      setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
+      if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
     } catch { /* ignore */ }
@@ -696,8 +698,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const handleRestore = useCallback(async (resourceId: string) => {
     try {
-      await restoreResource(resourceId);
-      setTrashedResources((prev) => prev.filter((r) => r.resource?.id !== resourceId));
+      const rid = String(resourceId);
+      await restoreResource(rid);
+      setTrashedResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
     } catch { /* ignore */ }
   }, []);
 

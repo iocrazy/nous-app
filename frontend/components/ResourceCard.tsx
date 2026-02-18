@@ -162,6 +162,40 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     setScrubPercent(x / rect.width);
   }, [isHovering, spriteLoaded]);
 
+  // Compute sprite frame style with object-contain behavior.
+  // Uses a frame-sized inner div (clipped by overflow) centered in the container.
+  const spriteFrame = React.useMemo(() => {
+    if (!spriteLoaded || !spriteImgRef.current || !thumbRef.current) return null;
+
+    const FRAME_COUNT = 10;
+    const img = spriteImgRef.current;
+    const frameW = img.naturalWidth / FRAME_COUNT;
+    const frameH = img.naturalHeight;
+    const cW = thumbRef.current.offsetWidth;
+    const cH = thumbRef.current.offsetHeight;
+    if (!frameW || !frameH || !cW || !cH) return null;
+
+    // Contain: scale frame to fit within the container
+    const scale = Math.min(cW / frameW, cH / frameH);
+    const rfw = frameW * scale;
+    const rfh = frameH * scale;
+
+    const frameIndex = Math.min(Math.floor(scrubPercent * FRAME_COUNT), FRAME_COUNT - 1);
+
+    return {
+      width: rfw,
+      height: rfh,
+      style: {
+        width: `${rfw}px`,
+        height: `${rfh}px`,
+        backgroundImage: `url(${spriteUrl})`,
+        backgroundSize: `${rfw * FRAME_COUNT}px ${rfh}px`,
+        backgroundPosition: `${-frameIndex * rfw}px 0px`,
+        backgroundRepeat: 'no-repeat',
+      } as React.CSSProperties,
+    };
+  }, [spriteLoaded, scrubPercent, spriteUrl]);
+
 
   // ─── Drag support ────────────────────────────────────
   const handleDragStart = useCallback((e: React.DragEvent) => {
@@ -343,16 +377,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         ) : (
           <IconComponent size={36} className={`${color} opacity-50 group-hover:opacity-80 transition-opacity`} />
         )}
-        {/* Sprite scrub overlay */}
-        {isHovering && spriteLoaded && spriteImgRef.current && (
-          <div
-            className="absolute inset-0 bg-no-repeat bg-black"
-            style={{
-              backgroundImage: `url(${spriteUrl})`,
-              backgroundSize: `${10 * 100}% 100%`,
-              backgroundPosition: `${Math.min(Math.floor(scrubPercent * 10), 9) * (100 / 9)}% 0`,
-            }}
-          />
+        {/* Sprite scrub overlay — contain-style: portrait frames get side bars */}
+        {isHovering && spriteLoaded && spriteFrame && (
+          <div className="absolute inset-0 bg-black flex items-center justify-center">
+            <div style={spriteFrame.style} />
+          </div>
         )}
         {/* Scrub progress bar */}
         {isHovering && spriteLoaded && (
