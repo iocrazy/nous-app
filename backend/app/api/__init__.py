@@ -31,14 +31,14 @@ from app.api.task_manager_router import router as task_manager_router
 from app.api.task_router import router as task_router
 from app.api.tasks_router import router as tasks_management_router
 from app.api.user_settings_router import router as settings_router
-from app.api.videos_router import legacy_router as legacy_douyin_router
-from app.api.videos_router import router as videos_router
+from app.api.media_router import legacy_router as legacy_douyin_router
+from app.api.media_router import router as media_router
 
 api_router = APIRouter()
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
 
-api_router.include_router(router=videos_router, tags=["Videos"])
+api_router.include_router(router=media_router, tags=["Media"])
 
 api_router.include_router(router=legacy_douyin_router, tags=["Legacy"])
 
