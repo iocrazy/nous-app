@@ -123,7 +123,7 @@ type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smalles
 // ─── Skeleton ─────────────────────────────────────────
 
 const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
         <div className="h-32 bg-zinc-800" />
@@ -2326,7 +2326,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
                         {filteredFolders.map((folder) => (
                           <FolderCard
                             key={`folder-${folder.id}`}
@@ -2419,7 +2419,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       </div>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
                         {sortedItems.map((item) => (
                           <ResourceCard
                             key={item.id}
