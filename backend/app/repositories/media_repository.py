@@ -1,9 +1,9 @@
-# app/repositories/video_repository.py
+# app/repositories/media_repository.py
 
 """
-Video Repository
+Media Repository
 
-Video data access layer based on Supabase, providing CRUD operations and query functions.
+Parsed media data access layer based on Supabase, providing CRUD operations and query functions.
 Uses async Supabase client.
 """
 
@@ -16,10 +16,10 @@ from app.core.enums import DownloadStatus
 from app.db.supabase_client import get_async_supabase_admin
 
 
-class VideoRepository:
-    """Video Repository (async)"""
+class MediaRepository:
+    """Media Repository (async)"""
 
-    TABLE_NAME = "videos"
+    TABLE_NAME = "parsed_media"
 
     def __init__(self):
         self._client = None  # 延迟初始化
@@ -91,7 +91,7 @@ class VideoRepository:
             client = await self._get_client()
             # Use videos_with_tags view which includes tags array
             query = (
-                client.table("videos_with_tags")
+                client.table("parsed_media_with_tags")
                 .select("*")
                 .eq("platform_id", platform_id)
             )
@@ -343,7 +343,7 @@ class VideoRepository:
         try:
             client = await self._get_client()
             # Use videos_with_tags view which includes tags array
-            query = client.table("videos_with_tags").select("*")
+            query = client.table("parsed_media_with_tags").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             query = query.order(order_by, desc=not ascending)
