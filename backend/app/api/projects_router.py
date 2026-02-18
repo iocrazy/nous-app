@@ -141,8 +141,9 @@ async def list_files(
     project_id: str,
     auth: AuthDep,
     include_trashed: bool = Query(False, description="Include trashed files"),
+    folder_id: Optional[str] = Query(None, description="Filter by folder ID"),
 ):
-    """List files in a project."""
+    """List files in a project, optionally filtered by folder."""
     try:
         repo = ProjectsRepository()
         project = await repo.get_project_by_id(project_id)
@@ -151,6 +152,12 @@ async def list_files(
         files = await repo.get_project_files(
             project_id, include_trashed=include_trashed
         )
+        # Apply folder filtering only when not fetching trashed files
+        if not include_trashed:
+            if folder_id is not None:
+                files = [f for f in files if f.get("folder_id") == folder_id]
+            else:
+                files = [f for f in files if not f.get("folder_id")]
         return {"success": True, "data": files}
     except HTTPException:
         raise
@@ -320,6 +327,163 @@ async def list_project_shares(project_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to list shares for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list project shares")
+
+
+# ============================================
+# Folder endpoints
+# ============================================
+
+
+class CreateFolderRequest(BaseModel):
+    name: str = "New Folder"
+    parent_id: Optional[str] = None
+
+
+class RenameFolderRequest(BaseModel):
+    name: str
+
+
+class MoveFileRequest(BaseModel):
+    folder_id: Optional[str] = None
+
+
+@router.get("/{project_id}/folders")
+async def list_folders(
+    project_id: str,
+    auth: AuthDep,
+    parent_id: Optional[str] = Query(None, description="Parent folder ID, null for root"),
+):
+    """List folders in a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        query = sb.table("project_folders").select("*").eq("project_id", project_id)
+        if parent_id:
+            query = query.eq("parent_id", parent_id)
+        else:
+            query = query.is_("parent_id", "null")
+        result = await query.order("name").execute()
+        return {"success": True, "data": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to list folders for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list folders")
+
+
+@router.post("/{project_id}/folders")
+async def create_folder(project_id: str, data: CreateFolderRequest, auth: AuthDep):
+    """Create a new folder in a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        insert_data: Dict[str, Any] = {
+            "project_id": project_id,
+            "name": data.name,
+            "created_by": auth.user_id,
+        }
+        if data.parent_id:
+            insert_data["parent_id"] = data.parent_id
+        result = await sb.table("project_folders").insert(insert_data).execute()
+        folder = result.data[0] if result.data else None
+        return {"success": True, "data": folder}
+    except Exception as e:
+        logger.error(f"Failed to create folder in project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create folder")
+
+
+@router.put("/{project_id}/folders/{folder_id}")
+async def rename_folder(
+    project_id: str, folder_id: str, data: RenameFolderRequest, auth: AuthDep
+):
+    """Rename a folder."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        result = (
+            await sb.table("project_folders")
+            .update({"name": data.name})
+            .eq("id", folder_id)
+            .eq("project_id", project_id)
+            .execute()
+        )
+        folder = result.data[0] if result.data else None
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        return {"success": True, "data": folder}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to rename folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to rename folder")
+
+
+@router.delete("/{project_id}/folders/{folder_id}")
+async def delete_folder(project_id: str, folder_id: str, auth: AuthDep):
+    """Delete a folder (files inside are moved to parent)."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        # Get folder to find parent_id
+        folder_result = (
+            await sb.table("project_folders")
+            .select("parent_id")
+            .eq("id", folder_id)
+            .eq("project_id", project_id)
+            .single()
+            .execute()
+        )
+        if not folder_result.data:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        parent_id = folder_result.data.get("parent_id")
+
+        # Move files to parent folder
+        await (
+            sb.table("project_files")
+            .update({"folder_id": parent_id})
+            .eq("folder_id", folder_id)
+            .execute()
+        )
+        # Move sub-folders to parent
+        await (
+            sb.table("project_folders")
+            .update({"parent_id": parent_id})
+            .eq("parent_id", folder_id)
+            .execute()
+        )
+        # Delete the folder
+        await sb.table("project_folders").delete().eq("id", folder_id).execute()
+        return {"success": True, "message": "Folder deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete folder")
+
+
+@router.put("/{project_id}/files/{file_id}/move")
+async def move_file(
+    project_id: str, file_id: str, data: MoveFileRequest, auth: AuthDep
+):
+    """Move a file to a different folder."""
+    try:
+        repo = ProjectsRepository()
+        file_record = await repo.get_file_by_id(file_id)
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        if file_record.get("project_id") != project_id:
+            raise HTTPException(
+                status_code=404, detail="File not found in this project"
+            )
+        result = await repo.update_file(file_id, {"folder_id": data.folder_id})
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to move file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to move file")
 
 
 @router.delete("/{project_id}/files/{file_id}")

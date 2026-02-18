@@ -1,4 +1,4 @@
-import { Project, ProjectFile, FileVersion, ReviewComment, ReviewStatus } from '../types';
+import { Project, ProjectFile, ProjectFolder, FileVersion, ReviewComment, ReviewStatus } from '../types';
 import { getAuthHeaders } from './parserService';
 
 const getApiUrl = (): string => {
@@ -60,10 +60,17 @@ export const deleteProject = async (id: string): Promise<void> => {
   if (!response.ok) throw new Error('Failed to delete project');
 };
 
-export const fetchProjectFiles = async (projectId: string, includeTrashed?: boolean): Promise<ProjectFile[]> => {
+export const fetchProjectFiles = async (
+  projectId: string,
+  includeTrashed?: boolean,
+  folderId?: string | null,
+): Promise<ProjectFile[]> => {
   const apiUrl = getApiUrl();
-  const qs = includeTrashed ? '?include_trashed=true' : '';
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files${qs}`, {
+  const params = new URLSearchParams();
+  if (includeTrashed) params.set('include_trashed', 'true');
+  if (folderId) params.set('folder_id', folderId);
+  const qs = params.toString();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files${qs ? '?' + qs : ''}`, {
     headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch files');
@@ -225,6 +232,88 @@ export const updateReviewStatus = async (projectId: string, fileId: string, stat
     body: JSON.stringify({ review_status: status }),
   });
   if (!response.ok) throw new Error('Failed to update review status');
+  const json = await response.json();
+  return json.data;
+};
+
+// ============================================
+// Project folders
+// ============================================
+
+export const fetchProjectFolders = async (
+  projectId: string,
+  parentId?: string | null,
+): Promise<ProjectFolder[]> => {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams();
+  if (parentId) params.set('parent_id', parentId);
+  const qs = params.toString();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders${qs ? '?' + qs : ''}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch folders');
+  const json = await response.json();
+  return json.data || [];
+};
+
+export const createProjectFolder = async (
+  projectId: string,
+  name: string,
+  parentId?: string | null,
+): Promise<ProjectFolder> => {
+  const apiUrl = getApiUrl();
+  const body: Record<string, string> = { name };
+  if (parentId) body.parent_id = parentId;
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error('Failed to create folder');
+  const json = await response.json();
+  return json.data;
+};
+
+export const renameProjectFolder = async (
+  projectId: string,
+  folderId: string,
+  name: string,
+): Promise<ProjectFolder> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders/${folderId}`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error('Failed to rename folder');
+  const json = await response.json();
+  return json.data;
+};
+
+export const deleteProjectFolder = async (
+  projectId: string,
+  folderId: string,
+): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders/${folderId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to delete folder');
+};
+
+export const moveFileToFolder = async (
+  projectId: string,
+  fileId: string,
+  folderId: string | null,
+): Promise<ProjectFile> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/move`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ folder_id: folderId }),
+  });
+  if (!response.ok) throw new Error('Failed to move file');
   const json = await response.json();
   return json.data;
 };
