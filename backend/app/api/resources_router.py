@@ -461,6 +461,8 @@ async def serve_resource_cover(resource_id: str):
 
         from app.core.config import settings
 
+        import mimetypes
+
         # Try thumbnail first, then cover image
         for field in ("thumbnail_path", "cover_image_path"):
             rel_path = resource.get(field)
@@ -471,12 +473,23 @@ async def serve_resource_cover(resource_id: str):
                 continue
             full_path = Path(settings.DOWNLOAD_PATH) / rel_path
             if full_path.exists():
-                import mimetypes
                 mime, _ = mimetypes.guess_type(str(full_path))
                 return FileResponse(
                     path=str(full_path),
                     media_type=mime or "image/jpeg",
                 )
+
+        # Fallback for image files: serve the original file as cover
+        if resource.get("mime_type", "").startswith("image/"):
+            file_path = resource.get("file_path")
+            if file_path and not file_path.startswith("http"):
+                full_path = Path(settings.DOWNLOAD_PATH) / file_path
+                if full_path.exists():
+                    mime, _ = mimetypes.guess_type(str(full_path))
+                    return FileResponse(
+                        path=str(full_path),
+                        media_type=mime or "image/jpeg",
+                    )
 
         raise HTTPException(status_code=404, detail="No cover image available")
     except HTTPException:
