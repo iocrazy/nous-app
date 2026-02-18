@@ -157,7 +157,7 @@ def download_media_task(
             user_id=user_id,
             task_type="download",
             title=video_title or platform_id,
-            video_id=platform_id,
+            media_id=platform_id,
             celery_task_id=task_id,
         ))
         run_async(tracker_unified.start(unified_task_id))
@@ -525,7 +525,7 @@ def download_ytdlp_task(
             user_id=user_id,
             task_type="download",
             title=video_title or platform_id,
-            video_id=platform_id,
+            media_id=platform_id,
             celery_task_id=task_id,
         ))
         run_async(tracker_unified.start(unified_task_id))
