@@ -67,6 +67,8 @@ import {
   renameResource,
   getFolderPreview,
   uploadNewVersion,
+  checkDuplicate,
+  linkExistingResource,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -83,6 +85,9 @@ import { SidebarFolderTree } from './SidebarFolderTree';
 import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
+import { computeFileHash } from '../utils/fileHash';
+import { DuplicateFileAlert } from './DuplicateFileAlert';
+import { Resource } from '../types';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -241,6 +246,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Aliases for readability
   const uploading = upload.isUploading;
+
+  // Duplicate detection
+  const [duplicateAlert, setDuplicateAlert] = useState<{
+    file: File;
+    existing: Resource;
+    remainingDuplicates: number;
+    resolve: (decision: { action: 'use-existing' | 'keep-both' | 'cancel'; applyToAll: boolean }) => void;
+  } | null>(null);
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{
@@ -597,10 +610,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     upload.setUploadStartTime(batchStartTime);
 
     let completedCount = 0;
+    let linkedCount = 0;
     // Map valid files to their progress entry IDs
     const validFileEntryIds = initialProgress
       .filter((p) => p.status === 'uploading')
       .map((p) => p.id);
+
+    // Track "Apply to all" preference across the batch
+    let batchDupAction: 'use-existing' | 'keep-both' | null = null;
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
@@ -608,6 +625,66 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       const fileStartTime = Date.now();
 
       try {
+        // ── Duplicate detection ──
+        upload.setItems((prev) =>
+          prev.map((p) => p.id === entryId ? { ...p, percent: 0 } : p)
+        );
+
+        const fileHash = await computeFileHash(file);
+        const dupResult = await checkDuplicate(fileHash, file.size);
+
+        if (dupResult.duplicate && dupResult.existing) {
+          let action = batchDupAction;
+
+          if (!action) {
+            // Show duplicate alert dialog and wait for user decision
+            const remainingToCheck = validFiles.length - i - 1;
+            const decision = await new Promise<{ action: 'use-existing' | 'keep-both' | 'cancel'; applyToAll: boolean }>((resolve) => {
+              setDuplicateAlert({
+                file,
+                existing: dupResult.existing as Resource,
+                remainingDuplicates: remainingToCheck,
+                resolve,
+              });
+            });
+            setDuplicateAlert(null);
+            action = decision.action;
+            if (decision.applyToAll) {
+              batchDupAction = decision.action === 'cancel' ? null : decision.action;
+            }
+          }
+
+          if (action === 'cancel') {
+            upload.setItems((prev) =>
+              prev.map((p) => p.id === entryId ? { ...p, status: 'error', error: t('common.cancel') } : p)
+            );
+            continue;
+          }
+
+          if (action === 'use-existing') {
+            // Link existing resource instead of uploading
+            await linkExistingResource(
+              String(dupResult.existing.id),
+              scopeType,
+              scopeId,
+              selectedFolderId,
+            );
+            linkedCount++;
+            completedCount++;
+            const fileSz = file.size;
+            upload.setItems((prev) =>
+              prev.map((p) => p.id === entryId
+                ? { ...p, percent: 100, status: 'complete', bytesUploaded: fileSz, speed: 0 }
+                : p
+              )
+            );
+            upload.setOverallProgress(Math.round((completedCount / validFiles.length) * 100));
+            continue;
+          }
+          // action === 'keep-both' → fall through to normal upload
+        }
+
+        // ── Normal upload ──
         await uploadResource(
           file,
           scopeType,
@@ -643,6 +720,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       }
     }
 
+    // Show toast for linked files
+    if (linkedCount > 0) {
+      addToast(
+        linkedCount === 1
+          ? t('resources.linkedExisting')
+          : t('resources.linkedExistingCount', { count: linkedCount }),
+        'success'
+      );
+    }
+
     // Refresh resource list
     try {
       const items = await fetchResources(scopeType, scopeId, selectedFolderId);
@@ -651,7 +738,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     upload.setIsUploading(false);
     upload.setOverallProgress(0);
-  }, [scopeType, scopeId, selectedFolderId, uploading, t, upload]);
+  }, [scopeType, scopeId, selectedFolderId, uploading, t, upload, addToast]);
 
   // ─── Drag & drop (robust nested-element handling) ────
 
@@ -2627,6 +2714,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           scopeId={scopeId}
           currentLibraryId={selectedLibraryId}
           excludeFolderIds={operationTargetFolders.map((f) => f.id)}
+        />
+      )}
+
+      {/* ── Duplicate File Alert ── */}
+      {duplicateAlert && (
+        <DuplicateFileAlert
+          file={duplicateAlert.file}
+          existing={duplicateAlert.existing}
+          remainingDuplicates={duplicateAlert.remainingDuplicates}
+          onUseExisting={(applyToAll) => {
+            duplicateAlert.resolve({ action: 'use-existing', applyToAll });
+          }}
+          onKeepBoth={(applyToAll) => {
+            duplicateAlert.resolve({ action: 'keep-both', applyToAll });
+          }}
+          onCancel={() => duplicateAlert.resolve({ action: 'cancel', applyToAll: false })}
         />
       )}
 

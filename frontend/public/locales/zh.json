@@ -436,7 +436,15 @@
     "backToCurrent": "返回当前版本",
     "transcoding": "转码中...",
     "transcodeFailed": "转码失败",
-    "retryTranscode": "重试"
+    "retryTranscode": "重试",
+    "duplicateDetected": "检测到重复文件",
+    "duplicateMessage": "\"{{filename}}\" 已存在于你的资源库中：",
+    "useExisting": "使用已有",
+    "keepBoth": "保留两者",
+    "applyToAll": "应用到所有重复文件",
+    "hashingFile": "正在检查重复...",
+    "linkedExisting": "已链接到已有文件",
+    "linkedExistingCount": "已链接 {{count}} 个已有文件"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

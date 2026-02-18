@@ -436,7 +436,15 @@
     "backToCurrent": "Back to current",
     "transcoding": "Transcoding...",
     "transcodeFailed": "Transcode Failed",
-    "retryTranscode": "Retry"
+    "retryTranscode": "Retry",
+    "duplicateDetected": "Duplicate File Detected",
+    "duplicateMessage": "\"{{filename}}\" already exists in your library:",
+    "useExisting": "Use Existing",
+    "keepBoth": "Keep Both",
+    "applyToAll": "Apply to all duplicates",
+    "hashingFile": "Checking for duplicates...",
+    "linkedExisting": "Linked to existing file",
+    "linkedExistingCount": "Linked {{count}} existing files"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

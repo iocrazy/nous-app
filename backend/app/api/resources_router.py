@@ -63,6 +63,69 @@ async def get_effective_permissions(
 
 
 # ============================================
+# Duplicate detection endpoints
+# ============================================
+
+
+@router.get("/check-duplicate")
+async def check_duplicate(
+    auth: AuthDep,
+    file_hash: str = Query(..., min_length=64, max_length=64),
+    file_size: int = Query(..., gt=0),
+):
+    """Check if a file with the same hash already exists."""
+    try:
+        repo = ResourcesRepository()
+        matches = await repo.find_by_hash(file_hash, auth.user_id)
+        # Secondary file_size check to guard against hash collisions
+        exact = [m for m in matches if m.get("file_size_bytes") == file_size]
+        return {
+            "duplicate": len(exact) > 0,
+            "existing": exact[0] if exact else None,
+        }
+    except Exception as e:
+        logger.error(f"Failed to check duplicate: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check duplicate")
+
+
+@router.post("/link-existing")
+async def link_existing_resource(
+    auth: AuthDep,
+    resource_id: str = Query(...),
+    scope_type: str = Query(..., pattern="^(personal|team)$"),
+    scope_id: str = Query(...),
+    folder_id: Optional[str] = Query(None),
+):
+    """Link an existing resource to the current scope/folder (use existing)."""
+    try:
+        repo = ResourcesRepository()
+        resource = await repo.get_resource_by_id(resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        existing_item = await repo.find_resource_item(
+            resource_id, scope_type, scope_id, folder_id
+        )
+        if existing_item:
+            return {"success": True, "data": resource, "already_linked": True}
+
+        item_data = {
+            "resource_id": resource_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "folder_id": folder_id,
+            "added_by": auth.user_id,
+        }
+        await repo.create_resource_item(item_data)
+        return {"success": True, "data": resource}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to link existing resource: {e}")
+        raise HTTPException(status_code=500, detail="Failed to link existing resource")
+
+
+# ============================================
 # Resource endpoints
 # ============================================
 
