@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, ProjectFolder } from '../types';
-import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder } from '../services/projectsService';
+import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile } from '../services/projectsService';
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
 import { LinkVideoModal } from './LinkVideoModal';
@@ -30,6 +30,8 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folders, setFolders] = useState<ProjectFolder[]>([]);
   const [folderChain, setFolderChain] = useState<ProjectFolder[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
@@ -86,6 +88,40 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       await loadContent();
     } catch (err) {
       console.error('Failed to create folder:', err);
+    }
+  };
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (e.shiftKey && lastSelectedId) {
+        const allIds = filteredAndSorted.map(f => f.id);
+        const start = allIds.indexOf(lastSelectedId);
+        const end = allIds.indexOf(id);
+        if (start >= 0 && end >= 0) {
+          const range = allIds.slice(Math.min(start, end), Math.max(start, end) + 1);
+          range.forEach(rid => next.add(rid));
+        }
+      } else if (e.metaKey || e.ctrlKey) {
+        next.has(id) ? next.delete(id) : next.add(id);
+      } else {
+        return new Set(next.has(id) ? [] : [id]);
+      }
+      return next;
+    });
+    setLastSelectedId(id);
+  };
+
+  const handleBatchTrash = async () => {
+    if (!window.confirm(t('projects.batch.confirmTrash', `Move ${selectedIds.size} files to trash?`))) return;
+    try {
+      for (const fileId of selectedIds) {
+        await updateFile(project.id, fileId, { is_trashed: true } as any);
+      }
+      setSelectedIds(new Set());
+      await loadContent();
+    } catch (err) {
+      console.error('Failed to batch trash files:', err);
     }
   };
 
@@ -339,6 +375,8 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                 file={file}
                 onClick={() => handleFileClick(file)}
                 viewMode="grid"
+                isSelected={selectedIds.has(file.id)}
+                onToggleSelect={(e) => toggleSelect(file.id, e)}
               />
             ))}
           </div>
@@ -363,11 +401,34 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                 file={file}
                 onClick={() => handleFileClick(file)}
                 viewMode="list"
+                isSelected={selectedIds.has(file.id)}
+                onToggleSelect={(e) => toggleSelect(file.id, e)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Floating batch action bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 flex items-center gap-4 shadow-2xl">
+          <span className="text-sm text-zinc-300">
+            {selectedIds.size} {t('projects.batch.selected', 'selected')}
+          </span>
+          <button
+            onClick={handleBatchTrash}
+            className="text-sm text-red-400 hover:text-red-300 px-3 py-1.5 hover:bg-red-500/10 rounded-lg transition-colors"
+          >
+            {t('projects.batch.trash', 'Trash')}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-zinc-500 hover:text-zinc-300 px-3 py-1.5 transition-colors"
+          >
+            {t('projects.batch.cancel', 'Cancel')}
+          </button>
+        </div>
+      )}
 
       {/* File Info Panel */}
       {selectedFile && (
