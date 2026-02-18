@@ -27,6 +27,7 @@ from app.api.shares_router import router as shares_router
 from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
+from app.api.task_manager_router import router as task_manager_router
 from app.api.task_router import router as task_router
 from app.api.tasks_router import router as tasks_management_router
 from app.api.user_settings_router import router as settings_router
@@ -82,3 +83,5 @@ api_router.include_router(router=shares_router, tags=["Shares"])
 api_router.include_router(router=libraries_router, tags=["Libraries"])
 
 api_router.include_router(router=reviews_router, tags=["Reviews"])
+
+api_router.include_router(router=task_manager_router, tags=["Task Manager"])

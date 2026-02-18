@@ -75,5 +75,9 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.cleanup_trashed_resources",
             "schedule": 86400.0,  # 每天执行一次
         },
+        "cleanup-old-unified-tasks-daily": {
+            "task": "app.tasks.scheduled_tasks.cleanup_old_unified_tasks",
+            "schedule": 86400.0,  # 每天执行一次
+        },
     },
 )

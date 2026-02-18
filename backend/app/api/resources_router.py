@@ -140,11 +140,28 @@ async def upload_resource(
     file: UploadFile = File(...),
 ):
     """Upload a file to the resource library."""
+    from app.services.task_tracker import get_task_tracker
+
+    tracker = get_task_tracker()
+    unified_task_id = None
+
     try:
         if file.size and file.size > MAX_UPLOAD_SIZE:
             raise HTTPException(
                 status_code=413, detail="File too large. Maximum size is 500 MB."
             )
+
+        # Create unified task for upload tracking
+        try:
+            unified_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="upload",
+                title=file.filename or "Upload",
+                total_bytes=file.size,
+            )
+            await tracker.start(unified_task_id)
+        except Exception as e:
+            logger.warning(f"[TaskTracker] Failed to track upload: {e}")
 
         svc = ResourcesService()
         result = await svc.upload_resource(
@@ -154,6 +171,15 @@ async def upload_resource(
             scope_id=scope_id,
             folder_id=folder_id,
         )
+
+        # Mark upload complete
+        if unified_task_id:
+            try:
+                await tracker.complete(unified_task_id, metadata_patch={
+                    "resource_id": str(result.get("id", "")),
+                })
+            except Exception:
+                pass
 
         # Trigger thumbnail generation in the background
         if result.get("file_path") and result.get("mime_type"):
@@ -169,9 +195,19 @@ async def upload_resource(
 
         return {"success": True, "data": result}
     except HTTPException:
+        if unified_task_id:
+            try:
+                await tracker.fail(unified_task_id, "Upload rejected")
+            except Exception:
+                pass
         raise
     except Exception as e:
         logger.error(f"Failed to upload resource: {e}")
+        if unified_task_id:
+            try:
+                await tracker.fail(unified_task_id, str(e)[:500])
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail="Failed to upload resource")
 
 
@@ -830,7 +866,7 @@ async def retry_transcode(
             raise HTTPException(status_code=400, detail="Only video files can be transcoded")
 
         from app.tasks.transcode_tasks import maybe_trigger_transcode
-        maybe_trigger_transcode(resource_id, version_id, mime)
+        maybe_trigger_transcode(resource_id, version_id, mime, user_id=auth.user_id)
 
         return {"success": True, "message": "Transcoding queued"}
     except HTTPException:

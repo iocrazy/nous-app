@@ -217,7 +217,11 @@
     "notifications": "Notifications",
     "noNotifications": "No notifications",
     "account": "Account",
-    "helpDocs": "Help & Docs"
+    "helpDocs": "Help & Docs",
+    "active": "active",
+    "activeCount": "{{count}} active",
+    "allComplete": "All tasks completed",
+    "clearCompleted": "Clear"
   },
   "plans": {
     "free": "Free"

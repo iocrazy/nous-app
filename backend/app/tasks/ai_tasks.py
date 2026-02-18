@@ -61,13 +61,48 @@ def _update_status(platform_id: str, field: str, status: str):
         run_async(ai_repo.update_video_ai_status(video["id"], field, status))
 
 
+def _update_unified_progress(unified_task_id: str, progress: int, subtitle: str = None):
+    """Update unified task progress (best-effort, never raises)."""
+    if not unified_task_id:
+        return
+    try:
+        from app.services.task_tracker import get_task_tracker
+        tracker = get_task_tracker()
+        run_async(tracker.update_progress(
+            unified_task_id, progress=progress, subtitle=subtitle,
+        ))
+    except Exception as e:
+        logger.debug(f"[AI] Unified progress update failed: {e}")
+
+
+def _complete_unified(unified_task_id: str):
+    if not unified_task_id:
+        return
+    try:
+        from app.services.task_tracker import get_task_tracker
+        run_async(get_task_tracker().complete(unified_task_id))
+    except Exception:
+        pass
+
+
+def _fail_unified(unified_task_id: str, error_msg: str):
+    if not unified_task_id:
+        return
+    try:
+        from app.services.task_tracker import get_task_tracker
+        run_async(get_task_tracker().fail(unified_task_id, error_msg[:500]))
+    except Exception:
+        pass
+
+
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def extract_audio_task(self, platform_id: str, user_id: str):
+def extract_audio_task(self, platform_id: str, user_id: str, unified_task_id: str = None):
     """Extract audio from a downloaded video file.
 
     Produces a .wav file for Whisper transcription.
     """
     logger.info(f"[AI] Starting audio extraction for {platform_id}")
+    _update_unified_progress(unified_task_id, 5, "Extracting audio...")
 
     try:
         from app.core.utils import Utils
@@ -126,6 +161,7 @@ def extract_audio_task(self, platform_id: str, user_id: str):
             raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
 
         logger.success(f"[AI] Audio extracted: {audio_path}")
+        _update_unified_progress(unified_task_id, 33, "Audio extracted")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -146,6 +182,7 @@ def extract_audio_task(self, platform_id: str, user_id: str):
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "transcript_status", "failed")
+        _fail_unified(unified_task_id, f"Audio extraction failed: {e}")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -160,15 +197,17 @@ def extract_audio_task(self, platform_id: str, user_id: str):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str = None):
+def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str = None, unified_task_id: str = None):
     """Transcribe audio using Whisper.
 
     Args:
         platform_id: Video platform ID.
         user_id: User ID (for loading AI settings).
         audio_path: Path to audio file. If None, derived from video download path.
+        unified_task_id: Optional unified task ID for progress tracking.
     """
     logger.info(f"[AI] Starting transcription for {platform_id}")
+    _update_unified_progress(unified_task_id, 35, "Transcribing...")
 
     try:
         from app.core.utils import Utils
@@ -223,6 +262,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         )
 
         logger.success(f"[AI] Transcription complete for {platform_id}")
+        _update_unified_progress(unified_task_id, 66, "Transcription complete")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -245,6 +285,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "transcript_status", "failed")
+        _fail_unified(unified_task_id, f"Transcription failed: {e}")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -259,14 +300,16 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_summary_task(self, platform_id: str, user_id: str):
+def generate_summary_task(self, platform_id: str, user_id: str, unified_task_id: str = None):
     """Generate LLM summary from a video's transcript.
 
     Args:
         platform_id: Video platform ID.
         user_id: User ID (for loading AI settings).
+        unified_task_id: Optional unified task ID for progress tracking.
     """
     logger.info(f"[AI] Starting summary generation for {platform_id}")
+    _update_unified_progress(unified_task_id, 68, "Generating summary...")
 
     try:
         from app.repositories.ai_repository import AIRepository
@@ -327,6 +370,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         )
 
         logger.success(f"[AI] Summary generated for {platform_id}")
+        _complete_unified(unified_task_id)
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -348,6 +392,7 @@ def generate_summary_task(self, platform_id: str, user_id: str):
         if self.request.retries < self.max_retries:
             raise self.retry(exc=e)
         _update_status(platform_id, "summary_status", "failed")
+        _fail_unified(unified_task_id, f"Summary generation failed: {e}")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -379,14 +424,29 @@ def chain_ai_pipeline(
     """
     from celery import chain
 
+    # Create unified task for the whole pipeline
+    unified_task_id = None
+    try:
+        from app.services.task_tracker import get_task_tracker
+        tracker = get_task_tracker()
+        unified_task_id = run_async(tracker.create(
+            user_id=user_id,
+            task_type="ai_pipeline",
+            title=f"AI Analysis: {platform_id}",
+            video_id=platform_id,
+        ))
+        run_async(tracker.start(unified_task_id))
+    except Exception as e:
+        logger.warning(f"[AI] Failed to create unified task: {e}")
+
     tasks = []
 
     if transcript_bool:
-        tasks.append(extract_audio_task.si(platform_id, user_id))
-        tasks.append(transcribe_audio_task.si(platform_id, user_id))
+        tasks.append(extract_audio_task.si(platform_id, user_id, unified_task_id))
+        tasks.append(transcribe_audio_task.si(platform_id, user_id, None, unified_task_id))
 
     if summary_bool and transcript_bool:
-        tasks.append(generate_summary_task.si(platform_id, user_id))
+        tasks.append(generate_summary_task.si(platform_id, user_id, unified_task_id))
 
     if tasks:
         pipeline = chain(*tasks)
@@ -402,4 +462,6 @@ def chain_ai_pipeline(
             )
         )
     else:
+        # No tasks to run, mark unified task as completed
+        _complete_unified(unified_task_id)
         logger.info(f"[AI] No AI tasks to run for {platform_id}")

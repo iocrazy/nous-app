@@ -60,7 +60,7 @@ def _maybe_chain_transcode(platform_id: str, user_id: str):
         version_id = str(latest["id"])
 
         from app.tasks.transcode_tasks import maybe_trigger_transcode
-        maybe_trigger_transcode(resource_id, version_id, mime)
+        maybe_trigger_transcode(resource_id, version_id, mime, user_id=user_id)
     except Exception as e:
         logger.warning(f"[Celery] Failed to chain transcode for {platform_id}: {e}")
 
@@ -135,7 +135,7 @@ def download_media_task(
     task_id = self.request.id
     logger.info(f"[Celery] Starting download task {task_id} for {platform_id}")
 
-    # Initialize TaskManager
+    # Initialize TaskManager (legacy)
     from app.services.task_manager import get_task_manager
 
     task_manager = get_task_manager()
@@ -147,6 +147,22 @@ def download_media_task(
 
     # Mark task as downloading
     task_manager.start_download(platform_id)
+
+    # Unified TaskTracker
+    from app.services.task_tracker import get_task_tracker
+    tracker_unified = get_task_tracker()
+    unified_task_id = None
+    try:
+        unified_task_id = run_async(tracker_unified.create(
+            user_id=user_id,
+            task_type="download",
+            title=video_title or platform_id,
+            video_id=platform_id,
+            celery_task_id=task_id,
+        ))
+        run_async(tracker_unified.start(unified_task_id))
+    except Exception as e:
+        logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
 
     try:
         from app.celery_app import celery_app
@@ -160,6 +176,8 @@ def download_media_task(
             platform_id=platform_id,
             redis_client=redis_client,
             task_manager=task_manager,
+            unified_tracker=tracker_unified,
+            unified_task_id=unified_task_id,
         )
 
         # Execute downloads based on type
@@ -256,6 +274,11 @@ def download_media_task(
                 # Mark complete in TaskManager
                 task_manager.complete_task(platform_id)
                 tracker.complete()
+                if unified_task_id:
+                    try:
+                        run_async(tracker_unified.complete(unified_task_id))
+                    except Exception:
+                        pass
                 logger.success(f"[Celery] Download task completed: {platform_id}")
 
                 # Log success
@@ -305,6 +328,11 @@ def download_media_task(
         # No video result means video download was not requested, mark as complete
         task_manager.complete_task(platform_id)
         tracker.complete()
+        if unified_task_id:
+            try:
+                run_async(tracker_unified.complete(unified_task_id))
+            except Exception:
+                pass
         logger.success(f"[Celery] Download task completed (no video): {platform_id}")
 
         # Auto-create resource record (dedup-aware)
@@ -331,6 +359,11 @@ def download_media_task(
 
         # Mark as failed in TaskManager
         task_manager.fail_task(platform_id, error_msg)
+        if unified_task_id:
+            try:
+                run_async(tracker_unified.fail(unified_task_id, error_msg))
+            except Exception:
+                pass
 
         # Check if we should retry
         current_task = task_manager.get_task(platform_id)
@@ -368,11 +401,14 @@ def download_media_task(
 class DownloadProgressTrackerWithTaskManager:
     """Progress tracker that updates both the old format and TaskManager."""
 
-    def __init__(self, task_id: str, platform_id: str, redis_client, task_manager):
+    def __init__(self, task_id: str, platform_id: str, redis_client, task_manager,
+                 unified_tracker=None, unified_task_id=None):
         self.task_id = task_id
         self.platform_id = platform_id
         self.redis = redis_client
         self.task_manager = task_manager
+        self.unified_tracker = unified_tracker
+        self.unified_task_id = unified_task_id
         self.last_update = 0
 
     def update(self, downloaded: int, total: int):
@@ -401,8 +437,20 @@ class DownloadProgressTrackerWithTaskManager:
             f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
-        # Update TaskManager
+        # Update TaskManager (legacy)
         self.task_manager.update_progress(self.platform_id, downloaded, total, speed)
+
+        # Update unified TaskTracker
+        if self.unified_tracker and self.unified_task_id:
+            try:
+                speed_bps = downloaded  # rough estimate
+                run_async(self.unified_tracker.update_progress(
+                    self.unified_task_id,
+                    percent,
+                    speed=speed_bps if total > 0 else None,
+                ))
+            except Exception:
+                pass
 
     def _calculate_speed(self, downloaded: int) -> str:
         """Calculate download speed string."""
@@ -459,7 +507,7 @@ def download_ytdlp_task(
     task_id = self.request.id
     logger.info(f"[Celery/yt-dlp] Starting download task {task_id} for {platform_id}")
 
-    # Initialize TaskManager
+    # Initialize TaskManager (legacy)
     from app.services.task_manager import get_task_manager
 
     task_manager = get_task_manager()
@@ -469,6 +517,22 @@ def download_ytdlp_task(
         task = task_manager.create_task(platform_id, video_title)
 
     task_manager.start_download(platform_id)
+
+    # Unified TaskTracker
+    from app.services.task_tracker import get_task_tracker
+    tracker_unified = get_task_tracker()
+    unified_task_id = None
+    try:
+        unified_task_id = run_async(tracker_unified.create(
+            user_id=user_id,
+            task_type="download",
+            title=video_title or platform_id,
+            video_id=platform_id,
+            celery_task_id=task_id,
+        ))
+        run_async(tracker_unified.start(unified_task_id))
+    except Exception as e:
+        logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
 
     try:
         from app.repositories.video_repository import VideoRepository
@@ -491,6 +555,12 @@ def download_ytdlp_task(
 
             def on_progress(downloaded: int, total: int, speed: str):
                 task_manager.update_progress(platform_id, downloaded, total, speed)
+                if unified_task_id:
+                    try:
+                        percent = int((downloaded / total) * 100) if total > 0 else 0
+                        run_async(tracker_unified.update_progress(unified_task_id, percent))
+                    except Exception:
+                        pass
 
             result = run_async(
                 YtdlpService.download_video(
@@ -543,6 +613,11 @@ def download_ytdlp_task(
             results["cover"] = "attempted"
 
         task_manager.complete_task(platform_id)
+        if unified_task_id:
+            try:
+                run_async(tracker_unified.complete(unified_task_id))
+            except Exception:
+                pass
         logger.success(f"[Celery/yt-dlp] Download task completed: {platform_id}")
 
         # Auto-create resource record (dedup-aware)
@@ -586,6 +661,11 @@ def download_ytdlp_task(
         )
 
         task_manager.fail_task(platform_id, error_msg)
+        if unified_task_id:
+            try:
+                run_async(tracker_unified.fail(unified_task_id, error_msg))
+            except Exception:
+                pass
 
         if self.request.retries < self.max_retries:
             countdown = 30 * (2**self.request.retries)
