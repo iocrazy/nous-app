@@ -141,13 +141,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         {isPlaying ? (
             <video
                 src={videoUrl}
-                className="w-full h-full object-contain bg-black"
+                className="bg-black"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 muted
                 loop
                 autoPlay
                 playsInline
-                controls
-                onClick={(e) => e.stopPropagation()} // Prevent card navigation when interacting with video/controls
             />
         ) : (
             <>
