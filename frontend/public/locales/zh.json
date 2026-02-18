@@ -817,6 +817,16 @@
       "share": "分享",
       "delete": "删除"
     },
+    "collect": {
+      "title": "文件收集",
+      "empty": "暂无收集链接",
+      "namePlaceholder": "收集名称",
+      "deadline": "截止日期",
+      "maxSize": "最大文件大小 (MB)",
+      "creating": "创建中...",
+      "create": "创建",
+      "newCollection": "新建收集链接"
+    },
     "share": {
       "title": "分享文件",
       "type": "分享类型",

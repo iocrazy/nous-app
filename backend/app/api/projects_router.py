@@ -974,3 +974,92 @@ async def remove_member(project_id: str, member_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to remove member {member_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove member")
+
+
+# ============================================
+# Collection endpoints
+# ============================================
+
+
+class CreateCollectionRequest(BaseModel):
+    collection_name: str
+    allowed_types: Optional[list[str]] = None
+    max_file_size_mb: int = 500
+    deadline: Optional[str] = None
+
+
+@router.get("/{project_id}/collections")
+async def list_collections(project_id: str, auth: AuthDep):
+    """List all collection links for a project."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        result = (
+            await sb.table("project_collections")
+            .select("*")
+            .eq("project_id", project_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return {"success": True, "data": result.data or []}
+    except Exception as e:
+        logger.error(f"Failed to list collections for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list collections")
+
+
+@router.post("/{project_id}/collections")
+async def create_collection(
+    project_id: str, data: CreateCollectionRequest, auth: AuthDep
+):
+    """Create a collection link for external file uploads."""
+    import secrets
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        collection_code = secrets.token_urlsafe(8)[:12]
+
+        insert_data: Dict[str, Any] = {
+            "project_id": project_id,
+            "collection_code": collection_code,
+            "collection_name": data.collection_name,
+            "max_file_size_mb": data.max_file_size_mb,
+            "created_by": auth.user_id,
+        }
+        if data.allowed_types:
+            insert_data["allowed_types"] = data.allowed_types
+        if data.deadline:
+            insert_data["deadline"] = data.deadline
+
+        result = await sb.table("project_collections").insert(insert_data).execute()
+        collection = result.data[0] if result.data else None
+        if not collection:
+            raise HTTPException(status_code=500, detail="Failed to create collection")
+        return {"success": True, "data": collection}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create collection for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create collection")
+
+
+@router.delete("/{project_id}/collections/{collection_id}")
+async def delete_collection(project_id: str, collection_id: str, auth: AuthDep):
+    """Delete a collection link."""
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        await (
+            sb.table("project_collections")
+            .delete()
+            .eq("id", collection_id)
+            .eq("project_id", project_id)
+            .execute()
+        )
+        return {"success": True, "message": "Collection deleted"}
+    except Exception as e:
+        logger.error(f"Failed to delete collection {collection_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete collection")

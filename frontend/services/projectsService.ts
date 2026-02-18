@@ -404,3 +404,49 @@ export const createProjectShare = async (
   const json = await response.json();
   return json.data;
 };
+
+// ============================================
+// Project collections
+// ============================================
+
+export const fetchProjectCollections = async (projectId: string): Promise<any[]> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to fetch collections');
+  const json = await response.json();
+  return json.data || [];
+};
+
+export const createProjectCollection = async (
+  projectId: string,
+  data: {
+    collection_name: string;
+    allowed_types?: string[];
+    max_file_size_mb?: number;
+    deadline?: string;
+  },
+): Promise<any> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error('Failed to create collection');
+  const json = await response.json();
+  return json.data;
+};
+
+export const deleteProjectCollection = async (
+  projectId: string,
+  collectionId: string,
+): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections/${collectionId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to delete collection');
+};
