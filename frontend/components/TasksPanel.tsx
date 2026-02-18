@@ -16,6 +16,8 @@ import {
   Brain,
   Clapperboard,
   Loader2,
+  Mic,
+  FileText,
 } from 'lucide-react';
 import {
   useTaskManager,
@@ -25,20 +27,64 @@ import {
   formatSpeed,
   formatFileSize,
   taskTypeLabel,
+  getTaskCategory,
 } from '../contexts/TaskManagerContext';
-import { AITasksPanel } from './AITasksPanel';
-
 // ─── Helpers ──────────────────────────────────────────
 
-type TypeFilter = 'all' | TaskType;
+type MainTab = 'history' | 'transfer' | 'ai';
+type SubFilter = string; // 'all' | specific task_type
 type StatusFilterValue = 'all' | TaskStatus;
 
-const TYPE_OPTIONS: { value: TypeFilter; label: string; icon: React.ReactNode; color: string }[] = [
-  { value: 'all', label: 'All', icon: <ListTodo size={14} />, color: 'text-zinc-400' },
-  { value: 'download', label: 'Download', icon: <Download size={14} />, color: 'text-blue-400' },
-  { value: 'upload', label: 'Upload', icon: <Upload size={14} />, color: 'text-emerald-400' },
-  { value: 'transcode', label: 'Transcode', icon: <Clapperboard size={14} />, color: 'text-amber-400' },
-  { value: 'ai_pipeline', label: 'AI Pipeline', icon: <Brain size={14} />, color: 'text-purple-400' },
+interface TabConfig {
+  value: MainTab;
+  label: string;
+  icon: React.ReactNode;
+  activeClass: string;   // selected state
+  inactiveClass: string; // unselected state
+}
+
+const MAIN_TABS: TabConfig[] = [
+  {
+    value: 'history',
+    label: 'Task History',
+    icon: <ListTodo size={15} />,
+    activeClass: 'bg-zinc-700 text-white',
+    inactiveClass: 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
+  },
+  {
+    value: 'transfer',
+    label: 'Transfer',
+    icon: <Download size={15} />,
+    activeClass: 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30',
+    inactiveClass: 'text-zinc-500 hover:text-blue-400/70 hover:bg-blue-500/5',
+  },
+  {
+    value: 'ai',
+    label: 'AI Tasks',
+    icon: <Brain size={15} />,
+    activeClass: 'bg-purple-500/15 text-purple-400 ring-1 ring-purple-500/30',
+    inactiveClass: 'text-zinc-500 hover:text-purple-400/70 hover:bg-purple-500/5',
+  },
+];
+
+interface SubFilterOption {
+  value: SubFilter;
+  label: string;
+  icon: React.ReactNode;
+}
+
+const TRANSFER_SUB_FILTERS: SubFilterOption[] = [
+  { value: 'all', label: 'All', icon: <ListTodo size={14} /> },
+  { value: 'download', label: 'Download', icon: <Download size={14} /> },
+  { value: 'upload', label: 'Upload', icon: <Upload size={14} /> },
+  { value: 'transcode', label: 'Transcode', icon: <Clapperboard size={14} /> },
+];
+
+const AI_SUB_FILTERS: SubFilterOption[] = [
+  { value: 'all', label: 'All', icon: <Brain size={14} /> },
+  { value: 'ai_extract', label: 'Extract', icon: <Mic size={14} /> },
+  { value: 'ai_transcription', label: 'Transcription', icon: <FileText size={14} /> },
+  { value: 'ai_summary', label: 'Summary', icon: <Brain size={14} /> },
 ];
 
 const STATUS_OPTIONS: { value: StatusFilterValue; label: string }[] = [
@@ -84,6 +130,9 @@ function getTypeIcon(type: TaskType) {
     case 'upload': return <Upload size={14} className="text-emerald-400" />;
     case 'transcode': return <Clapperboard size={14} className="text-amber-400" />;
     case 'ai_pipeline': return <Brain size={14} className="text-purple-400" />;
+    case 'ai_extract': return <Mic size={14} className="text-violet-400" />;
+    case 'ai_transcription': return <FileText size={14} className="text-fuchsia-400" />;
+    case 'ai_summary': return <Brain size={14} className="text-cyan-400" />;
     default: return <AlertCircle size={14} className="text-zinc-400" />;
   }
 }
@@ -104,46 +153,9 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   return date.toLocaleDateString();
 }
 
-// ─── Main Component with Tabs ─────────────────────────
+// ─── Main Component ──────────────────────────────────
 
-type MainTab = 'tasks' | 'ai';
-
-export const TasksPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<MainTab>('tasks');
-
-  return (
-    <div className="space-y-6">
-      {/* Tab Switcher */}
-      <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800 w-fit">
-        <button
-          onClick={() => setActiveTab('tasks')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'tasks'
-              ? 'bg-indigo-500/20 text-indigo-400'
-              : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-          }`}
-        >
-          <ListTodo size={16} />
-          Tasks
-        </button>
-        <button
-          onClick={() => setActiveTab('ai')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'ai'
-              ? 'bg-purple-500/20 text-purple-400'
-              : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-          }`}
-        >
-          <Brain size={16} />
-          AI Tasks
-        </button>
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === 'tasks' ? <UnifiedTasksView /> : <AITasksPanel />}
-    </div>
-  );
-};
+export const TasksPanel: React.FC = () => <UnifiedTasksView />;
 
 // ─── Unified Tasks View ───────────────────────────────
 
@@ -151,7 +163,6 @@ const UnifiedTasksView: React.FC = () => {
   const {
     tasks,
     isLoading,
-    activeTasks,
     cancelTask,
     retryTask,
     deleteTask,
@@ -159,23 +170,46 @@ const UnifiedTasksView: React.FC = () => {
     refreshTasks,
   } = useTaskManager();
 
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [mainTab, setMainTab] = useState<MainTab>('history');
+  const [subFilter, setSubFilter] = useState<SubFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Filtered tasks
+  // Reset sub-filter when switching main tab
+  const handleTabChange = (tab: MainTab) => {
+    setMainTab(tab);
+    setSubFilter('all');
+    setStatusFilter('all');
+  };
+
+  // Tasks scoped to the current main tab
+  const tabTasks = useMemo(() => {
+    switch (mainTab) {
+      case 'transfer':
+        return tasks.filter((t) => {
+          const cat = getTaskCategory(t.task_type);
+          return cat === 'transfer' || cat === 'processing'; // download/upload/transcode
+        });
+      case 'ai':
+        return tasks.filter((t) => getTaskCategory(t.task_type) === 'ai');
+      default:
+        return tasks;
+    }
+  }, [tasks, mainTab]);
+
+  // Further filtered by sub-filter and status
   const filteredTasks = useMemo(() => {
-    let filtered = tasks;
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter((t) => t.task_type === typeFilter);
+    let filtered = tabTasks;
+    if (subFilter !== 'all') {
+      filtered = filtered.filter((t) => t.task_type === subFilter);
     }
     if (statusFilter !== 'all') {
       filtered = filtered.filter((t) => t.status === statusFilter);
     }
     return filtered;
-  }, [tasks, typeFilter, statusFilter]);
+  }, [tabTasks, subFilter, statusFilter]);
 
-  // Stats derived from all tasks
+  // Stats derived from tab-scoped tasks
   const stats = useMemo(() => {
     const counts: Record<TaskStatus, number> = {
       pending: 0,
@@ -184,13 +218,23 @@ const UnifiedTasksView: React.FC = () => {
       failed: 0,
       cancelled: 0,
     };
-    for (const t of tasks) {
+    for (const t of tabTasks) {
       if (t.status in counts) counts[t.status]++;
     }
     return counts;
-  }, [tasks]);
+  }, [tabTasks]);
 
+  const activeTasks = tabTasks.filter(
+    (t) => t.status === 'pending' || t.status === 'processing'
+  );
   const hasCompleted = stats.completed > 0 || stats.failed > 0 || stats.cancelled > 0;
+
+  // Sub-filter options based on current tab
+  const currentSubFilters: SubFilterOption[] | null = mainTab === 'transfer'
+    ? TRANSFER_SUB_FILTERS
+    : mainTab === 'ai'
+      ? AI_SUB_FILTERS
+      : null;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -217,29 +261,37 @@ const UnifiedTasksView: React.FC = () => {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      {/* Header */}
+      {/* Header with Main Tabs */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-500/10 rounded-lg">
-            <ListTodo size={20} className="text-indigo-400" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-white">Task History</h2>
-            <p className="text-sm text-zinc-400">
-              {activeTasks.length > 0
-                ? `${activeTasks.length} active · ${tasks.length} total`
-                : `${tasks.length} tasks`}
-            </p>
-          </div>
+        <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800">
+          {MAIN_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => handleTabChange(tab.value)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                mainTab === tab.value ? tab.activeClass : tab.inactiveClass
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw size={18} className={`text-zinc-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-zinc-500">
+            {activeTasks.length > 0
+              ? `${activeTasks.length} active · ${tabTasks.length} total`
+              : `${tabTasks.length} tasks`}
+          </p>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={18} className={`text-zinc-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -269,28 +321,30 @@ const UnifiedTasksView: React.FC = () => {
         ))}
       </div>
 
-      {/* Type Filter Pills + Actions */}
+      {/* Sub-filter Pills + Actions */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800">
-          {TYPE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setTypeFilter(opt.value)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                typeFilter === opt.value
-                  ? 'bg-zinc-800 text-white'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-              }`}
-            >
-              {opt.icon}
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        {currentSubFilters && (
+          <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800">
+            {currentSubFilters.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setSubFilter(opt.value)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  subFilter === opt.value
+                    ? 'bg-zinc-800 text-white'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+                }`}
+              >
+                {opt.icon}
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
         {hasCompleted && (
           <button
             onClick={handleClearCompleted}
-            className="px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:bg-zinc-700 transition-colors flex items-center gap-1.5"
+            className={`px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:bg-zinc-700 transition-colors flex items-center gap-1.5 ${!currentSubFilters ? 'ml-auto' : ''}`}
           >
             <Trash2 size={13} />
             Clear Completed

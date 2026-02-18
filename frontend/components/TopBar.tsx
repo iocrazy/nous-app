@@ -120,11 +120,14 @@ const PanelShell: React.FC<{
 // Task type → background color for icon badge
 function taskTypeBg(type: string): string {
   switch (type) {
-    case 'upload':      return 'bg-blue-500/20 text-blue-400';
-    case 'download':    return 'bg-purple-500/20 text-purple-400';
-    case 'transcode':   return 'bg-amber-500/20 text-amber-400';
-    case 'ai_pipeline': return 'bg-cyan-500/20 text-cyan-400';
-    default:            return 'bg-zinc-700/50 text-zinc-400';
+    case 'upload':              return 'bg-blue-500/20 text-blue-400';
+    case 'download':            return 'bg-purple-500/20 text-purple-400';
+    case 'transcode':           return 'bg-amber-500/20 text-amber-400';
+    case 'ai_pipeline':         return 'bg-cyan-500/20 text-cyan-400';
+    case 'ai_extract':          return 'bg-violet-500/20 text-violet-400';
+    case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
+    case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
+    default:                    return 'bg-zinc-700/50 text-zinc-400';
   }
 }
 
