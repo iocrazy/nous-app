@@ -7,7 +7,7 @@ import { VideoPlayer } from './VideoPlayer';
 import { VersionCompareView } from './VersionCompareView';
 import { ReviewCommentsPanel } from './ReviewCommentsPanel';
 import { FileInfoPanel } from './FileInfoPanel';
-import { VersionManagerModal } from './VersionManagerModal';
+import { ProjectVersionModal } from './ProjectVersionModal';
 import { ReviewStatusDropdown } from './ReviewStatusDropdown';
 import { AnnotationCanvas } from './AnnotationCanvas';
 import { AnnotationToolbar } from './AnnotationToolbar';
@@ -482,7 +482,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
       </div>
 
       {/* Version Manager Modal */}
-      <VersionManagerModal
+      <ProjectVersionModal
         isOpen={isVersionModalOpen}
         onClose={() => setIsVersionModalOpen(false)}
         projectId={projectId}

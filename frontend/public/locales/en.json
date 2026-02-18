@@ -891,6 +891,13 @@
     },
     "header": {
       "searchFiles": "Search files..."
+    },
+    "versions": {
+      "title": "Version History",
+      "empty": "No versions found",
+      "current": "Current",
+      "uploading": "Uploading...",
+      "upload": "Upload New Version"
     }
   }
 }
