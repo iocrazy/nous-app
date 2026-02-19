@@ -75,8 +75,8 @@ def analyze_video_l1_task(
         if result.category and result.category != "Other":
             tag = await tags_repo.get_tag_by_name(result.category)
             if tag:
-                await tags_repo.add_tag_to_media(
-                    media_id=media_id,
+                await tags_repo.add_tag_to_resource(
+                    resource_id=media_id,
                     tag_id=tag["id"],
                     confidence=0.8,  # AI-based confidence
                     source="ai",
@@ -85,7 +85,7 @@ def analyze_video_l1_task(
 
         # Generate embedding
         # Get existing tags for this media
-        media_tags = await tags_repo.get_media_tags(media_id)
+        media_tags = await tags_repo.get_resource_tags(media_id)
         tag_names = [t["tags"]["name"] for t in media_tags if t.get("tags")]
 
         embedding_text = embedding_service.build_embedding_text(
@@ -216,15 +216,15 @@ def analyze_video_l2_task(
                 if result.category and result.category != "Other":
                     tag = await tags_repo.get_tag_by_name(result.category)
                     if tag:
-                        await tags_repo.add_tag_to_media(
-                            media_id=media_id,
+                        await tags_repo.add_tag_to_resource(
+                            resource_id=media_id,
                             tag_id=tag["id"],
                             confidence=0.9,  # Higher confidence for L2
                             source="ai",
                         )
 
                 # Regenerate embedding
-                media_tags = await tags_repo.get_media_tags(media_id)
+                media_tags = await tags_repo.get_resource_tags(media_id)
                 tag_names = [t["tags"]["name"] for t in media_tags if t.get("tags")]
 
                 embedding_text = embedding_service.build_embedding_text(

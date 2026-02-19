@@ -204,7 +204,7 @@ async def get_media_tags(
 ):
     """Get all tags associated with a media item."""
     repo = TagsRepository()
-    tags_data = await repo.get_media_tags(media_id)
+    tags_data = await repo.get_resource_tags(media_id)
 
     tags = []
     for item in tags_data:
@@ -229,8 +229,8 @@ async def add_tag_to_media(
 ):
     """Add a tag to a media item."""
     repo = TagsRepository()
-    result = await repo.add_tag_to_media(
-        media_id=media_id,
+    result = await repo.add_tag_to_resource(
+        resource_id=media_id,
         tag_id=str(media_tag.tag_id),
         confidence=media_tag.confidence,
         source=media_tag.source,
@@ -249,7 +249,7 @@ async def remove_tag_from_media(
 ):
     """Remove a tag from a media item."""
     repo = TagsRepository()
-    removed = await repo.remove_tag_from_media(media_id, tag_id)
+    removed = await repo.remove_tag_from_resource(media_id, tag_id)
 
     if not removed:
         raise HTTPException(

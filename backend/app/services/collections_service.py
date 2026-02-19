@@ -193,39 +193,39 @@ class CollectionsService:
         if operator == "has":
             # Media that have a specific tag
             result = (
-                await client.table("media_tags")
-                .select("media_id")
+                await client.table("resource_tags")
+                .select("resource_id")
                 .eq("tag_id", value)
-                .in_("media_id", user_media_ids)
+                .in_("resource_id", user_media_ids)
                 .execute()
             )
-            return list(set(r["media_id"] for r in result.data))
+            return list(set(r["resource_id"] for r in result.data))
 
         elif operator == "has_any":
             # Media that have any of the specified tags
             if isinstance(value, list):
                 result = (
-                    await client.table("media_tags")
-                    .select("media_id")
+                    await client.table("resource_tags")
+                    .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("media_id", user_media_ids)
+                    .in_("resource_id", user_media_ids)
                     .execute()
                 )
-                return list(set(r["media_id"] for r in result.data))
+                return list(set(r["resource_id"] for r in result.data))
 
         elif operator == "has_all":
             # Media that have all of the specified tags
             if isinstance(value, list):
                 media_tag_counts = {}
                 result = (
-                    await client.table("media_tags")
-                    .select("media_id")
+                    await client.table("resource_tags")
+                    .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("media_id", user_media_ids)
+                    .in_("resource_id", user_media_ids)
                     .execute()
                 )
                 for r in result.data:
-                    mid = r["media_id"]
+                    mid = r["resource_id"]
                     media_tag_counts[mid] = media_tag_counts.get(mid, 0) + 1
                 return [
                     mid
