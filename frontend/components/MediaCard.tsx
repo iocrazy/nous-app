@@ -5,7 +5,7 @@ import { Video, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
   Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus,
-  Sparkles, Eye
+  Sparkles, Eye, Star,
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl } from '../services/dataService';
@@ -117,6 +117,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [analysisText, setAnalysisText] = useState<string | null>(data.ai_analyze_text || null);
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  // Rating & Notes
+  const [ratingValue, setRatingValue] = useState(data.rating || 0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [notesValue, setNotesValue] = useState(data.notes || '');
 
   const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
@@ -353,6 +358,20 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       console.error('Refetch error:', error);
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  // Rating handler
+  const handleRating = (star: number) => {
+    const newRating = star === ratingValue ? 0 : star;
+    setRatingValue(newRating);
+    onUpdate?.(data.platform_id, { rating: newRating });
+  };
+
+  // Notes auto-save on blur
+  const handleNotesBlur = () => {
+    if (notesValue !== (data.notes || '')) {
+      onUpdate?.(data.platform_id, { notes: notesValue });
     }
   };
 
@@ -629,8 +648,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             )}
           </div>
 
-          {/* AI Status Icons */}
-          <div className="mb-4">
+          {/* Rating + AI Status on same line */}
+          <div className="mb-4 flex items-center justify-between">
+            {/* Rating stars */}
+            <div className="flex items-center gap-0.5">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => handleRating(star)}
+                  onMouseEnter={() => setHoverRating(star)}
+                  onMouseLeave={() => setHoverRating(0)}
+                  className="p-0.5 transition-colors"
+                >
+                  <Star
+                    size={16}
+                    className={
+                      star <= (hoverRating || ratingValue)
+                        ? 'text-amber-400 fill-amber-400'
+                        : 'text-zinc-600'
+                    }
+                  />
+                </button>
+              ))}
+            </div>
+            {/* AI Status Icons */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1" title={`Transcript: ${data.transcript_status || 'pending'}`}>
                 <FileText size={14} className={getAIStatusClass(data.transcript_status)} />
@@ -642,9 +683,18 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 <Eye size={14} className={getAIStatusClass(data.visual_analysis_status)} />
               </div>
             </div>
-            {data.summary_text && (
-              <p className="text-xs text-zinc-400 italic truncate mt-1">{data.summary_text}</p>
-            )}
+          </div>
+
+          {/* Notes */}
+          <div className="mb-4">
+            <textarea
+              value={notesValue}
+              onChange={(e) => setNotesValue(e.target.value)}
+              onBlur={handleNotesBlur}
+              placeholder="Add notes..."
+              rows={2}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 resize-none focus:outline-none focus:border-zinc-600 transition-colors"
+            />
           </div>
 
           {/* Action Buttons Row */}
