@@ -469,7 +469,8 @@
       "created": "创建时间",
       "modified": "修改时间",
       "sourceWeb": "网页下载",
-      "sourceUpload": "上传"
+      "sourceUpload": "上传",
+      "aiStatus": "AI 状态"
     }
   },
   "smartFolder": {

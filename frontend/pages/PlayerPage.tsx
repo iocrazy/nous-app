@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, FileQuestion } from 'lucide-react';
+import { ArrowLeft, Loader2, FileQuestion, UserRound } from 'lucide-react';
 import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { fetchVideoByDisplayId, updateItem, deleteItem } from '../services/dataService';
 import { getVideoUrl } from '../utils/awemeType';
+
+const MIN_PANEL_WIDTH = 380;
+const MAX_PANEL_WIDTH = 800;
+const DEFAULT_PANEL_WIDTH = 560;
+
 export function PlayerPage() {
   const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
   const [searchParams] = useSearchParams();
@@ -18,6 +23,10 @@ export function PlayerPage() {
   const playerRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
 
   const handleTimeUpdate = useCallback((seconds: number) => {
     setCurrentTime(seconds);
@@ -26,6 +35,33 @@ export function PlayerPage() {
   const handleDurationChange = useCallback((seconds: number) => {
     setDuration(seconds);
   }, []);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = panelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const delta = dragStartX.current - ev.clientX;
+      const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, dragStartWidth.current + delta));
+      setPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [panelWidth]);
 
   useEffect(() => {
     if (!displayId) return;
@@ -99,18 +135,34 @@ export function PlayerPage() {
           </button>
           <h2 className="text-xl font-bold text-white truncate">{video.title || video.description || 'Media Player'}</h2>
         </div>
-        <div className="flex-1 min-h-0 flex gap-4">
+        <div className="flex-1 min-h-0 flex">
           {/* Video Player — main area */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 relative">
             <VideoPlayer
               src={getVideoUrl(video) || ''}
               playerRef={playerRef}
               onTimeUpdate={handleTimeUpdate}
               onDurationChange={handleDurationChange}
             />
+            {video.author && (
+              <div className="absolute bottom-12 left-4 flex items-center gap-2 text-white/80 text-sm pointer-events-none">
+                <UserRound size={18} className="opacity-70" />
+                <span>@{video.author}</span>
+              </div>
+            )}
+          </div>
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleResizeStart}
+            className="w-1 shrink-0 cursor-col-resize group relative mx-1.5"
+          >
+            <div className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-blue-500/30 transition-colors rounded" />
           </div>
           {/* Detail Panel — right sidebar */}
-          <div className="w-[380px] shrink-0 overflow-y-auto custom-scrollbar">
+          <div
+            style={{ width: panelWidth }}
+            className="shrink-0 overflow-y-auto custom-scrollbar"
+          >
             <VideoDetailPanel
               video={video}
               onClose={handleBack}

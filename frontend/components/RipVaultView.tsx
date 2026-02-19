@@ -25,6 +25,9 @@ import {
   Sparkles,
   Eye,
   Star,
+  Music,
+  Pencil,
+  Link,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -35,9 +38,10 @@ import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { SemanticSearchBar } from './SemanticSearchBar';
-import { getCoverUrl } from '../utils/awemeType';
+import { getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId } from '../services/resourceService';
+import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 
 // ─── AI Status Badge ──────────────────────────────────
@@ -241,21 +245,26 @@ export const RipVaultView: React.FC = () => {
   // ─── Keyboard shortcuts ────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip shortcuts when user is typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
+
       if (e.key === 'Escape') {
+        if (renameTarget) { setRenameTarget(null); return; }
         if (multiSelectMode) {
           setMultiSelectMode(false);
           setSelectedIds(new Set());
         }
         setSelectedVideo(null);
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0 && !e.metaKey) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0 && !e.metaKey && !isEditing) {
         e.preventDefault();
         handleBatchDelete();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [multiSelectMode, selectedIds, handleBatchDelete]);
+  }, [multiSelectMode, selectedIds, handleBatchDelete, renameTarget]);
 
   useEffect(() => {
     if (multiSelectMode && selectedIds.size === 0) {
@@ -301,6 +310,119 @@ export const RipVaultView: React.FC = () => {
       handleUpdateLibraryItem(selectedVideo.platform_id, { notes: panelNotes });
     }
   };
+
+  // ─── Context menu ────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; video: Video } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Video | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, video: Video) => {
+    setContextMenu({ x: e.clientX, y: e.clientY, video });
+  }, []);
+
+  // Close context menu on click outside or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', handleKey); };
+  }, [contextMenu]);
+
+  const handleCtxOpenNewTab = useCallback(() => {
+    if (!contextMenu) return;
+    const v = contextMenu.video;
+    const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+    window.open(`${teamPath}/player/${v.id}?from=downloads`, '_blank');
+    setContextMenu(null);
+  }, [contextMenu, selectedTeamId]);
+
+  const handleCtxDownloadVideo = useCallback(async () => {
+    if (!contextMenu) return;
+    const v = contextMenu.video;
+    setContextMenu(null);
+    try {
+      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
+      const token = sessionData?.session?.access_token;
+      if (token && v.platform_id) {
+        const url = getDownloadUrl(v.platform_id);
+        const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) throw new Error('Download failed');
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `${v.platform_id}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+    }
+    // Fallback
+    const videoUrl = getVideoUrl(v);
+    if (videoUrl) window.open(videoUrl, '_blank');
+  }, [contextMenu]);
+
+  const handleCtxDownloadAudio = useCallback(() => {
+    if (!contextMenu) return;
+    const v = contextMenu.video;
+    const url = v.music_download_urls?.[0];
+    setContextMenu(null);
+    if (!url || url === '#') return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${v.platform_id || 'audio'}.mp3`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [contextMenu]);
+
+  const handleCtxShare = useCallback(() => {
+    if (!contextMenu) return;
+    const url = contextMenu.video.original_url;
+    setContextMenu(null);
+    if (url) {
+      navigator.clipboard.writeText(url);
+      addToast('Link copied to clipboard', 'success');
+    }
+  }, [contextMenu, addToast]);
+
+  const handleCtxRename = useCallback(() => {
+    if (!contextMenu) return;
+    setRenameTarget(contextMenu.video);
+    setRenameValue(contextMenu.video.title || '');
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  const handleRenameSubmit = useCallback(() => {
+    if (!renameTarget || !renameValue.trim()) { setRenameTarget(null); return; }
+    handleUpdateLibraryItem(renameTarget.platform_id, { title: renameValue.trim() });
+    setRenameTarget(null);
+    addToast('Renamed', 'success');
+  }, [renameTarget, renameValue, handleUpdateLibraryItem, addToast]);
+
+  const handleCtxDelete = useCallback(async () => {
+    if (!contextMenu) return;
+    const v = contextMenu.video;
+    setContextMenu(null);
+    try {
+      await trashResourceByPlatformId(v.platform_id);
+      if (selectedVideo?.platform_id === v.platform_id) setSelectedVideo(null);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(v.platform_id); return next; });
+      addToast(t('resources.movedToTrash'), 'success');
+      loadLibraryData();
+    } catch (err) {
+      console.error('Trash failed:', err);
+      addToast('Failed to remove', 'error');
+    }
+  }, [contextMenu, selectedVideo, addToast, loadLibraryData, t]);
 
   // ─── Helpers ───────────────────────────────────────
   const formatNumber = (num?: number) => {
@@ -435,6 +557,7 @@ export const RipVaultView: React.FC = () => {
                     resourceId={resourceIdMap[item.id]}
                     onClick={(e) => handleVideoClick(item, e)}
                     onDoubleClick={() => handleVideoDoubleClick(item)}
+                    onContextMenu={handleContextMenu}
                     isShared={sharedVideoIds.includes(item.platform_id)}
                     isSelected={selectedVideo?.platform_id === item.platform_id}
                     selectable
@@ -700,23 +823,8 @@ export const RipVaultView: React.FC = () => {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3 pb-6 space-y-2">
-              <button
-                onClick={() => handleNavigateToDetail(selectedVideo)}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
-              >
-                <ExternalLink size={14} />
-                {t('resources.openDetail', 'Open Detail')}
-              </button>
-              <button
-                onClick={() => handleDeleteSingle(selectedVideo)}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-zinc-800 rounded-lg transition-colors"
-              >
-                <Trash2 size={14} />
-                {t('resources.delete', 'Delete')}
-              </button>
-            </div>
+            {/* Bottom padding */}
+            <div className="pb-6" />
           </div>
         </div>
       )}
@@ -752,6 +860,98 @@ export const RipVaultView: React.FC = () => {
             <X size={14} />
             {t('common.cancel', 'Cancel')}
           </button>
+        </div>
+      )}
+
+      {/* ── Context Menu ── */}
+      {contextMenu && (
+        <div
+          className="fixed z-[100] bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden py-1 min-w-[180px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={handleCtxOpenNewTab}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
+            <ExternalLink size={14} className="text-zinc-500" />
+            Open in New Tab
+          </button>
+          <button
+            onClick={handleCtxDownloadVideo}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
+            <Download size={14} className="text-zinc-500" />
+            Download Original
+          </button>
+          {contextMenu.video.music_download_urls?.[0] && contextMenu.video.music_download_urls[0] !== '#' && (
+            <button
+              onClick={handleCtxDownloadAudio}
+              className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+            >
+              <Music size={14} className="text-zinc-500" />
+              Download Audio
+            </button>
+          )}
+          <div className="border-t border-zinc-800 my-1" />
+          <button
+            onClick={handleCtxRename}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
+            <Pencil size={14} className="text-zinc-500" />
+            Rename
+          </button>
+          <button
+            onClick={handleCtxShare}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
+            <Link size={14} className="text-zinc-500" />
+            Copy Link
+          </button>
+          <div className="border-t border-zinc-800 my-1" />
+          <button
+            onClick={handleCtxDelete}
+            className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-900/20 hover:text-red-300 flex items-center gap-2.5 transition-colors"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
+        </div>
+      )}
+
+      {/* ── Rename Dialog ── */}
+      {renameTarget && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center"
+          onClick={() => setRenameTarget(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-white mb-3">Rename</h3>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameTarget(null); }}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 transition-colors"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setRenameTarget(null)}
+                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRenameSubmit}
+                className="px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
