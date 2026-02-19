@@ -100,8 +100,14 @@ export const RipVaultView: React.FC = () => {
   const handleNavigateToDetail = useCallback((item: Video) => {
     if (!item.id) return;
     const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
-    navigate(`${teamPath}/player/${item.id}?from=downloads`);
-  }, [selectedTeamId, navigate]);
+    // Prefer ResourceDetail when resource_id is available
+    const resId = resourceIdMap[item.id];
+    if (resId) {
+      navigate(`${teamPath}/resources/file/${resId}?from=downloads`);
+    } else {
+      navigate(`${teamPath}/player/${item.id}?from=downloads`);
+    }
+  }, [selectedTeamId, navigate, resourceIdMap]);
 
   // ─── Toggle select (multi-select) ─────────────────
   const handleToggleSelect = useCallback((platformId: string, e: React.MouseEvent) => {
