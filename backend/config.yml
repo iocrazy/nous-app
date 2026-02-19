@@ -35,3 +35,7 @@ CORS_CREDENTIALS: true
 APP_PORT: 9999  # Docker 容器内部固定端口
 
 # 注意: DOWNLOAD_PATH 已移至 .env，作为唯一配置源
+
+# Cookie 管理: 平台 cookie 文件目录
+# 文件名对应平台: bilibili.txt, youtube.txt, twitter.txt 等
+COOKIES_DIR: ""

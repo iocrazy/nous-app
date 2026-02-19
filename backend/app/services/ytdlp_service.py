@@ -45,6 +45,7 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
+            *YtdlpService._get_cookie_args(url),
             url,
         ]
 
@@ -108,6 +109,7 @@ class YtdlpService:
             "--newline",
             "--progress-template",
             "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            *YtdlpService._get_cookie_args(url),
             "-o",
             output_template,
             url,
@@ -210,6 +212,7 @@ class YtdlpService:
             "0",  # Best quality
             "--no-playlist",
             "--no-warnings",
+            *YtdlpService._get_cookie_args(url),
             "-o",
             output_template,
             url,
@@ -372,6 +375,26 @@ class YtdlpService:
         except Exception as e:
             logger.warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
         return None
+
+    @staticmethod
+    def _get_cookie_args(url: str) -> list[str]:
+        """Return ['--cookies', '/path/to/platform.txt'] if a cookie file exists for this URL's platform."""
+        from app.core.config import settings
+
+        cookies_dir = settings.COOKIES_DIR
+        if not cookies_dir:
+            return []
+
+        platform, _ = URLRouter.detect_platform(url)
+        if not platform or platform == "unknown":
+            return []
+
+        cookie_file = os.path.join(cookies_dir, f"{platform}.txt")
+        if os.path.isfile(cookie_file):
+            logger.info(f"[yt-dlp] Using cookies for {platform}: {cookie_file}")
+            return ["--cookies", cookie_file]
+
+        return []
 
     @staticmethod
     def _find_downloaded_file(directory: str, prefix: str) -> Optional[str]:
