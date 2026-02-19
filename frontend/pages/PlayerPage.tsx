@@ -4,15 +4,12 @@ import { ArrowLeft, Loader2, FileQuestion } from 'lucide-react';
 import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
-import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl } from '../services/dataService';
-import { useTeamContext } from '../contexts/TeamContext';
-import { useLibrary } from '../hooks/useLibrary';
-
+import { fetchVideoByDisplayId, updateItem, deleteItem } from '../services/dataService';
+import { getVideoUrl } from '../utils/awemeType';
 export function PlayerPage() {
   const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { selectedTeamId } = useTeamContext();
   const from = searchParams.get('from');
 
   const [video, setVideo] = useState<Video | null>(null);
@@ -29,13 +26,6 @@ export function PlayerPage() {
   const handleDurationChange = useCallback((seconds: number) => {
     setDuration(seconds);
   }, []);
-
-  const {
-    collections,
-    selectedVideoCollectionIds,
-    handleToggleVideoCollection,
-    handleCreateCollection,
-  } = useLibrary({ isAuthenticated: true, selectedTeamId });
 
   useEffect(() => {
     if (!displayId) return;
@@ -107,13 +97,13 @@ export function PlayerPage() {
           >
             <ArrowLeft size={24} />
           </button>
-          <h2 className="text-xl font-bold text-white truncate">{video.title || video.desc || 'Media Player'}</h2>
+          <h2 className="text-xl font-bold text-white truncate">{video.title || video.description || 'Media Player'}</h2>
         </div>
         <div className="flex-1 min-h-0 flex gap-4">
           {/* Video Player — main area */}
           <div className="flex-1 min-w-0">
             <VideoPlayer
-              src={getDownloadUrl(video.platform_id)}
+              src={getVideoUrl(video) || ''}
               playerRef={playerRef}
               onTimeUpdate={handleTimeUpdate}
               onDurationChange={handleDurationChange}
@@ -126,10 +116,6 @@ export function PlayerPage() {
               onClose={handleBack}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
-              collections={collections}
-              videoCollectionIds={selectedVideoCollectionIds}
-              onToggleCollection={handleToggleVideoCollection}
-              onCreateCollection={handleCreateCollection}
               hidePreview
             />
           </div>
