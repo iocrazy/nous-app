@@ -561,17 +561,24 @@ def download_ytdlp_task(
 
         repo_class = MediaRepository
 
+        # Create unified progress tracker (same as Douyin task) to write to Redis
+        from app.celery_app import celery_app
+        redis_client = celery_app.backend.client
+
+        tracker = DownloadProgressTrackerWithTaskManager(
+            task_id=task_id,
+            platform_id=platform_id,
+            redis_client=redis_client,
+            task_manager=task_manager,
+            unified_tracker=tracker_unified,
+            unified_task_id=unified_task_id,
+        )
+
         if download_video:
             logger.info(f"[Celery/yt-dlp] Downloading video: {platform_id}")
 
             def on_progress(downloaded: int, total: int, speed: str):
-                task_manager.update_progress(platform_id, downloaded, total, speed)
-                if unified_task_id:
-                    try:
-                        percent = int((downloaded / total) * 100) if total > 0 else 0
-                        run_async(tracker_unified.update_progress(unified_task_id, percent))
-                    except Exception:
-                        pass
+                tracker.update(downloaded, total)
 
             result = run_async(
                 YtdlpService.download_video(
@@ -623,6 +630,7 @@ def download_ytdlp_task(
             )
             results["cover"] = "attempted"
 
+        tracker.complete()
         task_manager.complete_task(platform_id)
         if unified_task_id:
             try:
@@ -670,6 +678,18 @@ def download_ytdlp_task(
         logger.error(
             f"[Celery/yt-dlp] Download task failed: {platform_id}, error: {error_msg}"
         )
+
+        # Write failure to Redis so frontend polling picks it up
+        try:
+            import json as _json
+            from app.celery_app import celery_app as _app
+            _redis = _app.backend.client
+            _redis.setex(
+                f"download_progress:{task_id}", 300,
+                _json.dumps({"percent": 0, "status": "failed", "error": error_msg[:200]}),
+            )
+        except Exception:
+            pass
 
         task_manager.fail_task(platform_id, error_msg)
         if unified_task_id:

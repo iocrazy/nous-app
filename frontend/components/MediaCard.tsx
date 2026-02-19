@@ -34,6 +34,8 @@ interface MediaCardProps {
   downloadPercent?: number;
   downloadSpeed?: string;
   progressStyle?: ProgressStyleType;
+  /** Hide the left-side media preview (used when an external player is already shown) */
+  hidePreview?: boolean;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -88,7 +90,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   downloadStatus,
   downloadPercent = 0,
   downloadSpeed,
-  progressStyle = 'neon'
+  progressStyle = 'neon',
+  hidePreview = false,
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -446,9 +449,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
-      <div className="flex flex-col md:flex-row min-w-0">
+      <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
         {/* Media Preview Section - Left Side */}
-        <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
+        {!hidePreview && <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
           {/* Show download progress when downloading */}
           {downloadStatus && (downloadStatus === 'downloading' || downloadStatus === 'pending') ? (
             <div className="w-full h-full flex items-center justify-center">
@@ -532,7 +535,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 <span className="font-medium text-sm drop-shadow-md">@{data.author || 'Unknown'}</span>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Info Section - Right Side */}
         <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">

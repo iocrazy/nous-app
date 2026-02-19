@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, FileQuestion } from 'lucide-react';
 import { Video } from '../types';
+import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
-import { fetchVideoByDisplayId, updateItem, deleteItem } from '../services/dataService';
+import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl } from '../services/dataService';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useLibrary } from '../hooks/useLibrary';
 
@@ -17,6 +18,17 @@ export function PlayerPage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const playerRef = useRef<HTMLVideoElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const handleTimeUpdate = useCallback((seconds: number) => {
+    setCurrentTime(seconds);
+  }, []);
+
+  const handleDurationChange = useCallback((seconds: number) => {
+    setDuration(seconds);
+  }, []);
 
   const {
     collections,
@@ -95,19 +107,32 @@ export function PlayerPage() {
           >
             <ArrowLeft size={24} />
           </button>
-          <h2 className="text-xl font-bold text-white">Media Details</h2>
+          <h2 className="text-xl font-bold text-white truncate">{video.title || video.desc || 'Media Player'}</h2>
         </div>
-        <div className="flex-1 min-h-0">
-          <VideoDetailPanel
-            video={video}
-            onClose={handleBack}
-            onUpdate={handleUpdate}
-            onDelete={handleDelete}
-            collections={collections}
-            videoCollectionIds={selectedVideoCollectionIds}
-            onToggleCollection={handleToggleVideoCollection}
-            onCreateCollection={handleCreateCollection}
-          />
+        <div className="flex-1 min-h-0 flex gap-4">
+          {/* Video Player — main area */}
+          <div className="flex-1 min-w-0">
+            <VideoPlayer
+              src={getDownloadUrl(video.platform_id)}
+              playerRef={playerRef}
+              onTimeUpdate={handleTimeUpdate}
+              onDurationChange={handleDurationChange}
+            />
+          </div>
+          {/* Detail Panel — right sidebar */}
+          <div className="w-[380px] shrink-0 overflow-y-auto custom-scrollbar">
+            <VideoDetailPanel
+              video={video}
+              onClose={handleBack}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+              collections={collections}
+              videoCollectionIds={selectedVideoCollectionIds}
+              onToggleCollection={handleToggleVideoCollection}
+              onCreateCollection={handleCreateCollection}
+              hidePreview
+            />
+          </div>
         </div>
       </div>
     </div>
