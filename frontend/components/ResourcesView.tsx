@@ -496,6 +496,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   useEffect(() => {
     if (sidebarView === 'downloads') {
+      setSelectedIds(new Set());
       setLoading(true);
       loadDownloadedResources().finally(() => setLoading(false));
     }
@@ -2595,7 +2596,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       )}
 
       {/* ── Batch Selection Toolbar ── */}
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && !isDownloadsView && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
           <span className="text-sm text-zinc-300 font-medium">
             {t('resources.selected', { count: selectedIds.size })}
