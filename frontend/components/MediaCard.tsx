@@ -12,7 +12,7 @@ import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
-import { TagSelector } from './TagSelector';
+import { MediaTagPicker } from './MediaTagPicker';
 import { useToast } from './Toast';
 import {
   triggerTranscription, getTranscript,
@@ -607,10 +607,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           </div>
 
-          {/* Tags - Editable via TagSelector */}
+          {/* Tags - Editable via UnifiedTagPicker */}
           <div className="mb-4">
             {data.id ? (
-              <TagSelector videoId={data.id} initialTagNames={data.tags || []} />
+              <MediaTagPicker mediaId={data.id} initialTagNames={data.tags || []} />
             ) : (
               // Fallback for videos without database ID (e.g., just parsed)
               data.tags && data.tags.length > 0 && (
