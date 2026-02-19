@@ -9,7 +9,7 @@ import {
   FileText, Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
-import { TagSelector } from './TagSelector';
+import { MediaTagPicker } from './MediaTagPicker';
 
 interface LibraryTableProps {
   data: Video[];
@@ -672,13 +672,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
           className="animate-in fade-in slide-in-from-top-2 duration-200"
         >
           <div className="w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
-            <TagSelector
-              videoId={tagSelectorVideoId}
-              inline={true}
-              onTagsChange={() => {
-                // Tags will be updated via Realtime subscription in App.tsx
-              }}
-            />
+            <MediaTagPicker mediaId={String(tagSelectorVideoId)} />
           </div>
         </div>,
         document.body
