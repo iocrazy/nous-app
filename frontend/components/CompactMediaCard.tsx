@@ -289,12 +289,18 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </>
         )}
 
-        {/* Platform Badge */}
-        {!showingAnyScrub && data.source_platform && data.source_platform !== 'douyin' && (
+        {/* Platform Logo Badge */}
+        {!showingAnyScrub && data.source_platform && (
           <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
-            <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
-              {getPlatformLabel(data.source_platform)}
-            </span>
+            {['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(data.source_platform) ? (
+              <div className="bg-black/60 backdrop-blur-sm p-1 rounded-full">
+                <img src={`/icons/${data.source_platform}.svg`} alt="" className="w-4 h-4" />
+              </div>
+            ) : (
+              <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
+                {getPlatformLabel(data.source_platform)}
+              </span>
+            )}
           </div>
         )}
 
