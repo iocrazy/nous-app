@@ -107,7 +107,7 @@ class YtdlpService:
             "--no-warnings",
             "--newline",
             "--progress-template",
-            "download:%(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
             "-o",
             output_template,
             url,
@@ -131,15 +131,24 @@ class YtdlpService:
                         break
                     decoded = line.decode("utf-8", errors="replace").strip()
                     if decoded.startswith("download:") and progress_callback:
+                        # Format: "download:<percent_str> <downloaded_bytes> <total_bytes> <speed_str>"
                         parts = decoded[len("download:") :].split()
-                        if len(parts) >= 2:
+                        if parts:
                             try:
-                                downloaded = int(float(parts[0]))
-                                total = int(float(parts[1]))
-                                speed = parts[2] if len(parts) > 2 else "0 B/s"
+                                # Try byte-level progress first (parts[1]=downloaded, parts[2]=total)
+                                downloaded = int(float(parts[1]))
+                                total = int(float(parts[2]))
+                                speed = parts[3] if len(parts) > 3 else "0 B/s"
                                 progress_callback(downloaded, total, speed)
                             except (ValueError, IndexError):
-                                pass
+                                # Fallback: parse percent string (e.g. "45.2%")
+                                # Needed for DASH streams where byte totals are N/A
+                                try:
+                                    pct = float(parts[0].rstrip("%"))
+                                    speed = parts[3] if len(parts) > 3 else "0 B/s"
+                                    progress_callback(int(pct * 100), 10000, speed)
+                                except (ValueError, IndexError):
+                                    pass
 
             async def read_stderr():
                 while True:
