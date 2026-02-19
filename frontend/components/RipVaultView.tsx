@@ -660,31 +660,6 @@ export const RipVaultView: React.FC = () => {
               )}
             </div>
 
-            {/* Engagement */}
-            <div className="px-4 mt-4">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-                Engagement
-              </h4>
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-rose-500/5 border border-rose-500/10">
-                  <Heart size={12} className="text-rose-400 shrink-0" />
-                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.like_count)}</span>
-                </div>
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-sky-500/5 border border-sky-500/10">
-                  <MessageCircle size={12} className="text-sky-400 shrink-0" />
-                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.comment_count)}</span>
-                </div>
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
-                  <Share2 size={12} className="text-emerald-400 shrink-0" />
-                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.share_count)}</span>
-                </div>
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
-                  <Bookmark size={12} className="text-amber-400 shrink-0" />
-                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.favorite_count)}</span>
-                </div>
-              </div>
-            </div>
-
             {/* Tags */}
             {selectedVideo.tags && selectedVideo.tags.length > 0 && (
               <div className="px-4 mt-4">
