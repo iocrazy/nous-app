@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
 import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
-import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { isVideoType, getCoverUrl } from '../utils/awemeType';
+import { getPreviewSpriteUrl } from '../services/resourceService';
 
 const getPlatformLabel = (platform?: string): string => {
   if (!platform) return '';
@@ -26,6 +27,7 @@ interface CompactMediaCardProps {
   isChecked?: boolean;
   onToggleSelect?: (e: React.MouseEvent) => void;
   forceShowCheckbox?: boolean;
+  resourceId?: string;
 }
 
 // Helper to get AI status icon styling
@@ -58,12 +60,11 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [imageError, setImageError] = useState(false);
-  
+
   const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
   const isAlbum = !isVideo && images.length > 1;
@@ -73,8 +74,69 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
     ? images[currentImageIndex]
     : (getCoverUrl(data) || "https://picsum.photos/400/600");
 
-  // 视频 URL: 优先使用 download_path
-  const videoUrl = getVideoUrl(data);
+  // --- Sprite hover scrub (when resourceId available) ---
+  const hasSpriteSupport = isVideo && !!resourceId;
+  const [isHovering, setIsHovering] = useState(false);
+  const [spriteLoaded, setSpriteLoaded] = useState(false);
+  const [spriteError, setSpriteError] = useState(false);
+  const [scrubPercent, setScrubPercent] = useState(0);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const spriteImgRef = useRef<HTMLImageElement | null>(null);
+
+  const spriteUrl = useMemo(() => {
+    if (hasSpriteSupport) return getPreviewSpriteUrl(resourceId!);
+    return null;
+  }, [hasSpriteSupport, resourceId]);
+
+  const handleThumbMouseEnter = useCallback(() => {
+    if (!hasSpriteSupport || spriteError) return;
+    setIsHovering(true);
+    if (!spriteImgRef.current && spriteUrl) {
+      const img = new window.Image();
+      img.onload = () => { spriteImgRef.current = img; setSpriteLoaded(true); };
+      img.onerror = () => { setSpriteError(true); };
+      img.src = spriteUrl;
+    }
+  }, [hasSpriteSupport, spriteUrl, spriteError]);
+
+  const handleThumbMouseLeave = useCallback(() => {
+    setIsHovering(false);
+    setScrubPercent(0);
+  }, []);
+
+  const handleThumbMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isHovering || !spriteLoaded || !thumbRef.current) return;
+    const rect = thumbRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    setScrubPercent(x / rect.width);
+  }, [isHovering, spriteLoaded]);
+
+  const spriteFrame = useMemo(() => {
+    if (!spriteLoaded || !spriteImgRef.current || !thumbRef.current) return null;
+    const FRAME_COUNT = 10;
+    const img = spriteImgRef.current;
+    const frameW = img.naturalWidth / FRAME_COUNT;
+    const frameH = img.naturalHeight;
+    const cW = thumbRef.current.offsetWidth;
+    const cH = thumbRef.current.offsetHeight;
+    if (!frameW || !frameH || !cW || !cH) return null;
+    const scale = Math.min(cW / frameW, cH / frameH);
+    const rfw = frameW * scale;
+    const rfh = frameH * scale;
+    const frameIndex = Math.min(Math.floor(scrubPercent * FRAME_COUNT), FRAME_COUNT - 1);
+    return {
+      style: {
+        width: `${rfw}px`,
+        height: `${rfh}px`,
+        backgroundImage: `url(${spriteUrl})`,
+        backgroundSize: `${rfw * FRAME_COUNT}px ${rfh}px`,
+        backgroundPosition: `${-frameIndex * rfw}px 0px`,
+        backgroundRepeat: 'no-repeat',
+      } as React.CSSProperties,
+    };
+  }, [spriteLoaded, scrubPercent, spriteUrl]);
+
+  const showingSpriteOverlay = isHovering && spriteLoaded && spriteFrame;
 
   const formatNumber = (num?: number) => {
     if (!num) return '0';
@@ -131,102 +193,109 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </button>
         </div>
       )}
-      {/* Thumbnail Container - Handles Hover Playback & Sliding */}
+      {/* Thumbnail Container - Sprite Scrub on Hover */}
       <div
+        ref={thumbRef}
         className="relative w-full overflow-hidden bg-black aspect-[3/4] cursor-pointer"
         onClick={onClick}
-        onMouseEnter={() => isVideo && setIsPlaying(true)}
-        onMouseLeave={() => isVideo && setIsPlaying(false)}
+        onMouseEnter={hasSpriteSupport ? handleThumbMouseEnter : undefined}
+        onMouseLeave={hasSpriteSupport ? handleThumbMouseLeave : undefined}
+        onMouseMove={hasSpriteSupport ? handleThumbMouseMove : undefined}
       >
-        {isPlaying ? (
-            <video
-                src={videoUrl}
-                className="bg-black"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                muted
-                loop
-                autoPlay
-                playsInline
-            />
+        {/* Cover image (hidden when sprite overlay active) */}
+        {imageError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800">
+            <ImageIcon size={32} className="text-zinc-600 mb-2" />
+            <span className="text-xs text-zinc-500">Image unavailable</span>
+          </div>
         ) : (
-            <>
-                {imageError ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800">
-                    <ImageIcon size={32} className="text-zinc-600 mb-2" />
-                    <span className="text-xs text-zinc-500">Image unavailable</span>
-                  </div>
-                ) : (
-                  <img
-                    src={coverUrl}
-                    alt={data.title}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block"
-                    referrerPolicy="no-referrer"
-                    onError={() => setImageError(true)}
-                  />
-                )}
-                
-                {/* Carousel Controls for Albums */}
-                {isAlbum && (
-                  <>
-                    <button 
-                      onClick={(e) => handleSlide(e, 'left')}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-20"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button 
-                      onClick={(e) => handleSlide(e, 'right')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-20"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                    {/* Index Indicator */}
-                    <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium z-10 pointer-events-none">
-                      {currentImageIndex + 1}/{images.length}
-                    </div>
-                  </>
-                )}
-                
-                {/* Platform Badge */}
-                {data.source_platform && data.source_platform !== 'douyin' && (
-                  <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
-                    <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
-                      {getPlatformLabel(data.source_platform)}
-                    </span>
-                  </div>
-                )}
+          <img
+            src={coverUrl}
+            alt={data.title}
+            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingSpriteOverlay ? 'invisible' : ''}`}
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+          />
+        )}
 
-                {/* Type Indicator (Right side) */}
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
-                  {isShared && (
-                    <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
-                      <Users size={12} />
-                    </div>
-                  )}
-                  <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
-                    {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
-                  </div>
-                </div>
+        {/* Sprite scrub overlay */}
+        {showingSpriteOverlay && (
+          <div className="absolute inset-0 bg-black flex items-center justify-center">
+            <div style={spriteFrame.style} />
+          </div>
+        )}
+        {/* Scrub progress bar */}
+        {showingSpriteOverlay && (
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-black/30 z-20">
+            <div className="h-full bg-white/80 transition-none" style={{ width: `${scrubPercent * 100}%` }} />
+          </div>
+        )}
 
-                {/* Play Overlay (Desktop Hover - Only for Video) */}
-                {isVideo && (
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 z-10 pointer-events-none">
-                      <div className="bg-white/20 backdrop-blur-md p-2 rounded-full">
-                          <Play size={20} className="text-white fill-white" />
-                      </div>
-                    </div>
-                )}
+        {/* Carousel Controls for Albums */}
+        {isAlbum && !showingSpriteOverlay && (
+          <>
+            <button
+              onClick={(e) => handleSlide(e, 'left')}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-20"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={(e) => handleSlide(e, 'right')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-20"
+            >
+              <ChevronRight size={16} />
+            </button>
+            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium z-10 pointer-events-none">
+              {currentImageIndex + 1}/{images.length}
+            </div>
+          </>
+        )}
 
-                {/* Gradient Overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60 pointer-events-none" />
-                
-                {/* Title Overlay */}
-                <div className="absolute bottom-0 left-0 right-0 p-3 z-10 pointer-events-none">
-                  <h3 className="text-[12px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
-                    {data.title || 'Untitled Media'}
-                  </h3>
-                </div>
-            </>
+        {/* Platform Badge */}
+        {!showingSpriteOverlay && data.source_platform && data.source_platform !== 'douyin' && (
+          <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
+            <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
+              {getPlatformLabel(data.source_platform)}
+            </span>
+          </div>
+        )}
+
+        {/* Type Indicator (Right side) */}
+        {!showingSpriteOverlay && (
+          <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
+            {isShared && (
+              <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
+                <Users size={12} />
+              </div>
+            )}
+            <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
+              {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
+            </div>
+          </div>
+        )}
+
+        {/* Play Overlay (Desktop Hover - Only for Video without sprite) */}
+        {isVideo && !showingSpriteOverlay && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 z-10 pointer-events-none">
+            <div className="bg-white/20 backdrop-blur-md p-2 rounded-full">
+              <Play size={20} className="text-white fill-white" />
+            </div>
+          </div>
+        )}
+
+        {/* Gradient Overlay */}
+        {!showingSpriteOverlay && (
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60 pointer-events-none" />
+        )}
+
+        {/* Title Overlay */}
+        {!showingSpriteOverlay && (
+          <div className="absolute bottom-0 left-0 right-0 p-3 z-10 pointer-events-none">
+            <h3 className="text-[12px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
+              {data.title || 'Untitled Media'}
+            </h3>
+          </div>
         )}
       </div>
 

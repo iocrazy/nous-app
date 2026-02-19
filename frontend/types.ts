@@ -69,6 +69,11 @@ export interface ParsedMedia {
   notes?: string;
   tags?: string[];
 
+  // AI Processing Status
+  transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+
   // AI Generated Content (legacy)
   ai_extract_text?: string;
   ai_rewrite_text?: string;
@@ -81,6 +86,9 @@ export interface ParsedMedia {
 
   // Summary preview (joined from media_summaries)
   summary_text?: string;
+
+  // Resource linkage (joined from resources table via media_id)
+  resource_id?: string;
 
   // Timestamps
   created_at?: string;
