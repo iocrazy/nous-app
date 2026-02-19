@@ -74,6 +74,7 @@ import {
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
+import { createTag } from '../services/unifiedTagService';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
@@ -957,6 +958,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedResourceTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
     } catch { /* ignore */ }
   }, [selectedResource]);
+
+  const handleCreateTag = useCallback(async (name: string, color: string): Promise<Tag | null> => {
+    try {
+      const tag = await createTag({ name, color, type: 'user' });
+      setAllTags(prev => [...prev, tag]);
+      return tag;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
     if (!selectedResource?.resource?.id) return;
@@ -2560,12 +2571,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           <ResourceInfoPanel
             resource={selectedResource.resource}
             allTags={allTags}
-            assignedTags={selectedResourceTags}
+            assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
             folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
             readOnly={isRecycleView}
             onClose={() => setSelectedResource(null)}
             onAddTag={handleAddTag}
             onRemoveTag={handleRemoveTag}
+            onCreate={handleCreateTag}
             onUpdate={handleResourceUpdate}
           />
         </div>
