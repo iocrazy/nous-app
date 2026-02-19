@@ -448,7 +448,26 @@
     "applyToAll": "Apply to all duplicates",
     "hashingFile": "Checking for duplicates...",
     "linkedExisting": "Linked to existing file",
-    "linkedExistingCount": "Linked {{count}} existing files"
+    "linkedExistingCount": "Linked {{count}} existing files",
+    "infoPanel": {
+      "title": "Resource Info",
+      "notes": "Notes",
+      "notesPlaceholder": "Add notes...",
+      "urlPlaceholder": "http://",
+      "folders": "Folders",
+      "properties": "Properties",
+      "rating": "Rating",
+      "duration": "Duration",
+      "size": "Size",
+      "type": "Type",
+      "resolution": "Resolution",
+      "version": "Version",
+      "source": "Source",
+      "created": "Created",
+      "modified": "Modified",
+      "sourceWeb": "Web Download",
+      "sourceUpload": "Upload"
+    }
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

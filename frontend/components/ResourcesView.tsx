@@ -69,6 +69,7 @@ import {
   uploadNewVersion,
   checkDuplicate,
   linkExistingResource,
+  updateResource,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -955,6 +956,27 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       await removeResourceTag(selectedResource.resource.id, tagId);
       setSelectedResourceTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
     } catch { /* ignore */ }
+  }, [selectedResource]);
+
+  const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
+    if (!selectedResource?.resource?.id) return;
+    const rid = String(selectedResource.resource.id);
+    try {
+      await updateResource(rid, data as Record<string, unknown>);
+      // Update selected resource panel
+      setSelectedResource(prev => prev ? {
+        ...prev,
+        resource: { ...prev.resource, ...data } as Resource,
+      } : null);
+      // Sync the main resources list so re-selecting shows fresh data
+      setResources(prev => prev.map(item =>
+        String(item.resource?.id) === rid
+          ? { ...item, resource: { ...item.resource!, ...data } as Resource }
+          : item
+      ));
+    } catch (err) {
+      console.error('Failed to update resource:', err);
+    }
   }, [selectedResource]);
 
   // ─── Context menu handlers ─────────────────────────
@@ -2539,9 +2561,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             resource={selectedResource.resource}
             allTags={allTags}
             assignedTags={selectedResourceTags}
+            folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
             onClose={() => setSelectedResource(null)}
             onAddTag={handleAddTag}
             onRemoveTag={handleRemoveTag}
+            onUpdate={handleResourceUpdate}
           />
         </div>
       )}

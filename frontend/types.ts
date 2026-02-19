@@ -296,6 +296,9 @@ export interface Resource {
   thumbnail_path: string | null;
   cover_image_path: string | null;
   current_version: number;
+  notes: string | null;
+  url: string | null;
+  rating: number; // 0-5
   // AI Processing Status (moved from ParsedMedia to Resource)
   transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
