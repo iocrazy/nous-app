@@ -1,6 +1,9 @@
 import { getSupabaseClient } from '../supabaseClient';
 import { Collection } from '../types';
 
+// NOTE: media_collections table has been dropped (076 migration).
+// Collection-media associations are now managed via resource_items + folders.
+// The collections table itself still exists for metadata.
 export const fetchMyCollections = async (): Promise<Collection[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -17,7 +20,7 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
 
   let query = supabase
     .from('collections')
-    .select('*, media_collections(count)')
+    .select('*')
     .order('created_at', { ascending: false });
 
   if (teamIds.length > 0) {
@@ -29,45 +32,14 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
   const { data, error } = await query;
   if (error) throw error;
 
-  // Get thumbnail for each collection (first video's cover)
-  const collectionsWithThumbnails = await Promise.all(
-    (data || []).map(async (c) => {
-      let thumbnail_url: string | undefined;
-
-      // Get first video in collection
-      const { data: firstVideo } = await supabase
-        .from('media_collections')
-        .select('media_id')
-        .eq('collection_id', c.id)
-        .order('added_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (firstVideo) {
-        // Get video's cover URL
-        const { data: video } = await supabase
-          .from('parsed_media')
-          .select('cover_download_path, dynamic_cover_url')
-          .eq('id', firstVideo.media_id)
-          .maybeSingle();
-
-        if (video) {
-          thumbnail_url = video.cover_download_path || video.dynamic_cover_url || undefined;
-        }
-      }
-
-      return {
-        ...c,
-        id: String(c.id),
-        media_count: c.media_collections?.[0]?.count || 0,
-        video_count: c.media_collections?.[0]?.count || 0,
-        is_shared: !!c.team_id,
-        thumbnail_url,
-      };
-    })
-  );
-
-  return collectionsWithThumbnails;
+  return (data || []).map((c) => ({
+    ...c,
+    id: String(c.id),
+    media_count: 0,
+    video_count: 0,
+    is_shared: !!c.team_id,
+    thumbnail_url: undefined,
+  }));
 };
 
 export const createCollection = async (name: string, teamId?: string): Promise<Collection> => {
@@ -103,73 +75,18 @@ export const deleteCollection = async (collectionId: string): Promise<void> => {
   if (error) throw error;
 };
 
-export const addVideoToCollection = async (collectionId: string, videoAwemeId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  // Get media_id from platform_id
-  const { data: video } = await supabase
-    .from('parsed_media')
-    .select('id')
-    .eq('platform_id', videoAwemeId)
-    .maybeSingle();
-
-  if (!video) throw new Error('Video not found');
-
-  const { error } = await supabase
-    .from('media_collections')
-    .insert({
-      collection_id: parseInt(collectionId),
-      media_id: video.id,
-      added_by: user.id,
-    });
-
-  if (error && error.code !== '23505') throw error;
+// NOTE: media_collections table dropped. This is a no-op stub until
+// collection-video association is rebuilt on resource_items.
+export const addVideoToCollection = async (_collectionId: string, _videoAwemeId: string): Promise<void> => {
+  console.warn('addVideoToCollection: media_collections table has been dropped, operation skipped');
 };
 
-export const removeVideoFromCollection = async (collectionId: string, videoAwemeId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase not configured');
-
-  // Get media_id from platform_id
-  const { data: video } = await supabase
-    .from('parsed_media')
-    .select('id')
-    .eq('platform_id', videoAwemeId)
-    .maybeSingle();
-
-  if (!video) throw new Error('Video not found');
-
-  const { error } = await supabase
-    .from('media_collections')
-    .delete()
-    .eq('collection_id', parseInt(collectionId))
-    .eq('media_id', video.id);
-
-  if (error) throw error;
+// NOTE: media_collections table dropped. This is a no-op stub.
+export const removeVideoFromCollection = async (_collectionId: string, _videoAwemeId: string): Promise<void> => {
+  console.warn('removeVideoFromCollection: media_collections table has been dropped, operation skipped');
 };
 
-export const fetchVideoCollections = async (videoAwemeId: string): Promise<string[]> => {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
-
-  // Get media_id from platform_id
-  const { data: video } = await supabase
-    .from('parsed_media')
-    .select('id')
-    .eq('platform_id', videoAwemeId)
-    .maybeSingle();
-
-  if (!video) return [];
-
-  const { data, error } = await supabase
-    .from('media_collections')
-    .select('collection_id')
-    .eq('media_id', video.id);
-
-  if (error) throw error;
-  return (data || []).map(cv => String(cv.collection_id));
+// NOTE: media_collections table dropped. Returns empty until rebuilt on resource_items.
+export const fetchVideoCollections = async (_videoAwemeId: string): Promise<string[]> => {
+  return [];
 };
