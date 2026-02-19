@@ -2562,6 +2562,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             allTags={allTags}
             assignedTags={selectedResourceTags}
             folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
+            readOnly={isRecycleView}
             onClose={() => setSelectedResource(null)}
             onAddTag={handleAddTag}
             onRemoveTag={handleRemoveTag}

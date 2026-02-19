@@ -9,6 +9,7 @@ interface ResourceInfoPanelProps {
   allTags: Tag[];
   assignedTags: Array<{ tag: Tag }>;
   folderName?: string | null;
+  readOnly?: boolean;
   onClose: () => void;
   onAddTag: (tagId: string) => void;
   onRemoveTag: (tagId: string) => void;
@@ -97,9 +98,10 @@ const TagsSection: React.FC<{
   assignedTags: Array<{ tag: Tag }>;
   allTags: Tag[];
   assignedTagIds: Set<string>;
+  readOnly?: boolean;
   onAddTag: (tagId: string) => void;
   onRemoveTag: (tagId: string) => void;
-}> = ({ assignedTags, allTags, assignedTagIds, onAddTag, onRemoveTag }) => {
+}> = ({ assignedTags, allTags, assignedTagIds, readOnly, onAddTag, onRemoveTag }) => {
   const { t } = useTranslation();
   const [showDropdown, setShowDropdown] = useState(false);
   const [search, setSearch] = useState('');
@@ -137,17 +139,19 @@ const TagsSection: React.FC<{
             }}
           >
             {item.tag.name}
-            <button
-              onClick={() => onRemoveTag(item.tag.id)}
-              className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
-              title="Remove"
-            >
-              <X size={10} />
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => onRemoveTag(item.tag.id)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+                title="Remove"
+              >
+                <X size={10} />
+              </button>
+            )}
           </span>
         ))}
         {/* Add tag button + dropdown */}
-        <div className="relative" ref={dropdownRef}>
+        {!readOnly && <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => { setShowDropdown(!showDropdown); setSearch(''); }}
             className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
@@ -187,7 +191,7 @@ const TagsSection: React.FC<{
               </div>
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -200,6 +204,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   allTags,
   assignedTags,
   folderName,
+  readOnly = false,
   onClose,
   onAddTag,
   onRemoveTag,
@@ -308,7 +313,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
       {/* Editable Filename */}
       <div className="px-4 mt-4">
-        {editingName ? (
+        {!readOnly && editingName ? (
           <input
             ref={nameInputRef}
             value={nameValue}
@@ -321,6 +326,8 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
             className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
             autoFocus
           />
+        ) : readOnly ? (
+          <h4 className="text-sm font-medium text-white break-words leading-snug">{resource.filename}</h4>
         ) : (
           <div
             className="group flex items-start gap-1.5 cursor-pointer"
@@ -333,37 +340,55 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       </div>
 
       {/* Notes */}
-      <div className="px-4 mt-3">
-        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
-          {t('resources.infoPanel.notes')}
-        </h4>
-        <textarea
-          value={notesValue}
-          onChange={(e) => setNotesValue(e.target.value)}
-          onBlur={commitNotes}
-          placeholder={t('resources.infoPanel.notesPlaceholder')}
-          rows={3}
-          className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
-        />
-      </div>
+      {!readOnly && (
+        <div className="px-4 mt-3">
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+            {t('resources.infoPanel.notes')}
+          </h4>
+          <textarea
+            value={notesValue}
+            onChange={(e) => setNotesValue(e.target.value)}
+            onBlur={commitNotes}
+            placeholder={t('resources.infoPanel.notesPlaceholder')}
+            rows={3}
+            className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+          />
+        </div>
+      )}
+      {readOnly && notesValue && (
+        <div className="px-4 mt-3">
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+            {t('resources.infoPanel.notes')}
+          </h4>
+          <p className="text-xs text-zinc-400 whitespace-pre-wrap">{notesValue}</p>
+        </div>
+      )}
 
       {/* URL */}
-      <div className="px-4 mt-2">
-        <input
-          value={urlValue}
-          onChange={(e) => setUrlValue(e.target.value)}
-          onBlur={commitUrl}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          placeholder={t('resources.infoPanel.urlPlaceholder')}
-          className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
-        />
-      </div>
+      {!readOnly && (
+        <div className="px-4 mt-2">
+          <input
+            value={urlValue}
+            onChange={(e) => setUrlValue(e.target.value)}
+            onBlur={commitUrl}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            placeholder={t('resources.infoPanel.urlPlaceholder')}
+            className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+          />
+        </div>
+      )}
+      {readOnly && urlValue && (
+        <div className="px-4 mt-2">
+          <a href={urlValue} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:underline break-all">{urlValue}</a>
+        </div>
+      )}
 
       {/* Tags */}
       <TagsSection
         assignedTags={assignedTags}
         allTags={allTags}
         assignedTagIds={assignedTagIds}
+        readOnly={readOnly}
         onAddTag={onAddTag}
         onRemoveTag={onRemoveTag}
       />
@@ -388,7 +413,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         </h4>
         <div className="space-y-0">
           <InfoRow label={t('resources.infoPanel.rating')}>
-            <StarRating value={resource.rating ?? 0} onChange={handleRating} />
+            <StarRating value={resource.rating ?? 0} onChange={readOnly ? () => {} : handleRating} />
           </InfoRow>
           {isMedia && resource.duration_seconds && (
             <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} />
