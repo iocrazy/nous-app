@@ -18,7 +18,6 @@ import {
   Layers,
   FileQuestion,
   PanelLeft,
-  Plus,
   RefreshCw,
   Search,
   Share2,
@@ -40,6 +39,8 @@ import {
   retryTranscode,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
+import { createTag } from '../services/unifiedTagService';
+import { UnifiedTagPicker } from './UnifiedTagPicker';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { ShareModal } from './ShareModal';
@@ -228,9 +229,6 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
   // Inspector state
   const [notes, setNotes] = useState('');
-  const [showTagDropdown, setShowTagDropdown] = useState(false);
-  const [tagSearch, setTagSearch] = useState('');
-  const tagDropdownRef = useRef<HTMLDivElement>(null);
 
   // Review state
   const [rightTab, setRightTab] = useState<'info' | 'review'>('info');
@@ -297,13 +295,9 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   // Reset notes when file changes
   useEffect(() => { setNotes(''); }, [resourceId]);
 
-  // Close tag dropdown on outside click
+  // Close version dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
-        setShowTagDropdown(false);
-        setTagSearch('');
-      }
       if (versionDropdownRef.current && !versionDropdownRef.current.contains(e.target as Node)) {
         setShowVersionDropdown(false);
       }
@@ -420,8 +414,6 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       await addResourceTag(resourceId, tagId);
       const updated = await fetchResourceTags(resourceId);
       setAssignedTags(updated);
-      setShowTagDropdown(false);
-      setTagSearch('');
     } catch { /* ignore */ }
   }, [resourceId]);
 
@@ -499,12 +491,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     ? versions.find((v) => v.id === selectedVersionId)
     : versions.find((v) => v.version_number === resource.current_version);
   const transcodeStatus = viewingVersion?.transcode_status;
-  const assignedTagIds = new Set(assignedTags.map((t) => t.tag?.id).filter(Boolean));
   const fileExt = getFileExtension(resource.filename);
-  const availableTags = allTags.filter((tag) => !assignedTagIds.has(tag.id));
-  const filteredAvailableTags = tagSearch
-    ? availableTags.filter((tag) => tag.name.toLowerCase().includes(tagSearch.toLowerCase()))
-    : availableTags;
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
@@ -915,74 +902,21 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
             <CompactInfoRow label={t('resources.mimeType')} value={resource.mime_type} />
           </div>
 
-          {/* Section 3 — Tags (Eagle style) */}
-          <div className="px-4 py-3 border-t border-zinc-800">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              {t('resources.tags')}
-            </h4>
-            <div className="flex flex-wrap gap-1.5">
-              {assignedTags.map((item) => item.tag && (
-                <span
-                  key={item.tag.id}
-                  className="group inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full transition-opacity"
-                  style={{
-                    backgroundColor: (item.tag.color || '#6366f1') + '20',
-                    color: item.tag.color || '#6366f1',
-                  }}
-                >
-                  {item.tag.name}
-                  <button
-                    onClick={() => handleRemoveTag(item.tag.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
-                    title="Remove"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-              {/* Add tag button */}
-              <div className="relative" ref={tagDropdownRef}>
-                <button
-                  onClick={() => { setShowTagDropdown(!showTagDropdown); setTagSearch(''); }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
-                >
-                  <Plus size={10} />
-                  {t('resources.addTag')}
-                </button>
-                {showTagDropdown && (
-                  <div className="absolute left-0 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 py-1">
-                    <div className="px-2 pb-1">
-                      <input
-                        type="text"
-                        value={tagSearch}
-                        onChange={(e) => setTagSearch(e.target.value)}
-                        placeholder="Search tags..."
-                        className="w-full bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="max-h-32 overflow-y-auto">
-                      {filteredAvailableTags.map((tag) => (
-                        <button
-                          key={tag.id}
-                          onClick={() => handleAddTag(tag.id)}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-                        >
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: tag.color || '#6366f1' }}
-                          />
-                          <span className="truncate">{tag.name}</span>
-                        </button>
-                      ))}
-                      {filteredAvailableTags.length === 0 && (
-                        <p className="text-xs text-zinc-600 text-center py-2">{t('resources.noTagsAvailable')}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+          {/* Section 3 — Tags */}
+          <div className="border-t border-zinc-800">
+            <UnifiedTagPicker
+              assignedTags={assignedTags.map(item => item.tag).filter((t): t is Tag => !!t)}
+              allTags={allTags}
+              onAdd={handleAddTag}
+              onRemove={handleRemoveTag}
+              onCreate={async (name, color) => {
+                try {
+                  const tag = await createTag({ name, color, type: 'user' });
+                  setAllTags(prev => [...prev, tag]);
+                  return tag;
+                } catch { return null; }
+              }}
+            />
           </div>
 
           {/* Section 4 — Notes */}
