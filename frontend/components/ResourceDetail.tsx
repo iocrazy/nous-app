@@ -29,6 +29,9 @@ import {
   Tag as TagIcon,
   Check,
   Copy,
+  Pencil,
+  Star,
+  FolderOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -45,6 +48,7 @@ import {
   fetchResources,
   getResourceCoverUrl,
   retryTranscode,
+  updateResource,
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
 import { createTag } from '../services/unifiedTagService';
@@ -236,17 +240,42 @@ const FilePreview: React.FC<{
   );
 };
 
-// ─── CompactInfoRow ─────────────────────────────────────
+// ─── InfoRow (matches ResourceInfoPanel) ────────────────
 
-const CompactInfoRow: React.FC<{
-  label: string;
-  value: string | null | undefined;
-}> = ({ label, value }) => {
-  if (!value) return null;
+const InfoRow = ({ label, value, children }: { label: string; value?: string | null | undefined; children?: React.ReactNode }) => {
+  if (!value && !children) return null;
   return (
     <div className="flex justify-between items-center py-1.5">
       <span className="text-xs text-zinc-500">{label}</span>
-      <span className="text-xs text-zinc-300 text-right">{value}</span>
+      {children || <span className="text-xs text-zinc-300 text-right">{value}</span>}
+    </div>
+  );
+};
+
+// ─── Star Rating ────────────────────────────────────────
+
+const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = ({ value, onChange }) => {
+  const [hover, setHover] = useState(0);
+
+  return (
+    <div className="flex items-center gap-0.5" onMouseLeave={() => setHover(0)}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          className="p-0 transition-colors"
+          onMouseEnter={() => setHover(star)}
+          onClick={() => onChange(star === value ? 0 : star)}
+        >
+          <Star
+            size={14}
+            className={
+              (hover || value) >= star
+                ? 'text-amber-400 fill-amber-400'
+                : 'text-zinc-600'
+            }
+          />
+        </button>
+      ))}
     </div>
   );
 };
@@ -288,8 +317,12 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   // Navigation state
   const [currentIndex, setCurrentIndex] = useState<number>(-1);
 
-  // Inspector state
-  const [notes, setNotes] = useState('');
+  // Inspector state — editable fields (synced with resource)
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [notesValue, setNotesValue] = useState('');
+  const [urlValue, setUrlValue] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Review state
   const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis'>('info');
@@ -364,8 +397,58 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     return () => window.removeEventListener('keydown', onKey);
   }, [navigateToSibling, resource]);
 
-  // Reset notes when file changes
-  useEffect(() => { setNotes(''); }, [resourceId]);
+  // Sync editable fields when resource loads/changes
+  useEffect(() => {
+    if (resource) {
+      setNameValue(resource.filename);
+      setNotesValue(resource.notes || '');
+      setUrlValue(resource.url || '');
+      setEditingName(false);
+    }
+  }, [resource?.id, resource?.filename, resource?.notes, resource?.url]);
+
+  useEffect(() => {
+    if (editingName) nameInputRef.current?.select();
+  }, [editingName]);
+
+  // ─── Resource field update handler ───────────────────
+  const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
+    if (!resource) return;
+    try {
+      await updateResource(resourceId, data as Parameters<typeof updateResource>[1]);
+      setResource(prev => prev ? { ...prev, ...data } : prev);
+    } catch (err) {
+      console.error('Failed to update resource:', err);
+    }
+  }, [resourceId, resource]);
+
+  const commitName = useCallback(() => {
+    setEditingName(false);
+    const trimmed = nameValue.trim();
+    if (trimmed && trimmed !== resource?.filename) {
+      handleResourceUpdate({ filename: trimmed });
+    } else if (resource) {
+      setNameValue(resource.filename);
+    }
+  }, [nameValue, resource?.filename, handleResourceUpdate]);
+
+  const commitNotes = useCallback(() => {
+    const val = notesValue.trim();
+    if (val !== (resource?.notes || '').trim()) {
+      handleResourceUpdate({ notes: val || null } as Partial<Resource>);
+    }
+  }, [notesValue, resource?.notes, handleResourceUpdate]);
+
+  const commitUrl = useCallback(() => {
+    const val = urlValue.trim();
+    if (val !== (resource?.url || '').trim()) {
+      handleResourceUpdate({ url: val || null } as Partial<Resource>);
+    }
+  }, [urlValue, resource?.url, handleResourceUpdate]);
+
+  const handleRating = useCallback((v: number) => {
+    handleResourceUpdate({ rating: v });
+  }, [handleResourceUpdate]);
 
   // Close version dropdown on outside click
   useEffect(() => {
@@ -1058,107 +1141,121 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
           {rightTab === 'info' ? (
           <div className="overflow-y-auto flex-1">
-          {/* Section 1 — File Header */}
-          <div className="px-4 py-4">
-            <div className="flex items-start gap-3">
-              <div className={`p-2 rounded-lg ${iconBg} shrink-0`}>
-                <FileIcon size={18} className={iconColor} />
+          {/* Editable Filename */}
+          <div className="px-4 pt-4">
+            {editingName ? (
+              <input
+                ref={nameInputRef}
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={commitName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitName();
+                  if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
+                }}
+                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+                autoFocus
+              />
+            ) : (
+              <div
+                className="group flex items-start gap-1.5 cursor-pointer"
+                onClick={() => setEditingName(true)}
+              >
+                <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{resource.filename}</h4>
+                <Pencil size={12} className="text-zinc-600 group-hover:text-zinc-400 mt-0.5 shrink-0 transition-colors" />
               </div>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-medium text-white break-words leading-snug">
-                  {resource.filename}
-                </h2>
-                <div className="flex items-center gap-2 mt-1">
-                  {fileExt && (
-                    <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-zinc-800 text-zinc-400 rounded">
-                      {fileExt}
-                    </span>
-                  )}
-                  {resource.current_version != null && (
-                    <span className="text-[10px] text-zinc-500">v{resource.current_version}</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2 — File Properties */}
-          <div className="px-4 py-3 border-t border-zinc-800">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1">
-              {t('resources.fileProperties')}
-            </h4>
-            <CompactInfoRow label={t('resources.size')} value={formatFileSize(resource.file_size_bytes)} />
-            <CompactInfoRow label={t('resources.createdAt')} value={formatDate(resource.created_at)} />
-            {(isVideo || isAudio) && resource.duration_seconds != null && (
-              <CompactInfoRow label={t('resources.duration')} value={formatDuration(resource.duration_seconds)} />
             )}
-            {isVideo && resource.resolution && (
-              <CompactInfoRow label={t('resources.resolution')} value={resource.resolution.replace(':', 'x')} />
-            )}
-            <CompactInfoRow label={t('resources.mimeType')} value={resource.mime_type} />
           </div>
 
-          {/* Section 3 — Tags */}
-          <div className="border-t border-zinc-800">
-            <UnifiedTagPicker
-              assignedTags={assignedTags.map(item => item.tag).filter((t): t is Tag => !!t)}
-              allTags={allTags}
-              onAdd={handleAddTag}
-              onRemove={handleRemoveTag}
-              onCreate={async (name, color) => {
-                try {
-                  const tag = await createTag({ name, color, type: 'user' });
-                  setAllTags(prev => [...prev, tag]);
-                  return tag;
-                } catch { return null; }
-              }}
-            />
-          </div>
-
-          {/* Section 4 — Notes */}
-          <div className="px-4 py-3 border-t border-zinc-800">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              {t('resources.notes')}
+          {/* Notes */}
+          <div className="px-4 mt-3">
+            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+              {t('resources.infoPanel.notes')}
             </h4>
             <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder={t('resources.notesPlaceholder')}
+              value={notesValue}
+              onChange={(e) => setNotesValue(e.target.value)}
+              onBlur={commitNotes}
+              placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className="w-full bg-zinc-800/50 border border-zinc-700/30 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors"
+              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
             />
           </div>
 
-          {/* Section 5 — Source */}
-          <div className="px-4 py-3 border-t border-zinc-800">
+          {/* URL */}
+          <div className="px-4 mt-2">
+            <input
+              value={urlValue}
+              onChange={(e) => setUrlValue(e.target.value)}
+              onBlur={commitUrl}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              placeholder={t('resources.infoPanel.urlPlaceholder')}
+              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+            />
+          </div>
+
+          {/* Tags */}
+          <UnifiedTagPicker
+            assignedTags={assignedTags.map(item => item.tag).filter((t): t is Tag => !!t)}
+            allTags={allTags}
+            onAdd={handleAddTag}
+            onRemove={handleRemoveTag}
+            onCreate={async (name, color) => {
+              try {
+                const tag = await createTag({ name, color, type: 'user' });
+                setAllTags(prev => [...prev, tag]);
+                return tag;
+              } catch { return null; }
+            }}
+          />
+
+          {/* Properties */}
+          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
             <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              {t('resources.source')}
+              {t('resources.infoPanel.properties')}
             </h4>
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded ${
-                resource.source_type === 'web'
-                  ? 'bg-blue-500/10 text-blue-400'
-                  : 'bg-emerald-500/10 text-emerald-400'
-              }`}>
-                {resource.source_type === 'web' ? t('resources.webDownload') : t('resources.uploaded')}
-              </span>
+            <div className="space-y-0">
+              <InfoRow label={t('resources.infoPanel.rating')}>
+                <StarRating value={resource.rating ?? 0} onChange={handleRating} />
+              </InfoRow>
+              {(isVideo || isAudio) && resource.duration_seconds != null && (
+                <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} />
+              )}
+              <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} />
+              <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} />
+              {isVideo && resource.resolution && (
+                <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution.replace(':', 'x')} />
+              )}
+              {resource.current_version > 1 && (
+                <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} />
+              )}
+              <InfoRow
+                label={t('resources.infoPanel.source')}
+                value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
+              />
+              <InfoRow label={t('resources.infoPanel.created')} value={formatDate(resource.created_at)} />
+              <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} />
             </div>
-            {resource.media_id && (
+          </div>
+
+          {/* Source link */}
+          {resource.media_id && (
+            <div className="px-4 mt-3 border-t border-zinc-800/60 pt-3">
               <a
                 href={`/resources/media/${resource.media_id}`}
-                className="inline-flex items-center gap-1.5 mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <ExternalLink size={12} />
                 {t('resources.viewOriginal')}
               </a>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Section 6 — Versions */}
+          {/* Versions */}
           {versions.length > 0 && (
-            <div className="px-4 py-3 border-t border-zinc-800">
+            <div className="px-4 mt-3 border-t border-zinc-800/60 pt-3">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
                   {t('resources.versions')}
@@ -1208,6 +1305,9 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               </div>
             </div>
           )}
+
+          {/* Bottom spacing */}
+          <div className="h-6" />
           </div>
           ) : rightTab === 'review' ? (
             <ResourceReviewPanel
