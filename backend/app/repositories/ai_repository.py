@@ -3,8 +3,8 @@
 """
 AI data access layer.
 
-Handles CRUD operations for media_transcripts, media_summaries,
-and AI-related status fields on the parsed_media table.
+Handles CRUD operations for resource_transcripts, resource_summaries,
+and AI-related status fields on the resources table.
 """
 
 from typing import Any, Dict, List, Optional
@@ -41,10 +41,10 @@ class AIRepository:
         """
         try:
             client = await self._get_client()
-            row = {"media_id": media_id, **data}
+            row = {"resource_id": media_id, **data}
             result = (
-                await client.table("media_transcripts")
-                .upsert(row, on_conflict="media_id")
+                await client.table("resource_transcripts")
+                .upsert(row, on_conflict="resource_id")
                 .execute()
             )
             if result.data:
@@ -60,9 +60,9 @@ class AIRepository:
         try:
             client = await self._get_client()
             result = (
-                await client.table("media_transcripts")
+                await client.table("resource_transcripts")
                 .select("*")
-                .eq("media_id", media_id)
+                .eq("resource_id", media_id)
                 .maybe_single()
                 .execute()
             )
@@ -85,10 +85,10 @@ class AIRepository:
         """
         try:
             client = await self._get_client()
-            row = {"media_id": media_id, **data}
+            row = {"resource_id": media_id, **data}
             result = (
-                await client.table("media_summaries")
-                .upsert(row, on_conflict="media_id")
+                await client.table("resource_summaries")
+                .upsert(row, on_conflict="resource_id")
                 .execute()
             )
             if result.data:
@@ -104,9 +104,9 @@ class AIRepository:
         try:
             client = await self._get_client()
             result = (
-                await client.table("media_summaries")
+                await client.table("resource_summaries")
                 .select("*")
-                .eq("media_id", media_id)
+                .eq("resource_id", media_id)
                 .maybe_single()
                 .execute()
             )
@@ -122,7 +122,7 @@ class AIRepository:
     async def update_media_ai_status(
         self, media_id: str, field: str, status: str
     ) -> bool:
-        """Update an AI status field on the parsed_media table.
+        """Update an AI status field on the resources table.
 
         Args:
             media_id: UUID of the media.
@@ -138,7 +138,7 @@ class AIRepository:
         try:
             client = await self._get_client()
             await (
-                client.table("parsed_media")
+                client.table("resources")
                 .update({field: status})
                 .eq("id", media_id)
                 .execute()
@@ -150,16 +150,15 @@ class AIRepository:
             return False
 
     async def get_videos_needing_transcription(self, limit: int = 20) -> List[Dict]:
-        """Get videos that need transcription (status = 'pending', transcript_bool = true)."""
+        """Get videos that need transcription (status = 'pending')."""
         try:
             client = await self._get_client()
             result = (
-                await client.table("parsed_media")
+                await client.table("resources")
                 .select(
                     "id, platform_id, title, download_path, duration, source_platform"
                 )
                 .eq("transcript_status", "pending")
-                .eq("transcript_bool", True)
                 .not_.is_("download_path", "null")
                 .limit(limit)
                 .execute()
@@ -174,11 +173,10 @@ class AIRepository:
         try:
             client = await self._get_client()
             result = (
-                await client.table("parsed_media")
+                await client.table("resources")
                 .select("id, platform_id, title, description, source_platform")
                 .eq("transcript_status", "completed")
                 .eq("summary_status", "pending")
-                .eq("summary_bool", True)
                 .limit(limit)
                 .execute()
             )
