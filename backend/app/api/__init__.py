@@ -29,7 +29,6 @@ from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
 from app.api.task_manager_router import router as task_manager_router
 from app.api.task_router import router as task_router
-from app.api.tasks_router import router as tasks_management_router
 from app.api.user_settings_router import router as settings_router
 from app.api.media_router import legacy_router as legacy_douyin_router
 from app.api.media_router import router as media_router
@@ -64,7 +63,6 @@ api_router.include_router(router=logs_router, tags=["Logs"])
 
 api_router.include_router(router=system_router, tags=["系统监控"])
 
-api_router.include_router(router=tasks_management_router, tags=["Tasks"])
 
 api_router.include_router(router=ai_settings_router, tags=["AI"])
 

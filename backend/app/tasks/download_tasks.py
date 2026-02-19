@@ -148,20 +148,7 @@ def download_media_task(
     task_id = self.request.id
     logger.info(f"[Celery] Starting download task {task_id} for {platform_id}")
 
-    # Initialize TaskManager (legacy)
-    from app.services.task_manager import get_task_manager
-
-    task_manager = get_task_manager()
-
-    # Create or get task in TaskManager
-    task = task_manager.get_task(platform_id)
-    if not task:
-        task = task_manager.create_task(platform_id, video_title)
-
-    # Mark task as downloading
-    task_manager.start_download(platform_id)
-
-    # Unified TaskTracker
+    # Unified TaskTracker (Supabase)
     from app.services.task_tracker import get_task_tracker
     tracker_unified = get_task_tracker()
     unified_task_id = None
@@ -180,15 +167,12 @@ def download_media_task(
     try:
         from app.celery_app import celery_app
 
-        # Get Redis client from Celery backend
         redis_client = celery_app.backend.client
 
-        # Create progress tracker with TaskManager integration
-        tracker = DownloadProgressTrackerWithTaskManager(
+        # Create unified progress tracker (Redis + TaskTracker)
+        tracker = UnifiedProgressTracker(
             task_id=task_id,
-            platform_id=platform_id,
             redis_client=redis_client,
-            task_manager=task_manager,
             unified_tracker=tracker_unified,
             unified_task_id=unified_task_id,
         )
@@ -284,8 +268,6 @@ def download_media_task(
         # Check if video download was successful
         if video_result and hasattr(video_result, "video_download_status"):
             if video_result.video_download_status == DownloadStatus.COMPLETED:
-                # Mark complete in TaskManager
-                task_manager.complete_task(platform_id)
                 tracker.complete()
                 if unified_task_id:
                     try:
@@ -339,7 +321,6 @@ def download_media_task(
                 raise Exception(error_msg)
 
         # No video result means video download was not requested, mark as complete
-        task_manager.complete_task(platform_id)
         tracker.complete()
         if unified_task_id:
             try:
@@ -370,23 +351,22 @@ def download_media_task(
             f"[Celery] Download task failed: {platform_id}, error: {error_msg}"
         )
 
-        # Mark as failed in TaskManager
-        task_manager.fail_task(platform_id, error_msg)
+        # Write failure to Redis + TaskTracker
+        try:
+            tracker.failed(error_msg)
+        except Exception:
+            pass
         if unified_task_id:
             try:
                 run_async(tracker_unified.fail(unified_task_id, error_msg))
             except Exception:
                 pass
 
-        # Check if we should retry
-        current_task = task_manager.get_task(platform_id)
-        retry_count = current_task.get("retry_count", 0) if current_task else 0
-
-        if retry_count < 3:
-            # Auto retry with exponential backoff
-            countdown = 30 * (2**retry_count)
+        # Use Celery's built-in retry mechanism
+        if self.request.retries < self.max_retries:
+            countdown = 30 * (2 ** self.request.retries)
             logger.info(
-                f"[Celery] Scheduling retry {retry_count + 1}/3 for {platform_id} in {countdown}s"
+                f"[Celery] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
             )
             raise self.retry(exc=e, countdown=countdown)
 
@@ -398,7 +378,7 @@ def download_media_task(
                 message=f"Download failed: {video_title[:30]}...",
                 status="error",
                 aweme_id=platform_id,
-                details={"error": error_msg[:200], "retry_count": retry_count},
+                details={"error": error_msg[:200], "retry_count": self.request.retries},
             )
         )
 
@@ -407,74 +387,79 @@ def download_media_task(
             "status": "failed",
             "platform_id": platform_id,
             "error": error_msg,
-            "retry_count": retry_count,
+            "retry_count": self.request.retries,
         }
 
 
-class DownloadProgressTrackerWithTaskManager:
-    """Progress tracker that updates both the old format and TaskManager."""
+class UnifiedProgressTracker:
+    """Progress tracker that writes to Redis (real-time) + TaskTracker (Supabase lifecycle)."""
 
-    def __init__(self, task_id: str, platform_id: str, redis_client, task_manager,
+    def __init__(self, task_id: str, redis_client,
                  unified_tracker=None, unified_task_id=None):
         self.task_id = task_id
-        self.platform_id = platform_id
         self.redis = redis_client
-        self.task_manager = task_manager
         self.unified_tracker = unified_tracker
         self.unified_task_id = unified_task_id
         self.last_update = 0
+        self._last_downloaded = 0
+        self._last_time = 0
+        self._speed = 0.0
 
     def update(self, downloaded: int, total: int):
         """Update download progress."""
         import json
         import time
 
-        # Throttle updates to avoid Redis spam
         now = time.time()
-        if now - self.last_update < 0.5:  # Update at most every 0.5s
+        if now - self.last_update < 0.5:
             return
         self.last_update = now
 
-        percent = int((downloaded / total) * 100) if total > 0 else 0
-        speed = self._calculate_speed(downloaded)
+        # Calculate speed
+        if self._last_time > 0:
+            time_diff = now - self._last_time
+            if time_diff > 0:
+                self._speed = (downloaded - self._last_downloaded) / time_diff
+        self._last_downloaded = downloaded
+        self._last_time = now
 
-        # Update old format for backward compatibility
+        percent = int((downloaded / total) * 100) if total > 0 else 0
+        speed_str = self._format_speed(self._speed)
+
+        # Write to Redis for real-time frontend polling
         progress_data = {
             "percent": percent,
             "downloaded": downloaded,
             "total": total,
-            "speed": speed,
+            "speed": speed_str,
             "status": "downloading",
         }
         self.redis.setex(
             f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
-        # Update TaskManager (legacy)
-        self.task_manager.update_progress(self.platform_id, downloaded, total, speed)
-
-        # Update unified TaskTracker
+        # Update unified TaskTracker (throttled at 1s internally)
         if self.unified_tracker and self.unified_task_id:
             try:
                 run_async(self.unified_tracker.update_progress(
                     self.unified_task_id,
                     percent,
+                    speed=int(self._speed),
                 ))
             except Exception:
                 pass
 
-    def _calculate_speed(self, downloaded: int) -> str:
-        """Calculate download speed string."""
-        # Simple speed calculation (could be improved with time tracking)
-        if downloaded < 1024:
-            return f"{downloaded} B/s"
-        elif downloaded < 1024 * 1024:
-            return f"{downloaded / 1024:.1f} KB/s"
+    def _format_speed(self, bytes_per_sec: float) -> str:
+        """Format speed as human readable string."""
+        if bytes_per_sec < 1024:
+            return f"{bytes_per_sec:.0f} B/s"
+        elif bytes_per_sec < 1024 * 1024:
+            return f"{bytes_per_sec / 1024:.1f} KB/s"
         else:
-            return f"{downloaded / (1024 * 1024):.1f} MB/s"
+            return f"{bytes_per_sec / (1024 * 1024):.1f} MB/s"
 
     def complete(self):
-        """Mark download as complete."""
+        """Mark download as complete in Redis."""
         import json
 
         progress_data = {
@@ -485,7 +470,20 @@ class DownloadProgressTrackerWithTaskManager:
             "status": "completed",
         }
         self.redis.setex(
-            f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
+            f"download_progress:{self.task_id}", 60, json.dumps(progress_data)
+        )
+
+    def failed(self, error: str):
+        """Mark download as failed in Redis."""
+        import json
+
+        progress_data = {
+            "percent": 0,
+            "status": "failed",
+            "error": error[:200] if error else "Unknown error",
+        }
+        self.redis.setex(
+            f"download_progress:{self.task_id}", 300, json.dumps(progress_data)
         )
 
 
@@ -518,18 +516,7 @@ def download_ytdlp_task(
     task_id = self.request.id
     logger.info(f"[Celery/yt-dlp] Starting download task {task_id} for {platform_id}")
 
-    # Initialize TaskManager (legacy)
-    from app.services.task_manager import get_task_manager
-
-    task_manager = get_task_manager()
-
-    task = task_manager.get_task(platform_id)
-    if not task:
-        task = task_manager.create_task(platform_id, video_title)
-
-    task_manager.start_download(platform_id)
-
-    # Unified TaskTracker
+    # Unified TaskTracker (Supabase)
     from app.services.task_tracker import get_task_tracker
     tracker_unified = get_task_tracker()
     unified_task_id = None
@@ -561,15 +548,13 @@ def download_ytdlp_task(
 
         repo_class = MediaRepository
 
-        # Create unified progress tracker (same as Douyin task) to write to Redis
+        # Create unified progress tracker (Redis + TaskTracker)
         from app.celery_app import celery_app
         redis_client = celery_app.backend.client
 
-        tracker = DownloadProgressTrackerWithTaskManager(
+        tracker = UnifiedProgressTracker(
             task_id=task_id,
-            platform_id=platform_id,
             redis_client=redis_client,
-            task_manager=task_manager,
             unified_tracker=tracker_unified,
             unified_task_id=unified_task_id,
         )
@@ -631,7 +616,6 @@ def download_ytdlp_task(
             results["cover"] = "attempted"
 
         tracker.complete()
-        task_manager.complete_task(platform_id)
         if unified_task_id:
             try:
                 run_async(tracker_unified.complete(unified_task_id))
@@ -681,17 +665,10 @@ def download_ytdlp_task(
 
         # Write failure to Redis so frontend polling picks it up
         try:
-            import json as _json
-            from app.celery_app import celery_app as _app
-            _redis = _app.backend.client
-            _redis.setex(
-                f"download_progress:{task_id}", 300,
-                _json.dumps({"percent": 0, "status": "failed", "error": error_msg[:200]}),
-            )
+            tracker.failed(error_msg)
         except Exception:
             pass
 
-        task_manager.fail_task(platform_id, error_msg)
         if unified_task_id:
             try:
                 run_async(tracker_unified.fail(unified_task_id, error_msg))
