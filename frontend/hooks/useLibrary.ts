@@ -179,32 +179,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   }, [hasMoreData, isLoadingMore, isSearchActive, currentPage]);
 
   // --- Collection Video Loading ---
+  // NOTE: media_collections table has been dropped (076 migration).
+  // Collection-video association now uses resource_items + folders.
+  // For now, return empty until collection UI is rebuilt on new schema.
   const loadCollectionVideos = async (collectionId: string | null) => {
-    if (collectionId) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        const { data } = await supabase
-          .from('media_collections')
-          .select('media_id')
-          .eq('collection_id', parseInt(collectionId));
-        if (data) {
-          const videoIds = data.map(v => v.media_id);
-          if (videoIds.length > 0) {
-            const { data: videos } = await supabase
-              .from('parsed_media')
-              .select('platform_id')
-              .in('id', videoIds);
-            setCollectionVideoIds(videos?.map(v => v.platform_id) || []);
-          } else {
-            setCollectionVideoIds([]);
-          }
-        } else {
-          setCollectionVideoIds([]);
-        }
-      }
-    } else {
-      setCollectionVideoIds([]);
-    }
+    setCollectionVideoIds([]);
   };
 
   useEffect(() => {
@@ -212,66 +191,19 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   }, [activeCollectionId]);
 
   // Team library video IDs
+  // NOTE: media_collections table has been dropped (076 migration).
+  // Team library filtering will be rebuilt on resource_items + folders.
   useEffect(() => {
-    const loadTeamLibraryVideos = async () => {
-      if (isTeamLibraryActive && !activeCollectionId) {
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          const teamCollections = collections.filter(c => c.team_id);
-          if (teamCollections.length === 0) {
-            setTeamLibraryVideoIds([]);
-            return;
-          }
-          const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-          const { data } = await supabase
-            .from('media_collections')
-            .select('media_id')
-            .in('collection_id', teamCollectionIds);
-          if (data && data.length > 0) {
-            const videoIds = [...new Set(data.map(v => v.media_id))];
-            const { data: videos } = await supabase
-              .from('parsed_media')
-              .select('platform_id')
-              .in('id', videoIds);
-            setTeamLibraryVideoIds(videos?.map(v => v.platform_id) || []);
-          } else {
-            setTeamLibraryVideoIds([]);
-          }
-        }
-      } else if (!isTeamLibraryActive) {
-        setTeamLibraryVideoIds([]);
-      }
-    };
-    loadTeamLibraryVideos();
-  }, [isTeamLibraryActive, activeCollectionId, collections]);
+    if (!isTeamLibraryActive) {
+      setTeamLibraryVideoIds([]);
+    }
+  }, [isTeamLibraryActive]);
 
   // Shared video IDs
-  const loadAllSharedVideos = async (collectionsToCheck: Collection[]) => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !isAuthenticated) {
-      setSharedVideoIds([]);
-      return;
-    }
-    const teamCollections = collectionsToCheck.filter(c => c.team_id);
-    if (teamCollections.length === 0) {
-      setSharedVideoIds([]);
-      return;
-    }
-    const teamCollectionIds = teamCollections.map(c => parseInt(c.id));
-    const { data } = await supabase
-      .from('media_collections')
-      .select('media_id')
-      .in('collection_id', teamCollectionIds);
-    if (data && data.length > 0) {
-      const videoIds = [...new Set(data.map(v => v.media_id))];
-      const { data: videos } = await supabase
-        .from('parsed_media')
-        .select('platform_id')
-        .in('id', videoIds);
-      setSharedVideoIds(videos?.map(v => v.platform_id) || []);
-    } else {
-      setSharedVideoIds([]);
-    }
+  // NOTE: media_collections table has been dropped (076 migration).
+  // Shared video logic will be rebuilt on resource_items.
+  const loadAllSharedVideos = async (_collectionsToCheck: Collection[]) => {
+    setSharedVideoIds([]);
   };
 
   useEffect(() => {
@@ -326,45 +258,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     };
   }, [isAuthenticated]);
 
-  // Video collections realtime
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
-
-    const collectionChannel = supabase
-      .channel('media_collections_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'media_collections' },
-        async (payload) => {
-          console.log('Media collections realtime update:', payload.eventType, payload);
-          const newRecord = payload.new as { collection_id: number; media_id: number };
-          const oldRecord = payload.old as { collection_id: number; media_id: number };
-          const changedCollectionId = newRecord?.collection_id || oldRecord?.collection_id;
-
-          if (activeCollectionId && changedCollectionId === parseInt(activeCollectionId)) {
-            loadCollectionVideos(activeCollectionId);
-          }
-          if (selectedLibraryItem?.platform_id) {
-            fetchVideoCollections(selectedLibraryItem.platform_id)
-              .then(setSelectedVideoCollectionIds)
-              .catch(console.error);
-          }
-          fetchMyCollections().then(newCollections => {
-            setCollections(newCollections);
-            loadAllSharedVideos(newCollections);
-          }).catch(console.error);
-        }
-      )
-      .subscribe((status) => {
-        console.log('Collection videos realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('Unsubscribing from collection videos realtime channel');
-      supabase.removeChannel(collectionChannel);
-    };
-  }, [isAuthenticated, activeCollectionId, selectedLibraryItem?.platform_id]);
+  // NOTE: media_collections realtime subscription removed — table dropped in 076 migration.
+  // Collection realtime will be rebuilt on resource_items when collection UI is migrated.
 
   // Video tags realtime
   useEffect(() => {
@@ -372,21 +267,30 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const tagsChannel = supabase
-      .channel('media_tags_realtime')
+      .channel('resource_tags_realtime')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'media_tags' },
+        { event: '*', schema: 'public', table: 'resource_tags' },
         async (payload) => {
-          console.log('Media tags realtime update:', payload.eventType, payload);
-          const newRecord = payload.new as { media_id: string; tag_id: string };
-          const oldRecord = payload.old as { media_id: string; tag_id: string };
-          const videoId = newRecord?.media_id || oldRecord?.media_id;
-          if (!videoId) return;
+          console.log('Resource tags realtime update:', payload.eventType, payload);
+          const newRecord = payload.new as { resource_id: string; tag_id: string };
+          const oldRecord = payload.old as { resource_id: string; tag_id: string };
+          const resourceId = newRecord?.resource_id || oldRecord?.resource_id;
+          if (!resourceId) return;
+
+          // Look up the parsed_media record via resources table
+          const { data: resource } = await supabase
+            .from('resources')
+            .select('media_id')
+            .eq('id', resourceId)
+            .maybeSingle();
+
+          if (!resource?.media_id) return;
 
           const { data: updatedVideo, error } = await supabase
-            .from('parsed_media_with_tags')
+            .from('parsed_media')
             .select('*')
-            .eq('id', videoId)
+            .eq('id', resource.media_id)
             .single();
 
           if (error || !updatedVideo) {
@@ -394,6 +298,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
             return;
           }
 
+          const videoId = String(resource.media_id);
           setLibrary(prev =>
             prev.map(item => item.id === videoId ? { ...item, tags: updatedVideo.tags || [] } : item)
           );
@@ -403,7 +308,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         }
       )
       .subscribe((status) => {
-        console.log('Video tags realtime subscription status:', status);
+        console.log('Resource tags realtime subscription status:', status);
       });
 
     return () => {
