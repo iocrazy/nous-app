@@ -138,6 +138,8 @@ export const RipVaultView: React.FC = () => {
   const [panelRating, setPanelRating] = useState(0);
   const [panelHoverRating, setPanelHoverRating] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Video | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
@@ -313,8 +315,6 @@ export const RipVaultView: React.FC = () => {
 
   // ─── Context menu ────────────────────────────────────
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; video: Video } | null>(null);
-  const [renameTarget, setRenameTarget] = useState<Video | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const handleContextMenu = useCallback((e: React.MouseEvent, video: Video) => {
     setContextMenu({ x: e.clientX, y: e.clientY, video });
