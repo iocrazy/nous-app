@@ -92,3 +92,64 @@ async def clear_completed(auth: AuthDep):
     tracker = get_task_tracker()
     count = await tracker.clear_completed(auth.user_id)
     return {"success": True, "cleared": count}
+
+
+@router.get("/tasks/{task_id}/progress")
+async def get_task_progress(task_id: str, auth: AuthDep):
+    """Get real-time download progress from Redis.
+
+    Looks up the celery_task_id from unified_tasks, then reads the
+    Redis key ``download_progress:{celery_task_id}`` for live progress.
+    Falls back to the task's DB progress if no Redis data exists.
+    """
+    import json
+
+    tracker = get_task_tracker()
+    client = await tracker._get_client()
+
+    # Look up the unified task to get celery_task_id
+    result = await (
+        client.table("unified_tasks")
+        .select("celery_task_id, progress, status, speed, total_bytes, error_msg")
+        .eq("id", task_id)
+        .eq("user_id", auth.user_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(404, "Task not found")
+
+    task_row = result.data
+    celery_id = task_row.get("celery_task_id")
+
+    # Try Redis first for real-time progress
+    if celery_id:
+        try:
+            from app.celery_app import celery_app
+            redis_client = celery_app.backend.client
+            raw = redis_client.get(f"download_progress:{celery_id}")
+            if raw:
+                data = json.loads(raw)
+                return {
+                    "task_id": task_id,
+                    "celery_task_id": celery_id,
+                    "status": data.get("status", "downloading"),
+                    "percent": data.get("percent", 0),
+                    "downloaded": data.get("downloaded", 0),
+                    "total": data.get("total", 0),
+                    "speed": data.get("speed", "0 B/s"),
+                    "error": data.get("error"),
+                }
+        except Exception as e:
+            logger.debug(f"Redis progress lookup failed: {e}")
+
+    # Fallback to DB progress
+    return {
+        "task_id": task_id,
+        "celery_task_id": celery_id,
+        "status": task_row.get("status", "pending"),
+        "percent": task_row.get("progress", 0),
+        "speed": task_row.get("speed"),
+        "total": task_row.get("total_bytes"),
+        "error": task_row.get("error_msg"),
+    }

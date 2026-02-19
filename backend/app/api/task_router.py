@@ -86,27 +86,21 @@ async def get_task_status(task_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail=f"获取任务状态失败: {str(e)}")
 
 
-@router.get("/{task_id}/progress", tags=TAGS, summary="Get download progress")
+@router.get("/{task_id}/progress", tags=TAGS, summary="Get download progress by Celery task ID")
 async def get_download_progress(task_id: str, auth: AuthDep):
-    """
-    Get download progress for a task from Redis.
+    """Get real-time download progress from Redis by Celery task ID.
 
-    Returns percent, speed, downloaded bytes, total bytes.
-
-    - **task_id**: 任务 ID
-
-    需要认证：Bearer Token 或 API Key
+    Used by the parser flow where only the Celery task ID is available.
+    For unified task ID lookups, use /task-manager/tasks/{id}/progress instead.
     """
     import json
 
     try:
         redis_client = celery_app.backend.client
-        progress_key = f"download_progress:{task_id}"
+        raw = redis_client.get(f"download_progress:{task_id}")
 
-        progress_data = redis_client.get(progress_key)
-
-        if progress_data:
-            data = json.loads(progress_data)
+        if raw:
+            data = json.loads(raw)
             return {
                 "task_id": task_id,
                 "status": data.get("status", "downloading"),
@@ -114,32 +108,21 @@ async def get_download_progress(task_id: str, auth: AuthDep):
                 "downloaded": data.get("downloaded", 0),
                 "total": data.get("total", 0),
                 "speed": data.get("speed", "0 B/s"),
+                "error": data.get("error"),
             }
 
-        # Check if task is complete
+        # Fallback: check Celery result state
         result = AsyncResult(task_id, app=celery_app)
         if result.state == "SUCCESS":
-            return {
-                "task_id": task_id,
-                "status": "completed",
-                "percent": 100,
-            }
+            return {"task_id": task_id, "status": "completed", "percent": 100}
         elif result.state == "FAILURE":
-            return {
-                "task_id": task_id,
-                "status": "failed",
-                "error": str(result.result),
-            }
+            return {"task_id": task_id, "status": "failed", "error": str(result.result)}
 
-        return {
-            "task_id": task_id,
-            "status": "pending",
-            "percent": 0,
-        }
+        return {"task_id": task_id, "status": "pending", "percent": 0}
 
     except Exception as e:
-        logger.error(f"获取下载进度失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取下载进度失败: {str(e)}")
+        logger.error(f"Failed to get download progress: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get download progress: {e}")
 
 
 @router.delete("/{task_id}", tags=TAGS)
