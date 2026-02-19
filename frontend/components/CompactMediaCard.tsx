@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
 import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
-import { isVideoType, getCoverUrl } from '../utils/awemeType';
+import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 
 const getPlatformLabel = (platform?: string): string => {
@@ -74,6 +74,10 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
     ? images[currentImageIndex]
     : (getCoverUrl(data) || "https://picsum.photos/400/600");
 
+  // --- Video autoplay fallback (when no sprite) ---
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoUrl = isVideo ? getVideoUrl(data) : undefined;
+
   // --- Sprite hover scrub (when resourceId available) ---
   const hasSpriteSupport = isVideo && !!resourceId;
   const [isHovering, setIsHovering] = useState(false);
@@ -89,18 +93,24 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   }, [hasSpriteSupport, resourceId]);
 
   const handleThumbMouseEnter = useCallback(() => {
-    if (!hasSpriteSupport || spriteError) return;
+    if (!hasSpriteSupport) return;
+    if (spriteError) {
+      // Sprite failed — fallback to video autoplay
+      if (videoUrl) setIsPlaying(true);
+      return;
+    }
     setIsHovering(true);
     if (!spriteImgRef.current && spriteUrl) {
       const img = new window.Image();
       img.onload = () => { spriteImgRef.current = img; setSpriteLoaded(true); };
-      img.onerror = () => { setSpriteError(true); };
+      img.onerror = () => { setSpriteError(true); if (videoUrl) setIsPlaying(true); };
       img.src = spriteUrl;
     }
-  }, [hasSpriteSupport, spriteUrl, spriteError]);
+  }, [hasSpriteSupport, spriteUrl, spriteError, videoUrl]);
 
   const handleThumbMouseLeave = useCallback(() => {
     setIsHovering(false);
+    setIsPlaying(false);
     setScrubPercent(0);
   }, []);
 
@@ -193,13 +203,13 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </button>
         </div>
       )}
-      {/* Thumbnail Container - Sprite Scrub on Hover */}
+      {/* Thumbnail Container - Sprite Scrub or Video Autoplay on Hover */}
       <div
         ref={thumbRef}
         className="relative w-full overflow-hidden bg-black aspect-[3/4] cursor-pointer"
         onClick={onClick}
-        onMouseEnter={hasSpriteSupport ? handleThumbMouseEnter : undefined}
-        onMouseLeave={hasSpriteSupport ? handleThumbMouseLeave : undefined}
+        onMouseEnter={hasSpriteSupport ? handleThumbMouseEnter : (isVideo && videoUrl ? () => setIsPlaying(true) : undefined)}
+        onMouseLeave={hasSpriteSupport ? handleThumbMouseLeave : (isVideo && videoUrl ? () => { setIsPlaying(false); } : undefined)}
         onMouseMove={hasSpriteSupport ? handleThumbMouseMove : undefined}
       >
         {/* Cover image (hidden when sprite overlay active) */}
@@ -215,6 +225,18 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingSpriteOverlay ? 'invisible' : ''}`}
             referrerPolicy="no-referrer"
             onError={() => setImageError(true)}
+          />
+        )}
+
+        {/* Video autoplay overlay (fallback when no sprite) */}
+        {isPlaying && !showingSpriteOverlay && videoUrl && (
+          <video
+            src={videoUrl}
+            muted
+            loop
+            autoPlay
+            playsInline
+            className="absolute inset-0 w-full h-full object-contain bg-black z-[5]"
           />
         )}
 
