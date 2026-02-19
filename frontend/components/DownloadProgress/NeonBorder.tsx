@@ -21,10 +21,13 @@ export const NeonBorder: React.FC<DownloadProgressProps> = ({
     <div className={`relative ${containerSize} rounded-xl overflow-hidden group`}>
       {/* Background thumbnail with blur */}
       {thumbnailUrl && (
-        <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${thumbnailUrl})` }}
-        >
+        <div className="absolute inset-0">
+          <img
+            src={thumbnailUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-contain"
+            referrerPolicy="no-referrer"
+          />
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
         </div>
       )}
