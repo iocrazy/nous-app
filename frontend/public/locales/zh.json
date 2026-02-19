@@ -448,7 +448,26 @@
     "applyToAll": "应用到所有重复文件",
     "hashingFile": "正在检查重复...",
     "linkedExisting": "已链接到已有文件",
-    "linkedExistingCount": "已链接 {{count}} 个已有文件"
+    "linkedExistingCount": "已链接 {{count}} 个已有文件",
+    "infoPanel": {
+      "title": "资源信息",
+      "notes": "备注",
+      "notesPlaceholder": "添加备注...",
+      "urlPlaceholder": "http://",
+      "folders": "文件夹",
+      "properties": "属性",
+      "rating": "评分",
+      "duration": "时长",
+      "size": "大小",
+      "type": "类型",
+      "resolution": "分辨率",
+      "version": "版本",
+      "source": "来源",
+      "created": "创建时间",
+      "modified": "修改时间",
+      "sourceWeb": "网页下载",
+      "sourceUpload": "上传"
+    }
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

@@ -75,6 +75,21 @@ export async function renameResource(resourceId: string, filename: string): Prom
   if (error) throw error;
 }
 
+export async function updateResource(
+  resourceId: string,
+  data: { filename?: string; notes?: string; url?: string; rating?: number },
+): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
+    method: 'PATCH',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error('Failed to update resource');
+  const json = await response.json();
+  return json.data;
+}
+
 export async function trashFolder(id: string): Promise<void> {
   const { error } = await supabase
     .from('folders')
