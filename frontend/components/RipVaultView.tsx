@@ -21,6 +21,10 @@ import {
   Bookmark,
   Calendar,
   MonitorPlay,
+  Brain,
+  Sparkles,
+  Eye,
+  Star,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -35,6 +39,38 @@ import { getCoverUrl } from '../utils/awemeType';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId } from '../services/resourceService';
 import { getSupabaseClient } from '../supabaseClient';
+
+// ─── AI Status Badge ──────────────────────────────────
+const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
+  switch (status) {
+    case 'processing':
+      return (
+        <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400">
+          <Loader2 size={9} className="animate-spin" /> Processing
+        </span>
+      );
+    case 'completed':
+      return (
+        <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
+          <Check size={9} /> Done
+        </span>
+      );
+    case 'failed':
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">
+          Failed
+        </span>
+      );
+    case 'pending':
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-500">
+          Pending
+        </span>
+      );
+    default:
+      return null;
+  }
+};
 
 export const RipVaultView: React.FC = () => {
   const { t } = useTranslation();
@@ -94,6 +130,9 @@ export const RipVaultView: React.FC = () => {
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
   const [infoPanelWidth, setInfoPanelWidth] = useState(320);
+  const [panelNotes, setPanelNotes] = useState('');
+  const [panelRating, setPanelRating] = useState(0);
+  const [panelHoverRating, setPanelHoverRating] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
 
   // ─── Navigation ────────────────────────────────────
@@ -243,6 +282,26 @@ export const RipVaultView: React.FC = () => {
     document.addEventListener('mouseup', handleUp);
   }, [infoPanelWidth]);
 
+  // ─── Panel Rating & Notes ─────────────────────────
+  useEffect(() => {
+    setPanelNotes(selectedVideo?.notes || '');
+    setPanelRating(selectedVideo?.rating || 0);
+  }, [selectedVideo?.platform_id]);
+
+  const handlePanelRating = (star: number) => {
+    if (!selectedVideo) return;
+    const newRating = star === panelRating ? 0 : star;
+    setPanelRating(newRating);
+    handleUpdateLibraryItem(selectedVideo.platform_id, { rating: newRating });
+  };
+
+  const handlePanelNotesBlur = () => {
+    if (!selectedVideo) return;
+    if (panelNotes !== (selectedVideo.notes || '')) {
+      handleUpdateLibraryItem(selectedVideo.platform_id, { notes: panelNotes });
+    }
+  };
+
   // ─── Helpers ───────────────────────────────────────
   const formatNumber = (num?: number) => {
     if (!num) return '0';
@@ -261,71 +320,80 @@ export const RipVaultView: React.FC = () => {
   // ─── Render ────────────────────────────────────────
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full">
-      {/* Header */}
-      <header
-        className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 px-6 pt-6"
+      {/* Toolbar — matches ResourcesView style */}
+      <div
+        className="px-6 py-3 border-b border-zinc-800/80"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
-        <div>
-          <h1 className="text-2xl font-bold text-white">{t('resources.downloads')}</h1>
-          <p className="text-zinc-400 text-sm">{t('library.subtitle', 'Manage your saved downloads')}</p>
-        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-sm text-zinc-200 font-medium truncate">{t('resources.downloads')}</span>
+            {!isLoadingLibrary && (
+              <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
+                {filteredLibrary.length} {filteredLibrary.length === 1 ? 'item' : 'items'}
+              </span>
+            )}
+          </div>
 
-        <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-          <button
-            onClick={loadLibraryData}
-            disabled={isLoadingLibrary}
-            className="p-2 bg-zinc-900 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            title="Refresh Data"
-          >
-            <RefreshCw size={20} className={isLoadingLibrary ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Refresh */}
+            <button
+              onClick={loadLibraryData}
+              disabled={isLoadingLibrary}
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors"
+              title="Refresh Data"
+            >
+              <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
+            </button>
 
-          <SemanticSearchBar
-            onSearch={(results, query) => {
-              setSearchResults(results as any);
-              setIsSearchActive(true);
-              setSearchQueryText(query);
-            }}
-            onClear={() => {
-              setSearchResults([]);
-              setIsSearchActive(false);
-              setSearchQueryText('');
-            }}
-            placeholder={t('library.searchPlaceholder', 'Search title, tags, notes...')}
-            className="flex-1 md:w-80"
-            library={library as any}
-          />
+            {/* Search */}
+            <SemanticSearchBar
+              onSearch={(results, query) => {
+                setSearchResults(results as any);
+                setIsSearchActive(true);
+                setSearchQueryText(query);
+              }}
+              onClear={() => {
+                setSearchResults([]);
+                setIsSearchActive(false);
+                setSearchQueryText('');
+              }}
+              placeholder={t('library.searchPlaceholder', 'Search title, tags, notes...')}
+              className="w-52"
+              library={library as any}
+            />
 
-          <div className="hidden md:flex bg-zinc-900 rounded-lg border border-zinc-800 p-1">
-            <button
-              onClick={() => setLibraryViewMode('list')}
-              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="List View"
-            >
-              <LayoutList size={18} />
-            </button>
-            <button
-              onClick={() => setLibraryViewMode('grid')}
-              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="Grid View"
-            >
-              <LayoutGrid size={18} />
-            </button>
-            <button
-              onClick={() => setLibraryViewMode('feed')}
-              className={`p-1.5 rounded-md transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="Feed View"
-            >
-              <Smartphone size={18} />
-            </button>
+            {/* View toggle */}
+            <div className="hidden md:flex items-center">
+              <button
+                onClick={() => setLibraryViewMode('list')}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                title="List View"
+              >
+                <LayoutList size={14} />
+              </button>
+              <button
+                onClick={() => setLibraryViewMode('grid')}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                title="Grid View"
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button
+                onClick={() => setLibraryViewMode('feed')}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                title="Feed View"
+              >
+                <Smartphone size={14} />
+              </button>
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Content */}
       <div
-        className="flex-1 overflow-y-auto px-6 pb-6"
+        className="flex-1 overflow-y-auto px-5 pb-5"
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
           const target = e.target as HTMLElement;
@@ -359,7 +427,7 @@ export const RipVaultView: React.FC = () => {
           <>
             {/* Grid view */}
             {libraryViewMode === 'grid' && (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2">
                 {filteredLibrary.map((item) => (
                   <CompactMediaCard
                     key={item.platform_id}
@@ -408,7 +476,7 @@ export const RipVaultView: React.FC = () => {
         )}
       </div>
 
-      {/* ── Right Info Panel: Video details ── */}
+      {/* ── Right Info Panel: Video details (Eagle style) ── */}
       {selectedVideo && (
         <div
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
@@ -431,10 +499,10 @@ export const RipVaultView: React.FC = () => {
           <div className="flex-1 overflow-y-auto">
             {/* Header */}
             <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800">
-              <h3 className="text-sm font-medium text-white truncate">{t('resources.details', 'Details')}</h3>
+              <h3 className="text-sm font-semibold text-white truncate">{t('resources.details', 'Details')}</h3>
               <button
                 onClick={() => setSelectedVideo(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded transition-colors"
+                className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
               >
                 <X size={16} />
               </button>
@@ -456,9 +524,9 @@ export const RipVaultView: React.FC = () => {
               )}
             </div>
 
-            {/* Title & Description */}
-            <div className="px-4 py-3 border-b border-zinc-800">
-              <h4 className="text-sm font-medium text-white leading-snug">
+            {/* Title */}
+            <div className="px-4 mt-4">
+              <h4 className="text-sm font-medium text-white break-words leading-snug">
                 {selectedVideo.title || 'Untitled'}
               </h4>
               {selectedVideo.description && (
@@ -468,73 +536,37 @@ export const RipVaultView: React.FC = () => {
               )}
             </div>
 
-            {/* Metadata */}
-            <div className="px-4 py-3 space-y-2.5 border-b border-zinc-800">
-              {selectedVideo.author && (
-                <div className="flex items-center gap-2 text-xs">
-                  <User size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400">@{selectedVideo.author}</span>
-                </div>
-              )}
-              {selectedVideo.duration && (
-                <div className="flex items-center gap-2 text-xs">
-                  <Clock size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400">{selectedVideo.duration}s</span>
-                </div>
-              )}
-              {selectedVideo.resolution && (
-                <div className="flex items-center gap-2 text-xs">
-                  <MonitorPlay size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400">{selectedVideo.resolution}</span>
-                </div>
-              )}
-              {selectedVideo.datasize && (
-                <div className="flex items-center gap-2 text-xs">
-                  <HardDrive size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400">{selectedVideo.datasize}</span>
-                </div>
-              )}
-              {selectedVideo.published_at && (
-                <div className="flex items-center gap-2 text-xs">
-                  <Calendar size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400">{formatDate(selectedVideo.published_at)}</span>
-                </div>
-              )}
-              {selectedVideo.source_platform && (
-                <div className="flex items-center gap-2 text-xs">
-                  <ExternalLink size={13} className="text-zinc-500 shrink-0" />
-                  <span className="text-zinc-400 capitalize">{selectedVideo.source_platform}</span>
-                </div>
-              )}
-            </div>
-
             {/* Engagement */}
-            <div className="px-4 py-3 border-b border-zinc-800">
-              <h5 className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">Engagement</h5>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <Heart size={13} className="text-rose-500" />
-                  <span>{formatNumber(selectedVideo.like_count)}</span>
+            <div className="px-4 mt-4">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Engagement
+              </h4>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-rose-500/5 border border-rose-500/10">
+                  <Heart size={12} className="text-rose-400 shrink-0" />
+                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.like_count)}</span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <MessageCircle size={13} className="text-sky-500" />
-                  <span>{formatNumber(selectedVideo.comment_count)}</span>
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-sky-500/5 border border-sky-500/10">
+                  <MessageCircle size={12} className="text-sky-400 shrink-0" />
+                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.comment_count)}</span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <Share2 size={13} className="text-emerald-500" />
-                  <span>{formatNumber(selectedVideo.share_count)}</span>
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                  <Share2 size={12} className="text-emerald-400 shrink-0" />
+                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.share_count)}</span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <Bookmark size={13} className="text-amber-500" />
-                  <span>{formatNumber(selectedVideo.favorite_count)}</span>
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                  <Bookmark size={12} className="text-amber-400 shrink-0" />
+                  <span className="text-xs text-zinc-300">{formatNumber(selectedVideo.favorite_count)}</span>
                 </div>
               </div>
             </div>
 
             {/* Tags */}
             {selectedVideo.tags && selectedVideo.tags.length > 0 && (
-              <div className="px-4 py-3 border-b border-zinc-800">
-                <h5 className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">Tags</h5>
+              <div className="px-4 mt-4">
+                <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                  Tags
+                </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedVideo.tags.map((tag, i) => (
                     <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
@@ -545,8 +577,131 @@ export const RipVaultView: React.FC = () => {
               </div>
             )}
 
+            {/* Rating */}
+            <div className="px-4 mt-4">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Rating
+              </h4>
+              <div className="flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <button
+                    key={star}
+                    onClick={() => handlePanelRating(star)}
+                    onMouseEnter={() => setPanelHoverRating(star)}
+                    onMouseLeave={() => setPanelHoverRating(0)}
+                    className="p-0.5 transition-colors"
+                  >
+                    <Star
+                      size={16}
+                      className={(panelHoverRating || panelRating) >= star
+                        ? 'text-amber-400 fill-amber-400'
+                        : 'text-zinc-600'}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="px-4 mt-4">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+                Notes
+              </h4>
+              <textarea
+                value={panelNotes}
+                onChange={e => setPanelNotes(e.target.value)}
+                onBlur={handlePanelNotesBlur}
+                placeholder="Add notes..."
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none min-h-[60px] focus:outline-none focus:border-zinc-600 transition-colors"
+                rows={3}
+              />
+            </div>
+
+            {/* AI Status */}
+            {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (
+              <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+                <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                  AI
+                </h4>
+                <div className="space-y-1.5">
+                  {selectedVideo.transcript_status && selectedVideo.transcript_status !== 'none' && (
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2">
+                        <Brain size={12} className="text-indigo-400" />
+                        <span className="text-xs text-zinc-400">Transcript</span>
+                      </div>
+                      <AIStatusBadge status={selectedVideo.transcript_status} />
+                    </div>
+                  )}
+                  {selectedVideo.summary_status && selectedVideo.summary_status !== 'none' && (
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={12} className="text-indigo-400" />
+                        <span className="text-xs text-zinc-400">Summary</span>
+                      </div>
+                      <AIStatusBadge status={selectedVideo.summary_status} />
+                    </div>
+                  )}
+                  {selectedVideo.visual_analysis_status && selectedVideo.visual_analysis_status !== 'none' && (
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2">
+                        <Eye size={12} className="text-purple-400" />
+                        <span className="text-xs text-zinc-400">Visual Analysis</span>
+                      </div>
+                      <AIStatusBadge status={selectedVideo.visual_analysis_status} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Properties */}
+            <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Properties
+              </h4>
+              <div className="space-y-0">
+                {selectedVideo.author && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Author</span>
+                    <span className="text-xs text-zinc-300">@{selectedVideo.author}</span>
+                  </div>
+                )}
+                {selectedVideo.duration && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Duration</span>
+                    <span className="text-xs text-zinc-300">{selectedVideo.duration}s</span>
+                  </div>
+                )}
+                {selectedVideo.resolution && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Resolution</span>
+                    <span className="text-xs text-zinc-300">{selectedVideo.resolution}</span>
+                  </div>
+                )}
+                {selectedVideo.datasize && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Size</span>
+                    <span className="text-xs text-zinc-300">{selectedVideo.datasize}</span>
+                  </div>
+                )}
+                {selectedVideo.source_platform && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Platform</span>
+                    <span className="text-xs text-zinc-300 capitalize">{selectedVideo.source_platform}</span>
+                  </div>
+                )}
+                {selectedVideo.published_at && (
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-xs text-zinc-500">Published</span>
+                    <span className="text-xs text-zinc-300">{formatDate(selectedVideo.published_at)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Actions */}
-            <div className="px-4 py-3 space-y-2">
+            <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3 pb-6 space-y-2">
               <button
                 onClick={() => handleNavigateToDetail(selectedVideo)}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
