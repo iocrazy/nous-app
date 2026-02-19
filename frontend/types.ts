@@ -67,6 +67,7 @@ export interface ParsedMedia {
 
   // User Data
   notes?: string;
+  rating?: number; // 0-5 star rating
   tags?: string[];
 
   // AI Processing Status
