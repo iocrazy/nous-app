@@ -21,6 +21,14 @@ import {
   RefreshCw,
   Search,
   Share2,
+  Brain,
+  Sparkles,
+  Eye,
+  AlertCircle,
+  Clock,
+  Tag as TagIcon,
+  Check,
+  Copy,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -51,6 +59,15 @@ import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
+import {
+  triggerTranscriptionByResource,
+  getTranscriptByResource,
+  triggerSummaryByResource,
+  getSummaryByResource,
+  triggerVisualAnalysisByResource,
+  pollForResult,
+} from '../services/aiService';
+import { TranscriptData, SummaryData } from '../types';
 
 // ─── Utility functions ──────────────────────────────────
 
@@ -93,6 +110,50 @@ function getFileExtension(filename: string | null | undefined): string {
   if (!filename) return '';
   const parts = filename.split('.');
   return parts.length > 1 ? parts[parts.length - 1].toUpperCase() : '';
+}
+
+function formatTimestamp(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function generateSRT(segments: TranscriptData['segments']): string {
+  return segments.map((seg, i) => {
+    const fmt = (sec: number) => {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      const ms = Math.round((sec % 1) * 1000);
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
+    };
+    return `${i + 1}\n${fmt(seg.start)} --> ${fmt(seg.end)}\n${seg.text}`;
+  }).join('\n\n');
+}
+
+function downloadTextFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function getAIStatusIndicator(status?: string) {
+  switch (status) {
+    case 'processing':
+      return <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />;
+    case 'completed':
+      return <span className="w-2 h-2 rounded-full bg-emerald-400" />;
+    case 'failed':
+      return <span className="w-2 h-2 rounded-full bg-red-400" />;
+    default:
+      return null;
+  }
 }
 
 // ─── FilePreview ─────────────────────────────────────────
@@ -231,8 +292,19 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [notes, setNotes] = useState('');
 
   // Review state
-  const [rightTab, setRightTab] = useState<'info' | 'review'>('info');
+  const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis'>('info');
   const [currentUserId, setCurrentUserId] = useState<string>('');
+
+  // AI / Transcript / Analysis state
+  const [transcript, setTranscript] = useState<TranscriptData | null>(null);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
+  const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
   const [annotationActive, setAnnotationActive] = useState(false);
   const [pendingAnnotations, setPendingAnnotations] = useState<NormalizedAnnotation[]>([]);
@@ -452,6 +524,104 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       refreshCommentMarkers();
     }
   }, [resource?.mime_type, refreshCommentMarkers]);
+
+  // ─── AI: load existing transcript/summary on tab switch ───
+  useEffect(() => {
+    if (rightTab === 'transcript' && resource?.transcript_status === 'completed' && !transcript) {
+      loadTranscript();
+    }
+    if (rightTab === 'analysis' && resource?.summary_status === 'completed' && !summary) {
+      loadSummary();
+    }
+  }, [rightTab, resource?.transcript_status, resource?.summary_status]);
+
+  const loadTranscript = useCallback(async () => {
+    try {
+      setTranscriptLoading(true);
+      setTranscriptError(null);
+      const data = await getTranscriptByResource(resourceId);
+      setTranscript(data);
+    } catch (err) {
+      setTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript');
+    } finally {
+      setTranscriptLoading(false);
+    }
+  }, [resourceId]);
+
+  const loadSummary = useCallback(async () => {
+    try {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      const data = await getSummaryByResource(resourceId);
+      setSummary(data);
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : 'Failed to load summary');
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [resourceId]);
+
+  const handleTranscribe = async () => {
+    try {
+      setTranscriptLoading(true);
+      setTranscriptError(null);
+      await triggerTranscriptionByResource(resourceId);
+      // Poll for completion
+      const data = await pollForResult(() => getTranscriptByResource(resourceId), 3000, 60);
+      setTranscript(data);
+    } catch (err) {
+      setTranscriptError(err instanceof Error ? err.message : 'Failed to transcribe');
+    } finally {
+      setTranscriptLoading(false);
+    }
+  };
+
+  const handleSummarize = async () => {
+    try {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      await triggerSummaryByResource(resourceId);
+      const data = await pollForResult(() => getSummaryByResource(resourceId), 3000, 60);
+      setSummary(data);
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : 'Failed to summarize');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const handleVisualAnalysis = async () => {
+    try {
+      setVisualAnalysisLoading(true);
+      setVisualAnalysisError(null);
+      await triggerVisualAnalysisByResource(resourceId);
+    } catch (err) {
+      setVisualAnalysisError(err instanceof Error ? err.message : 'Failed to start analysis');
+    } finally {
+      setVisualAnalysisLoading(false);
+    }
+  };
+
+  const handleCopyTranscript = () => {
+    if (!transcript) return;
+    const text = transcript.segments
+      .map((s) => `[${formatTimestamp(s.start)}] ${s.text}`)
+      .join('\n');
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleExportSRT = () => {
+    if (!transcript) return;
+    const srt = generateSRT(transcript.segments);
+    downloadTextFile(srt, `${resource?.filename || resourceId}_transcript.srt`, 'text/srt');
+  };
+
+  const handleExportTXT = () => {
+    if (!transcript) return;
+    downloadTextFile(transcript.text, `${resource?.filename || resourceId}_transcript.txt`, 'text/plain');
+  };
 
   const handleBack = useCallback(() => {
     navigate(-1);
@@ -858,6 +1028,32 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
             >
               Review
             </button>
+            {(isVideo || isAudio) && (
+              <>
+                <button
+                  onClick={() => setRightTab('transcript')}
+                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                    rightTab === 'transcript'
+                      ? 'text-zinc-200 border-b-2 border-indigo-500'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  Transcript
+                  {getAIStatusIndicator(resource.transcript_status)}
+                </button>
+                <button
+                  onClick={() => setRightTab('analysis')}
+                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                    rightTab === 'analysis'
+                      ? 'text-zinc-200 border-b-2 border-indigo-500'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  Analysis
+                  {getAIStatusIndicator(resource.summary_status || resource.visual_analysis_status)}
+                </button>
+              </>
+            )}
           </div>
 
           {rightTab === 'info' ? (
@@ -1013,7 +1209,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
             </div>
           )}
           </div>
-          ) : (
+          ) : rightTab === 'review' ? (
             <ResourceReviewPanel
               resourceId={resourceId}
               versionId={selectedVersionId || viewingVersion?.id}
@@ -1029,7 +1225,296 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               }}
               onCommentChange={refreshCommentMarkers}
             />
-          )}
+          ) : rightTab === 'transcript' ? (
+            <div className="overflow-y-auto flex-1 p-4 space-y-4 animate-in fade-in duration-300">
+              {/* Processing state */}
+              {resource.transcript_status === 'processing' && (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
+                  <h3 className="text-sm font-medium text-zinc-200">Transcribing...</h3>
+                  <p className="text-xs text-zinc-500 mt-1">This may take a few minutes.</p>
+                </div>
+              )}
+
+              {/* Not started */}
+              {(!resource.transcript_status || resource.transcript_status === 'pending' || resource.transcript_status === 'none') && !transcript && !transcriptLoading && (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
+                    <FileText size={28} className="text-zinc-500" />
+                  </div>
+                  <h3 className="text-sm font-medium text-zinc-200">No Transcript Available</h3>
+                  <p className="text-xs text-zinc-500 mt-1 mb-4 max-w-[220px]">
+                    Generate a transcript to see timestamped text from this media.
+                  </p>
+                  <button
+                    onClick={handleTranscribe}
+                    disabled={transcriptLoading}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {transcriptLoading ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
+                    Transcribe
+                  </button>
+                  {transcriptError && (
+                    <div className="mt-3 flex items-center gap-1.5 text-xs text-red-400">
+                      <AlertCircle size={12} />
+                      {transcriptError}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Failed */}
+              {resource.transcript_status === 'failed' && !transcript && (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="p-4 bg-red-500/10 rounded-full mb-4">
+                    <AlertCircle size={28} className="text-red-400" />
+                  </div>
+                  <h3 className="text-sm font-medium text-zinc-200">Transcription Failed</h3>
+                  <p className="text-xs text-zinc-500 mt-1 mb-4">Something went wrong. Please try again.</p>
+                  <button
+                    onClick={handleTranscribe}
+                    disabled={transcriptLoading}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {transcriptLoading ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Loading existing */}
+              {transcriptLoading && resource.transcript_status === 'completed' && (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 size={20} className="animate-spin text-indigo-400" />
+                </div>
+              )}
+
+              {/* Transcript content */}
+              {transcript && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                    <span className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {formatTimestamp(transcript.duration)} total
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <TagIcon size={10} />
+                      {transcript.language.toUpperCase()}
+                    </span>
+                    <span>{transcript.segments.length} segments</span>
+                  </div>
+
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar divide-y divide-zinc-800/50">
+                      {transcript.segments.map((seg, i) => (
+                        <div
+                          key={i}
+                          className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
+                        >
+                          <button
+                            className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                            onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
+                          >
+                            [{formatTimestamp(seg.start)}]
+                          </button>
+                          <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={handleCopyTranscript}
+                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    >
+                      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      {copied ? 'Copied!' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={handleExportSRT}
+                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    >
+                      <Download size={12} />
+                      SRT
+                    </button>
+                    <button
+                      onClick={handleExportTXT}
+                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    >
+                      <Download size={12} />
+                      TXT
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : rightTab === 'analysis' ? (
+            <div className="overflow-y-auto flex-1 p-4 space-y-5 animate-in fade-in duration-300">
+              {/* Summary Section */}
+              <section className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 bg-indigo-500/10 rounded text-indigo-400">
+                    <Sparkles size={14} />
+                  </div>
+                  <h3 className="text-xs font-medium text-zinc-200">Summary</h3>
+                  {getAIStatusIndicator(resource.summary_status)}
+                </div>
+
+                {resource.summary_status === 'processing' && (
+                  <div className="flex items-center gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                    <Loader2 size={14} className="animate-spin text-indigo-400" />
+                    <span className="text-xs text-zinc-400">Generating summary...</span>
+                  </div>
+                )}
+
+                {(!resource.summary_status || resource.summary_status === 'pending' || resource.summary_status === 'none') && !summary && !summaryLoading && (
+                  <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                    <p className="text-xs text-zinc-500 mb-2">Generate an AI summary with key points and topics.</p>
+                    <button
+                      onClick={handleSummarize}
+                      disabled={summaryLoading}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {summaryLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                      Summarize
+                    </button>
+                    {summaryError && (
+                      <p className="mt-2 text-[10px] text-red-400 flex items-center gap-1">
+                        <AlertCircle size={10} />
+                        {summaryError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {resource.summary_status === 'failed' && !summary && (
+                  <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                    <p className="text-xs text-red-400 mb-2">Summarization failed.</p>
+                    <button
+                      onClick={handleSummarize}
+                      disabled={summaryLoading}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {summaryLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {summaryLoading && resource.summary_status === 'completed' && (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 size={16} className="animate-spin text-indigo-400" />
+                  </div>
+                )}
+
+                {summary && (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <p className="text-xs text-zinc-300 leading-relaxed">{summary.summary}</p>
+                    </div>
+                    {summary.key_points.length > 0 && (
+                      <div>
+                        <h4 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5">Key Points</h4>
+                        <ul className="space-y-1">
+                          {summary.key_points.map((point, i) => (
+                            <li key={i} className="flex items-start gap-1.5 text-xs text-zinc-300">
+                              <ChevronRight size={12} className="text-indigo-400 mt-0.5 shrink-0" />
+                              {point}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {summary.topics.length > 0 && (
+                      <div>
+                        <h4 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5">Topics</h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {summary.topics.map((topic, i) => {
+                            const colors = [
+                              'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+                              'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                              'bg-purple-500/10 text-purple-400 border-purple-500/20',
+                              'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                              'bg-rose-500/10 text-rose-400 border-rose-500/20',
+                              'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+                            ];
+                            return (
+                              <span key={i} className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${colors[i % colors.length]}`}>
+                                {topic}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Visual Analysis Section (video only) */}
+              {isVideo && (
+                <section className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1 bg-purple-500/10 rounded text-purple-400">
+                      <Eye size={14} />
+                    </div>
+                    <h3 className="text-xs font-medium text-zinc-200">Visual Analysis</h3>
+                    {getAIStatusIndicator(resource.visual_analysis_status)}
+                  </div>
+
+                  {resource.visual_analysis_status === 'processing' && (
+                    <div className="flex items-center gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <Loader2 size={14} className="animate-spin text-purple-400" />
+                      <span className="text-xs text-zinc-400">Analyzing visual content...</span>
+                    </div>
+                  )}
+
+                  {(!resource.visual_analysis_status || resource.visual_analysis_status === 'pending' || resource.visual_analysis_status === 'none') && (
+                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <p className="text-xs text-zinc-500 mb-2">Analyze video frames to detect objects, scenes, and visual content.</p>
+                      <button
+                        onClick={handleVisualAnalysis}
+                        disabled={visualAnalysisLoading}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {visualAnalysisLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                        Analyze
+                      </button>
+                      {visualAnalysisError && (
+                        <p className="mt-2 text-[10px] text-red-400 flex items-center gap-1">
+                          <AlertCircle size={10} />
+                          {visualAnalysisError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {resource.visual_analysis_status === 'failed' && (
+                    <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                      <p className="text-xs text-red-400 mb-2">Visual analysis failed.</p>
+                      <button
+                        onClick={handleVisualAnalysis}
+                        disabled={visualAnalysisLoading}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {visualAnalysisLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {resource.visual_analysis_status === 'completed' && (resource as any).ai_analyze_text && (
+                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                        {(resource as any).ai_analyze_text}
+                      </p>
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
 
