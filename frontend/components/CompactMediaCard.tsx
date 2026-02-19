@@ -74,9 +74,10 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
     ? images[currentImageIndex]
     : (getCoverUrl(data) || "https://picsum.photos/400/600");
 
-  // --- Video autoplay fallback (when no sprite) ---
-  const [isPlaying, setIsPlaying] = useState(false);
+  // --- Video seek scrub (universal fallback for any video) ---
   const videoUrl = isVideo ? getVideoUrl(data) : undefined;
+  const [isVideoScrubbing, setIsVideoScrubbing] = useState(false);
+  const videoScrubRef = useRef<HTMLVideoElement>(null);
 
   // --- Sprite hover scrub (when resourceId available) ---
   const hasSpriteSupport = isVideo && !!resourceId;
@@ -93,33 +94,44 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   }, [hasSpriteSupport, resourceId]);
 
   const handleThumbMouseEnter = useCallback(() => {
-    if (!hasSpriteSupport) return;
-    if (spriteError) {
-      // Sprite failed — fallback to video autoplay
-      if (videoUrl) setIsPlaying(true);
-      return;
-    }
-    setIsHovering(true);
-    if (!spriteImgRef.current && spriteUrl) {
-      const img = new window.Image();
-      img.onload = () => { spriteImgRef.current = img; setSpriteLoaded(true); };
-      img.onerror = () => { setSpriteError(true); if (videoUrl) setIsPlaying(true); };
-      img.src = spriteUrl;
+    if (hasSpriteSupport && !spriteError) {
+      // Try sprite scrub first
+      setIsHovering(true);
+      if (!spriteImgRef.current && spriteUrl) {
+        const img = new window.Image();
+        img.onload = () => { spriteImgRef.current = img; setSpriteLoaded(true); };
+        img.onerror = () => { setSpriteError(true); if (videoUrl) setIsVideoScrubbing(true); };
+        img.src = spriteUrl;
+      }
+    } else if (videoUrl) {
+      // No sprite — use video seek scrub
+      setIsVideoScrubbing(true);
     }
   }, [hasSpriteSupport, spriteUrl, spriteError, videoUrl]);
 
   const handleThumbMouseLeave = useCallback(() => {
     setIsHovering(false);
-    setIsPlaying(false);
+    setIsVideoScrubbing(false);
     setScrubPercent(0);
   }, []);
 
   const handleThumbMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isHovering || !spriteLoaded || !thumbRef.current) return;
+    if (!thumbRef.current) return;
     const rect = thumbRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    setScrubPercent(x / rect.width);
-  }, [isHovering, spriteLoaded]);
+    const pct = x / rect.width;
+    if (isHovering && spriteLoaded) {
+      // Sprite scrub mode
+      setScrubPercent(pct);
+    } else if (isVideoScrubbing) {
+      // Video seek scrub mode
+      setScrubPercent(pct);
+      const vid = videoScrubRef.current;
+      if (vid?.duration && isFinite(vid.duration)) {
+        vid.currentTime = vid.duration * pct;
+      }
+    }
+  }, [isHovering, spriteLoaded, isVideoScrubbing]);
 
   const spriteFrame = useMemo(() => {
     if (!spriteLoaded || !spriteImgRef.current || !thumbRef.current) return null;
@@ -147,6 +159,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   }, [spriteLoaded, scrubPercent, spriteUrl]);
 
   const showingSpriteOverlay = isHovering && spriteLoaded && spriteFrame;
+  const showingAnyScrub = showingSpriteOverlay || isVideoScrubbing;
 
   const formatNumber = (num?: number) => {
     if (!num) return '0';
@@ -208,9 +221,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         ref={thumbRef}
         className="relative w-full overflow-hidden bg-black aspect-[3/4] cursor-pointer"
         onClick={onClick}
-        onMouseEnter={hasSpriteSupport ? handleThumbMouseEnter : (isVideo && videoUrl ? () => setIsPlaying(true) : undefined)}
-        onMouseLeave={hasSpriteSupport ? handleThumbMouseLeave : (isVideo && videoUrl ? () => { setIsPlaying(false); } : undefined)}
-        onMouseMove={hasSpriteSupport ? handleThumbMouseMove : undefined}
+        onMouseEnter={isVideo ? handleThumbMouseEnter : undefined}
+        onMouseLeave={isVideo ? handleThumbMouseLeave : undefined}
+        onMouseMove={isVideo ? handleThumbMouseMove : undefined}
       >
         {/* Cover image (hidden when sprite overlay active) */}
         {imageError ? (
@@ -222,19 +235,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           <img
             src={coverUrl}
             alt={data.title}
-            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingSpriteOverlay ? 'invisible' : ''}`}
+            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingAnyScrub ? 'invisible' : ''}`}
             referrerPolicy="no-referrer"
             onError={() => setImageError(true)}
           />
         )}
 
-        {/* Video autoplay overlay (fallback when no sprite) */}
-        {isPlaying && !showingSpriteOverlay && videoUrl && (
+        {/* Video seek scrub overlay */}
+        {isVideoScrubbing && videoUrl && (
           <video
+            ref={videoScrubRef}
             src={videoUrl}
+            preload="auto"
             muted
-            loop
-            autoPlay
             playsInline
             className="absolute inset-0 w-full h-full object-contain bg-black z-[5]"
           />
@@ -247,14 +260,14 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </div>
         )}
         {/* Scrub progress bar */}
-        {showingSpriteOverlay && (
+        {showingAnyScrub && (
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-black/30 z-20">
             <div className="h-full bg-white/80 transition-none" style={{ width: `${scrubPercent * 100}%` }} />
           </div>
         )}
 
         {/* Carousel Controls for Albums */}
-        {isAlbum && !showingSpriteOverlay && (
+        {isAlbum && !showingAnyScrub && (
           <>
             <button
               onClick={(e) => handleSlide(e, 'left')}
@@ -275,7 +288,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
 
         {/* Platform Badge */}
-        {!showingSpriteOverlay && data.source_platform && data.source_platform !== 'douyin' && (
+        {!showingAnyScrub && data.source_platform && data.source_platform !== 'douyin' && (
           <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
             <span className="bg-black/70 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
               {getPlatformLabel(data.source_platform)}
@@ -284,7 +297,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
 
         {/* Type Indicator (Right side) */}
-        {!showingSpriteOverlay && (
+        {!showingAnyScrub && (
           <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
             {isShared && (
               <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
@@ -298,7 +311,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
 
         {/* Play Overlay (Desktop Hover - Only for Video without sprite) */}
-        {isVideo && !showingSpriteOverlay && (
+        {isVideo && !showingAnyScrub && (
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 z-10 pointer-events-none">
             <div className="bg-white/20 backdrop-blur-md p-2 rounded-full">
               <Play size={20} className="text-white fill-white" />
@@ -307,12 +320,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
 
         {/* Gradient Overlay */}
-        {!showingSpriteOverlay && (
+        {!showingAnyScrub && (
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60 pointer-events-none" />
         )}
 
         {/* Title Overlay */}
-        {!showingSpriteOverlay && (
+        {!showingAnyScrub && (
           <div className="absolute bottom-0 left-0 right-0 p-3 z-10 pointer-events-none">
             <h3 className="text-[12px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
               {data.title || 'Untitled Media'}
