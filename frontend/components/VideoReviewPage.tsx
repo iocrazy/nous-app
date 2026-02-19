@@ -9,7 +9,7 @@ import { ReviewCommentsPanel } from './ReviewCommentsPanel';
 import { FileInfoPanel } from './FileInfoPanel';
 import { ProjectVersionModal } from './ProjectVersionModal';
 import { ReviewStatusDropdown } from './ReviewStatusDropdown';
-import { AnnotationCanvas } from './AnnotationCanvas';
+import { AnnotationCanvas, AnnotationCanvasHandle } from './AnnotationCanvas';
 import { AnnotationToolbar } from './AnnotationToolbar';
 
 interface VideoReviewPageProps {
@@ -64,7 +64,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   const [annotationStrokeWidth, setAnnotationStrokeWidth] = useState(4);
   const [currentDrawingData, setCurrentDrawingData] = useState<DrawingData | null>(null);
   const [viewingDrawingData, setViewingDrawingData] = useState<DrawingData | null>(null);
-  const annotationCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const annotationCanvasRef = useRef<AnnotationCanvasHandle>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
 
   // Load versions on mount
@@ -185,13 +185,11 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   }, []);
 
   const handleAnnotationUndo = useCallback(() => {
-    const canvas = document.querySelector('canvas[class*="absolute inset-0"]') as any;
-    if (canvas?.__undo) canvas.__undo();
+    annotationCanvasRef.current?.undo();
   }, []);
 
   const handleAnnotationClear = useCallback(() => {
-    const canvas = document.querySelector('canvas[class*="absolute inset-0"]') as any;
-    if (canvas?.__clear) canvas.__clear();
+    annotationCanvasRef.current?.clear();
     setCurrentDrawingData(null);
   }, []);
 
@@ -375,6 +373,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                         onClose={handleAnnotationClose}
                       />
                       <AnnotationCanvas
+                        ref={annotationCanvasRef}
                         width={videoRef.current?.videoWidth || 1920}
                         height={videoRef.current?.videoHeight || 1080}
                         isActive={true}

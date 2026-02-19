@@ -1,5 +1,10 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { DrawingData, Stroke } from '../types';
+
+export interface AnnotationCanvasHandle {
+  undo: () => void;
+  clear: () => void;
+}
 
 interface AnnotationCanvasProps {
   width: number;
@@ -40,7 +45,7 @@ function drawArrowhead(
   ctx.stroke();
 }
 
-export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
+export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCanvasProps>(({
   width,
   height,
   isActive,
@@ -50,7 +55,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   existingDrawing,
   onDrawingChange,
   onClose,
-}) => {
+}, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
@@ -263,9 +268,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   };
 
-  // Expose undo/clear methods via public API through strokes state
-  // These are called by parent through prop callbacks in AnnotationToolbar
-  // We use imperative handle pattern instead
   const undo = useCallback(() => {
     setStrokes((prev) => prev.slice(0, -1));
   }, []);
@@ -274,15 +276,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     setStrokes([]);
   }, []);
 
-  // Expose undo/clear to parent via ref-like mechanism
-  // We attach them to the canvas element as custom properties
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      (canvas as any).__undo = undo;
-      (canvas as any).__clear = clear;
-    }
-  }, [undo, clear]);
+  useImperativeHandle(ref, () => ({ undo, clear }), [undo, clear]);
 
   // Calculate text input position in screen coordinates
   const getTextInputStyle = (): React.CSSProperties => {
@@ -339,6 +333,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       )}
     </div>
   );
-};
+});
+
+AnnotationCanvas.displayName = 'AnnotationCanvas';
 
 export default AnnotationCanvas;

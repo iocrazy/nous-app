@@ -219,7 +219,9 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     try {
       await updateFile(project.id, renameFile.id, { filename: renameValue.trim() });
       await loadContent();
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to rename file:', err);
+    }
     setRenameFile(null);
   };
 
@@ -227,14 +229,18 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     try {
       await updateReviewStatus(project.id, file.id, status);
       await loadContent();
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to set review status:', err);
+    }
   };
 
   const handleDeleteFile = async (file: ProjectFile) => {
     try {
       await deleteFile(project.id, file.id);
       await loadContent();
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('Failed to delete file:', err);
+    }
   };
 
   return (

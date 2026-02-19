@@ -74,8 +74,8 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       await addProjectMember(project.id, inviteEmail.trim(), inviteRole);
       setInviteEmail('');
       await loadMembers();
-    } catch (err: any) {
-      setError(err.message || 'Failed to invite member');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to invite member');
     } finally {
       setIsInviting(false);
     }
