@@ -11,7 +11,7 @@ class TagsRepository:
     """Repository for tags CRUD operations (异步)."""
 
     TABLE_NAME = "tags"
-    MEDIA_TAGS_TABLE = "media_tags"
+    RESOURCE_TAGS_TABLE = "resource_tags"
 
     def __init__(self):
         self._client = None
@@ -27,15 +27,15 @@ class TagsRepository:
         client = await self._get_client()
         return client.table(self.TABLE_NAME)
 
-    async def _get_media_tags_table(self):
-        """获取媒体标签关联表引用"""
+    async def _get_resource_tags_table(self):
+        """获取资源标签关联表引用"""
         client = await self._get_client()
-        return client.table(self.MEDIA_TAGS_TABLE)
+        return client.table(self.RESOURCE_TAGS_TABLE)
 
     async def get_all_tags(self, user_id: Optional[str] = None) -> List[dict]:
         """Get all tags (system + time + user's own tags) with media_count."""
         table = await self._get_table()
-        media_tags_table = await self._get_media_tags_table()
+        resource_tags_table = await self._get_resource_tags_table()
 
         # Get system tags
         system_result = await table.select("*").eq("type", "system").execute()
@@ -54,7 +54,7 @@ class TagsRepository:
         for tag in tags:
             tag_id = str(tag.get("id"))
             count_result = (
-                await media_tags_table.select("*", count="exact")
+                await resource_tags_table.select("*", count="exact")
                 .eq("tag_id", tag_id)
                 .execute()
             )
@@ -166,89 +166,89 @@ class TagsRepository:
         )
         return len(result.data) > 0
 
-    async def add_tag_to_media(
+    async def add_tag_to_resource(
         self,
-        media_id: str,
+        resource_id: str,
         tag_id: str,
         confidence: Optional[float] = None,
         source: str = "manual",
     ) -> dict:
-        """Add a tag to a media item.
+        """Add a tag to a resource item.
 
         Args:
-            media_id: The media UUID
+            resource_id: The resource UUID
             tag_id: The tag UUID
             confidence: Optional confidence score for auto-assigned tags
             source: How the tag was added ('manual', 'auto', 'ai')
         """
-        data = {"media_id": media_id, "tag_id": tag_id, "source": source}
+        data = {"resource_id": resource_id, "tag_id": tag_id, "source": source}
         if confidence is not None:
             data["confidence"] = confidence
 
-        media_tags_table = await self._get_media_tags_table()
-        result = await media_tags_table.upsert(data).execute()
-        logger.info(f"Added tag {tag_id} to media {media_id}")
+        resource_tags_table = await self._get_resource_tags_table()
+        result = await resource_tags_table.upsert(data).execute()
+        logger.info(f"Added tag {tag_id} to resource {resource_id}")
         return result.data[0]
 
-    async def remove_tag_from_media(self, media_id: str, tag_id: str) -> bool:
-        """Remove a tag from a media item."""
-        media_tags_table = await self._get_media_tags_table()
+    async def remove_tag_from_resource(self, resource_id: str, tag_id: str) -> bool:
+        """Remove a tag from a resource item."""
+        resource_tags_table = await self._get_resource_tags_table()
         result = (
-            await media_tags_table.delete()
-            .eq("media_id", media_id)
+            await resource_tags_table.delete()
+            .eq("resource_id", resource_id)
             .eq("tag_id", tag_id)
             .execute()
         )
         return len(result.data) > 0
 
-    async def get_media_tags(self, media_id: str) -> List[dict]:
-        """Get all tags for a media item with tag details."""
-        media_tags_table = await self._get_media_tags_table()
+    async def get_resource_tags(self, resource_id: str) -> List[dict]:
+        """Get all tags for a resource item with tag details."""
+        resource_tags_table = await self._get_resource_tags_table()
         result = (
-            await media_tags_table.select("*, tags(*)")
-            .eq("media_id", media_id)
+            await resource_tags_table.select("*, tags(*)")
+            .eq("resource_id", resource_id)
             .execute()
         )
 
         return result.data
 
-    async def get_media_by_tag(
+    async def get_resources_by_tag(
         self, tag_id: str, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[dict]:
-        """Get all media with a specific tag."""
-        media_tags_table = await self._get_media_tags_table()
+        """Get all resources with a specific tag."""
+        resource_tags_table = await self._get_resource_tags_table()
         result = (
-            await media_tags_table.select("media_id, parsed_media(*)")
+            await resource_tags_table.select("resource_id, resources(*)")
             .eq("tag_id", tag_id)
             .range(offset, offset + limit - 1)
             .execute()
         )
 
-        return [r["parsed_media"] for r in result.data if r.get("parsed_media")]
+        return [r["resources"] for r in result.data if r.get("resources")]
 
-    async def bulk_add_tags_to_media(
-        self, media_id: str, tag_ids: List[str], source: str = "manual"
+    async def bulk_add_tags_to_resource(
+        self, resource_id: str, tag_ids: List[str], source: str = "manual"
     ) -> List[dict]:
-        """Add multiple tags to a media item at once."""
+        """Add multiple tags to a resource item at once."""
         data = [
-            {"media_id": media_id, "tag_id": tag_id, "source": source}
+            {"resource_id": resource_id, "tag_id": tag_id, "source": source}
             for tag_id in tag_ids
         ]
 
-        media_tags_table = await self._get_media_tags_table()
-        result = await media_tags_table.upsert(data).execute()
-        logger.info(f"Added {len(tag_ids)} tags to media {media_id}")
+        resource_tags_table = await self._get_resource_tags_table()
+        result = await resource_tags_table.upsert(data).execute()
+        logger.info(f"Added {len(tag_ids)} tags to resource {resource_id}")
         return result.data
 
     async def get_tag_counts(self, user_id: str, limit: int = 10) -> List[dict]:
-        """Get tag usage counts for a user's media.
+        """Get tag usage counts for a user's resources.
 
         Returns tags sorted by usage count (most used first).
         """
         client = await self._get_client()
 
-        # Query media_tags joined with tags and parsed_media to filter by user
-        # We need to count how many media each tag is associated with for this user
+        # Query resource_tags joined with tags and resources to filter by user
+        # We need to count how many resources each tag is associated with for this user
         result = await client.rpc(
             "get_user_tag_counts", {"p_user_id": user_id, "p_limit": limit}
         ).execute()
@@ -266,29 +266,29 @@ class TagsRepository:
         """Fallback method to get tag counts without RPC."""
         client = await self._get_client()
 
-        # Get all media IDs for this user
-        media_result = (
-            await client.table("parsed_media").select("id").eq("user_id", user_id).execute()
+        # Get all resource IDs for this user
+        resource_result = (
+            await client.table("resources").select("id").eq("user_id", user_id).execute()
         )
-        if not media_result.data:
+        if not resource_result.data:
             return []
 
-        media_ids = [v["id"] for v in media_result.data]
+        resource_ids = [v["id"] for v in resource_result.data]
 
-        # Get all media_tags for these media
-        media_tags_result = (
-            await client.table("media_tags")
+        # Get all resource_tags for these resources
+        resource_tags_result = (
+            await client.table("resource_tags")
             .select("tag_id, tags(id, name, color, icon, type)")
-            .in_("media_id", media_ids)
+            .in_("resource_id", resource_ids)
             .execute()
         )
 
-        if not media_tags_result.data:
+        if not resource_tags_result.data:
             return []
 
         # Count tags
         tag_counts: dict = {}
-        for vt in media_tags_result.data:
+        for vt in resource_tags_result.data:
             tag_info = vt.get("tags")
             if tag_info:
                 tag_id = tag_info["id"]
