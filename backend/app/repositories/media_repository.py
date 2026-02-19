@@ -91,7 +91,7 @@ class MediaRepository:
             client = await self._get_client()
             # Use parsed_media_with_tags view which includes tags array
             query = (
-                client.table("parsed_media_with_tags")
+                client.table("parsed_media")
                 .select("*")
                 .eq("platform_id", platform_id)
             )
@@ -366,7 +366,7 @@ class MediaRepository:
         try:
             client = await self._get_client()
             # Use parsed_media_with_tags view which includes tags array
-            query = client.table("parsed_media_with_tags").select("*")
+            query = client.table("parsed_media").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
             query = query.order(order_by, desc=not ascending)

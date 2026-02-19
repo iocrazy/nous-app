@@ -19,9 +19,9 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
 # Request/Response schemas
 class AnalysisResponse(BaseModel):
-    """Response schema for media analysis."""
+    """Response schema for resource analysis."""
 
-    media_id: int
+    resource_id: int
     analysis_level: str
     visual_description: Optional[str] = None
     detected_objects: List[str] = []
@@ -79,7 +79,7 @@ async def get_analysis_stats(auth: AuthDep = None):
 
     # Analyzed videos
     analysis_result = (
-        await supabase.table("media_analysis")
+        await supabase.table("resource_analysis")
         .select("analysis_level, analysis_cost")
         .execute()
     )
@@ -141,7 +141,7 @@ async def get_media_analysis(
         )
 
     return AnalysisResponse(
-        media_id=analysis["media_id"],
+        resource_id=analysis["resource_id"],
         analysis_level=analysis.get("analysis_level", "none"),
         visual_description=analysis.get("visual_description"),
         detected_objects=analysis.get("detected_objects", []),
