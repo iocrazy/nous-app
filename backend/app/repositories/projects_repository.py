@@ -22,6 +22,11 @@ class ProjectsRepository:
     TABLE_MEDIA = "parsed_media"
     TABLE_VERSIONS = "file_versions"
     TABLE_COMMENTS = "review_comments"
+    TABLE_FOLDERS = "project_folders"
+    TABLE_SHARES = "shares"
+    TABLE_TASKS = "project_tasks"
+    TABLE_MEMBERS = "project_members"
+    TABLE_COLLECTIONS = "project_collections"
 
     def __init__(self):
         self._client = None
@@ -465,4 +470,375 @@ class ProjectsRepository:
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"Failed to update review status for file {file_id}: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Folders
+    # ------------------------------------------------------------------ #
+
+    async def get_folders(
+        self, project_id: str, parent_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get folders in a project, optionally filtered by parent."""
+        try:
+            client = await self._get_client()
+            query = (
+                client.table(self.TABLE_FOLDERS)
+                .select("*")
+                .eq("project_id", project_id)
+            )
+            if parent_id:
+                query = query.eq("parent_id", parent_id)
+            else:
+                query = query.is_("parent_id", "null")
+            result = await query.order("name").execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get folders for project {project_id}: {e}")
+            return []
+
+    async def get_folder(
+        self, folder_id: str, project_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single folder by ID, scoped to project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_FOLDERS)
+                .select("*")
+                .eq("id", folder_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get folder {folder_id}: {e}")
+            return None
+
+    async def create_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new folder."""
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_FOLDERS).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create folder: {e}")
+            raise
+
+    async def update_folder(
+        self, folder_id: str, project_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Update a folder, scoped to project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_FOLDERS)
+                .update(data)
+                .eq("id", folder_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to update folder {folder_id}: {e}")
+            raise
+
+    async def delete_folder_record(self, folder_id: str, project_id: str) -> bool:
+        """Delete a folder record."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_FOLDERS)
+                .delete()
+                .eq("id", folder_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete folder {folder_id}: {e}")
+            raise
+
+    async def reparent_folder_children(
+        self, folder_id: str, new_parent_id: Optional[str]
+    ) -> None:
+        """Move files and sub-folders to a new parent when deleting a folder."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_FILES)
+                .update({"folder_id": new_parent_id})
+                .eq("folder_id", folder_id)
+                .execute()
+            )
+            await (
+                client.table(self.TABLE_FOLDERS)
+                .update({"parent_id": new_parent_id})
+                .eq("parent_id", folder_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"Failed to reparent children of folder {folder_id}: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Shares
+    # ------------------------------------------------------------------ #
+
+    async def get_shares_by_project(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all shares for files in a project."""
+        try:
+            client = await self._get_client()
+            files_result = (
+                await client.table(self.TABLE_FILES)
+                .select("id")
+                .eq("project_id", project_id)
+                .execute()
+            )
+            file_ids = [f["id"] for f in (files_result.data or [])]
+            if not file_ids:
+                return []
+            result = (
+                await client.table(self.TABLE_SHARES)
+                .select("*")
+                .in_("project_file_id", file_ids)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get shares for project {project_id}: {e}")
+            return []
+
+    async def get_file_in_project(
+        self, file_id: str, project_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get a file verifying it belongs to the project (id + filename only)."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_FILES)
+                .select("id, filename")
+                .eq("id", file_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get file {file_id} in project {project_id}: {e}")
+            return None
+
+    async def create_share(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new share record."""
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_SHARES).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create share: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Tasks
+    # ------------------------------------------------------------------ #
+
+    async def get_tasks(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all tasks for a project, ordered by sort_order."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_TASKS)
+                .select("*")
+                .eq("project_id", project_id)
+                .order("sort_order")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get tasks for project {project_id}: {e}")
+            return []
+
+    async def create_task(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new task."""
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_TASKS).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create task: {e}")
+            raise
+
+    async def update_task(
+        self, task_id: str, project_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Update a task, scoped to project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_TASKS)
+                .update(data)
+                .eq("id", task_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to update task {task_id}: {e}")
+            raise
+
+    async def delete_task(self, task_id: str, project_id: str) -> bool:
+        """Delete a task, scoped to project."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_TASKS)
+                .delete()
+                .eq("id", task_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete task {task_id}: {e}")
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Members
+    # ------------------------------------------------------------------ #
+
+    async def get_members(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all members of a project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_MEMBERS)
+                .select("*")
+                .eq("project_id", project_id)
+                .order("created_at")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get members for project {project_id}: {e}")
+            return []
+
+    async def create_member(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new member record."""
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_MEMBERS).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create member: {e}")
+            raise
+
+    async def update_member(
+        self, member_id: str, project_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Update a member, scoped to project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_MEMBERS)
+                .update(data)
+                .eq("id", member_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to update member {member_id}: {e}")
+            raise
+
+    async def delete_member(self, member_id: str, project_id: str) -> bool:
+        """Delete a member, scoped to project."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_MEMBERS)
+                .delete()
+                .eq("id", member_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete member {member_id}: {e}")
+            raise
+
+    async def enrich_members_with_email(
+        self, members: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enrich member records with user email from auth."""
+        if not members:
+            return members
+        try:
+            client = await self._get_client()
+            user_ids = [m["user_id"] for m in members]
+            users_result = await client.auth.admin.list_users()
+            user_map = {
+                str(u.id): u.email for u in users_result if str(u.id) in user_ids
+            }
+            for m in members:
+                m["email"] = user_map.get(m["user_id"], "")
+            return members
+        except Exception as e:
+            logger.warning(f"Failed to enrich members with email: {e}")
+            return members
+
+    async def get_user_email(self, user_id: str) -> str:
+        """Get a user's email from auth."""
+        try:
+            client = await self._get_client()
+            user = await client.auth.admin.get_user_by_id(user_id)
+            return user.user.email if user.user else ""
+        except Exception:
+            return ""
+
+    # ------------------------------------------------------------------ #
+    # Collections
+    # ------------------------------------------------------------------ #
+
+    async def get_collections(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all collections for a project."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_COLLECTIONS)
+                .select("*")
+                .eq("project_id", project_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get collections for project {project_id}: {e}")
+            return []
+
+    async def create_collection(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new collection."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_COLLECTIONS).insert(data).execute()
+            )
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create collection: {e}")
+            raise
+
+    async def delete_collection(self, collection_id: str, project_id: str) -> bool:
+        """Delete a collection, scoped to project."""
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_COLLECTIONS)
+                .delete()
+                .eq("id", collection_id)
+                .eq("project_id", project_id)
+                .execute()
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete collection {collection_id}: {e}")
             raise

@@ -8,22 +8,27 @@ file management, and video linking.
 Requires authentication (JWT or API Key).
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from loguru import logger
-from pydantic import BaseModel
 
 from app.core.deps import AuthDep
-from app.repositories.projects_repository import ProjectsRepository
 from app.schemas.projects import (
     AddMemberRequest,
+    CreateCollectionRequest,
     CreateCommentRequest,
+    CreateFolderRequest,
+    CreateShareRequest,
     LinkMediaRequest,
+    MoveFileRequest,
     ProjectCreate,
     ProjectFileUpdate,
     ProjectUpdate,
+    RenameFolderRequest,
     ReviewStatusUpdate,
+    TaskCreateRequest,
+    TaskUpdateRequest,
     UpdateMemberRoleRequest,
 )
 from app.services.projects_service import ProjectsService
@@ -84,14 +89,11 @@ async def create_project(data: ProjectCreate, auth: AuthDep):
 async def get_project(project_id: str, auth: AuthDep):
     """Get a single project by ID with file count."""
     try:
-        repo = ProjectsRepository()
-        project = await repo.get_project_by_id(project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        project["file_count"] = await repo.get_project_file_count(project_id)
+        svc = ProjectsService()
+        project = await svc.get_project(project_id)
         return {"success": True, "data": project}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to get project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get project")
@@ -147,22 +149,11 @@ async def list_files(
 ):
     """List files in a project, optionally filtered by folder."""
     try:
-        repo = ProjectsRepository()
-        project = await repo.get_project_by_id(project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        files = await repo.get_project_files(
-            project_id, include_trashed=include_trashed
-        )
-        # Apply folder filtering only when not fetching trashed files
-        if not include_trashed:
-            if folder_id is not None:
-                files = [f for f in files if f.get("folder_id") == folder_id]
-            else:
-                files = [f for f in files if not f.get("folder_id")]
+        svc = ProjectsService()
+        files = await svc.get_project_files(project_id, include_trashed, folder_id)
         return {"success": True, "data": files}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list files for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list files")
@@ -181,7 +172,6 @@ async def upload_file(
     Max file size: 500 MB. Video files will have metadata extracted via ffprobe.
     """
     try:
-        # Check file size via content-length hint (if available)
         if file.size and file.size > MAX_UPLOAD_SIZE:
             raise HTTPException(
                 status_code=413, detail="File too large. Maximum size is 500 MB."
@@ -226,17 +216,11 @@ async def link_media(project_id: str, data: LinkMediaRequest, auth: AuthDep):
 async def get_file_info(project_id: str, file_id: str, auth: AuthDep):
     """Get detailed info for a single file."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
+        svc = ProjectsService()
+        file_record = await svc.get_file_info(project_id, file_id)
         return {"success": True, "data": file_record}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to get file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get file info")
@@ -248,29 +232,13 @@ async def update_file(
 ):
     """Update file metadata (rename, add notes, trash/restore)."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-
-        update_data = data.model_dump(exclude_none=True)
-
-        # Set trashed_at timestamp when trashing
-        if data.is_trashed is True:
-            from datetime import datetime, timezone
-
-            update_data["trashed_at"] = datetime.now(timezone.utc).isoformat()
-        elif data.is_trashed is False:
-            update_data["trashed_at"] = None
-
-        result = await repo.update_file(file_id, update_data)
+        svc = ProjectsService()
+        result = await svc.update_file(
+            project_id, file_id, data.model_dump(exclude_none=True)
+        )
         return {"success": True, "data": result}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to update file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update file")
@@ -280,20 +248,11 @@ async def update_file(
 async def restore_file(project_id: str, file_id: str, auth: AuthDep):
     """Restore a trashed file."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-        result = await repo.update_file(
-            file_id, {"is_trashed": False, "trashed_at": None}
-        )
+        svc = ProjectsService()
+        result = await svc.restore_file(project_id, file_id)
         return {"success": True, "data": result}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to restore file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to restore file")
@@ -303,91 +262,25 @@ async def restore_file(project_id: str, file_id: str, auth: AuthDep):
 async def list_project_shares(project_id: str, auth: AuthDep):
     """List all shares for files in this project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        # Get all file IDs in this project
-        files_result = (
-            await sb.table("project_files")
-            .select("id")
-            .eq("project_id", project_id)
-            .execute()
-        )
-        file_ids = [f["id"] for f in (files_result.data or [])]
-        if not file_ids:
-            return {"success": True, "data": []}
-
-        # Get shares for those files
-        result = (
-            await sb.table("shares")
-            .select("*")
-            .in_("project_file_id", file_ids)
-            .order("created_at", desc=True)
-            .execute()
-        )
-        return {"success": True, "data": result.data or []}
+        svc = ProjectsService()
+        shares = await svc.list_shares(project_id)
+        return {"success": True, "data": shares}
     except Exception as e:
         logger.error(f"Failed to list shares for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list project shares")
 
 
-class CreateShareRequest(BaseModel):
-    file_id: str
-    share_type: str = "link"
-    share_name: Optional[str] = None
-    password: Optional[str] = None
-    allow_download: bool = True
-    expires_hours: Optional[int] = None
-
-
 @router.post("/{project_id}/shares")
 async def create_share(project_id: str, data: CreateShareRequest, auth: AuthDep):
     """Create a share link for a project file."""
-    import secrets
-    from datetime import datetime, timedelta, timezone
-
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-
-        # Verify file belongs to project
-        file_result = (
-            await sb.table("project_files")
-            .select("id, filename")
-            .eq("id", data.file_id)
-            .eq("project_id", project_id)
-            .single()
-            .execute()
+        svc = ProjectsService()
+        share = await svc.create_share(
+            project_id, data.model_dump(exclude_none=True), auth.user_id
         )
-        if not file_result.data:
-            raise HTTPException(status_code=404, detail="File not found in project")
-
-        share_code = secrets.token_urlsafe(8)[:12]
-        share_name = data.share_name or file_result.data["filename"]
-
-        share_data: Dict[str, Any] = {
-            "project_file_id": data.file_id,
-            "share_type": data.share_type,
-            "shared_by": auth.user_id,
-            "share_name": share_name,
-            "share_code": share_code,
-            "password": data.password,
-            "allow_download": data.allow_download,
-            "status": "active",
-        }
-        if data.expires_hours:
-            share_data["expires_at"] = (
-                datetime.now(timezone.utc) + timedelta(hours=data.expires_hours)
-            ).isoformat()
-
-        result = await sb.table("shares").insert(share_data).execute()
-        share = result.data[0] if result.data else None
-        if not share:
-            raise HTTPException(status_code=500, detail="Failed to create share")
         return {"success": True, "data": share}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to create share for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create share")
@@ -398,37 +291,19 @@ async def create_share(project_id: str, data: CreateShareRequest, auth: AuthDep)
 # ============================================
 
 
-class CreateFolderRequest(BaseModel):
-    name: str = "New Folder"
-    parent_id: Optional[str] = None
-
-
-class RenameFolderRequest(BaseModel):
-    name: str
-
-
-class MoveFileRequest(BaseModel):
-    folder_id: Optional[str] = None
-
-
 @router.get("/{project_id}/folders")
 async def list_folders(
     project_id: str,
     auth: AuthDep,
-    parent_id: Optional[str] = Query(None, description="Parent folder ID, null for root"),
+    parent_id: Optional[str] = Query(
+        None, description="Parent folder ID, null for root"
+    ),
 ):
     """List folders in a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        query = sb.table("project_folders").select("*").eq("project_id", project_id)
-        if parent_id:
-            query = query.eq("parent_id", parent_id)
-        else:
-            query = query.is_("parent_id", "null")
-        result = await query.order("name").execute()
-        return {"success": True, "data": result.data or []}
+        svc = ProjectsService()
+        folders = await svc.list_folders(project_id, parent_id)
+        return {"success": True, "data": folders}
     except Exception as e:
         logger.error(f"Failed to list folders for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list folders")
@@ -438,18 +313,10 @@ async def list_folders(
 async def create_folder(project_id: str, data: CreateFolderRequest, auth: AuthDep):
     """Create a new folder in a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        insert_data: Dict[str, Any] = {
-            "project_id": project_id,
-            "name": data.name,
-            "created_by": auth.user_id,
-        }
-        if data.parent_id:
-            insert_data["parent_id"] = data.parent_id
-        result = await sb.table("project_folders").insert(insert_data).execute()
-        folder = result.data[0] if result.data else None
+        svc = ProjectsService()
+        folder = await svc.create_folder(
+            project_id, data.name, auth.user_id, data.parent_id
+        )
         return {"success": True, "data": folder}
     except Exception as e:
         logger.error(f"Failed to create folder in project {project_id}: {e}")
@@ -462,22 +329,11 @@ async def rename_folder(
 ):
     """Rename a folder."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        result = (
-            await sb.table("project_folders")
-            .update({"name": data.name})
-            .eq("id", folder_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
-        folder = result.data[0] if result.data else None
-        if not folder:
-            raise HTTPException(status_code=404, detail="Folder not found")
+        svc = ProjectsService()
+        folder = await svc.rename_folder(project_id, folder_id, data.name)
         return {"success": True, "data": folder}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to rename folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to rename folder")
@@ -487,41 +343,11 @@ async def rename_folder(
 async def delete_folder(project_id: str, folder_id: str, auth: AuthDep):
     """Delete a folder (files inside are moved to parent)."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        # Get folder to find parent_id
-        folder_result = (
-            await sb.table("project_folders")
-            .select("parent_id")
-            .eq("id", folder_id)
-            .eq("project_id", project_id)
-            .single()
-            .execute()
-        )
-        if not folder_result.data:
-            raise HTTPException(status_code=404, detail="Folder not found")
-        parent_id = folder_result.data.get("parent_id")
-
-        # Move files to parent folder
-        await (
-            sb.table("project_files")
-            .update({"folder_id": parent_id})
-            .eq("folder_id", folder_id)
-            .execute()
-        )
-        # Move sub-folders to parent
-        await (
-            sb.table("project_folders")
-            .update({"parent_id": parent_id})
-            .eq("parent_id", folder_id)
-            .execute()
-        )
-        # Delete the folder
-        await sb.table("project_folders").delete().eq("id", folder_id).execute()
+        svc = ProjectsService()
+        await svc.delete_folder(project_id, folder_id)
         return {"success": True, "message": "Folder deleted"}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to delete folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete folder")
@@ -533,18 +359,11 @@ async def move_file(
 ):
     """Move a file to a different folder."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-        result = await repo.update_file(file_id, {"folder_id": data.folder_id})
+        svc = ProjectsService()
+        result = await svc.move_file(project_id, file_id, data.folder_id)
         return {"success": True, "data": result}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to move file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to move file")
@@ -554,19 +373,11 @@ async def move_file(
 async def delete_file(project_id: str, file_id: str, auth: AuthDep):
     """Permanently delete a file record."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-
-        await repo.delete_file(file_id)
+        svc = ProjectsService()
+        await svc.delete_file(project_id, file_id)
         return {"success": True, "message": "File deleted"}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to delete file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete file")
@@ -581,18 +392,11 @@ async def delete_file(project_id: str, file_id: str, auth: AuthDep):
 async def list_versions(project_id: str, file_id: str, auth: AuthDep):
     """List all versions of a file."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-        versions = await repo.get_file_versions(file_id)
+        svc = ProjectsService()
+        versions = await svc.get_file_versions(project_id, file_id)
         return {"success": True, "data": versions}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list versions for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list versions")
@@ -644,18 +448,11 @@ async def list_comments(
 ):
     """List comments on a file."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-        comments = await repo.get_comments_for_file(file_id, version_id=version_id)
+        svc = ProjectsService()
+        comments = await svc.get_file_comments(project_id, file_id, version_id)
         return {"success": True, "data": comments}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to list comments for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list comments")
@@ -670,17 +467,9 @@ async def add_comment(
 ):
     """Add a comment to a file."""
     try:
-        repo = ProjectsRepository()
-        file_record = await repo.get_file_by_id(file_id)
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_record.get("project_id") != project_id:
-            raise HTTPException(
-                status_code=404, detail="File not found in this project"
-            )
-
         svc = ProjectsService()
         result = await svc.add_comment(
+            project_id=project_id,
             file_id=file_id,
             author_id=auth.user_id,
             content=data.content,
@@ -689,30 +478,26 @@ async def add_comment(
             drawing_data=data.drawing_data,
         )
         return {"success": True, "data": result}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to add comment to file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to add comment")
 
 
 @router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
-async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: AuthDep):
+async def delete_comment(
+    project_id: str, file_id: str, comment_id: str, auth: AuthDep
+):
     """Delete a comment. Only the author can delete their own comment."""
     try:
-        repo = ProjectsRepository()
-        comment = await repo.get_comment_by_id(comment_id)
-        if not comment:
-            raise HTTPException(status_code=404, detail="Comment not found")
-        if comment.get("author_id") != auth.user_id:
-            raise HTTPException(
-                status_code=403, detail="Can only delete your own comments"
-            )
-
-        await repo.delete_comment(comment_id)
+        svc = ProjectsService()
+        await svc.delete_comment(comment_id, auth.user_id)
         return {"success": True, "message": "Comment deleted"}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to delete comment {comment_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete comment")
@@ -749,66 +534,26 @@ async def update_review_status(
 # ============================================
 
 
-class TaskCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    task_type: Optional[str] = "general"
-    assignee_id: Optional[str] = None
-    due_date: Optional[str] = None
-    status: Optional[str] = "todo"
-
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    task_type: Optional[str] = None
-    assignee_id: Optional[str] = None
-    due_date: Optional[str] = None
-    status: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
 @router.get("/{project_id}/tasks")
 async def list_tasks(project_id: str, auth: AuthDep):
     """List all tasks for a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        result = await sb.table("project_tasks").select("*").eq(
-            "project_id", project_id
-        ).order("sort_order").execute()
-        return {"success": True, "data": result.data or []}
+        svc = ProjectsService()
+        tasks = await svc.list_tasks(project_id)
+        return {"success": True, "data": tasks}
     except Exception as e:
         logger.error(f"Failed to list tasks for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list tasks")
 
 
 @router.post("/{project_id}/tasks")
-async def create_task(project_id: str, data: TaskCreate, auth: AuthDep):
+async def create_task(project_id: str, data: TaskCreateRequest, auth: AuthDep):
     """Create a new task in a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        insert_data: Dict[str, Any] = {
-            "project_id": project_id,
-            "title": data.title,
-            "created_by": auth.user_id,
-        }
-        if data.description is not None:
-            insert_data["description"] = data.description
-        if data.task_type is not None:
-            insert_data["task_type"] = data.task_type
-        if data.assignee_id is not None:
-            insert_data["assignee_id"] = data.assignee_id
-        if data.due_date is not None:
-            insert_data["due_date"] = data.due_date
-        if data.status is not None:
-            insert_data["status"] = data.status
-
-        result = await sb.table("project_tasks").insert(insert_data).execute()
-        task = result.data[0] if result.data else None
+        svc = ProjectsService()
+        task = await svc.create_task(
+            project_id, data.model_dump(exclude_none=True), auth.user_id
+        )
         return {"success": True, "data": task}
     except Exception as e:
         logger.error(f"Failed to create task in project {project_id}: {e}")
@@ -816,26 +561,19 @@ async def create_task(project_id: str, data: TaskCreate, auth: AuthDep):
 
 
 @router.put("/{project_id}/tasks/{task_id}")
-async def update_task(project_id: str, task_id: str, data: TaskUpdate, auth: AuthDep):
+async def update_task(
+    project_id: str, task_id: str, data: TaskUpdateRequest, auth: AuthDep
+):
     """Update a task."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        update_data = data.model_dump(exclude_none=True)
-        if not update_data:
-            raise HTTPException(status_code=400, detail="No fields to update")
-
-        result = await sb.table("project_tasks").update(update_data).eq(
-            "id", task_id
-        ).eq("project_id", project_id).execute()
-
-        task = result.data[0] if result.data else None
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
+        svc = ProjectsService()
+        task = await svc.update_task(
+            project_id, task_id, data.model_dump(exclude_none=True)
+        )
         return {"success": True, "data": task}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        status = 400 if "No fields" in str(e) else 404
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to update task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update task")
@@ -845,12 +583,8 @@ async def update_task(project_id: str, task_id: str, data: TaskUpdate, auth: Aut
 async def delete_task(project_id: str, task_id: str, auth: AuthDep):
     """Delete a task."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        await sb.table("project_tasks").delete().eq(
-            "id", task_id
-        ).eq("project_id", project_id).execute()
+        svc = ProjectsService()
+        await svc.delete_task(project_id, task_id)
         return {"success": True, "message": "Task deleted"}
     except Exception as e:
         logger.error(f"Failed to delete task {task_id}: {e}")
@@ -866,28 +600,8 @@ async def delete_task(project_id: str, task_id: str, auth: AuthDep):
 async def list_members(project_id: str, auth: AuthDep):
     """List all members of a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        result = (
-            await sb.table("project_members")
-            .select("*")
-            .eq("project_id", project_id)
-            .order("created_at")
-            .execute()
-        )
-
-        # Enrich with user email from auth.users
-        members = result.data or []
-        if members:
-            user_ids = [m["user_id"] for m in members]
-            users_result = await sb.auth.admin.list_users()
-            user_map = {
-                str(u.id): u.email for u in users_result if str(u.id) in user_ids
-            }
-            for m in members:
-                m["email"] = user_map.get(m["user_id"], "")
-
+        svc = ProjectsService()
+        members = await svc.list_members(project_id)
         return {"success": True, "data": members}
     except Exception as e:
         logger.error(f"Failed to list members for project {project_id}: {e}")
@@ -898,31 +612,11 @@ async def list_members(project_id: str, auth: AuthDep):
 async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
     """Add a member to a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-
-        member_data = {
-            "project_id": project_id,
-            "user_id": data.user_id,
-            "role": data.role,
-            "invited_by": auth.user_id,
-        }
-        result = await sb.table("project_members").insert(member_data).execute()
-        member = result.data[0] if result.data else None
-        if not member:
-            raise HTTPException(status_code=500, detail="Failed to add member")
-
-        # Get email
-        try:
-            user = await sb.auth.admin.get_user_by_id(data.user_id)
-            member["email"] = user.user.email if user.user else ""
-        except Exception:
-            member["email"] = ""
-
+        svc = ProjectsService()
+        member = await svc.add_member(
+            project_id, data.user_id, data.role, auth.user_id
+        )
         return {"success": True, "data": member}
-    except HTTPException:
-        raise
     except Exception as e:
         error_msg = str(e)
         if "duplicate key" in error_msg or "unique" in error_msg.lower():
@@ -939,22 +633,11 @@ async def update_member_role(
 ):
     """Update a member's role."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        result = (
-            await sb.table("project_members")
-            .update({"role": data.role})
-            .eq("id", member_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
-        member = result.data[0] if result.data else None
-        if not member:
-            raise HTTPException(status_code=404, detail="Member not found")
+        svc = ProjectsService()
+        member = await svc.update_member_role(project_id, member_id, data.role)
         return {"success": True, "data": member}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to update member {member_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update member role")
@@ -964,12 +647,8 @@ async def update_member_role(
 async def remove_member(project_id: str, member_id: str, auth: AuthDep):
     """Remove a member from a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        await sb.table("project_members").delete().eq("id", member_id).eq(
-            "project_id", project_id
-        ).execute()
+        svc = ProjectsService()
+        await svc.remove_member(project_id, member_id)
         return {"success": True, "message": "Member removed"}
     except Exception as e:
         logger.error(f"Failed to remove member {member_id}: {e}")
@@ -981,28 +660,13 @@ async def remove_member(project_id: str, member_id: str, auth: AuthDep):
 # ============================================
 
 
-class CreateCollectionRequest(BaseModel):
-    collection_name: str
-    allowed_types: Optional[list[str]] = None
-    max_file_size_mb: int = 500
-    deadline: Optional[str] = None
-
-
 @router.get("/{project_id}/collections")
 async def list_collections(project_id: str, auth: AuthDep):
     """List all collection links for a project."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        result = (
-            await sb.table("project_collections")
-            .select("*")
-            .eq("project_id", project_id)
-            .order("created_at", desc=True)
-            .execute()
-        )
-        return {"success": True, "data": result.data or []}
+        svc = ProjectsService()
+        collections = await svc.list_collections(project_id)
+        return {"success": True, "data": collections}
     except Exception as e:
         logger.error(f"Failed to list collections for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list collections")
@@ -1013,33 +677,12 @@ async def create_collection(
     project_id: str, data: CreateCollectionRequest, auth: AuthDep
 ):
     """Create a collection link for external file uploads."""
-    import secrets
-
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        collection_code = secrets.token_urlsafe(8)[:12]
-
-        insert_data: Dict[str, Any] = {
-            "project_id": project_id,
-            "collection_code": collection_code,
-            "collection_name": data.collection_name,
-            "max_file_size_mb": data.max_file_size_mb,
-            "created_by": auth.user_id,
-        }
-        if data.allowed_types:
-            insert_data["allowed_types"] = data.allowed_types
-        if data.deadline:
-            insert_data["deadline"] = data.deadline
-
-        result = await sb.table("project_collections").insert(insert_data).execute()
-        collection = result.data[0] if result.data else None
-        if not collection:
-            raise HTTPException(status_code=500, detail="Failed to create collection")
+        svc = ProjectsService()
+        collection = await svc.create_collection(
+            project_id, data.model_dump(exclude_none=True), auth.user_id
+        )
         return {"success": True, "data": collection}
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to create collection for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create collection")
@@ -1049,16 +692,8 @@ async def create_collection(
 async def delete_collection(project_id: str, collection_id: str, auth: AuthDep):
     """Delete a collection link."""
     try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        sb = await get_async_supabase_admin()
-        await (
-            sb.table("project_collections")
-            .delete()
-            .eq("id", collection_id)
-            .eq("project_id", project_id)
-            .execute()
-        )
+        svc = ProjectsService()
+        await svc.delete_collection(project_id, collection_id)
         return {"success": True, "message": "Collection deleted"}
     except Exception as e:
         logger.error(f"Failed to delete collection {collection_id}: {e}")
