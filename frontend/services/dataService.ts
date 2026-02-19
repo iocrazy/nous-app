@@ -2,7 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { ParsedMedia } from '../types';
 
 const TABLE_NAME = 'parsed_media';
-const VIEW_NAME = 'parsed_media_with_tags';  // View that includes tags array
+const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
 
 const getApiUrl = (): string => {
   // @ts-ignore
