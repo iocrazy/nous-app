@@ -226,6 +226,7 @@ frontend/public/*
 !frontend/public/404.html
 !frontend/public/500.html
 !frontend/public/offline.html
+!frontend/public/icons/
 
 # Storybook build outputs
 .out

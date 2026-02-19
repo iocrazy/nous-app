@@ -145,8 +145,12 @@ export function PlayerPage() {
               onDurationChange={handleDurationChange}
             />
             {video.author && (
-              <div className="absolute bottom-12 left-4 flex items-center gap-2 text-white/80 text-sm pointer-events-none">
-                <UserRound size={18} className="opacity-70" />
+              <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none">
+                {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
+                  <img src={`/icons/${video.source_platform}.svg`} alt="" className="w-4 h-4" />
+                ) : (
+                  <UserRound size={16} className="opacity-70" />
+                )}
                 <span>@{video.author}</span>
               </div>
             )}
