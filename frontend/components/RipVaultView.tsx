@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
   RefreshCw,
   LayoutGrid,
@@ -34,6 +34,7 @@ import { SemanticSearchBar } from './SemanticSearchBar';
 import { getCoverUrl } from '../utils/awemeType';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId } from '../services/resourceService';
+import { getSupabaseClient } from '../supabaseClient';
 
 export const RipVaultView: React.FC = () => {
   const { t } = useTranslation();
@@ -60,6 +61,31 @@ export const RipVaultView: React.FC = () => {
     loadLibraryData,
     handleUpdateLibraryItem,
   } = useLibrary({ isAuthenticated: true, selectedTeamId: null });
+
+  // ─── Resource ID mapping (for sprite scrub) ───────
+  const [resourceIdMap, setResourceIdMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (library.length === 0) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const mediaIds = library.map((item) => item.id).filter(Boolean);
+    if (mediaIds.length === 0) return;
+
+    supabase
+      .from('resources')
+      .select('id, media_id')
+      .in('media_id', mediaIds)
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          if (row.media_id) map[row.media_id] = String(row.id);
+        }
+        setResourceIdMap(map);
+      });
+  }, [library]);
 
   // ─── Selection state ───────────────────────────────
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -338,6 +364,7 @@ export const RipVaultView: React.FC = () => {
                   <CompactMediaCard
                     key={item.platform_id}
                     data={item}
+                    resourceId={resourceIdMap[item.id]}
                     onClick={(e) => handleVideoClick(item, e)}
                     onDoubleClick={() => handleVideoDoubleClick(item)}
                     isShared={sharedVideoIds.includes(item.platform_id)}
