@@ -164,10 +164,10 @@ class SearchService:
                 f"Database text search found {len(filtered_videos)} results for: {query_clean}"
             )
 
-            # If no results from basic fields, try searching in media_analysis
+            # If no results from basic fields, try searching in resource_analysis
             if not filtered_videos:
                 logger.info(
-                    f"No results in basic fields, searching media_analysis for: {query_clean}"
+                    f"No results in basic fields, searching resource_analysis for: {query_clean}"
                 )
 
                 # First get all user's media IDs
@@ -186,11 +186,11 @@ class SearchService:
                     user_media_ids = [v["id"] for v in user_media.data]
 
                 if user_media_ids:
-                    # Search in media_analysis table
+                    # Search in resource_analysis table
                     analysis_search = (
-                        await client.table("media_analysis")
-                        .select("media_id")
-                        .in_("media_id", user_media_ids)
+                        await client.table("resource_analysis")
+                        .select("resource_id")
+                        .in_("resource_id", user_media_ids)
                         .or_(
                             f"visual_description.ilike.{search_pattern},"
                             f"detected_text.ilike.{search_pattern}"
@@ -201,7 +201,7 @@ class SearchService:
 
                     if analysis_search.data:
                         matched_media_ids = [
-                            a["media_id"] for a in analysis_search.data
+                            a["resource_id"] for a in analysis_search.data
                         ]
                         # Fetch the full media data for matched IDs
                         media_result = (
@@ -214,21 +214,21 @@ class SearchService:
                         )
                         filtered_videos = media_result.data
                         logger.info(
-                            f"Found {len(filtered_videos)} results in media_analysis"
+                            f"Found {len(filtered_videos)} results in resource_analysis"
                         )
 
             # Apply tag filter if specified
             if tag_ids and filtered_videos:
                 media_ids = [v["id"] for v in filtered_videos]
                 tag_filter_result = (
-                    await client.table("media_tags")
-                    .select("media_id")
-                    .in_("media_id", media_ids)
+                    await client.table("resource_tags")
+                    .select("resource_id")
+                    .in_("resource_id", media_ids)
                     .in_("tag_id", tag_ids)
                     .execute()
                 )
 
-                tagged_media_ids = set(r["media_id"] for r in tag_filter_result.data)
+                tagged_media_ids = set(r["resource_id"] for r in tag_filter_result.data)
                 filtered_videos = [
                     v for v in filtered_videos if v["id"] in tagged_media_ids
                 ]
@@ -270,14 +270,14 @@ class SearchService:
 
         # Apply tag filter if specified
         if tag_ids:
-            # Get media IDs that have the specified tags
+            # Get resource IDs that have the specified tags
             tag_filter_result = (
-                await client.table("media_tags")
-                .select("media_id")
+                await client.table("resource_tags")
+                .select("resource_id")
                 .in_("tag_id", tag_ids)
                 .execute()
             )
-            tagged_media_ids = list(set(r["media_id"] for r in tag_filter_result.data))
+            tagged_media_ids = list(set(r["resource_id"] for r in tag_filter_result.data))
 
             if not tagged_media_ids:
                 return SearchResponse(
