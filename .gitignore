@@ -260,6 +260,9 @@ cache/
 .worktree-registry.json
 backend/.celery/
 
+# Cookie files (contain sensitive session data)
+backend/config/cookies/*.txt
+
 # MCP
 .playwright-mcp/
 

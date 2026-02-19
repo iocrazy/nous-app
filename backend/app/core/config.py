@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # Docker 部署时使用默认值 /app/downloads（容器内路径）
     # 本地开发时可通过 .env 覆盖为实际路径
     DOWNLOAD_PATH: str = Field(default="/app/downloads", description="视频存储路径")
+    COOKIES_DIR: str = Field(
+        default="", description="Path to directory containing platform cookie files"
+    )
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
 
