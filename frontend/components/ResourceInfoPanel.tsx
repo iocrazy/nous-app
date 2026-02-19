@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music } from 'lucide-react';
+import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain, Sparkles, Eye, Loader2, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
@@ -53,6 +53,39 @@ function getFileIcon(mimeType: string | null | undefined) {
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
   return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
 }
+
+// ─── AI Status Badge ────────────────────────────────────
+
+const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
+  switch (status) {
+    case 'processing':
+      return (
+        <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400">
+          <Loader2 size={9} className="animate-spin" /> Processing
+        </span>
+      );
+    case 'completed':
+      return (
+        <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
+          <Check size={9} /> Done
+        </span>
+      );
+    case 'failed':
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">
+          Failed
+        </span>
+      );
+    case 'pending':
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-500">
+          Pending
+        </span>
+      );
+    default:
+      return null;
+  }
+};
 
 // ─── Star Rating ─────────────────────────────────────────
 
@@ -302,6 +335,46 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* AI Status */}
+      {(resource.transcript_status && resource.transcript_status !== 'none') ||
+       (resource.summary_status && resource.summary_status !== 'none') ||
+       (resource.visual_analysis_status && resource.visual_analysis_status !== 'none') ? (
+        <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+            {t('resources.infoPanel.aiStatus')}
+          </h4>
+          <div className="space-y-0">
+            {resource.transcript_status && resource.transcript_status !== 'none' && (
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <Brain size={12} className="text-cyan-400" />
+                  <span className="text-xs text-zinc-400">Transcript</span>
+                </div>
+                <AIStatusBadge status={resource.transcript_status} />
+              </div>
+            )}
+            {resource.summary_status && resource.summary_status !== 'none' && (
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={12} className="text-indigo-400" />
+                  <span className="text-xs text-zinc-400">Summary</span>
+                </div>
+                <AIStatusBadge status={resource.summary_status} />
+              </div>
+            )}
+            {resource.visual_analysis_status && resource.visual_analysis_status !== 'none' && (
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <Eye size={12} className="text-purple-400" />
+                  <span className="text-xs text-zinc-400">Visual Analysis</span>
+                </div>
+                <AIStatusBadge status={resource.visual_analysis_status} />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {/* Properties */}
       <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">

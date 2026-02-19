@@ -21,6 +21,7 @@ interface CompactMediaCardProps {
   data: Video;
   onClick: (e?: React.MouseEvent) => void;
   onDoubleClick?: () => void;
+  onContextMenu?: (e: React.MouseEvent, data: Video) => void;
   isShared?: boolean;
   isSelected?: boolean;
   selectable?: boolean;
@@ -60,7 +61,7 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -191,12 +192,13 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   return (
     <div
-      className={`group relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
+      className={`group relative flex flex-col bg-zinc-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
         isChecked || isSelected
           ? 'border-indigo-500/50 ring-1 ring-inset ring-indigo-500/30'
           : 'border-zinc-800 hover:border-zinc-600'
       }`}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, data); } : undefined}
       data-context-item
     >
       {/* Checkbox overlay */}
@@ -219,7 +221,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
       {/* Thumbnail Container - Sprite Scrub or Video Autoplay on Hover */}
       <div
         ref={thumbRef}
-        className="relative w-full overflow-hidden bg-black aspect-[3/4] cursor-pointer"
+        className="relative w-full overflow-hidden bg-black aspect-[2/3] cursor-pointer"
         onClick={onClick}
         onMouseEnter={isVideo ? handleThumbMouseEnter : undefined}
         onMouseLeave={isVideo ? handleThumbMouseLeave : undefined}
@@ -326,8 +328,8 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
         {/* Title Overlay */}
         {!showingAnyScrub && (
-          <div className="absolute bottom-0 left-0 right-0 p-3 z-10 pointer-events-none">
-            <h3 className="text-[12px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
+          <div className="absolute bottom-0 left-0 right-0 p-2 z-10 pointer-events-none">
+            <h3 className="text-[11px] text-white font-medium line-clamp-2 leading-tight drop-shadow-md">
               {data.title || 'Untitled Media'}
             </h3>
           </div>
@@ -336,20 +338,20 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
       {/* Info & Actions Section - Handles Detail View */}
       <div
-        className="p-3 flex flex-col gap-3 bg-zinc-900 cursor-pointer"
+        className="p-2 flex flex-col gap-2 bg-zinc-900 cursor-pointer"
         onClick={(e) => onClick(e)}
       >
         
         {/* Tags Row - Single line only */}
         {data.tags && data.tags.length > 0 ? (
-           <div className="flex items-center gap-1.5 overflow-hidden">
+           <div className="flex items-center gap-1 overflow-hidden">
               {data.tags.slice(0, 3).map((tag, i) => (
-                 <span key={i} className={`text-[10px] px-2 py-0.5 rounded border font-medium whitespace-nowrap ${getTagColor(tag)}`}>
+                 <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded border font-medium whitespace-nowrap ${getTagColor(tag)}`}>
                     #{tag}
                  </span>
               ))}
               {data.tags.length > 3 && (
-                 <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 whitespace-nowrap">+{data.tags.length - 3}</span>
+                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 whitespace-nowrap">+{data.tags.length - 3}</span>
               )}
            </div>
         ) : (
@@ -357,29 +359,29 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
 
         {/* AI Status Icons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <div title={`Transcript: ${data.transcript_status || 'pending'}`}>
-            <FileText size={12} className={getAIStatusClass(data.transcript_status)} />
+            <FileText size={11} className={getAIStatusClass(data.transcript_status)} />
           </div>
           <div title={`Summary: ${data.summary_status || 'pending'}`}>
-            <Sparkles size={12} className={getAIStatusClass(data.summary_status)} />
+            <Sparkles size={11} className={getAIStatusClass(data.summary_status)} />
           </div>
           <div title={`Visual Analysis: ${data.visual_analysis_status || 'pending'}`}>
-            <Eye size={12} className={getAIStatusClass(data.visual_analysis_status)} />
+            <Eye size={11} className={getAIStatusClass(data.visual_analysis_status)} />
           </div>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-4 gap-1.5">
            {/* Like */}
-           <div className="flex flex-col items-center justify-center py-2 bg-[#2A1818] rounded-lg border border-red-900/30">
-              <Heart size={14} className="text-rose-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.like_count)}</span>
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#2A1818] rounded-md border border-red-900/30">
+              <Heart size={12} className="text-rose-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.like_count)}</span>
            </div>
            {/* Comment */}
-           <div className="flex flex-col items-center justify-center py-2 bg-[#10243E] rounded-lg border border-sky-900/30">
-              <MessageCircle size={14} className="text-sky-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.comment_count)}</span>
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#10243E] rounded-md border border-sky-900/30">
+              <MessageCircle size={12} className="text-sky-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.comment_count)}</span>
            </div>
            {/* Share - Click to copy link */}
            <button
@@ -391,32 +393,32 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
               }}
-              className="flex flex-col items-center justify-center py-2 bg-[#0F291E] rounded-lg border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all cursor-pointer group"
+              className="flex flex-col items-center justify-center py-1.5 bg-[#0F291E] rounded-md border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all cursor-pointer group"
               title="Click to copy link"
            >
               {copiedShare ? (
-                <Check size={14} className="text-emerald-400 mb-1" />
+                <Check size={12} className="text-emerald-400 mb-0.5" />
               ) : (
-                <Share2 size={14} className="text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
+                <Share2 size={12} className="text-emerald-500 mb-0.5 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-[10px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
+              <span className="text-[9px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
            </button>
            {/* Collect */}
-           <div className="flex flex-col items-center justify-center py-2 bg-[#2E2005] rounded-lg border border-amber-900/30">
-              <Bookmark size={14} className="text-amber-500 mb-1" />
-              <span className="text-[10px] text-white font-bold">{formatNumber(data.favorite_count)}</span>
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#2E2005] rounded-md border border-amber-900/30">
+              <Bookmark size={12} className="text-amber-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.favorite_count)}</span>
            </div>
         </div>
 
         {/* Author Footer with Date - Inline Layout */}
-        <div className="flex items-center pt-2 border-t border-zinc-800/50 mt-1 gap-2">
-             <div className="w-5 h-5 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0 border border-zinc-700">
-                <User size={12} className="text-zinc-500" />
+        <div className="flex items-center pt-1.5 border-t border-zinc-800/50 gap-1.5">
+             <div className="w-4 h-4 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0 border border-zinc-700">
+                <User size={10} className="text-zinc-500" />
              </div>
              <div className="flex items-center min-w-0 flex-1">
-                <span className="text-[11px] text-zinc-400 font-medium truncate">@{data.author || 'User'}</span>
-                <span className="text-[11px] text-zinc-600 mx-1.5">·</span>
-                <span className="text-[10px] text-zinc-500 font-mono flex-shrink-0">
+                <span className="text-[10px] text-zinc-400 font-medium truncate">@{data.author || 'User'}</span>
+                <span className="text-[10px] text-zinc-600 mx-1">·</span>
+                <span className="text-[9px] text-zinc-500 font-mono flex-shrink-0">
                    {formatDate(data.published_at)}
                 </span>
              </div>

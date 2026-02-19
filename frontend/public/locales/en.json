@@ -469,7 +469,8 @@
       "created": "Created",
       "modified": "Modified",
       "sourceWeb": "Web Download",
-      "sourceUpload": "Upload"
+      "sourceUpload": "Upload",
+      "aiStatus": "AI Status"
     }
   },
   "smartFolder": {
