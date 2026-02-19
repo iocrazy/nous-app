@@ -189,3 +189,65 @@ class UpdateMemberRoleRequest(BaseModel):
     """Request body for updating a member's role"""
 
     role: str = Field(..., pattern="^(admin|editor|viewer)$")
+
+
+class CreateShareRequest(BaseModel):
+    """Request body for creating a share link"""
+
+    file_id: str
+    share_type: str = "link"
+    share_name: Optional[str] = None
+    password: Optional[str] = None
+    allow_download: bool = True
+    expires_hours: Optional[int] = None
+
+
+class CreateFolderRequest(BaseModel):
+    """Request body for creating a folder"""
+
+    name: str = "New Folder"
+    parent_id: Optional[str] = None
+
+
+class RenameFolderRequest(BaseModel):
+    """Request body for renaming a folder"""
+
+    name: str
+
+
+class MoveFileRequest(BaseModel):
+    """Request body for moving a file to a folder"""
+
+    folder_id: Optional[str] = None
+
+
+class TaskCreateRequest(BaseModel):
+    """Request body for creating a project task"""
+
+    title: str
+    description: Optional[str] = None
+    task_type: Optional[str] = "general"
+    assignee_id: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = "todo"
+
+
+class TaskUpdateRequest(BaseModel):
+    """Request body for updating a project task"""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    task_type: Optional[str] = None
+    assignee_id: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class CreateCollectionRequest(BaseModel):
+    """Request body for creating a collection link"""
+
+    collection_name: str
+    allowed_types: Optional[list[str]] = None
+    max_file_size_mb: int = 500
+    deadline: Optional[str] = None
