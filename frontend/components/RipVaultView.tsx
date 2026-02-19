@@ -98,6 +98,7 @@ export const RipVaultView: React.FC = () => {
     setIsSearchActive,
     setSearchQueryText,
     sharedVideoIds,
+    setLibrary,
     loadLibraryData,
     handleUpdateLibraryItem,
   } = useLibrary({ isAuthenticated: true, selectedTeamId: null });
@@ -202,28 +203,28 @@ export const RipVaultView: React.FC = () => {
   // ─── Delete (soft-delete → move to recycle bin) ──
   const handleBatchDelete = useCallback(async () => {
     const platformIds = Array.from(selectedIds);
-    let successCount = 0;
+    const trashedIds = new Set<string>();
     for (const pid of platformIds) {
       try {
         await trashResourceByPlatformId(pid);
-        successCount++;
+        trashedIds.add(pid);
       } catch (err) {
         console.error('Trash failed for', pid, err);
       }
     }
-    if (selectedVideo && selectedIds.has(selectedVideo.platform_id)) {
+    if (selectedVideo && trashedIds.has(selectedVideo.platform_id)) {
       setSelectedVideo(null);
     }
     setSelectedIds(new Set());
     setMultiSelectMode(false);
-    if (successCount > 0) {
+    if (trashedIds.size > 0) {
+      setLibrary(prev => prev.filter(item => !trashedIds.has(item.platform_id)));
       addToast(t('resources.movedToTrash'), 'success');
     }
-    if (successCount < platformIds.length) {
-      addToast(`Failed to remove ${platformIds.length - successCount} item(s)`, 'error');
+    if (trashedIds.size < platformIds.length) {
+      addToast(`Failed to remove ${platformIds.length - trashedIds.size} item(s)`, 'error');
     }
-    loadLibraryData();
-  }, [selectedIds, selectedVideo, addToast, loadLibraryData, t]);
+  }, [selectedIds, selectedVideo, addToast, setLibrary, t]);
 
   const handleDeleteSingle = useCallback(async (video: Video) => {
     try {
@@ -236,13 +237,13 @@ export const RipVaultView: React.FC = () => {
         next.delete(video.platform_id);
         return next;
       });
+      setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
       addToast(t('resources.movedToTrash'), 'success');
-      loadLibraryData();
     } catch (err) {
       console.error('Trash failed:', err);
       addToast('Failed to remove', 'error');
     }
-  }, [selectedVideo, addToast, loadLibraryData, t]);
+  }, [selectedVideo, addToast, setLibrary, t]);
 
   // ─── Keyboard shortcuts ────────────────────────────
   useEffect(() => {
@@ -416,13 +417,13 @@ export const RipVaultView: React.FC = () => {
       await trashResourceByPlatformId(v.platform_id);
       if (selectedVideo?.platform_id === v.platform_id) setSelectedVideo(null);
       setSelectedIds(prev => { const next = new Set(prev); next.delete(v.platform_id); return next; });
+      setLibrary(prev => prev.filter(item => item.platform_id !== v.platform_id));
       addToast(t('resources.movedToTrash'), 'success');
-      loadLibraryData();
     } catch (err) {
       console.error('Trash failed:', err);
       addToast('Failed to remove', 'error');
     }
-  }, [contextMenu, selectedVideo, addToast, loadLibraryData, t]);
+  }, [contextMenu, selectedVideo, addToast, setLibrary, t]);
 
   // ─── Helpers ───────────────────────────────────────
   const formatNumber = (num?: number) => {
@@ -840,7 +841,7 @@ export const RipVaultView: React.FC = () => {
       )}
 
       {/* ── Batch Selection Toolbar ── */}
-      {selectedIds.size > 1 && (
+      {selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
           <span className="text-sm text-zinc-300 font-medium">
             {t('resources.selected', { count: selectedIds.size })}
@@ -853,12 +854,12 @@ export const RipVaultView: React.FC = () => {
             <Trash2 size={14} />
             {t('common.delete', 'Delete')}
           </button>
+          <div className="w-px h-5 bg-zinc-700" />
           <button
             onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
           >
             <X size={14} />
-            {t('common.cancel', 'Cancel')}
           </button>
         </div>
       )}
