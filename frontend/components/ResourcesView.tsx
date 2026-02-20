@@ -88,6 +88,8 @@ import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
+import { downloadWithAuth } from '../utils/download';
+import { getResourceFileUrl } from '../services/resourceService';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
 
@@ -1132,15 +1134,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     if (contextMenu.type === 'file') {
       const item = contextMenu.target as ResourceItem;
       const resourceId = item.resource?.id;
-      const filePath = item.resource?.file_path;
       const items: ContextMenuItem[] = [
         {
           label: t('resources.openInNewTab'),
           icon: <ExternalLink size={14} />,
           onClick: () => {
-            if (filePath) window.open(filePath, '_blank');
+            if (resourceId) window.open(getResourceFileUrl(String(resourceId)), '_blank');
           },
-          disabled: !filePath,
+          disabled: !resourceId,
         },
       ];
       if (canDo('download')) {
@@ -1148,16 +1149,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           label: t('resources.downloadOriginal'),
           icon: <Download size={14} />,
           onClick: () => {
-            if (filePath) {
-              const a = document.createElement('a');
-              a.href = filePath;
-              a.download = item.resource?.filename ?? 'download';
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
+            if (resourceId) {
+              downloadWithAuth(getResourceFileUrl(String(resourceId)), item.resource?.filename ?? 'download', {
+                onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+              });
             }
           },
-          disabled: !filePath,
+          disabled: !resourceId,
         });
       }
       if (canDo('update')) {

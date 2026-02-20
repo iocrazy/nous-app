@@ -55,6 +55,8 @@ import { createTag } from '../services/unifiedTagService';
 import { UnifiedTagPicker } from './UnifiedTagPicker';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
+import { downloadFile } from '../utils/download';
+import { useToast } from './Toast';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
@@ -288,6 +290,7 @@ interface ResourceDetailProps {
 
 export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const navigate = useNavigate();
   const { teamId } = useParams();
 
@@ -954,14 +957,18 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
                 <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-44">
                   {fileUrl && (
-                    <a
-                      href={fileUrl}
-                      download
+                    <button
                       className="block w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-                      onClick={() => setShowMoreMenu(false)}
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        downloadFile(fileUrl, resource.filename || 'download', {
+                          onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                          onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                        });
+                      }}
                     >
                       {t('resources.downloadOriginal')}
-                    </a>
+                    </button>
                   )}
                 </div>
               </>
