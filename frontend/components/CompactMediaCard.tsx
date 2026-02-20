@@ -208,10 +208,10 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         >
           <button
             onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
-            className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+            className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
               isChecked
-                ? 'bg-indigo-500 text-white'
-                : 'bg-black/50 border border-zinc-500 text-transparent hover:border-zinc-300'
+                ? 'bg-indigo-500 text-white shadow-lg'
+                : 'bg-black/50 border border-zinc-400 text-transparent hover:border-zinc-200'
             }`}
           >
             <Check size={12} />
