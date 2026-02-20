@@ -201,6 +201,27 @@ class TagsRepository:
         )
         return len(result.data) > 0
 
+    async def resolve_media_id_to_resource_id(self, media_id: str) -> Optional[str]:
+        """Resolve a parsed_media ID to its corresponding resource ID.
+
+        Args:
+            media_id: The parsed_media Snowflake ID
+
+        Returns:
+            The resource Snowflake ID, or None if no resource exists for this media.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data and len(result.data) > 0:
+            return str(result.data[0]["id"])
+        return None
+
     async def get_resource_tags(self, resource_id: str) -> List[dict]:
         """Get all tags for a resource item with tag details."""
         resource_tags_table = await self._get_resource_tags_table()

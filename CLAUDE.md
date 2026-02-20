@@ -66,28 +66,44 @@
 ## 项目结构
 
 ```
-douyin_analysis/
+mediahub/
 ├── backend/                    # 后端服务（FastAPI + Supabase）
-│   ├── app/                   # 主应用包
+│   ├── app/
 │   │   ├── api/              # API 路由
-│   │   ├── core/             # 核心配置
-│   │   ├── db/               # Supabase 数据库配置
-│   │   ├── repositories/     # 数据访问层
+│   │   │   ├── media_router.py       # 解析/下载（parsed_media）
+│   │   │   ├── resources_router.py   # 资源库 CRUD
+│   │   │   ├── tags_router.py        # 标签系统
+│   │   │   ├── projects_router.py    # 项目管理
+│   │   │   ├── teams_router.py       # 团队管理
+│   │   │   └── auth_router.py        # 认证
+│   │   ├── core/             # 核心配置 + 依赖注入
+│   │   ├── db/               # Supabase 客户端（同步/异步）
+│   │   ├── repositories/     # 数据访问层（Repository Pattern）
 │   │   ├── schemas/          # Pydantic 模型
-│   │   └── services/         # 业务逻辑层
+│   │   ├── services/         # 业务逻辑层
+│   │   │   └── task_tracker.py       # unified_tasks 任务追踪
+│   │   └── tasks/            # Celery 异步任务
 │   ├── config.yml            # 业务配置
-│   └── pyproject.toml        # 后端依赖
-├── frontend/                   # 前端应用（React 19 + Vite）
+│   └── pyproject.toml        # 后端依赖（uv 管理）
+├── frontend/                   # 前端应用（React 19 + Vite 7）
 │   ├── components/            # React 组件
+│   ├── contexts/              # React Context（TaskManager, Toast 等）
+│   ├── pages/                 # 页面组件（PlayerPage 等）
 │   ├── services/              # API 服务层
-│   │   ├── dataService.ts    # Supabase 数据操作
-│   │   └── parserService.ts  # 后端 API 调用
-│   ├── App.tsx               # 主应用组件
-│   ├── types.ts              # TypeScript 类型
-│   ├── supabaseClient.ts     # Supabase 客户端配置
-│   └── package.json          # 前端依赖
-└── supabase/                   # Supabase 配置
-    └── migrations/            # SQL 迁移脚本
+│   │   ├── parserService.ts          # 解析/下载 API
+│   │   ├── resourceService.ts        # 资源库 API
+│   │   ├── unifiedTagService.ts      # 统一标签服务（Resources + Media）
+│   │   ├── tagsService.ts            # 旧版标签服务（仅 media）
+│   │   ├── teamService.ts            # 团队 API
+│   │   └── projectService.ts         # 项目 API
+│   ├── public/locales/        # i18n 翻译文件（en.json, zh.json）
+│   ├── App.tsx               # 主应用 + 路由
+│   ├── types.ts              # TypeScript 类型定义
+│   └── supabaseClient.ts     # Supabase 客户端（含 bigIntSafeFetch）
+├── supabase/
+│   └── migrations/            # SQL 迁移（001-077+）
+└── scripts/
+    └── worktree-manager.sh    # Worktree 管理工具
 ```
 
 ## 常用命令
@@ -122,27 +138,71 @@ supabase db push
 
 ### 数据库
 
-项目使用 **Supabase**（云端 PostgreSQL）：
-- 内置用户认证（Supabase Auth）
-- 实时订阅支持
-- 行级安全策略（RLS）
+项目使用 **Supabase**（PostgreSQL）+ **本地 Docker** 开发：
+- Supabase Auth 用户认证
+- 实时订阅（Task Center 监听 `unified_tasks` 表）
+- 所有 ID 使用 Snowflake BIGINT（migration 051 迁移）
 
-### 核心组件
+### 核心数据表
 
-**浏览器自动化层** (`backend/app/services/douyin_analysis.py`)
-- 使用 DrissionPage 的 ChromiumPage 实现单例模式
-- 通过网络监听器拦截抖音 API 响应（`aweme/post/`、`aweme/detail/`）
-- 执行隐身脚本绕过自动化检测
-- 线程安全的懒加载初始化
+| 表名 | 用途 | 主键 |
+|------|------|------|
+| `parsed_media` | 解析的视频/媒体元数据 | BIGINT Snowflake |
+| `resources` | 资源库文件（上传/下载的媒体） | BIGINT Snowflake |
+| `resource_tags` | 资源-标签关联（junction table） | resource_id + tag_id |
+| `tags` | 标签定义（system/user/time） | UUID |
+| `resource_items` | 资源归属（文件夹/scope） | BIGINT |
+| `resource_versions` | 资源版本历史 | BIGINT |
+| `teams` | 团队 | BIGINT Snowflake |
+| `team_members` | 团队成员 | BIGINT |
+| `projects` | 项目 | BIGINT Snowflake |
+| `unified_tasks` | 异步任务追踪（Celery/后台） | UUID |
+| `folders` | 文件夹 | BIGINT Snowflake |
 
-**服务层** (`backend/app/services/`)
-- `SupabaseDouyinService`: 编排完整工作流程
-- `DouyinParser`: 将原始 aweme_detail JSON 解析为结构化模式
-- `DownloaderService`: 异步媒体下载，带重试逻辑
-- `SupabaseAuthService`: Supabase 用户认证
+**重要关系**：
+- `resources.media_id` → `parsed_media.id`（一个 resource 对应一个 parsed_media）
+- `resource_tags.resource_id` → `resources.id`（标签关联到 resource，不是 parsed_media）
+- 前端 MediaTagPicker 传入 `parsed_media.id`，后端自动解析为 `resources.id`
 
-**存储层** (`backend/app/repositories/`)
-- `SupabaseDouyinRepository`: Supabase 视频数据访问
+### 标签系统（Tags）
+
+**演进历史**：`video_tags` → `media_tags`（migration 066）→ 合并到 `resource_tags`（migration 077，`media_tags` 已删除）
+
+**当前架构**：
+- 全局标签 CRUD：`GET/POST /api/v1/tags`
+- Media 标签关联：`/api/v1/tags/media/{media_id}/tags`（后端自动将 media_id 解析为 resource_id）
+- Resource 标签关联：`/api/v1/resources/{resource_id}/tags`（直接使用 resource UUID/Snowflake）
+- 前端两套服务：
+  - `unifiedTagService.ts` — 推荐使用，支持 resource 和 media 两种 entity type
+  - `tagsService.ts` — 旧版，仅用于 media
+
+### 任务系统（Task Center）
+
+- 前端 `TaskManagerContext` 通过 Supabase Realtime 监听 `unified_tasks` 表变化
+- Celery 任务和 FastAPI 后台任务均通过 `TaskTracker` 创建 `unified_tasks` 记录
+- 任务状态：`pending` → `running` → `completed` / `failed`
+
+### 前端技术栈
+
+- **React 19** + **TypeScript** + **Vite 7**
+- **TailwindCSS** 样式
+- **Recharts** 数据可视化
+- **Lucide React** 图标库
+- **Supabase JS** 客户端（含 `bigIntSafeFetch` 处理 BIGINT 精度）
+- **i18next** 多语言支持
+
+### 前后端对接
+
+**认证方式**：JWT Token（从 Supabase session 获取，`Authorization: Bearer <token>`）
+
+**服务层分工**：
+| 前端服务 | 后端路由 | 用途 |
+|----------|----------|------|
+| `parserService.ts` | `/api/v1/videos/*` | 视频解析/下载 |
+| `resourceService.ts` | `/api/v1/resources/*` | 资源库 CRUD |
+| `unifiedTagService.ts` | `/api/v1/tags/*` + `/api/v1/resources/*/tags` | 标签管理 |
+| `teamService.ts` | `/api/v1/teams/*` | 团队管理 |
+| `projectService.ts` | `/api/v1/projects/*` | 项目管理 |
 
 ### 配置系统
 
@@ -151,44 +211,11 @@ supabase db push
 - **config.yml**: 业务配置（USER_AGENTS、CORS、超时时间）
 - **.env**: 敏感配置（SUPABASE_URL、API Keys）
 
-### aweme_type 值
+### 已知陷阱
 
-- `0`: 标准视频
-- `2`: 图片轮播/图集
-- `4`: 特殊视频类型
-- `61`: 另一种特殊视频变体
-- `68`: 图文类型
-
-### 前端技术栈
-
-- **React 19** + **TypeScript**
-- **Vite** 构建工具
-- **TailwindCSS** 样式（CDN 版本）
-- **Recharts** 数据可视化
-- **Lucide React** 图标库
-- **Supabase JS** 客户端
-
-### 前后端对接
-
-前端通过 `services/parserService.ts` 调用后端 API：
-
-```typescript
-// 解析单个链接
-const response = await parseShareLink(url, {
-  video_bool: true,
-  music_bool: false,
-  cover_bool: true,
-});
-
-// 批量解析
-const response = await parseBatchLinks(urls, options);
-```
-
-**认证方式**：
-- API Key：存储在 `localStorage.douyin_api_key`
-- JWT Token：从 Supabase session 获取
-
-**数据库表名**：`douyin_videos`（前后端统一）
+- **Snowflake BIGINT 精度丢失**：PostgREST 返回 BIGINT 为 JSON number，JS 超过 2^53 精度丢失。已在 `supabaseClient.ts` 添加 `bigIntSafeFetch` 修复。
+- **catch 静默吞错**：前端 `catch { /* ignore */ }` 会隐藏错误，新代码应使用 `catch (err) { console.error(...) }`
+- **media_id vs resource_id**：`MediaTagPicker` 传入 parsed_media ID，后端自动解析为 resource_id。如果 media 没有对应 resource，标签操作返回空/404。
 
 ## Supabase 配置
 
@@ -234,7 +261,9 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 
 ## API 端点
 
-### 认证
+所有端点前缀：`/api/v1`
+
+### 认证 (`/auth`)
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -244,36 +273,82 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 | `/auth/me` | GET | 获取当前用户 |
 | `/auth/refresh` | POST | 刷新令牌 |
 
-### 抖音视频
+### 媒体解析/下载 (`/videos`)
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/douyin/fetch` | POST | 获取单个视频 |
-| `/douyin/fetch/batch` | POST | 批量获取视频 |
-| `/douyin/videos` | GET | 获取视频列表 |
-| `/douyin/videos/{aweme_id}` | GET | 获取视频详情 |
-| `/douyin/videos/{aweme_id}` | DELETE | 删除视频 |
-| `/douyin/videos/search` | POST | 搜索视频 |
-| `/douyin/statistics` | GET | 获取统计信息 |
-| `/douyin/retry/{aweme_id}` | POST | 重试下载 |
+| `/videos/fetch` | POST | 解析并下载视频 |
+| `/videos/fetch/batch` | POST | 批量解析 |
+| `/videos` | GET | 获取 parsed_media 列表 |
+| `/videos/{id}` | GET | 获取 parsed_media 详情 |
+| `/videos/{id}` | DELETE | 删除 |
+| `/videos/search` | POST | 搜索 |
+
+### 资源库 (`/resources`)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/resources` | GET | 资源列表（支持 folder_id 筛选） |
+| `/resources/{id}` | GET | 资源详情 |
+| `/resources/{id}` | PATCH | 更新资源（filename/notes/url/rating） |
+| `/resources/{id}` | DELETE | 删除（软删除/is_trashed） |
+| `/resources/{id}/tags` | GET/POST | 资源标签关联 |
+| `/resources/{id}/tags/{tag_id}` | DELETE | 移除标签 |
+| `/resources/folders` | GET/POST | 文件夹 CRUD |
+| `/resources/upload` | POST | 上传文件 |
+
+### 标签 (`/tags`)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/tags` | GET | 所有标签列表 |
+| `/tags` | POST | 创建标签 |
+| `/tags/{id}` | PUT/DELETE | 更新/删除标签 |
+| `/tags/media/{media_id}/tags` | GET/POST | Media 标签关联（自动解析 media_id → resource_id） |
+| `/tags/media/{media_id}/tags/{tag_id}` | DELETE | 移除 media 标签 |
+| `/tags/statistics` | GET | 标签使用统计 |
+
+### 团队 (`/teams`) 和项目 (`/projects`)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/teams` | GET/POST | 团队列表/创建 |
+| `/teams/{id}` | GET/PATCH/DELETE | 团队 CRUD |
+| `/teams/{id}/members` | GET/POST | 团队成员 |
+| `/projects` | GET/POST | 项目列表/创建 |
+| `/projects/{id}` | GET/PATCH/DELETE | 项目 CRUD |
+| `/projects/{id}/files` | GET/POST | 项目文件 |
 
 ## 开发指南
 
+### 后端分层架构（Router → Service → Repository）
+
+```
+Router (api/)          — HTTP 层，参数校验，调用 Service
+  ↓
+Service (services/)    — 业务逻辑编排（可选层，简单 CRUD 可跳过）
+  ↓
+Repository (repos/)    — 数据访问，Supabase 查询
+  ↓
+Schema (schemas/)      — Pydantic 请求/响应模型
+```
+
 ### 添加新功能
 
-1. 在 `backend/app/schemas/` 添加 Pydantic 模型
-2. 在 `backend/app/repositories/` 添加数据访问方法
-3. 在 `backend/app/services/` 添加业务逻辑
-4. 在 `backend/app/api/` 添加 API 路由
-5. 在 `frontend/services/parserService.ts` 添加 API 调用
-6. 在 `frontend/components/` 添加 React 组件
-7. 在 `frontend/App.tsx` 集成新组件
+1. `supabase/migrations/` — 数据库迁移（三位数编号，如 `078_xxx.sql`）
+2. `backend/app/schemas/` — Pydantic 模型
+3. `backend/app/repositories/` — 数据访问层
+4. `backend/app/api/` — API 路由（在 `main.py` 注册）
+5. `frontend/types.ts` — TypeScript 类型
+6. `frontend/services/` — API 服务层
+7. `frontend/components/` — React 组件
+8. `frontend/public/locales/` — i18n 翻译
 
 ### 数据库变更
 
 1. 在 `supabase/migrations/` 创建新的 SQL 文件（按序号命名）
-2. 在 Supabase SQL Editor 执行
-3. 运行 `npm run generate:types`（前端）更新 TypeScript 类型
+2. 本地执行：`psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -f migrations/xxx.sql`
+3. 更新 `frontend/types.ts` 中对应的 TypeScript 接口
 
 
 

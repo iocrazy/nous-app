@@ -3,7 +3,6 @@ import { Video } from '../types';
 import { isSupabaseConfigured } from '../supabaseClient';
 import { parseShareLink, parseBatchLinks } from '../services/parserService';
 import { fetchVideoByPlatformId, saveItem } from '../services/dataService';
-import { addTagsToVideo } from '../services/tagsService';
 import { useDownloadProgress } from './useDownloadProgress';
 import { getSystemStatus, SystemStatus } from '../services/systemService';
 import { LogEntry } from '../components/TaskMonitor';
@@ -161,17 +160,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
         setCurrentResult(parsedResult);
 
-        if (selectedTagIds.length > 0 && response.id) {
-          try {
-            await addTagsToVideo(response.id, selectedTagIds);
-            addLog(`Added ${selectedTagIds.length} tag(s) to video`, 'success');
-            setSelectedTagIds([]);
-          } catch (tagError) {
-            console.error('Failed to add tags:', tagError);
-            addLog('Warning: Failed to add tags to video', 'warning');
-          }
-        }
-
         if (response.download_task_id) {
           addLog('Download task submitted to background queue', 'info');
           addLog(`Tracking download progress: ${response.download_task_id}`, 'info');
@@ -253,7 +241,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     }
   };
 
-  const handleSaveToLibrary = async (item: Video, silent = false, tagIds?: string[]) => {
+  const handleSaveToLibrary = async (item: Video, silent = false) => {
     const newItem = { ...item, notes: item.notes || '', tags: item.tags || [] };
     try {
       setLibrary(prev => {
@@ -262,15 +250,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       });
       if (isSupabaseConfigured()) {
         const savedItem = await saveItem(newItem);
-        const tagsToAdd = tagIds || selectedTagIds;
-        if (tagsToAdd.length > 0 && savedItem.id) {
-          try {
-            await addTagsToVideo(savedItem.id, tagsToAdd);
-            setSelectedTagIds([]);
-          } catch (tagError) {
-            console.error('Failed to add tags:', tagError);
-          }
-        }
         if (!silent) alert('Saved to Cloud Collection!');
       } else {
         if (!silent) alert('Saved to Local Collection (Supabase not configured)');

@@ -330,9 +330,7 @@ class YtdlpService:
 
         return {
             "platform_id": platform_id,
-            "external_id": video_id,
             "source_platform": platform,
-            "source_url": url,
             "original_url": original_url,
             "title": title,
             "description": description,

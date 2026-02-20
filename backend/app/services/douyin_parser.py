@@ -189,7 +189,6 @@ class DouyinParser:
             "hashtags": Utils.concat_hashtag_name(aweme_detail),
             "datasize_bytes": 0,  # Image/video mixed type doesn't have single file size
             "source_platform": "douyin",
-            "external_id": aweme_id,
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
             "music_download_urls": aweme_detail.get("music", {})
@@ -275,7 +274,6 @@ class DouyinParser:
             "duration": Utils.format_duration(video_data.get("duration")),
             "resolution": f"{video_data.get('width')}x{video_data.get('height')}",
             "source_platform": "douyin",
-            "external_id": aweme_id,
             "video_download_urls": video_data.get("play_addr", {}).get(
                 "url_list", None
             ),
@@ -349,7 +347,6 @@ class DouyinParser:
             "hashtags": Utils.concat_hashtag_name(aweme_detail),
             "datasize_bytes": 0,  # Image collections don't have video file size
             "source_platform": "douyin",
-            "external_id": aweme_id,
             "image_download_urls": image_download_urls,
             "music_download_urls": aweme_detail.get("music", {})
             .get("play_url", {})
