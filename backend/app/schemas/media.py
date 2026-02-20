@@ -130,15 +130,9 @@ class MediaUpdate(MediaBase):
     platform_id: Optional[str] = Field(
         None, description="Unique media identifier from platform"
     )
-
-    @model_validator(mode="after")
-    def check_urls(self):
-        """Validate URL format"""
-        for url_field in ["video_download_url", "download_url"]:
-            url = getattr(self, url_field, None)
-            if url and not (url.startswith("http://") or url.startswith("https://")):
-                raise ValueError(f"{url_field} must be a valid HTTP or HTTPS URL")
-        return self
+    original_url: Optional[str] = Field(
+        None, description="Original media URL"
+    )
 
 
 class MediaInDB(MediaBase):
