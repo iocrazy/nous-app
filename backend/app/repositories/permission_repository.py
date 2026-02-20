@@ -19,12 +19,11 @@ class PermissionRepository:
     """Permission data access (async)"""
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def get_access_override(
         self, object_type: str, object_id: str, user_id: str

@@ -18,13 +18,11 @@ class SupabaseAuthService:
     """Supabase 认证服务 (异步)"""
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase()
 
     async def sign_up(
         self, email: str, password: str, metadata: Optional[Dict[str, Any]] = None
@@ -276,13 +274,11 @@ class SupabaseAdminAuthService:
     """Supabase 管理员认证服务（使用 service_role key）(异步)"""
 
     def __init__(self):
-        self._admin_client = None
+        pass
 
     async def _get_admin_client(self):
-        """获取异步管理员客户端"""
-        if self._admin_client is None:
-            self._admin_client = await get_async_supabase_admin()
-        return self._admin_client
+        """Get async admin client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         """根据用户 ID 获取用户信息"""

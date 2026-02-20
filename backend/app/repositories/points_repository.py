@@ -25,13 +25,11 @@ class PointsRepository:
     TABLE_TRANSACTIONS = "point_transactions"
 
     def __init__(self):
-        self._client = None  # Lazy initialisation
+        pass
 
     async def _get_client(self):
-        """Get async Supabase admin client"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #
     # Point Pricing

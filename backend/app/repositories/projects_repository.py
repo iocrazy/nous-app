@@ -29,13 +29,11 @@ class ProjectsRepository:
     TABLE_COLLECTIONS = "project_collections"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """Get async Supabase admin client"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #
     # Projects CRUD

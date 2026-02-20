@@ -32,13 +32,11 @@ class CleanupService:
     """Service for generating and managing cleanup suggestions (异步)."""
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def get_cleanup_data(
         self, user_id: str, limit: int = 50, include_duplicates: bool = True
