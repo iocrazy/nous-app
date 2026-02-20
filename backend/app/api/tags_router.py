@@ -14,9 +14,6 @@ from app.schemas.tags import (
     TagResponse,
     TagStatisticsResponse,
     TagUpdate,
-    MediaTagCreate,
-    MediaTagResponse,
-    MediaTagsResponse,
 )
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -191,67 +188,4 @@ async def delete_tag(
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-        )
-
-
-# Media-Tag association endpoints
-
-
-@router.get("/media/{media_id}/tags", response_model=MediaTagsResponse)
-async def get_media_tags(
-    media_id: str,
-    auth: AuthDep = None,
-):
-    """Get all tags associated with a media item."""
-    repo = TagsRepository()
-    tags_data = await repo.get_resource_tags(media_id)
-
-    tags = []
-    for item in tags_data:
-        if item.get("tags"):
-            tags.append(
-                MediaTagResponse(
-                    tag=item["tags"],
-                    confidence=item.get("confidence"),
-                    source=item.get("source", "manual"),
-                    created_at=item.get("created_at"),
-                )
-            )
-
-    return MediaTagsResponse(media_id=media_id, tags=tags)
-
-
-@router.post("/media/{media_id}/tags", status_code=status.HTTP_201_CREATED)
-async def add_tag_to_media(
-    media_id: str,
-    media_tag: MediaTagCreate,
-    auth: AuthDep = None,
-):
-    """Add a tag to a media item."""
-    repo = TagsRepository()
-    result = await repo.add_tag_to_resource(
-        resource_id=media_id,
-        tag_id=str(media_tag.tag_id),
-        confidence=media_tag.confidence,
-        source=media_tag.source,
-    )
-
-    return {"message": "Tag added successfully", "data": result}
-
-
-@router.delete(
-    "/media/{media_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
-)
-async def remove_tag_from_media(
-    media_id: str,
-    tag_id: str,
-    auth: AuthDep = None,
-):
-    """Remove a tag from a media item."""
-    repo = TagsRepository()
-    removed = await repo.remove_tag_from_resource(media_id, tag_id)
-
-    if not removed:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tag association not found"
         )

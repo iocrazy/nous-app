@@ -1,5 +1,7 @@
 /**
- * Tags Service - Tag management for videos
+ * Tags Service - Global tag CRUD operations.
+ *
+ * Resource-specific tag associations are in unifiedTagService.ts.
  */
 
 import { getAuthHeaders } from './parserService';
@@ -16,14 +18,14 @@ const getApiUrl = (): string => {
 
 // Types
 export interface Tag {
-  id: string;  // UUID string from backend
+  id: string;  // Snowflake BIGINT as string
   name: string;
   name_zh?: string | null;  // Chinese name for bilingual support
   color: string | null;
   icon: string | null;
   type: 'system' | 'user' | 'time';
   user_id?: string;
-  video_count?: number;  // Only present in some responses
+  media_count?: number;
   created_at: string;
 }
 
@@ -31,18 +33,12 @@ export interface TagCreate {
   name: string;
   name_zh?: string;  // Chinese name
   color?: string;
-  description?: string;
 }
 
 export interface TagUpdate {
   name?: string;
   color?: string;
-  description?: string;
-}
-
-export interface VideoTagsResponse {
-  media_id: string;
-  tags: Tag[];
+  icon?: string;
 }
 
 /**
@@ -88,7 +84,7 @@ export const createTag = async (tag: TagCreate): Promise<Tag> => {
 /**
  * Update an existing tag
  */
-export const updateTag = async (tagId: number, updates: TagUpdate): Promise<Tag> => {
+export const updateTag = async (tagId: string, updates: TagUpdate): Promise<Tag> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}`, {
@@ -108,7 +104,7 @@ export const updateTag = async (tagId: number, updates: TagUpdate): Promise<Tag>
 /**
  * Delete a tag
  */
-export const deleteTag = async (tagId: number): Promise<void> => {
+export const deleteTag = async (tagId: string): Promise<void> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}`, {
@@ -120,103 +116,6 @@ export const deleteTag = async (tagId: number): Promise<void> => {
     const error = await response.json().catch(() => ({ detail: 'Failed to delete tag' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
-};
-
-/**
- * Get tags for a specific video
- */
-export const getVideoTags = async (videoId: string): Promise<Tag[]> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get video tags' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-  // Backend returns { media_id, tags: [{ tag: {...}, confidence, source, created_at }] }
-  return (data.tags || []).map((item: { tag: Tag }) => item.tag);
-};
-
-/**
- * Add tags to a video
- */
-export const addTagsToVideo = async (videoId: string, tagIds: string[]): Promise<VideoTagsResponse> => {
-  const apiUrl = getApiUrl();
-
-  // Backend expects single tag at a time: { tag_id, confidence?, source? }
-  // We'll add tags one by one
-  for (const tagId of tagIds) {
-    const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-      body: JSON.stringify({ tag_id: tagId }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Failed to add tag' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-  }
-
-  // Return updated tags
-  const tags = await getVideoTags(videoId);
-  return { media_id: videoId, tags };
-};
-
-/**
- * Remove a tag from a video
- */
-export const removeTagFromVideo = async (videoId: string, tagId: string): Promise<void> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/tags/videos/${videoId}/tags/${tagId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to remove tag' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-};
-
-/**
- * Get videos by tag
- */
-export const getVideosByTag = async (
-  tagId: number,
-  page: number = 1,
-  pageSize: number = 20
-): Promise<{
-  videos: Array<{ id: number; platform_id: string; title: string }>;
-  total: number;
-  page: number;
-  page_size: number;
-}> => {
-  const apiUrl = getApiUrl();
-
-  const params = new URLSearchParams({
-    page: page.toString(),
-    page_size: pageSize.toString(),
-  });
-
-  const response = await fetch(`${apiUrl}/api/v1/tags/${tagId}/videos?${params}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get videos by tag' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
 };
 
 /**

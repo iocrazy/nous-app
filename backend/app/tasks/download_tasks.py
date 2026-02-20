@@ -152,11 +152,21 @@ def download_media_task(
     from app.services.task_tracker import get_task_tracker
     tracker_unified = get_task_tracker()
     unified_task_id = None
+    dl_parts = []
+    if download_video:
+        dl_parts.append("Video")
+    if download_music:
+        dl_parts.append("Audio")
+    if download_cover:
+        dl_parts.append("Cover")
+    dl_subtitle = " + ".join(dl_parts) if dl_parts else None
+
     try:
         unified_task_id = run_async(tracker_unified.create(
             user_id=user_id,
             task_type="download",
             title=video_title or platform_id,
+            subtitle=dl_subtitle,
             media_id=platform_id,
             celery_task_id=task_id,
         ))
@@ -520,11 +530,21 @@ def download_ytdlp_task(
     from app.services.task_tracker import get_task_tracker
     tracker_unified = get_task_tracker()
     unified_task_id = None
+    dl_parts = []
+    if download_video:
+        dl_parts.append("Video")
+    if download_music:
+        dl_parts.append("Audio")
+    if download_cover:
+        dl_parts.append("Cover")
+    dl_subtitle = " + ".join(dl_parts) if dl_parts else None
+
     try:
         unified_task_id = run_async(tracker_unified.create(
             user_id=user_id,
             task_type="download",
             title=video_title or platform_id,
+            subtitle=dl_subtitle,
             media_id=platform_id,
             celery_task_id=task_id,
         ))

@@ -5,14 +5,13 @@ import { Video, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
   Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus,
-  Sparkles, Eye, Star,
+  Sparkles, Eye, Star, ExternalLink,
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
-import { getDownloadUrl } from '../services/dataService';
+import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
-import { MediaTagPicker } from './MediaTagPicker';
 import { useToast } from './Toast';
 import {
   triggerTranscription, getTranscript,
@@ -97,9 +96,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [copied, setCopied] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [retrySuccess, setRetrySuccess] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [showRetryMenu, setShowRetryMenu] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
 
@@ -235,47 +235,23 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   };
 
-  const onDownloadVideo = async () => {
-    if (!data.platform_id) return;
+  const triggerAuthDownload = async (url: string, fallbackFilename: string) => {
     setIsDownloading(true);
-
     try {
-      // 获取认证 token
       const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
       const token = sessionData?.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      if (!token) {
-        console.error('No auth token available');
-        // 回退到静态文件下载
-        if (videoUrl) {
-          handleDownload(videoUrl, `${data.platform_id}.mp4`);
-        }
-        return;
-      }
+      const response = await fetch(url, { headers });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
 
-      // 使用 API 下载端点（带认证）
-      const downloadUrl = getDownloadUrl(data.platform_id);
-      const response = await fetch(downloadUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.status}`);
-      }
-
-      // 从 Content-Disposition 获取文件名
       const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${data.platform_id}.mp4`;
+      let filename = fallbackFilename;
       if (contentDisposition) {
         const match = contentDisposition.match(/filename="(.+)"/);
-        if (match) {
-          filename = match[1];
-        }
+        if (match) filename = match[1];
       }
-
-      // 创建 blob 并下载
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -285,16 +261,24 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
-
     } catch (error) {
       console.error('Download error:', error);
-      // 回退到静态文件播放（新标签页打开）
-      if (videoUrl) {
-        window.open(videoUrl, '_blank');
-      }
+      addToast('Download failed', 'error');
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const onDownloadVideo = () => {
+    if (!data.platform_id) return;
+    setShowDownloadMenu(false);
+    triggerAuthDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`);
+  };
+
+  const onDownloadCoverFile = () => {
+    if (!data.platform_id) return;
+    setShowDownloadMenu(false);
+    triggerAuthDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`);
   };
 
   const onDownloadImages = () => {
@@ -313,9 +297,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     handleDownload(url, `${data.platform_id || 'music'}.mp3`);
   };
 
+  const onDownloadCover = () => {
+    if (!coverUrl) return;
+    handleDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
+  };
+
   // 重新获取/下载
   const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
-    if (!data.platform_id || !data.original_url) return;
+    if (!data.platform_id || !data.original_url) {
+      addToast('No source URL available for this media', 'error');
+      return;
+    }
     setIsRetrying(true);
     setRetrySuccess(false);
     setShowRetryMenu(false);
@@ -326,7 +318,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       const token = sessionData?.session?.access_token;
 
       if (!token) {
-        console.error('No auth token available');
+        addToast('Authentication required', 'error');
         return;
       }
 
@@ -347,15 +339,18 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error(`Refetch failed: ${response.status}`);
+        const errorBody = await response.json().catch(() => null);
+        const detail = errorBody?.detail || `Request failed (${response.status})`;
+        throw new Error(detail);
       }
 
       setRetrySuccess(true);
-      // 3秒后重置成功状态
+      addToast('Download task submitted', 'success');
       setTimeout(() => setRetrySuccess(false), 3000);
 
     } catch (error) {
       console.error('Refetch error:', error);
+      addToast(error instanceof Error ? error.message : 'Download failed', 'error');
     } finally {
       setIsRetrying(false);
     }
@@ -629,22 +624,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           </div>
 
-          {/* Tags - Editable via UnifiedTagPicker */}
+          {/* Tags - Read-only display (tag editing is in ResourcesView) */}
           <div className="mb-4">
-            {data.id ? (
-              <MediaTagPicker mediaId={data.id} initialTagNames={data.tags || []} />
-            ) : (
-              // Fallback for videos without database ID (e.g., just parsed)
-              data.tags && data.tags.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {data.tags.map((tag, i) => (
-                    <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
-                      <Tag size={10} className="opacity-70" />
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )
+            {data.tags && data.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {data.tags.map((tag, i) => (
+                  <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
+                    <Tag size={10} className="opacity-70" />
+                    {tag}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
 
@@ -797,24 +787,75 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Downloads Footer */}
           <div className="space-y-3 pt-4 border-t border-zinc-800/50 mt-auto">
              <div className="flex gap-2">
-                {isVideo && videoUrl && (
+                {/* Download 下拉菜单 */}
+                <div className="relative flex-1">
                   <button
-                    onClick={onDownloadVideo}
+                    onClick={() => setShowDownloadMenu(!showDownloadMenu)}
                     disabled={isDownloading}
-                    className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5 disabled:opacity-70"
+                    className="w-full flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5 disabled:opacity-70"
                   >
-                    {isDownloading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
+                    {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                     {isDownloading ? 'Downloading...' : 'Download'}
                   </button>
-                )}
-                {data.image_download_urls && data.image_download_urls.length > 0 && (
-                   <button
-                     onClick={onDownloadImages}
-                     className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5"
-                   >
-                   <Download className="w-4 h-4" />
-                   Images
-                 </button>
+
+                  {showDownloadMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowDownloadMenu(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 min-w-[180px] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div className="py-1">
+                          {isVideo && videoUrl && (
+                            <button
+                              onClick={onDownloadVideo}
+                              className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <VideoIcon size={15} className="text-indigo-400" />
+                              Video
+                            </button>
+                          )}
+                          {data.image_download_urls && data.image_download_urls.length > 0 && (
+                            <button
+                              onClick={() => { setShowDownloadMenu(false); onDownloadImages(); }}
+                              className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <ImageIcon size={15} className="text-pink-400" />
+                              Images ({data.image_download_urls.length})
+                            </button>
+                          )}
+                          {coverUrl && (
+                            <button
+                              onClick={onDownloadCoverFile}
+                              className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <ImageIcon size={15} className="text-emerald-400" />
+                              Cover
+                            </button>
+                          )}
+                          {data.music_download_urls?.[0] && data.music_download_urls[0] !== '#' && (
+                            <button
+                              onClick={() => { setShowDownloadMenu(false); onDownloadAudio(); }}
+                              className="w-full px-4 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <Music size={15} className="text-amber-400" />
+                              Audio
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Open Link */}
+                {data.original_url && (
+                  <a
+                    href={data.original_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-11 h-11 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg transition-colors border border-zinc-700 shrink-0"
+                    title="Open Original Link"
+                  >
+                    <ExternalLink className="w-5 h-5" />
+                  </a>
                 )}
                 {onSave && (
                    <button
@@ -856,35 +897,56 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       />
                       <div className="absolute bottom-full right-0 mb-2 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
                         <div className="py-1">
-                          <button
-                            onClick={() => onRefetch({ video: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <VideoIcon size={16} className="text-indigo-400" />
-                            Download Video
-                          </button>
-                          <button
-                            onClick={() => onRefetch({ cover: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <ImageIcon size={16} className="text-emerald-400" />
-                            Download Cover
-                          </button>
-                          <button
-                            onClick={() => onRefetch({ music: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <Music size={16} className="text-amber-400" />
-                            Download Audio
-                          </button>
-                          <div className="border-t border-zinc-700 my-1" />
-                          <button
-                            onClick={() => onRefetch({ video: true, cover: true, music: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <Download size={16} className="text-sky-400" />
-                            Download All
-                          </button>
+                          {data.video_download_status?.toLowerCase() !== 'completed' && (
+                            <button
+                              onClick={() => onRefetch({ video: true })}
+                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <VideoIcon size={16} className="text-indigo-400" />
+                              Download Video
+                            </button>
+                          )}
+                          {data.cover_download_status?.toLowerCase() !== 'completed' && (
+                            <button
+                              onClick={() => onRefetch({ cover: true })}
+                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <ImageIcon size={16} className="text-emerald-400" />
+                              Download Cover
+                            </button>
+                          )}
+                          {data.music_download_status?.toLowerCase() !== 'completed' && (
+                            <button
+                              onClick={() => onRefetch({ music: true })}
+                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <Music size={16} className="text-amber-400" />
+                              Download Audio
+                            </button>
+                          )}
+                          {(data.video_download_status?.toLowerCase() === 'completed' &&
+                            data.cover_download_status?.toLowerCase() === 'completed' &&
+                            data.music_download_status?.toLowerCase() === 'completed') ? (
+                            <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
+                              <Check size={16} className="text-emerald-400" />
+                              All Downloaded
+                            </div>
+                          ) : (
+                            <>
+                              <div className="border-t border-zinc-700 my-1" />
+                              <button
+                                onClick={() => onRefetch({
+                                  video: data.video_download_status?.toLowerCase() !== 'completed',
+                                  cover: data.cover_download_status?.toLowerCase() !== 'completed',
+                                  music: data.music_download_status?.toLowerCase() !== 'completed',
+                                })}
+                                className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                              >
+                                <Download size={16} className="text-sky-400" />
+                                Download All
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </>

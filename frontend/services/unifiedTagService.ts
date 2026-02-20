@@ -1,8 +1,8 @@
 /**
- * Unified Tag Service — abstracts tag operations for both Resources and Media (Downloads).
+ * Unified Tag Service — tag operations for Resources.
  *
- * Global tag CRUD is shared; entity-specific associations route to the correct
- * junction table (resource_tags vs video_tags) via a TaggableType discriminator.
+ * Global tag CRUD is shared; entity-specific associations route to
+ * /resources/{id}/tags endpoints.
  */
 
 import { getAuthHeaders } from './parserService';
@@ -17,7 +17,7 @@ const getApiUrl = (): string => {
   return 'http://localhost:8080';
 };
 
-// ─── Global tag CRUD (shared by all entity types) ──────────
+// ─── Global tag CRUD ──────────────────────────────────────
 
 export async function fetchAllTags(): Promise<Tag[]> {
   const apiUrl = getApiUrl();
@@ -53,9 +53,7 @@ export async function deleteTag(tagId: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete tag');
 }
 
-// ─── Entity-specific tag associations ──────────────────────
-
-export type TaggableType = 'resource' | 'media';
+// ─── Resource tag associations ────────────────────────────
 
 export interface TagAssociation {
   tag: Tag;
@@ -66,72 +64,47 @@ export interface TagAssociation {
 }
 
 /**
- * Fetch tags for any entity type.
+ * Fetch tags for a resource.
  */
-export async function fetchEntityTags(
-  entityType: TaggableType,
-  entityId: string,
+export async function fetchResourceTags(
+  resourceId: string,
 ): Promise<TagAssociation[]> {
   const apiUrl = getApiUrl();
-  const url =
-    entityType === 'resource'
-      ? `${apiUrl}/api/v1/resources/${entityId}/tags`
-      : `${apiUrl}/api/v1/tags/videos/${entityId}/tags`;
-
-  const res = await fetch(url, { headers: await getAuthHeaders() });
-  if (!res.ok) throw new Error(`Failed to fetch ${entityType} tags`);
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch resource tags');
   const json = await res.json();
-
-  // Normalize: resource returns { data: [{tag}] }, video returns { tags: [{tag, confidence, source}] }
-  if (entityType === 'resource') {
-    return (json.data ?? []).map((item: { tag: Tag }) => ({ tag: item.tag }));
-  }
-  return (json.tags ?? []).map((item: { tag: Tag; confidence?: number; source?: string }) => ({
-    tag: item.tag,
-    confidence: item.confidence,
-    source: item.source,
-  }));
+  return (json.data ?? []).map((item: { tag: Tag }) => ({ tag: item.tag }));
 }
 
 /**
- * Add a tag to any entity.
+ * Add a tag to a resource.
  */
-export async function addEntityTag(
-  entityType: TaggableType,
-  entityId: string,
+export async function addResourceTag(
+  resourceId: string,
   tagId: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
-  const url =
-    entityType === 'resource'
-      ? `${apiUrl}/api/v1/resources/${entityId}/tags`
-      : `${apiUrl}/api/v1/tags/videos/${entityId}/tags`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags`, {
     method: 'POST',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ tag_id: tagId }),
   });
-  if (!res.ok) throw new Error(`Failed to add ${entityType} tag`);
+  if (!res.ok) throw new Error('Failed to add resource tag');
 }
 
 /**
- * Remove a tag from any entity.
+ * Remove a tag from a resource.
  */
-export async function removeEntityTag(
-  entityType: TaggableType,
-  entityId: string,
+export async function removeResourceTag(
+  resourceId: string,
   tagId: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
-  const url =
-    entityType === 'resource'
-      ? `${apiUrl}/api/v1/resources/${entityId}/tags/${tagId}`
-      : `${apiUrl}/api/v1/tags/videos/${entityId}/tags/${tagId}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/tags/${tagId}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  if (!res.ok) throw new Error(`Failed to remove ${entityType} tag`);
+  if (!res.ok) throw new Error('Failed to remove resource tag');
 }

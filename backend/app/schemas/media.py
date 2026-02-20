@@ -50,23 +50,6 @@ class MediaBase(BaseModel):
     source_platform: Optional[str] = Field(
         default="douyin", description="Source platform"
     )
-    source_url: Optional[str] = Field(None, description="Original user input URL")
-    external_id: Optional[str] = Field(None, description="Platform's original ID")
-
-    # AI processing status
-    transcript_status: Optional[str] = Field(
-        default="pending", description="Transcription status"
-    )
-    summary_status: Optional[str] = Field(
-        default="pending", description="Summary status"
-    )
-    visual_analysis_status: Optional[str] = Field(
-        default="pending", description="Visual analysis status"
-    )
-
-    # Automation toggles
-    transcript_bool: Optional[bool] = Field(default=True, description="Auto-transcribe")
-    summary_bool: Optional[bool] = Field(default=True, description="Auto-summarize")
 
     # HLS streaming
     hls_path: Optional[str] = Field(None, description="HLS playlist path")
@@ -271,10 +254,7 @@ class MediaFetchRequest(BaseModel):
     url: str = Field(..., description="Text containing a media URL")
     video_bool: bool = Field(default=True, description="Whether to download video")
     music_bool: bool = Field(default=False, description="Whether to download audio")
-    transcript_bool: bool = Field(
-        default=True, description="Whether to auto-transcribe"
-    )
-    summary_bool: bool = Field(default=True, description="Whether to auto-summarize")
+    cover_bool: bool = Field(default=True, description="Whether to download cover")
 
     @model_validator(mode="after")
     def validate_url(self):

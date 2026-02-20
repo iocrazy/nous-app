@@ -294,7 +294,7 @@ async def fetch_video(
         if dedup_hit:
             # Auto-create resource record immediately for dedup hits
             background_tasks.add_task(
-                MediaService._create_resource_record_sync,
+                MediaService._create_resource_record,
                 platform_id,
                 auth.user_id,
             )
@@ -359,7 +359,7 @@ async def fetch_video(
                     )
                 # Auto-create resource record after background downloads
                 background_tasks.add_task(
-                    MediaService._create_resource_record_sync,
+                    MediaService._create_resource_record,
                     platform_id,
                     auth.user_id,
                 )
@@ -1129,8 +1129,10 @@ async def _handle_ytdlp_fetch(
     parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
 
     # Step 2.5: Enrich Bilibili stats (favorite_count, share_count)
-    if platform == "bilibili" and parsed_data.get("external_id"):
-        bvid = parsed_data["external_id"]
+    # Extract raw video ID from platform_id (format: "{platform}_{id}")
+    raw_video_id = parsed_data["platform_id"].split("_", 1)[1] if "_" in parsed_data["platform_id"] else parsed_data["platform_id"]
+    if platform == "bilibili" and raw_video_id:
+        bvid = raw_video_id
         extra_stats = await YtdlpService._fetch_bilibili_stats(bvid)
         if extra_stats:
             parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
@@ -1196,14 +1198,39 @@ async def _handle_ytdlp_fetch(
                 download_video: bool,
                 download_music: bool,
                 download_cover: bool,
+                video_title: str = "undefined",
             ):
                 """Background task for yt-dlp download"""
                 from app.core.enums import DownloadStatus
                 from app.core.utils import Utils
                 from app.repositories.media_repository import MediaRepository
                 from app.services.downloader import DownloaderService
+                from app.services.task_tracker import get_task_tracker
 
                 repo = MediaRepository()
+
+                # Create unified_tasks record for Task Center visibility
+                tracker = get_task_tracker()
+                unified_task_id = None
+                dl_parts = []
+                if download_video:
+                    dl_parts.append("Video")
+                if download_music:
+                    dl_parts.append("Audio")
+                if download_cover:
+                    dl_parts.append("Cover")
+                dl_subtitle = " + ".join(dl_parts) if dl_parts else None
+                try:
+                    unified_task_id = await tracker.create(
+                        user_id=user_id,
+                        task_type="download",
+                        title=video_title or platform_id,
+                        subtitle=dl_subtitle,
+                        media_id=platform_id,
+                    )
+                    await tracker.start(unified_task_id)
+                except Exception as e:
+                    logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
 
                 # Use structured path
                 from app.services.url_router import URLRouter
@@ -1247,6 +1274,13 @@ async def _handle_ytdlp_fetch(
                     # Auto-create resource record
                     await MediaService._create_resource_record(platform_id, user_id)
 
+                    # Mark task completed
+                    if unified_task_id:
+                        try:
+                            await tracker.complete(unified_task_id)
+                        except Exception as e:
+                            logger.warning(f"[TaskTracker] Failed to complete task: {e}")
+
                 except Exception as e:
                     logger.error(f"[yt-dlp] Background download failed: {e}")
                     await repo.update(
@@ -1257,6 +1291,12 @@ async def _handle_ytdlp_fetch(
                         },
                         user_id=user_id,
                     )
+                    # Mark task failed
+                    if unified_task_id:
+                        try:
+                            await tracker.fail(unified_task_id, str(e)[:500])
+                        except Exception as te:
+                            logger.warning(f"[TaskTracker] Failed to mark task failed: {te}")
 
             import os
 
@@ -1268,6 +1308,7 @@ async def _handle_ytdlp_fetch(
                 request.video_bool,
                 request.music_bool,
                 request.cover_bool,
+                video_title[:50] if video_title else "undefined",
             )
             logger.info(
                 f"[yt-dlp] FastAPI background download tasks added: {platform_id}"

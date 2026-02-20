@@ -214,7 +214,7 @@ class MediaRepository:
                 await client.table(self.TABLE_NAME)
                 .select(
                     "id, download_path, storage_size, cover_download_path, "
-                    "source_platform, external_id"
+                    "source_platform, platform_id"
                 )
                 .eq("platform_id", platform_id)
                 .eq("video_download_status", DownloadStatus.COMPLETED.value)

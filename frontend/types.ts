@@ -18,8 +18,6 @@ export interface ParsedMedia {
 
   // Platform info
   source_platform?: string;  // 'douyin', 'youtube', 'bilibili', 'twitter', 'other'
-  source_url?: string;       // Original user input URL
-  external_id?: string;      // Platform's original ID
 
   // Interaction Data
   like_count?: number;
