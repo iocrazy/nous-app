@@ -76,7 +76,7 @@ def parse_single_link_task(
         from app.repositories.media_repository import MediaRepository
         from app.services.douyin_analysis import DouyinAnalysis
         from app.services.douyin_parser import DouyinParser
-        from app.tasks.download_tasks import download_media_task
+        from app.tasks.download_tasks import download_unified_task
 
         # Fetch video data
         aweme_detail = run_async(DouyinAnalysis.fetch_one_video(valid_url))
@@ -193,7 +193,7 @@ def parse_single_link_task(
 
         if need_download:
             # Trigger download task (Phase 2)
-            download_task = download_media_task.delay(
+            download_task = download_unified_task.delay(
                 platform_id=platform_id,
                 user_id=user_id,
                 download_video=video_bool,
@@ -245,15 +245,14 @@ def parse_single_link_task(
             "platform_id": platform_id,
             "title": parsed_data.get("title"),
             "author": parsed_data.get("author"),
-            "author_avatar": parsed_data.get("author_avatar"),
             "duration": parsed_data.get("duration"),
             "media_type": media_type,
-            "create_time": parsed_data.get("create_time"),
+            "published_at": parsed_data.get("published_at"),
             "statistics": {
-                "likes": parsed_data.get("likes", 0),
-                "comments": parsed_data.get("comments", 0),
-                "shares": parsed_data.get("shares", 0),
-                "collects": parsed_data.get("collects", 0),
+                "likes": parsed_data.get("like_count", 0),
+                "comments": parsed_data.get("comment_count", 0),
+                "shares": parsed_data.get("share_count", 0),
+                "collects": parsed_data.get("favorite_count", 0),
             },
             "cover_urls": parsed_data.get("cover_urls", []),
             "description": parsed_data.get("description"),

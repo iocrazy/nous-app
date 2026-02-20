@@ -116,291 +116,6 @@ def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
         logger.warning(f"[AI] Failed to chain AI pipeline for {platform_id}: {e}")
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
-def download_media_task(
-    self,
-    platform_id: str,
-    user_id: str,
-    download_video: bool = True,
-    download_music: bool = False,
-    download_cover: bool = True,
-    media_type: int = 0,
-    video_title: str = "undefined",
-):
-    """
-    Download media files with progress tracking and TaskManager integration.
-
-    This task runs after metadata is parsed and saved.
-    Progress is tracked in Redis via TaskManager and can be polled by frontend.
-
-    Args:
-        platform_id: Video ID
-        user_id: User ID
-        download_video: Whether to download video
-        download_music: Whether to download music
-        download_cover: Whether to download cover
-        media_type: Media type (0=video, 2/68=images)
-        video_title: Video title for logging
-
-    Returns:
-        dict: Download result
-    """
-    task_id = self.request.id
-    logger.info(f"[Celery] Starting download task {task_id} for {platform_id}")
-
-    # Unified TaskTracker (Supabase)
-    from app.services.task_tracker import get_task_tracker
-    tracker_unified = get_task_tracker()
-    unified_task_id = None
-    dl_parts = []
-    if download_video:
-        dl_parts.append("Video")
-    if download_music:
-        dl_parts.append("Audio")
-    if download_cover:
-        dl_parts.append("Cover")
-    dl_subtitle = " + ".join(dl_parts) if dl_parts else None
-
-    try:
-        unified_task_id = run_async(tracker_unified.create(
-            user_id=user_id,
-            task_type="download",
-            title=video_title or platform_id,
-            subtitle=dl_subtitle,
-            media_id=platform_id,
-            celery_task_id=task_id,
-        ))
-        run_async(tracker_unified.start(unified_task_id))
-    except Exception as e:
-        logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
-
-    try:
-        from app.celery_app import celery_app
-
-        redis_client = celery_app.backend.client
-
-        # Create unified progress tracker (Redis + TaskTracker)
-        tracker = UnifiedProgressTracker(
-            task_id=task_id,
-            redis_client=redis_client,
-            unified_tracker=tracker_unified,
-            unified_task_id=unified_task_id,
-        )
-
-        # Execute downloads based on type
-        results = {
-            "video": None,
-            "music": None,
-            "cover": None,
-        }
-        video_result = None
-
-        if int(media_type) in (0, 4, 61):  # Video types
-            if download_video:
-                logger.info(f"[Celery] Downloading video: {platform_id}")
-                video_result = run_async(
-                    DownloaderService.download_video_by_platform_id(
-                        platform_id, user_id=user_id, progress_tracker=tracker
-                    )
-                )
-                results["video"] = (
-                    video_result.video_download_status.value
-                    if hasattr(video_result, "video_download_status")
-                    else "unknown"
-                )
-
-            if download_music:
-                logger.info(f"[Celery] Downloading music: {platform_id}")
-                result = run_async(
-                    DownloaderService.download_music_by_platform_id(
-                        platform_id=platform_id, user_id=user_id
-                    )
-                )
-                results["music"] = (
-                    result.music_download_status.value
-                    if hasattr(result, "music_download_status")
-                    else "unknown"
-                )
-
-            if download_cover:
-                logger.info(f"[Celery] Downloading cover: {platform_id}")
-                result = run_async(
-                    DownloaderService.download_cover_by_platform_id(
-                        platform_id, user_id=user_id
-                    )
-                )
-                results["cover"] = (
-                    result.cover_download_status.value
-                    if hasattr(result, "cover_download_status")
-                    else "unknown"
-                )
-
-        elif int(media_type) in (2, 68):  # Image types
-            if download_video:  # "video" flag used for images too
-                logger.info(f"[Celery] Downloading images: {platform_id}")
-                video_result = run_async(
-                    DownloaderService.download_images_by_platform_id(
-                        platform_id, user_id=user_id
-                    )
-                )
-                results["video"] = (
-                    video_result.video_download_status.value
-                    if hasattr(video_result, "video_download_status")
-                    else "unknown"
-                )
-
-            if download_music:
-                logger.info(f"[Celery] Downloading music: {platform_id}")
-                result = run_async(
-                    DownloaderService.download_music_by_platform_id(
-                        platform_id=platform_id, user_id=user_id
-                    )
-                )
-                results["music"] = (
-                    result.music_download_status.value
-                    if hasattr(result, "music_download_status")
-                    else "unknown"
-                )
-
-            if download_cover:
-                logger.info(f"[Celery] Downloading cover: {platform_id}")
-                result = run_async(
-                    DownloaderService.download_cover_by_platform_id(
-                        platform_id, user_id=user_id
-                    )
-                )
-                results["cover"] = (
-                    result.cover_download_status.value
-                    if hasattr(result, "cover_download_status")
-                    else "unknown"
-                )
-
-        # Check if video download was successful
-        if video_result and hasattr(video_result, "video_download_status"):
-            if video_result.video_download_status == DownloadStatus.COMPLETED:
-                tracker.complete()
-                if unified_task_id:
-                    try:
-                        run_async(tracker_unified.complete(unified_task_id))
-                    except Exception:
-                        pass
-                logger.success(f"[Celery] Download task completed: {platform_id}")
-
-                # Log success
-                run_async(
-                    log_user_action(
-                        user_id=user_id,
-                        action="download",
-                        message=f"Download completed: {video_title[:30]}...",
-                        status="success",
-                        aweme_id=platform_id,
-                        details={"media_type": media_type, "task_id": task_id},
-                    )
-                )
-
-                # Auto-create resource record (dedup-aware)
-                try:
-                    from app.services.media_service import MediaService
-
-                    run_async(
-                        MediaService._create_resource_record(platform_id, user_id)
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"[Celery] Failed to create resource record for {platform_id}: {e}"
-                    )
-
-                # Chain HLS transcode for video files
-                _maybe_chain_transcode(platform_id, user_id)
-
-                # Chain AI pipeline if user has auto-transcribe enabled
-                _maybe_chain_ai_pipeline(platform_id, user_id)
-
-                return {
-                    "status": "success",
-                    "platform_id": platform_id,
-                    "results": results,
-                }
-            else:
-                # Download failed
-                error_msg = (
-                    video_result.error
-                    if hasattr(video_result, "error") and video_result.error
-                    else "Download failed"
-                )
-                raise Exception(error_msg)
-
-        # No video result means video download was not requested, mark as complete
-        tracker.complete()
-        if unified_task_id:
-            try:
-                run_async(tracker_unified.complete(unified_task_id))
-            except Exception:
-                pass
-        logger.success(f"[Celery] Download task completed (no video): {platform_id}")
-
-        # Auto-create resource record (dedup-aware)
-        try:
-            from app.services.media_service import MediaService
-
-            run_async(MediaService._create_resource_record(platform_id, user_id))
-        except Exception as e:
-            logger.warning(
-                f"[Celery] Failed to create resource record for {platform_id}: {e}"
-            )
-
-        return {
-            "status": "success",
-            "platform_id": platform_id,
-            "results": results,
-        }
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(
-            f"[Celery] Download task failed: {platform_id}, error: {error_msg}"
-        )
-
-        # Write failure to Redis + TaskTracker
-        try:
-            tracker.failed(error_msg)
-        except Exception:
-            pass
-        if unified_task_id:
-            try:
-                run_async(tracker_unified.fail(unified_task_id, error_msg))
-            except Exception:
-                pass
-
-        # Use Celery's built-in retry mechanism
-        if self.request.retries < self.max_retries:
-            countdown = 30 * (2 ** self.request.retries)
-            logger.info(
-                f"[Celery] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
-            )
-            raise self.retry(exc=e, countdown=countdown)
-
-        # Log failure after max retries
-        run_async(
-            log_user_action(
-                user_id=user_id,
-                action="download",
-                message=f"Download failed: {video_title[:30]}...",
-                status="error",
-                aweme_id=platform_id,
-                details={"error": error_msg[:200], "retry_count": self.request.retries},
-            )
-        )
-
-        logger.error(f"[Celery] Max retries reached for {platform_id}")
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": error_msg,
-            "retry_count": self.request.retries,
-        }
-
-
 class UnifiedProgressTracker:
     """Progress tracker that writes to Redis (real-time) + TaskTracker (Supabase lifecycle)."""
 
@@ -448,16 +163,25 @@ class UnifiedProgressTracker:
             f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
-        # Update unified TaskTracker (throttled at 1s internally)
+        # Update unified TaskTracker (throttled at 1s internally).
+        # When called from within a running event loop (e.g. inside an async
+        # download function), use create_task() to avoid the overhead of
+        # run_async() which would spawn a thread + new event loop per update.
         if self.unified_tracker and self.unified_task_id:
+            coro = self.unified_tracker.update_progress(
+                self.unified_task_id,
+                percent,
+                speed=int(self._speed),
+            )
             try:
-                run_async(self.unified_tracker.update_progress(
-                    self.unified_task_id,
-                    percent,
-                    speed=int(self._speed),
-                ))
-            except Exception:
-                pass
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                # No running event loop — fall back to blocking run_async
+                try:
+                    run_async(coro)
+                except Exception as e:
+                    logger.debug(f"[ProgressTracker] Supabase update failed: {e}")
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
@@ -497,36 +221,228 @@ class UnifiedProgressTracker:
         )
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
-def download_ytdlp_task(
-    self,
+# ─── Internal download strategies ─────────────────────────────────────
+
+def _do_douyin_download(
+    platform_id: str,
+    user_id: str,
+    download_video: bool,
+    download_music: bool,
+    download_cover: bool,
+    media_type: int,
+    tracker: UnifiedProgressTracker,
+) -> dict:
+    """Douyin download strategy: reads URLs from DB, downloads via httpx."""
+    results = {"video": None, "music": None, "cover": None}
+    video_ok = False
+
+    if int(media_type) in (0, 4, 61):  # Video types
+        if download_video:
+            logger.info(f"[Download] Downloading douyin video: {platform_id}")
+            video_result = run_async(
+                DownloaderService.download_video_by_platform_id(
+                    platform_id, user_id=user_id, progress_tracker=tracker
+                )
+            )
+            results["video"] = (
+                video_result.video_download_status.value
+                if hasattr(video_result, "video_download_status")
+                else "unknown"
+            )
+            if hasattr(video_result, "video_download_status"):
+                video_ok = video_result.video_download_status == DownloadStatus.COMPLETED
+                if not video_ok:
+                    error_msg = (
+                        video_result.error
+                        if hasattr(video_result, "error") and video_result.error
+                        else "Download failed"
+                    )
+                    raise Exception(error_msg)
+
+        if download_music:
+            logger.info(f"[Download] Downloading douyin music: {platform_id}")
+            result = run_async(
+                DownloaderService.download_music_by_platform_id(
+                    platform_id=platform_id, user_id=user_id
+                )
+            )
+            results["music"] = (
+                result.music_download_status.value
+                if hasattr(result, "music_download_status")
+                else "unknown"
+            )
+
+    elif int(media_type) in (2, 68):  # Image types
+        if download_video:  # "video" flag used for images too
+            logger.info(f"[Download] Downloading douyin images: {platform_id}")
+            video_result = run_async(
+                DownloaderService.download_images_by_platform_id(
+                    platform_id, user_id=user_id
+                )
+            )
+            results["video"] = (
+                video_result.video_download_status.value
+                if hasattr(video_result, "video_download_status")
+                else "unknown"
+            )
+            if hasattr(video_result, "video_download_status"):
+                video_ok = video_result.video_download_status == DownloadStatus.COMPLETED
+                if not video_ok:
+                    error_msg = (
+                        video_result.error
+                        if hasattr(video_result, "error") and video_result.error
+                        else "Image download failed"
+                    )
+                    raise Exception(error_msg)
+
+        if download_music:
+            logger.info(f"[Download] Downloading douyin music: {platform_id}")
+            result = run_async(
+                DownloaderService.download_music_by_platform_id(
+                    platform_id=platform_id, user_id=user_id
+                )
+            )
+            results["music"] = (
+                result.music_download_status.value
+                if hasattr(result, "music_download_status")
+                else "unknown"
+            )
+
+    if download_cover:
+        logger.info(f"[Download] Downloading douyin cover: {platform_id}")
+        result = run_async(
+            DownloaderService.download_cover_by_platform_id(
+                platform_id, user_id=user_id
+            )
+        )
+        results["cover"] = (
+            result.cover_download_status.value
+            if hasattr(result, "cover_download_status")
+            else "unknown"
+        )
+
+    return results
+
+
+def _do_ytdlp_download(
     url: str,
     platform_id: str,
     user_id: str,
+    download_video: bool,
+    download_music: bool,
+    download_cover: bool,
+    tracker: UnifiedProgressTracker,
+) -> dict:
+    """yt-dlp download strategy: downloads via yt-dlp using original URL."""
+    from app.repositories.media_repository import MediaRepository
+    from app.services.url_router import URLRouter
+    from app.services.ytdlp_service import YtdlpService
+
+    results = {"video": None, "music": None, "cover": None}
+
+    detected_platform, _ = URLRouter.detect_platform(url)
+    storage_dir, relative_prefix = Utils.create_web_resource_path(
+        detected_platform, platform_id
+    )
+
+    if download_video:
+        logger.info(f"[Download] Downloading video via yt-dlp: {platform_id}")
+
+        def on_progress(downloaded: int, total: int, speed: str):
+            tracker.update(downloaded, total)
+
+        result = run_async(
+            YtdlpService.download_video(
+                url, str(storage_dir), platform_id, progress_callback=on_progress
+            )
+        )
+        if result.get("file_path"):
+            import os
+
+            file_name = os.path.basename(result["file_path"])
+            relative_path = f"{relative_prefix}/{file_name}"
+            repo = MediaRepository()
+            run_async(
+                repo.mark_media_as_downloaded(
+                    platform_id=platform_id,
+                    download_path=relative_path,
+                    duration=0,
+                    storage_size=result.get("file_size", 0),
+                )
+            )
+            run_async(
+                DownloaderService.optimize_video_for_streaming(result["file_path"])
+            )
+            results["video"] = DownloadStatus.COMPLETED.value
+        else:
+            results["video"] = DownloadStatus.FAILED.value
+            raise Exception("yt-dlp video download failed: no output file")
+
+    if download_music:
+        logger.info(f"[Download] Extracting audio via yt-dlp: {platform_id}")
+        result = run_async(
+            YtdlpService.download_audio(url, str(storage_dir), platform_id)
+        )
+        if result.get("file_path"):
+            repo = MediaRepository()
+            run_async(repo.mark_music_as_downloaded(platform_id))
+            results["music"] = DownloadStatus.COMPLETED.value
+        else:
+            results["music"] = DownloadStatus.FAILED.value
+
+    if download_cover:
+        logger.info(f"[Download] Downloading cover: {platform_id}")
+        cover_result = run_async(
+            DownloaderService.download_cover_by_platform_id(
+                platform_id, user_id=user_id
+            )
+        )
+        if cover_result and cover_result.cover_download_status == DownloadStatus.COMPLETED:
+            results["cover"] = DownloadStatus.COMPLETED.value
+        else:
+            error = cover_result.error if cover_result else "Unknown error"
+            logger.warning(f"[Download] Cover download failed for {platform_id}: {error}")
+            results["cover"] = DownloadStatus.FAILED.value
+
+    return results
+
+
+# ─── Unified download task ─────────────────────────────────────────────
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def download_unified_task(
+    self,
+    platform_id: str,
+    user_id: str,
+    url: str = None,
     download_video: bool = True,
     download_music: bool = False,
     download_cover: bool = True,
+    media_type: int = 0,
     video_title: str = "undefined",
 ):
     """
-    Celery task for downloading media via yt-dlp (non-Douyin platforms).
+    Unified download task for all platforms.
+
+    Routing:
+      - url=None  → Douyin path (reads download URLs from DB, downloads via httpx)
+      - url given → yt-dlp path (downloads directly from URL)
 
     Args:
-        url: Original video URL
-        platform_id: Video platform ID
+        platform_id: Media platform ID
         user_id: User ID
+        url: Original URL (only for yt-dlp platforms; None for Douyin)
         download_video: Whether to download video
         download_music: Whether to download audio
-        download_cover: Whether to download cover (thumbnail)
-        video_title: Video title for logging
-
-    Returns:
-        dict: Download result
+        download_cover: Whether to download cover/thumbnail
+        media_type: Media type (0=video, 2/68=images). Only used in Douyin path.
+        video_title: Title for logging and task tracker display
     """
     task_id = self.request.id
-    logger.info(f"[Celery/yt-dlp] Starting download task {task_id} for {platform_id}")
+    strategy = "yt-dlp" if url else "douyin"
+    logger.info(f"[Download/{strategy}] Starting task {task_id} for {platform_id}")
 
-    # Unified TaskTracker (Supabase)
+    # ── TaskTracker setup (Supabase lifecycle) ──
     from app.services.task_tracker import get_task_tracker
     tracker_unified = get_task_tracker()
     unified_task_id = None
@@ -553,22 +469,7 @@ def download_ytdlp_task(
         logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
 
     try:
-        from app.repositories.media_repository import MediaRepository
-        from app.services.ytdlp_service import YtdlpService
-
-        results = {"video": None, "music": None, "cover": None}
-
-        # Detect platform from URL for structured path
-        from app.services.url_router import URLRouter
-
-        detected_platform, _ = URLRouter.detect_platform(url)
-        storage_dir, relative_prefix = Utils.create_web_resource_path(
-            detected_platform, platform_id
-        )
-
-        repo_class = MediaRepository
-
-        # Create unified progress tracker (Redis + TaskTracker)
+        # ── Progress tracker setup (Redis real-time) ──
         from app.celery_app import celery_app
         redis_client = celery_app.backend.client
 
@@ -579,94 +480,60 @@ def download_ytdlp_task(
             unified_task_id=unified_task_id,
         )
 
-        if download_video:
-            logger.info(f"[Celery/yt-dlp] Downloading video: {platform_id}")
-
-            def on_progress(downloaded: int, total: int, speed: str):
-                tracker.update(downloaded, total)
-
-            result = run_async(
-                YtdlpService.download_video(
-                    url, str(storage_dir), platform_id, progress_callback=on_progress
-                )
+        # ── Dispatch to strategy ──
+        if url:
+            results = _do_ytdlp_download(
+                url=url,
+                platform_id=platform_id,
+                user_id=user_id,
+                download_video=download_video,
+                download_music=download_music,
+                download_cover=download_cover,
+                tracker=tracker,
             )
-            if result.get("file_path"):
-                import os
-
-                file_name = os.path.basename(result["file_path"])
-                relative_path = f"{relative_prefix}/{file_name}"
-                repo = repo_class()
-                run_async(
-                    repo.mark_media_as_downloaded(
-                        platform_id=platform_id,
-                        download_path=relative_path,
-                        duration=0,
-                        storage_size=result.get("file_size", 0),
-                    )
-                )
-                # Optimize for streaming
-                run_async(
-                    DownloaderService.optimize_video_for_streaming(result["file_path"])
-                )
-                results["video"] = DownloadStatus.COMPLETED.value
-            else:
-                results["video"] = DownloadStatus.FAILED.value
-
-        if download_music:
-            logger.info(f"[Celery/yt-dlp] Extracting audio: {platform_id}")
-            result = run_async(
-                YtdlpService.download_audio(url, str(storage_dir), platform_id)
+        else:
+            results = _do_douyin_download(
+                platform_id=platform_id,
+                user_id=user_id,
+                download_video=download_video,
+                download_music=download_music,
+                download_cover=download_cover,
+                media_type=media_type,
+                tracker=tracker,
             )
-            if result.get("file_path"):
-                repo = repo_class()
-                run_async(repo.mark_music_as_downloaded(platform_id))
-                results["music"] = DownloadStatus.COMPLETED.value
-            else:
-                results["music"] = DownloadStatus.FAILED.value
 
-        # For cover: download thumbnail from metadata
-        if download_cover:
-            logger.info(f"[Celery/yt-dlp] Downloading cover: {platform_id}")
-            repo = repo_class()
-            run_async(
-                DownloaderService.download_cover_by_platform_id(
-                    platform_id, user_id=user_id
-                )
-            )
-            results["cover"] = "attempted"
-
+        # ── Common post-download: mark complete ──
         tracker.complete()
         if unified_task_id:
             try:
                 run_async(tracker_unified.complete(unified_task_id))
             except Exception:
                 pass
-        logger.success(f"[Celery/yt-dlp] Download task completed: {platform_id}")
-
-        # Auto-create resource record (dedup-aware)
-        try:
-            from app.services.media_service import MediaService
-
-            run_async(MediaService._create_resource_record(platform_id, user_id))
-        except Exception as e:
-            logger.warning(
-                f"[Celery/yt-dlp] Failed to create resource record for {platform_id}: {e}"
-            )
-
-        # Chain HLS transcode for video files
-        _maybe_chain_transcode(platform_id, user_id)
+        logger.success(f"[Download/{strategy}] Completed: {platform_id}")
 
         # Log success
         run_async(
             log_user_action(
                 user_id=user_id,
                 action="download",
-                message=f"Download completed (yt-dlp): {video_title[:30]}...",
+                message=f"Download completed ({strategy}): {video_title[:30]}...",
                 status="success",
                 aweme_id=platform_id,
-                details={"media_type": "video", "task_id": task_id},
+                details={"media_type": media_type, "task_id": task_id},
             )
         )
+
+        # Auto-create resource record (dedup-aware)
+        try:
+            from app.services.media_service import MediaService
+            run_async(MediaService._create_resource_record(platform_id, user_id))
+        except Exception as e:
+            logger.warning(
+                f"[Download] Failed to create resource record for {platform_id}: {e}"
+            )
+
+        # Chain HLS transcode for video files
+        _maybe_chain_transcode(platform_id, user_id)
 
         # Chain AI pipeline if user has auto-transcribe enabled
         _maybe_chain_ai_pipeline(platform_id, user_id)
@@ -680,25 +547,25 @@ def download_ytdlp_task(
     except Exception as e:
         error_msg = str(e)
         logger.error(
-            f"[Celery/yt-dlp] Download task failed: {platform_id}, error: {error_msg}"
+            f"[Download/{strategy}] Failed: {platform_id}, error: {error_msg}"
         )
 
-        # Write failure to Redis so frontend polling picks it up
+        # Write failure to Redis + TaskTracker
         try:
             tracker.failed(error_msg)
         except Exception:
             pass
-
         if unified_task_id:
             try:
                 run_async(tracker_unified.fail(unified_task_id, error_msg))
             except Exception:
                 pass
 
+        # Celery retry with exponential backoff
         if self.request.retries < self.max_retries:
-            countdown = 30 * (2**self.request.retries)
+            countdown = 30 * (2 ** self.request.retries)
             logger.info(
-                f"[Celery/yt-dlp] Scheduling retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
+                f"[Download/{strategy}] Retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
             )
             raise self.retry(exc=e, countdown=countdown)
 
@@ -707,18 +574,25 @@ def download_ytdlp_task(
             log_user_action(
                 user_id=user_id,
                 action="download",
-                message=f"Download failed (yt-dlp): {video_title[:30]}...",
+                message=f"Download failed ({strategy}): {video_title[:30]}...",
                 status="error",
                 aweme_id=platform_id,
                 details={"error": error_msg[:200], "retry_count": self.request.retries},
             )
         )
 
+        logger.error(f"[Download/{strategy}] Max retries reached for {platform_id}")
         return {
             "status": "failed",
             "platform_id": platform_id,
             "error": error_msg,
+            "retry_count": self.request.retries,
         }
+
+
+# Backward-compatible aliases for existing call sites during migration
+download_media_task = download_unified_task
+download_ytdlp_task = download_unified_task
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
