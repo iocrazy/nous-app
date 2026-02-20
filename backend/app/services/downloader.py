@@ -367,11 +367,17 @@ class DownloaderService:
             repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                result.video_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
             logger.info(f"准备下载视频: {platform_id}")
@@ -399,7 +405,7 @@ class DownloaderService:
                 await repo.update(
                     platform_id,
                     {
-                        "download_status": DownloadStatus.FAILED,
+                        "video_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
                     user_id=user_id,
@@ -526,11 +532,17 @@ class DownloaderService:
             repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                result.video_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
             logger.info(f"准备下载 {platform_id} 的图片集")
@@ -843,11 +855,17 @@ class DownloaderService:
             repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for cover {platform_id}: {db_err}", exc_info=True)
                 result.cover_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found for cover: platform_id={platform_id}, user_id={user_id}")
+                result.cover_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
             video_title = video_data.get("title", "undefined")
@@ -944,7 +962,18 @@ class DownloaderService:
             return result
 
         except Exception as e:
-            logger.error(f"下载封面出错: {str(e)}")
+            logger.error(f"下载封面出错 {platform_id}: {str(e)}", exc_info=True)
             result.cover_download_status = DownloadStatus.FAILED
             result.error = str(e)
+            # Persist failure status to DB so it doesn't stay NULL
+            try:
+                repo = MediaRepository()
+                await repo.update(
+                    platform_id,
+                    {"cover_download_status": DownloadStatus.FAILED.value,
+                     "error_message": str(e)[:500]},
+                    user_id=user_id,
+                )
+            except Exception:
+                logger.debug(f"Failed to persist cover failure status for {platform_id}")
             return result

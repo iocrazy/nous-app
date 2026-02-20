@@ -22,13 +22,11 @@ class MediaRepository:
     TABLE_NAME = "parsed_media"
 
     def __init__(self):
-        self._client = None  # 延迟初始化
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """获取表引用"""
@@ -86,22 +84,20 @@ class MediaRepository:
 
         Returns:
             视频记录或 None
+
+        Raises:
+            Exception: DB connection or query errors (not swallowed).
         """
-        try:
-            client = await self._get_client()
-            # Use parsed_media_with_tags view which includes tags array
-            query = (
-                client.table("parsed_media")
-                .select("*")
-                .eq("platform_id", platform_id)
-            )
-            if user_id:
-                query = query.eq("user_id", user_id)
-            result = await query.execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取视频记录失败: {e}")
-            return None
+        client = await self._get_client()
+        query = (
+            client.table("parsed_media")
+            .select("*")
+            .eq("platform_id", platform_id)
+        )
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = await query.execute()
+        return result.data[0] if result.data else None
 
     async def get_by_id(self, media_id: str) -> Optional[Dict[str, Any]]:
         """Get a parsed_media record by its primary key (UUID).
@@ -111,20 +107,19 @@ class MediaRepository:
 
         Returns:
             Media record or None.
+
+        Raises:
+            Exception: DB connection or query errors (not swallowed).
         """
-        try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_NAME)
-                .select("*")
-                .eq("id", media_id)
-                .limit(1)
-                .execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"Failed to get media by id {media_id}: {e}")
-            return None
+        client = await self._get_client()
+        result = (
+            await client.table(self.TABLE_NAME)
+            .select("*")
+            .eq("id", media_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
 
     async def update(
         self, platform_id: str, data: Dict[str, Any], user_id: Optional[str] = None
@@ -207,25 +202,24 @@ class MediaRepository:
 
         Returns:
             Video record with download info, or None
+
+        Raises:
+            Exception: DB connection or query errors (not swallowed).
         """
-        try:
-            client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_NAME)
-                .select(
-                    "id, download_path, storage_size, cover_download_path, "
-                    "source_platform, platform_id"
-                )
-                .eq("platform_id", platform_id)
-                .eq("video_download_status", DownloadStatus.COMPLETED.value)
-                .not_.is_("download_path", "null")
-                .limit(1)
-                .execute()
+        client = await self._get_client()
+        result = (
+            await client.table(self.TABLE_NAME)
+            .select(
+                "id, download_path, storage_size, cover_download_path, "
+                "source_platform, platform_id"
             )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"查找已下载视频失败: {e}")
-            return None
+            .eq("platform_id", platform_id)
+            .eq("video_download_status", DownloadStatus.COMPLETED.value)
+            .not_.is_("download_path", "null")
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
 
     async def check_media_existence(self, platform_id: str) -> bool:
         """检查媒体是否存在"""
@@ -365,7 +359,6 @@ class MediaRepository:
         """
         try:
             client = await self._get_client()
-            # Use parsed_media_with_tags view which includes tags array
             query = client.table("parsed_media").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
@@ -429,7 +422,7 @@ class MediaRepository:
             if media_type:
                 query = query.eq("media_type", media_type)
 
-            # TODO: category search needs to be reimplemented via media_tags table
+            # TODO: category search needs to be reimplemented via resource_tags table
             # if category:
             #     query = query.ilike("video_categories", f"%{category}%")
 
