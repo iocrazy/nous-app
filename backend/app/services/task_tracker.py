@@ -23,13 +23,10 @@ class TaskTracker:
 
     def __init__(self):
         self._last_progress: dict[str, float] = {}  # task_id -> last_write_time
-        self._client = None
 
     async def _get_client(self):
-        if self._client is None:
-            from app.db.supabase_client import get_async_supabase_admin
-            self._client = await get_async_supabase_admin()
-        return self._client
+        from app.db.supabase_client import get_async_supabase_admin
+        return await get_async_supabase_admin()
 
     async def create(
         self,

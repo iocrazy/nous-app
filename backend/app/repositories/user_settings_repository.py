@@ -18,13 +18,11 @@ class UserSettingsRepository:
     """用户设置仓库类 (异步)"""
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """获取表引用"""

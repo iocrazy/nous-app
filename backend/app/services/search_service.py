@@ -42,13 +42,10 @@ class SearchService:
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.analysis_repo = AnalysisRepository()
-        self._client = None
 
     async def _get_client(self):
-        """Get async client"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def semantic_search(
         self,

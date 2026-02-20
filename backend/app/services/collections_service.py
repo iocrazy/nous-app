@@ -14,13 +14,10 @@ class CollectionsService:
 
     def __init__(self):
         self.repo = CollectionsRepository()
-        self._client = None
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def get_collection_media(
         self,

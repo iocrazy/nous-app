@@ -25,12 +25,11 @@ class ResourcesRepository:
     TABLE_RESOURCE_TAGS = "resource_tags"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #
     # Resources CRUD
