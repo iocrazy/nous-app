@@ -168,25 +168,33 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api/v1")
 
-# 挂载静态文件服务 - 用于访问下载的视频和封面
-# 优先从 frontend_config.yml 读取路径
+# 媒体文件服务 - 用于访问下载的视频和封面
+# 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
 try:
-    media_base_path = Utils.get_download_base_path()
-    media_path = Path(media_base_path)
-    if media_path.exists():
-        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-        logger.info(f"静态文件服务已挂载: /media -> {media_path}")
-    else:
-        # 尝试创建目录
-        media_path.mkdir(parents=True, exist_ok=True)
-        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-        logger.info(f"已创建媒体目录并挂载: /media -> {media_path}")
+    _media_base_path = Path(Utils.get_download_base_path()).resolve()
+    _media_base_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"媒体文件路由已注册: /media -> {_media_base_path}")
+
+    @app.get("/media/{file_path:path}")
+    async def serve_media_file(file_path: str):
+        """Serve media files with CORS support."""
+        import mimetypes
+
+        full_path = (_media_base_path / file_path).resolve()
+        # Security: prevent path traversal
+        if not str(full_path).startswith(str(_media_base_path)):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        return FileResponse(str(full_path), media_type=mime_type)
+
 except ValueError:
     logger.warning(
-        "未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。"
+        "未配置下载路径，媒体文件路由未注册。请在设置中配置 Default Download Path。"
     )
 except Exception as e:
-    logger.warning(f"静态文件服务挂载失败: {e}")
+    logger.warning(f"媒体文件路由注册失败: {e}")
 
 
 @app.get("/health")

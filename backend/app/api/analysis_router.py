@@ -200,7 +200,7 @@ async def trigger_analysis(
             )
 
         task = analyze_video_l1_task.delay(
-            video_id=media_id,
+            media_id=media_id,
             cover_url=media["cover_url"],
             title=media.get("title", ""),
             description=media.get("description", ""),
@@ -228,7 +228,7 @@ async def trigger_analysis(
             )
 
         task = analyze_video_l2_task.delay(
-            video_id=media_id,
+            media_id=media_id,
             cover_url=media.get("cover_url", ""),
             video_path=video_path,
             title=media.get("title", ""),
@@ -274,7 +274,7 @@ async def trigger_batch_analysis(
         )
 
     task = batch_analyze_l1_task.delay(
-        video_ids=request.media_ids, batch_size=len(request.media_ids)
+        media_ids=request.media_ids, batch_size=len(request.media_ids)
     )
 
     return {
