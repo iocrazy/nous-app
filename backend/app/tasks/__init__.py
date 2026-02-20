@@ -13,6 +13,7 @@ from app.tasks.download_tasks import (
     download_cover_task,
     download_images_task,
     download_music_task,
+    download_unified_task,
     download_video_task,
 )
 from app.tasks.parse_tasks import (
@@ -28,6 +29,7 @@ from app.tasks.transcode_tasks import transcode_to_hls
 
 __all__ = [
     # 下载任务
+    "download_unified_task",
     "download_video_task",
     "download_images_task",
     "download_music_task",

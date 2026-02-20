@@ -303,14 +303,14 @@ async def fetch_video(
             # Try Celery, fallback to FastAPI background tasks if unavailable
             try:
                 from app.celery_app import celery_app
-                from app.tasks.download_tasks import download_media_task
+                from app.tasks.download_tasks import download_unified_task
 
                 # Check if Celery is available - ping() returns empty list if no workers
                 workers = celery_app.control.ping(timeout=1)
                 if not workers:
                     raise RuntimeError("No Celery workers available")
 
-                download_task = download_media_task.delay(
+                download_task = download_unified_task.delay(
                     platform_id=platform_id,
                     user_id=auth.user_id,
                     download_video=need_download_video,
@@ -1007,7 +1007,8 @@ async def download_video_file(platform_id: str, auth: AuthDep):
         if not download_path:
             raise HTTPException(status_code=404, detail="Video file path not found")
 
-        file_path = Path(download_path)
+        base_path = Utils.get_download_base_path()
+        file_path = Path(base_path) / download_path
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Video file not found")
 
@@ -1056,7 +1057,8 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
         if not cover_path:
             raise HTTPException(status_code=404, detail="Cover file path not found")
 
-        file_path = Path(cover_path)
+        base_path = Utils.get_download_base_path()
+        file_path = Path(base_path) / cover_path
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Cover file not found")
 
@@ -1168,13 +1170,13 @@ async def _handle_ytdlp_fetch(
         # Try Celery first, fallback to FastAPI background tasks
         try:
             from app.celery_app import celery_app
-            from app.tasks.download_tasks import download_ytdlp_task
+            from app.tasks.download_tasks import download_unified_task
 
             workers = celery_app.control.ping(timeout=1)
             if not workers:
                 raise RuntimeError("No Celery workers available")
 
-            download_task = download_ytdlp_task.delay(
+            download_task = download_unified_task.delay(
                 url=url,
                 platform_id=platform_id,
                 user_id=auth.user_id,
