@@ -83,7 +83,7 @@ export interface ParsedMedia {
   hls_path?: string;
   media_format?: 'mp4' | 'hls';
 
-  // Summary preview (joined from media_summaries)
+  // Summary preview (joined from resource_summaries)
   summary_text?: string;
 
   // Resource linkage (joined from resources table via media_id)
