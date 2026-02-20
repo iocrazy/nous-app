@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
-import { getSupabaseClient } from '../supabaseClient';
+import { downloadFile, downloadWithAuth } from '../utils/download';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
@@ -205,101 +205,73 @@ export const MediaCard: React.FC<MediaCardProps> = ({
      return `${secondsStr}s`;
   };
 
-  const handleDownload = async (url: string, filename: string) => {
-    setIsDownloading(true);
-    try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const blob = await response.blob();
-        const blobUrl = window.URL.createObjectURL(blob);
-
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-        console.warn('Direct download failed, falling back to new tab:', error);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } finally {
-        setIsDownloading(false);
-    }
+  const dlCallbacks = {
+    onSuccess: (fname: string) => addToast(`Downloaded: ${fname}`, 'success'),
+    onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
+  };
+  const dlSilent = {
+    onSuccess: (fname: string) => addToast(`Downloaded: ${fname}`, 'success'),
   };
 
-  const triggerAuthDownload = async (url: string, fallbackFilename: string) => {
+  const doDownload = async (url: string, filename: string, auth = false, silent = false): Promise<boolean> => {
     setIsDownloading(true);
     try {
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const response = await fetch(url, { headers });
-      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = fallbackFilename;
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="(.+)"/);
-        if (match) filename = match[1];
-      }
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-      console.error('Download error:', error);
-      addToast('Download failed', 'error');
+      const cbs = silent ? dlSilent : dlCallbacks;
+      return auth
+        ? await downloadWithAuth(url, filename, cbs)
+        : await downloadFile(url, filename, cbs);
     } finally {
       setIsDownloading(false);
     }
   };
 
-  const onDownloadVideo = () => {
-    if (!data.platform_id) return;
+  const onDownloadVideo = async () => {
     setShowDownloadMenu(false);
-    triggerAuthDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`);
+    if (!data.platform_id) return;
+    // Try backend API first (silent error), fallback to remote URL
+    if (data.video_download_status?.toLowerCase() === 'completed') {
+      const ok = await doDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`, true, true);
+      if (ok) return;
+    }
+    if (videoUrl) {
+      await doDownload(videoUrl, `${data.platform_id}.mp4`);
+    } else {
+      addToast('No video file available', 'error');
+    }
   };
 
-  const onDownloadCoverFile = () => {
-    if (!data.platform_id) return;
+  const onDownloadCoverFile = async () => {
     setShowDownloadMenu(false);
-    triggerAuthDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`);
+    if (!data.platform_id) return;
+    if (data.cover_download_status?.toLowerCase() === 'completed') {
+      const ok = await doDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`, true, true);
+      if (ok) return;
+    }
+    if (coverUrl) {
+      await doDownload(coverUrl, `${data.platform_id}_cover.jpg`);
+    } else {
+      addToast('No cover file available', 'error');
+    }
   };
 
   const onDownloadImages = () => {
     if (!data.image_download_urls) return;
     data.image_download_urls.forEach((url, idx) => {
-        // Stagger downloads slightly
-        setTimeout(() => {
-            handleDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
-        }, idx * 500);
+      setTimeout(() => {
+        doDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
+      }, idx * 500);
     });
   };
 
   const onDownloadAudio = () => {
     const url = data.music_download_urls?.[0];
     if (!url || url === '#') return;
-    handleDownload(url, `${data.platform_id || 'music'}.mp3`);
+    doDownload(url, `${data.platform_id || 'music'}.mp3`);
   };
 
   const onDownloadCover = () => {
     if (!coverUrl) return;
-    handleDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
+    doDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
   };
 
   // 重新获取/下载
@@ -903,7 +875,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                               className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                             >
                               <VideoIcon size={16} className="text-indigo-400" />
-                              Download Video
+                              Fetch Video
                             </button>
                           )}
                           {data.cover_download_status?.toLowerCase() !== 'completed' && (
@@ -912,7 +884,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                               className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                             >
                               <ImageIcon size={16} className="text-emerald-400" />
-                              Download Cover
+                              Fetch Cover
                             </button>
                           )}
                           {data.music_download_status?.toLowerCase() !== 'completed' && (
@@ -921,7 +893,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                               className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                             >
                               <Music size={16} className="text-amber-400" />
-                              Download Audio
+                              Fetch Audio
                             </button>
                           )}
                           {(data.video_download_status?.toLowerCase() === 'completed' &&
@@ -929,7 +901,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                             data.music_download_status?.toLowerCase() === 'completed') ? (
                             <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
                               <Check size={16} className="text-emerald-400" />
-                              All Downloaded
+                              All Fetched
                             </div>
                           ) : (
                             <>
@@ -943,7 +915,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                                 className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                               >
                                 <Download size={16} className="text-sky-400" />
-                                Download All
+                                Fetch All
                               </button>
                             </>
                           )}

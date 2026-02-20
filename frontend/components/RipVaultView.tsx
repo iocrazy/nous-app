@@ -43,6 +43,7 @@ import { useToast } from './Toast';
 import { trashResourceByPlatformId } from '../services/resourceService';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
+import { downloadFile, downloadWithAuth } from '../utils/download';
 
 // ─── AI Status Badge ──────────────────────────────────
 const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
@@ -343,47 +344,36 @@ export const RipVaultView: React.FC = () => {
     if (!contextMenu) return;
     const v = contextMenu.video;
     setContextMenu(null);
-    try {
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-      if (token && v.platform_id) {
-        const url = getDownloadUrl(v.platform_id);
-        const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        if (!resp.ok) throw new Error('Download failed');
-        const blob = await resp.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `${v.platform_id}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        return;
-      }
-    } catch (err) {
-      console.error('Download error:', err);
+    const callbacks = {
+      onSuccess: (f: string) => addToast(`Downloaded: ${f}`, 'success'),
+      onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
+    };
+    // Try backend API first, fallback to remote URL
+    if (v.video_download_status?.toLowerCase() === 'completed' && v.platform_id) {
+      const ok = await downloadWithAuth(getDownloadUrl(v.platform_id), `${v.platform_id}.mp4`, {
+        onSuccess: callbacks.onSuccess,
+      });
+      if (ok) return;
     }
-    // Fallback
     const videoUrl = getVideoUrl(v);
-    if (videoUrl) window.open(videoUrl, '_blank');
-  }, [contextMenu]);
+    if (videoUrl) {
+      await downloadFile(videoUrl, `${v.platform_id || 'video'}.mp4`, callbacks);
+    } else {
+      addToast('No video file available', 'error');
+    }
+  }, [contextMenu, addToast]);
 
-  const handleCtxDownloadAudio = useCallback(() => {
+  const handleCtxDownloadAudio = useCallback(async () => {
     if (!contextMenu) return;
     const v = contextMenu.video;
     const url = v.music_download_urls?.[0];
     setContextMenu(null);
     if (!url || url === '#') return;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${v.platform_id || 'audio'}.mp3`;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, [contextMenu]);
+    await downloadFile(url, `${v.platform_id || 'audio'}.mp3`, {
+      onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+      onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+    });
+  }, [contextMenu, addToast]);
 
   const handleCtxShare = useCallback(() => {
     if (!contextMenu) return;

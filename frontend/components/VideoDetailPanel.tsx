@@ -47,8 +47,8 @@ const generateSRT = (segments: TranscriptData['segments']): string => {
   }).join('\n\n');
 };
 
-// Download text as file
-const downloadFile = (content: string, filename: string, mimeType: string) => {
+// Download text content as file (for SRT/TXT export)
+const downloadTextFile = (content: string, filename: string, mimeType: string) => {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -176,12 +176,12 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const handleExportSRT = () => {
     if (!transcript) return;
     const srt = generateSRT(transcript.segments);
-    downloadFile(srt, `${video.platform_id}_transcript.srt`, 'text/srt');
+    downloadTextFile(srt, `${video.platform_id}_transcript.srt`, 'text/srt');
   };
 
   const handleExportTXT = () => {
     if (!transcript) return;
-    downloadFile(transcript.text, `${video.platform_id}_transcript.txt`, 'text/plain');
+    downloadTextFile(transcript.text, `${video.platform_id}_transcript.txt`, 'text/plain');
   };
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [

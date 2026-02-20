@@ -9,6 +9,8 @@ import { LinkVideoModal } from './LinkVideoModal';
 import { ProjectShareModal } from './ProjectShareModal';
 import { ProjectFileContextMenu } from './ProjectFileContextMenu';
 import { ProjectCollectModal } from './ProjectCollectModal';
+import { useToast } from './Toast';
+import { downloadFile } from '../utils/download';
 
 type SortField = 'updated_at' | 'filename' | 'file_size_bytes';
 type FilterType = 'all' | 'video' | 'image' | 'document' | 'audio';
@@ -22,6 +24,7 @@ interface ProjectFilesViewProps {
 
 export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onBack, onFileReview }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -203,9 +206,12 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     setContextMenu({ file, x: e.clientX, y: e.clientY });
   };
 
-  const handleDownload = (file: ProjectFile) => {
+  const handleDownload = async (file: ProjectFile) => {
     if (file.file_path) {
-      window.open(file.file_path, '_blank');
+      await downloadFile(file.file_path, file.filename || 'download', {
+        onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+        onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+      });
     }
   };
 
