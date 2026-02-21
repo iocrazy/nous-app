@@ -93,6 +93,13 @@ class MediaBase(BaseModel):
         None, description="Download duration (seconds)"
     )
     download_path: Optional[str] = Field(None, description="Download path")
+
+    # Image download info (for image carousel content)
+    image_download_status: Optional[DownloadStatus] = Field(
+        None, description="Image download status"
+    )
+    image_download_path: Optional[str] = Field(None, description="Image download path")
+
     error_message: Optional[str] = Field(None, description="Error message")
     download_time: Optional[datetime] = Field(None, description="Download time")
 
