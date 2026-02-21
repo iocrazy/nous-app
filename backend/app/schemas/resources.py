@@ -22,6 +22,11 @@ class ResourceUpdate(BaseModel):
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None
+    # Per-user download status
+    video_download_status: Optional[str] = Field(None, description="User video download status")
+    music_download_status: Optional[str] = Field(None, description="User music download status")
+    cover_download_status: Optional[str] = Field(None, description="User cover download status")
+    image_download_status: Optional[str] = Field(None, description="User image download status")
 
 
 class ResourceMoveRequest(BaseModel):
