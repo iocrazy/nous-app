@@ -40,7 +40,7 @@ import { LibraryFeed } from './LibraryFeed';
 import { SemanticSearchBar } from './SemanticSearchBar';
 import { getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { useToast } from './Toast';
-import { trashResourceByPlatformId } from '../services/resourceService';
+import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
@@ -104,8 +104,8 @@ export const RipVaultView: React.FC = () => {
     handleUpdateLibraryItem,
   } = useLibrary({ isAuthenticated: true, selectedTeamId: null });
 
-  // ─── Resource ID mapping (for sprite scrub) ───────
-  const [resourceIdMap, setResourceIdMap] = useState<Record<string, string>>({});
+  // ─── Resource data mapping (notes/rating/id from resources table) ───
+  const [resourceDataMap, setResourceDataMap] = useState<Record<string, { id: string; notes: string | null; rating: number }>>({});
 
   useEffect(() => {
     if (library.length === 0) return;
@@ -117,17 +117,26 @@ export const RipVaultView: React.FC = () => {
 
     supabase
       .from('resources')
-      .select('id, media_id')
+      .select('id, media_id, notes, rating')
       .in('media_id', mediaIds)
       .then(({ data, error }) => {
         if (error || !data) return;
-        const map: Record<string, string> = {};
+        const map: Record<string, { id: string; notes: string | null; rating: number }> = {};
         for (const row of data) {
-          if (row.media_id) map[row.media_id] = String(row.id);
+          if (row.media_id) map[row.media_id] = { id: String(row.id), notes: row.notes, rating: row.rating || 0 };
         }
-        setResourceIdMap(map);
+        setResourceDataMap(map);
       });
   }, [library]);
+
+  // Convenience accessor: get resource ID by parsed_media ID
+  const resourceIdMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
+      map[mediaId] = rd.id;
+    }
+    return map;
+  }, [resourceDataMap]);
 
   // ─── Selection state ───────────────────────────────
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -295,23 +304,43 @@ export const RipVaultView: React.FC = () => {
     document.addEventListener('mouseup', handleUp);
   }, [infoPanelWidth]);
 
-  // ─── Panel Rating & Notes ─────────────────────────
-  useEffect(() => {
-    setPanelNotes(selectedVideo?.notes || '');
-    setPanelRating(selectedVideo?.rating || 0);
-  }, [selectedVideo?.platform_id]);
+  // ─── Panel Rating & Notes (from resources table) ──
+  const selectedResourceData = selectedVideo?.id ? resourceDataMap[selectedVideo.id] : undefined;
 
-  const handlePanelRating = (star: number) => {
-    if (!selectedVideo) return;
+  useEffect(() => {
+    setPanelNotes(selectedResourceData?.notes || '');
+    setPanelRating(selectedResourceData?.rating || 0);
+  }, [selectedVideo?.platform_id, selectedResourceData]);
+
+  const handlePanelRating = async (star: number) => {
+    if (!selectedVideo || !selectedResourceData) return;
     const newRating = star === panelRating ? 0 : star;
     setPanelRating(newRating);
-    handleUpdateLibraryItem(selectedVideo.platform_id, { rating: newRating });
+    try {
+      await updateResource(selectedResourceData.id, { rating: newRating });
+      // Update local cache
+      setResourceDataMap(prev => ({
+        ...prev,
+        [selectedVideo.id!]: { ...prev[selectedVideo.id!], rating: newRating },
+      }));
+    } catch (err) {
+      console.error('Failed to update rating:', err);
+    }
   };
 
-  const handlePanelNotesBlur = () => {
-    if (!selectedVideo) return;
-    if (panelNotes !== (selectedVideo.notes || '')) {
-      handleUpdateLibraryItem(selectedVideo.platform_id, { notes: panelNotes });
+  const handlePanelNotesBlur = async () => {
+    if (!selectedVideo || !selectedResourceData) return;
+    if (panelNotes !== (selectedResourceData.notes || '')) {
+      try {
+        await updateResource(selectedResourceData.id, { notes: panelNotes });
+        // Update local cache
+        setResourceDataMap(prev => ({
+          ...prev,
+          [selectedVideo.id!]: { ...prev[selectedVideo.id!], notes: panelNotes },
+        }));
+      } catch (err) {
+        console.error('Failed to update notes:', err);
+      }
     }
   };
 
@@ -691,20 +720,22 @@ export const RipVaultView: React.FC = () => {
               </div>
             </div>
 
-            {/* Notes */}
-            <div className="px-4 mt-4">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
-                Notes
-              </h4>
-              <textarea
-                value={panelNotes}
-                onChange={e => setPanelNotes(e.target.value)}
-                onBlur={handlePanelNotesBlur}
-                placeholder="Add notes..."
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none min-h-[60px] focus:outline-none focus:border-zinc-600 transition-colors"
-                rows={3}
-              />
-            </div>
+            {/* Notes (from resources table) */}
+            {selectedResourceData && (
+              <div className="px-4 mt-4">
+                <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+                  Notes
+                </h4>
+                <textarea
+                  value={panelNotes}
+                  onChange={e => setPanelNotes(e.target.value)}
+                  onBlur={handlePanelNotesBlur}
+                  placeholder="Add notes..."
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none min-h-[60px] focus:outline-none focus:border-zinc-600 transition-colors"
+                  rows={3}
+                />
+              </div>
+            )}
 
             {/* AI Status */}
             {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (

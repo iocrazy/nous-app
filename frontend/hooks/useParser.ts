@@ -242,7 +242,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   };
 
   const handleSaveToLibrary = async (item: Video, silent = false) => {
-    const newItem = { ...item, notes: item.notes || '', tags: item.tags || [] };
+    const newItem = { ...item, tags: item.tags || [] };
     try {
       setLibrary(prev => {
         if (prev.find(i => i.platform_id === item.platform_id)) return prev;
