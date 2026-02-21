@@ -323,26 +323,14 @@ class MediaRepository:
         limit: int = 100,
         order_by: str = "created_at",
         ascending: bool = False,
-        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        获取所有视频记录（分页）
-
-        Args:
-            skip: 跳过记录数
-            limit: 返回记录数
-            order_by: 排序字段
-            ascending: 是否升序
-            user_id: 用户 ID（如果提供则只返回该用户的视频）
-
-        Returns:
-            视频记录列表（包含 tags 数组）
+        Get all parsed_media records (global, no user filter).
+        Use get_user_media_list() for per-user queries instead.
         """
         try:
             client = await self._get_client()
             query = client.table("parsed_media").select("*")
-            if user_id:
-                query = query.eq("user_id", user_id)
             query = query.order(order_by, desc=not ascending)
             query = query.range(skip, skip + limit - 1)
             result = await query.execute()
@@ -400,6 +388,7 @@ class MediaRepository:
 
     async def search(
         self,
+        user_id: str,
         keyword: Optional[str] = None,
         author: Optional[str] = None,
         status: Optional[DownloadStatus] = None,
@@ -409,127 +398,99 @@ class MediaRepository:
         end_date: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 100,
-        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        搜索视频记录
+        Search user's media through resources table.
 
-        Args:
-            keyword: 关键词（搜索标题和描述）
-            author: 作者
-            status: 下载状态
-            media_type: 媒体类型
-            category: 分类
-            start_date: 开始日期
-            end_date: 结束日期
-            skip: 跳过记录数
-            limit: 返回记录数
-            user_id: 用户 ID（如果提供则只搜索该用户的视频）
-
-        Returns:
-            匹配的视频记录列表
+        Queries resources joined with parsed_media, filtered by creator_id.
         """
         try:
-            table = await self._get_table()
-            query = table.select("*")
-
-            if user_id:
-                query = query.eq("user_id", user_id)
+            client = await self._get_client()
+            resource_fields = (
+                "id, video_download_status, music_download_status, "
+                "cover_download_status, image_download_status, media_id, created_at"
+            )
+            query = (
+                client.table("resources")
+                .select(f"{resource_fields}, parsed_media!inner(*)")
+                .eq("creator_id", user_id)
+                .eq("source_type", "web")
+                .eq("is_trashed", False)
+            )
 
             if keyword:
                 query = query.or_(
-                    f"title.ilike.%{keyword}%,description.ilike.%{keyword}%"
+                    f"parsed_media.title.ilike.%{keyword}%,parsed_media.description.ilike.%{keyword}%"
                 )
 
             if author:
-                query = query.ilike("author", f"%{author}%")
+                query = query.ilike("parsed_media.author", f"%{author}%")
 
             if status:
                 query = query.eq("video_download_status", status.value)
 
             if media_type:
-                query = query.eq("media_type", media_type)
-
-            # TODO: category search needs to be reimplemented via resource_tags table
-            # if category:
-            #     query = query.ilike("video_categories", f"%{category}%")
+                query = query.eq("parsed_media.media_type", media_type)
 
             if start_date:
-                query = query.gte("published_at", start_date.isoformat())
+                query = query.gte("parsed_media.published_at", start_date.isoformat())
 
             if end_date:
-                query = query.lte("published_at", end_date.isoformat())
+                query = query.lte("parsed_media.published_at", end_date.isoformat())
 
             query = query.order("created_at", desc=True).range(skip, skip + limit - 1)
             result = await query.execute()
-            return result.data or []
+
+            # Flatten: merge parsed_media into top-level, overlay user statuses
+            videos = []
+            for row in (result.data or []):
+                media = dict(row.get("parsed_media", {}))
+                media["resource_id"] = row["id"]
+                for field in ("video_download_status", "music_download_status",
+                              "cover_download_status", "image_download_status"):
+                    user_status = row.get(field)
+                    if user_status is not None:
+                        media[field] = user_status
+                videos.append(media)
+            return videos
         except Exception as e:
             logger.error(f"搜索视频失败: {e}")
             return []
 
-    async def get_statistics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_statistics(self, user_id: str) -> Dict[str, Any]:
         """
-        获取统计信息
-
-        Args:
-            user_id: 用户 ID（如果提供则只统计该用户的视频）
+        Get per-user statistics through the resources table.
         """
         try:
-            table = await self._get_table()
+            client = await self._get_client()
+            base = (
+                client.table("resources")
+                .select("video_download_status, parsed_media(datasize_bytes, author)", count="exact")
+                .eq("creator_id", user_id)
+                .eq("source_type", "web")
+                .eq("is_trashed", False)
+            )
 
-            # 总数
-            total_query = table.select("*", count="exact")
-            if user_id:
-                total_query = total_query.eq("user_id", user_id)
-            total_result = await total_query.execute()
+            # Total count
+            total_result = await base.execute()
             total = total_result.count or 0
+            rows = total_result.data or []
 
-            # 各状态数量
-            pending_query = table.select("*", count="exact").eq(
-                "video_download_status", DownloadStatus.PENDING.value
-            )
-            if user_id:
-                pending_query = pending_query.eq("user_id", user_id)
-            pending_result = await pending_query.execute()
-            pending = pending_result.count or 0
+            # Count statuses from result data
+            pending = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.PENDING.value)
+            completed = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.COMPLETED.value)
+            failed = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.FAILED.value)
 
-            completed_query = table.select("*", count="exact").eq(
-                "video_download_status", DownloadStatus.COMPLETED.value
-            )
-            if user_id:
-                completed_query = completed_query.eq("user_id", user_id)
-            completed_result = await completed_query.execute()
-            completed = completed_result.count or 0
-
-            failed_query = table.select("*", count="exact").eq(
-                "video_download_status", DownloadStatus.FAILED.value
-            )
-            if user_id:
-                failed_query = failed_query.eq("user_id", user_id)
-            failed_result = await failed_query.execute()
-            failed = failed_result.count or 0
-
-            # Calculate total storage bytes
-            storage_query = table.select("datasize_bytes")
-            if user_id:
-                storage_query = storage_query.eq("user_id", user_id)
-            storage_result = await storage_query.execute()
-            total_storage_bytes = sum(
-                (row.get("datasize_bytes") or 0) for row in (storage_result.data or [])
-            )
-
-            # Count unique authors
-            authors_query = table.select("author")
-            if user_id:
-                authors_query = authors_query.eq("user_id", user_id)
-            authors_result = await authors_query.execute()
-            unique_authors = len(
-                set(
-                    row.get("author")
-                    for row in (authors_result.data or [])
-                    if row.get("author")
-                )
-            )
+            # Calculate total storage bytes and unique authors from joined parsed_media
+            total_storage_bytes = 0
+            authors = set()
+            for row in rows:
+                pm = row.get("parsed_media") or {}
+                total_storage_bytes += pm.get("datasize_bytes") or 0
+                author = pm.get("author")
+                if author:
+                    authors.add(author)
+            unique_authors = len(authors)
 
             return {
                 "total": total,
