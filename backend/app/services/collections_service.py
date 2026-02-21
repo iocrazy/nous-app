@@ -1,7 +1,7 @@
 """Smart Collections service with rule engine (异步)."""
 
 from datetime import datetime, timedelta
-from typing import Any, List
+from typing import Any, Dict, List
 
 from loguru import logger
 
@@ -18,6 +18,27 @@ class CollectionsService:
     async def _get_client(self):
         """Get async client (loop-aware, safe for Celery workers)."""
         return await get_async_supabase_admin()
+
+    async def _get_user_resource_mapping(self, user_id: str) -> Dict[int, int]:
+        """Get user's resource mapping {resource_id: media_id} from resources table.
+
+        Since parsed_media is now a global table (no user_id column),
+        we identify the user's media through the resources table.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("resources")
+            .select("id, media_id")
+            .eq("creator_id", user_id)
+            .eq("source_type", "web")
+            .eq("is_trashed", False)
+            .execute()
+        )
+        return {
+            r["id"]: r["media_id"]
+            for r in result.data
+            if r.get("media_id")
+        }
 
     async def get_collection_media(
         self,
@@ -83,17 +104,16 @@ class CollectionsService:
         match_type = rules.get("match", "all")
         conditions = rules.get("conditions", [])
 
-        client = await self._get_client()
+        # Get user's media IDs through resources table
+        resource_map = await self._get_user_resource_mapping(user_id)
+        user_media_ids = list(resource_map.values())
+
+        if not user_media_ids:
+            return []
 
         if not conditions:
             # No conditions = all user media
-            result = (
-                await client.table("parsed_media")
-                .select("id")
-                .eq("user_id", user_id)
-                .execute()
-            )
-            return [r["id"] for r in result.data]
+            return user_media_ids
 
         # Start with base query
         media_sets = []
@@ -104,7 +124,7 @@ class CollectionsService:
             value = condition.get("value")
 
             matching_ids = await self._evaluate_condition(
-                field, operator, value, user_id
+                field, operator, value, user_id, user_media_ids, resource_map
             )
             media_sets.append(set(matching_ids))
 
@@ -124,21 +144,31 @@ class CollectionsService:
         return list(result_set)
 
     async def _evaluate_condition(
-        self, field: str, operator: str, value: Any, user_id: str
+        self,
+        field: str,
+        operator: str,
+        value: Any,
+        user_id: str,
+        user_media_ids: List[int],
+        resource_map: Dict[int, int],
     ) -> List[int]:
         """Evaluate a single condition and return matching media IDs."""
         client = await self._get_client()
 
         # Tag-based conditions
         if field == "tag":
-            return await self._match_tag_condition(operator, value, user_id)
+            return await self._match_tag_condition(
+                operator, value, resource_map
+            )
 
         # Date-based conditions
         if field == "date":
-            return await self._match_date_condition(operator, value, user_id)
+            return await self._match_date_condition(
+                operator, value, user_media_ids
+            )
 
-        # Direct field conditions on parsed_media
-        query = client.table("parsed_media").select("id").eq("user_id", user_id)
+        # Direct field conditions on parsed_media (scoped to user's media)
+        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
 
         field_mapping = {
             "author": "author",
@@ -173,18 +203,17 @@ class CollectionsService:
         return [r["id"] for r in result.data]
 
     async def _match_tag_condition(
-        self, operator: str, value: Any, user_id: str
+        self, operator: str, value: Any, resource_map: Dict[int, int]
     ) -> List[int]:
-        """Match media by tag conditions."""
+        """Match media by tag conditions.
+
+        resource_tags.resource_id references resources.id,
+        so we query by user's resource IDs and map back to media IDs.
+        """
         client = await self._get_client()
 
-        # Get user's media first
-        user_media = (
-            await client.table("parsed_media").select("id").eq("user_id", user_id).execute()
-        )
-        user_media_ids = [v["id"] for v in user_media.data]
-
-        if not user_media_ids:
+        resource_ids = list(resource_map.keys())
+        if not resource_ids:
             return []
 
         if operator == "has":
@@ -193,10 +222,15 @@ class CollectionsService:
                 await client.table("resource_tags")
                 .select("resource_id")
                 .eq("tag_id", value)
-                .in_("resource_id", user_media_ids)
+                .in_("resource_id", resource_ids)
                 .execute()
             )
-            return list(set(r["resource_id"] for r in result.data))
+            # Map resource_id back to media_id
+            return list(set(
+                resource_map[r["resource_id"]]
+                for r in result.data
+                if r["resource_id"] in resource_map
+            ))
 
         elif operator == "has_any":
             # Media that have any of the specified tags
@@ -205,25 +239,31 @@ class CollectionsService:
                     await client.table("resource_tags")
                     .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("resource_id", user_media_ids)
+                    .in_("resource_id", resource_ids)
                     .execute()
                 )
-                return list(set(r["resource_id"] for r in result.data))
+                return list(set(
+                    resource_map[r["resource_id"]]
+                    for r in result.data
+                    if r["resource_id"] in resource_map
+                ))
 
         elif operator == "has_all":
             # Media that have all of the specified tags
             if isinstance(value, list):
-                media_tag_counts = {}
+                media_tag_counts: Dict[int, int] = {}
                 result = (
                     await client.table("resource_tags")
                     .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("resource_id", user_media_ids)
+                    .in_("resource_id", resource_ids)
                     .execute()
                 )
                 for r in result.data:
-                    mid = r["resource_id"]
-                    media_tag_counts[mid] = media_tag_counts.get(mid, 0) + 1
+                    rid = r["resource_id"]
+                    if rid in resource_map:
+                        mid = resource_map[rid]
+                        media_tag_counts[mid] = media_tag_counts.get(mid, 0) + 1
                 return [
                     mid
                     for mid, count in media_tag_counts.items()
@@ -233,11 +273,15 @@ class CollectionsService:
         return []
 
     async def _match_date_condition(
-        self, operator: str, value: Any, user_id: str
+        self, operator: str, value: Any, user_media_ids: List[int]
     ) -> List[int]:
         """Match media by date conditions."""
         client = await self._get_client()
-        query = client.table("parsed_media").select("id").eq("user_id", user_id)
+
+        if not user_media_ids:
+            return []
+
+        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
 
         # Handle relative date values
         if isinstance(value, str):
