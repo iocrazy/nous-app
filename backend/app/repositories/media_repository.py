@@ -57,6 +57,10 @@ class MediaRepository:
                 data["cover_download_status"], DownloadStatus
             ):
                 data["cover_download_status"] = data["cover_download_status"].value
+            if "image_download_status" in data and isinstance(
+                data["image_download_status"], DownloadStatus
+            ):
+                data["image_download_status"] = data["image_download_status"].value
 
             # 处理 datetime
             if "published_at" in data and isinstance(data["published_at"], datetime):
@@ -73,30 +77,27 @@ class MediaRepository:
             raise
 
     async def get_by_platform_id(
-        self, platform_id: str, user_id: Optional[str] = None
+        self, platform_id: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        根据 platform_id 获取视频记录
+        """Get parsed_media record by platform_id (global, no user filtering).
 
         Args:
-            platform_id: 视频唯一标识
-            user_id: 用户 ID（如果提供则只返回该用户的视频）
+            platform_id: Unique media identifier from platform.
 
         Returns:
-            视频记录或 None
+            Media record or None.
 
         Raises:
             Exception: DB connection or query errors (not swallowed).
         """
         client = await self._get_client()
-        query = (
-            client.table("parsed_media")
+        result = (
+            await client.table("parsed_media")
             .select("*")
             .eq("platform_id", platform_id)
+            .limit(1)
+            .execute()
         )
-        if user_id:
-            query = query.eq("user_id", user_id)
-        result = await query.execute()
         return result.data[0] if result.data else None
 
     async def get_by_id(self, media_id: str) -> Optional[Dict[str, Any]]:
@@ -122,75 +123,55 @@ class MediaRepository:
         return result.data[0] if result.data else None
 
     async def update(
-        self, platform_id: str, data: Dict[str, Any], user_id: Optional[str] = None
+        self, platform_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """
-        更新视频记录
+        """Update parsed_media record by platform_id (global).
 
         Args:
-            platform_id: 视频唯一标识
-            data: 更新数据
-            user_id: 用户 ID（如果提供则只更新该用户的视频）
+            platform_id: Unique media identifier from platform.
+            data: Update data dict.
 
         Returns:
-            更新后的记录
+            Updated record or None.
         """
         try:
-            # 处理枚举类型
-            if "video_download_status" in data and isinstance(
-                data["video_download_status"], DownloadStatus
-            ):
-                data["video_download_status"] = data["video_download_status"].value
-            if "music_download_status" in data and isinstance(
-                data["music_download_status"], DownloadStatus
-            ):
-                data["music_download_status"] = data["music_download_status"].value
-            if "cover_download_status" in data and isinstance(
-                data["cover_download_status"], DownloadStatus
-            ):
-                data["cover_download_status"] = data["cover_download_status"].value
+            # Handle enums
+            for field in ("video_download_status", "music_download_status",
+                          "cover_download_status", "image_download_status"):
+                if field in data and isinstance(data[field], DownloadStatus):
+                    data[field] = data[field].value
 
-            # 处理 datetime
             if "published_at" in data and isinstance(data["published_at"], datetime):
                 data["published_at"] = data["published_at"].isoformat()
             if "download_time" in data and isinstance(data["download_time"], datetime):
                 data["download_time"] = data["download_time"].isoformat()
 
-            # 添加更新时间
             data["updated_at"] = datetime.now().isoformat()
 
             table = await self._get_table()
-            query = table.update(data).eq("platform_id", platform_id)
-            if user_id:
-                query = query.eq("user_id", user_id)
-            result = await query.execute()
-            logger.info(f"更新视频记录成功: {platform_id}")
+            result = await table.update(data).eq("platform_id", platform_id).execute()
+            logger.info(f"Updated parsed_media: {platform_id}")
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"更新视频记录失败: {e}")
+            logger.error(f"Failed to update parsed_media: {e}")
             raise
 
-    async def delete(self, platform_id: str, user_id: Optional[str] = None) -> bool:
-        """
-        删除视频记录
+    async def delete(self, platform_id: str) -> bool:
+        """Delete parsed_media record by platform_id (global).
 
         Args:
-            platform_id: 视频唯一标识
-            user_id: 用户 ID（如果提供则只删除该用户的视频）
+            platform_id: Unique media identifier from platform.
 
         Returns:
-            是否删除成功
+            True if deleted successfully.
         """
         try:
             table = await self._get_table()
-            query = table.delete().eq("platform_id", platform_id)
-            if user_id:
-                query = query.eq("user_id", user_id)
-            await query.execute()
-            logger.info(f"删除视频记录成功: {platform_id}")
+            await table.delete().eq("platform_id", platform_id).execute()
+            logger.info(f"Deleted parsed_media: {platform_id}")
             return True
         except Exception as e:
-            logger.error(f"删除视频记录失败: {e}")
+            logger.error(f"Failed to delete parsed_media: {e}")
             return False
 
     async def get_downloaded_by_platform_id(
@@ -276,12 +257,12 @@ class MediaRepository:
     async def mark_images_as_downloaded(
         self, platform_id: str, download_path: str, duration: float
     ) -> Optional[Dict[str, Any]]:
-        """标记图片为已下载"""
+        """Mark image carousel as downloaded (uses image_download_status)."""
         return await self.update(
             platform_id,
             {
-                "video_download_status": DownloadStatus.COMPLETED.value,
-                "download_path": download_path,
+                "image_download_status": DownloadStatus.COMPLETED.value,
+                "image_download_path": download_path,
                 "download_duration": duration,
                 "download_time": datetime.now().isoformat(),
             },

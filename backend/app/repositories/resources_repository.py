@@ -98,6 +98,43 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource by platform_id {platform_id}: {e}")
             return None
 
+    async def get_resource_by_media_id_and_creator(
+        self, media_id: str, creator_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get user's resource for a specific media item."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_RESOURCES)
+                .select("*")
+                .eq("media_id", media_id)
+                .eq("creator_id", creator_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get resource for media={media_id}, creator={creator_id}: {e}")
+            return None
+
+    async def update_download_status(
+        self, resource_id: str, statuses: Dict[str, str]
+    ) -> Optional[Dict[str, Any]]:
+        """Update one or more download status fields on a resource.
+
+        Args:
+            resource_id: Resource ID.
+            statuses: Dict of status fields, e.g. {"video_download_status": "completed"}.
+        """
+        valid_fields = {
+            "video_download_status", "music_download_status",
+            "cover_download_status", "image_download_status",
+        }
+        data = {k: v for k, v in statuses.items() if k in valid_fields}
+        if not data:
+            return None
+        return await self.update_resource(resource_id, data)
+
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:

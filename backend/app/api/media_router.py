@@ -730,7 +730,7 @@ async def get_video(platform_id: str, auth: AuthDep):
     """
     try:
         repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -766,7 +766,7 @@ async def delete_video(
         repo = MediaRepository()
 
         # Get video info for logging and file deletion
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
 
@@ -798,7 +798,7 @@ async def delete_video(
                     files_deleted.append(f"cover: {path.name}")
 
         # Delete database record
-        result = await repo.delete(platform_id, user_id=auth.user_id)
+        result = await repo.delete(platform_id)
 
         if not result:
             raise HTTPException(
@@ -954,7 +954,7 @@ async def retry_download(
     """
     try:
         repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -969,7 +969,7 @@ async def retry_download(
         if request.music_bool:
             status_updates["music_download_status"] = DownloadStatus.PENDING.value
 
-        await repo.update(platform_id, status_updates, user_id=auth.user_id)
+        await repo.update(platform_id, status_updates)
 
         # Trigger Celery download task, fallback to background tasks
         download_task_id = None
@@ -1038,7 +1038,7 @@ async def download_video_file(platform_id: str, auth: AuthDep):
     """
     try:
         repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -1090,7 +1090,7 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
     """
     try:
         repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -1141,7 +1141,7 @@ async def download_music_file(platform_id: str, auth: AuthDep):
     """
     try:
         repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+        video = await repo.get_by_platform_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
