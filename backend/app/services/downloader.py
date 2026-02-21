@@ -736,8 +736,8 @@ class DownloaderService:
                 result.music_download_status = DownloadStatus.FAILED
                 return result
 
-            # Get music URL list from dict
-            music_urls = music_data.get("music_download_urls", [])
+            # Get music URL list from dict (guard against None from DB)
+            music_urls = music_data.get("music_download_urls") or []
 
             # Create structured path: global/resources/web/{platform}/{platform_id}/
             # Note: music_data doesn't have source_platform, default to douyin
@@ -759,7 +759,7 @@ class DownloaderService:
                             f"Marked music {platform_id} as downloaded successfully, "
                             f"but failed to update the database: {e}."
                         )
-                        result.error += (
+                        result.error = (
                             f"Marked music {platform_id} as downloaded successfully, "
                             f"but failed to update the database: {e}."
                         )
@@ -777,7 +777,7 @@ class DownloaderService:
                     f"All download URLs for the music of video {platform_id} failed."
                 )
                 result.music_download_status = DownloadStatus.FAILED
-                result.error += (
+                result.error = (
                     f"All download URLs for the music of video {platform_id} failed."
                 )
 
@@ -795,6 +795,7 @@ class DownloaderService:
         except Exception as e:
             logger.error(f"Music download processing error: {str(e)}")
             result.error = str(e)
+            result.music_download_status = DownloadStatus.FAILED
             return result
 
     @staticmethod
