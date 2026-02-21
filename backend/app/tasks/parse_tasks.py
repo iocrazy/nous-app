@@ -192,6 +192,16 @@ def parse_single_link_task(
         download_task_id = None
 
         if need_download:
+            # Pre-flight: verify download task is registered with worker
+            from app.services.system_monitor_service import check_worker_ready
+
+            ready, err_msg = check_worker_ready()
+            if not ready:
+                logger.error(f"[Celery] Cannot dispatch download: {err_msg}")
+                raise RuntimeError(
+                    f"Download worker not ready: {err_msg}"
+                )
+
             # Trigger download task (Phase 2)
             download_task = download_unified_task.delay(
                 platform_id=platform_id,

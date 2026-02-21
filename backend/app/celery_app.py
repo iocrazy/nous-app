@@ -6,23 +6,25 @@ Celery 应用初始化模块
 用于创建和配置 Celery 实例，支持异步任务处理。
 """
 
+import pkgutil
+
 from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+import app.tasks as _tasks_pkg
+
+# 自动扫描 app/tasks/ 下所有模块，新增 task 文件无需手动注册
+_task_modules = [
+    f"app.tasks.{name}" for _, name, _ in pkgutil.iter_modules(_tasks_pkg.__path__)
+]
 
 # 创建 Celery 应用实例
 celery_app = Celery(
     "mediahub",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=[
-        "app.tasks.download_tasks",
-        "app.tasks.parse_tasks",
-        "app.tasks.scheduled_tasks",
-        "app.tasks.ai_tasks",
-        "app.tasks.transcode_tasks",
-    ],
+    include=_task_modules,
 )
 
 # Celery 配置

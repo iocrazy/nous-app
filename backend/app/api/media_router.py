@@ -302,13 +302,12 @@ async def fetch_video(
         if need_download:
             # Try Celery, fallback to FastAPI background tasks if unavailable
             try:
-                from app.celery_app import celery_app
                 from app.tasks.download_tasks import download_unified_task
+                from app.services.system_monitor_service import check_worker_ready
 
-                # Check if Celery is available - ping() returns empty list if no workers
-                workers = celery_app.control.ping(timeout=1)
-                if not workers:
-                    raise RuntimeError("No Celery workers available")
+                ready, err_msg = check_worker_ready()
+                if not ready:
+                    raise RuntimeError(err_msg)
 
                 download_task = download_unified_task.delay(
                     platform_id=platform_id,
@@ -926,16 +925,30 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
         )
 
 
+class RetryDownloadRequest(BaseModel):
+    """Retry download request — select which media to re-download."""
+
+    video_bool: bool = True
+    music_bool: bool = False
+    cover_bool: bool = False
+
+
 @router.post("/retry/{platform_id}", tags=TAGS_DOWNLOAD)
 async def retry_download(
-    platform_id: str, background_tasks: BackgroundTasks, auth: AuthDep
+    platform_id: str,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
+    request: RetryDownloadRequest = RetryDownloadRequest(),
 ):
     """
     Retry download
 
-    Re-trigger download for a failed video.
+    Re-trigger download for a video. Supports selective media types.
 
     - **platform_id**: Video unique identifier
+    - **video_bool**: Re-download video (default True)
+    - **music_bool**: Re-download music (default False)
+    - **cover_bool**: Re-download cover (default False)
 
     Authentication: Bearer Token or API Key (requires `videos:retry` scope)
     """
@@ -947,25 +960,48 @@ async def retry_download(
             raise HTTPException(status_code=404, detail="Video not found")
 
         video_title = video.get("title", platform_id)[:30]
+        media_type = video.get("media_type", 0)
 
-        # Reset download status
-        await repo.update(
-            platform_id,
-            {
-                "video_download_status": DownloadStatus.PENDING.value,
-                "error_message": None,
-            },
-            user_id=auth.user_id,
-        )
+        # Reset download status for requested media types
+        status_updates: dict = {"error_message": None}
+        if request.video_bool:
+            status_updates["video_download_status"] = DownloadStatus.PENDING.value
+        if request.music_bool:
+            status_updates["music_download_status"] = DownloadStatus.PENDING.value
 
-        # Add background download task (pass user_id for data isolation)
-        from app.services.downloader import DownloaderService
+        await repo.update(platform_id, status_updates, user_id=auth.user_id)
 
-        background_tasks.add_task(
-            DownloaderService.download_video_by_platform_id,
-            platform_id,
-            user_id=auth.user_id,
-        )
+        # Trigger Celery download task, fallback to background tasks
+        download_task_id = None
+        try:
+            from app.tasks.download_tasks import download_unified_task
+            from app.services.system_monitor_service import check_worker_ready
+
+            ready, err_msg = check_worker_ready()
+            if not ready:
+                raise RuntimeError(err_msg)
+
+            download_task = download_unified_task.delay(
+                platform_id=platform_id,
+                user_id=auth.user_id,
+                download_video=request.video_bool,
+                download_music=request.music_bool,
+                download_cover=request.cover_bool,
+                media_type=media_type,
+                video_title=video_title,
+            )
+            download_task_id = download_task.id
+            logger.info(f"Celery retry task submitted: {download_task_id}")
+        except Exception as celery_err:
+            logger.warning(f"Celery unavailable for retry, using background tasks: {celery_err}")
+            from app.services.downloader import DownloaderService
+
+            if request.video_bool:
+                background_tasks.add_task(
+                    DownloaderService.download_video_by_platform_id,
+                    platform_id,
+                    user_id=auth.user_id,
+                )
 
         # Log retry action
         background_tasks.add_task(
@@ -977,7 +1013,11 @@ async def retry_download(
             aweme_id=platform_id,
         )
 
-        return {"success": True, "message": "Download task resubmitted"}
+        return {
+            "success": True,
+            "message": "Download task resubmitted",
+            "task_id": download_task_id,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1007,7 +1047,10 @@ async def download_video_file(platform_id: str, auth: AuthDep):
         if not download_path:
             raise HTTPException(status_code=404, detail="Video file path not found")
 
-        base_path = Utils.get_download_base_path()
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
         file_path = Path(base_path) / download_path
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Video file not found")
@@ -1026,7 +1069,6 @@ async def download_video_file(platform_id: str, auth: AuthDep):
             path=str(file_path),
             filename=filename,
             media_type="video/mp4",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except HTTPException:
         raise
@@ -1057,7 +1099,10 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
         if not cover_path:
             raise HTTPException(status_code=404, detail="Cover file path not found")
 
-        base_path = Utils.get_download_base_path()
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
         file_path = Path(base_path) / cover_path
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Cover file not found")
@@ -1075,13 +1120,101 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
             path=str(file_path),
             filename=filename,
             media_type="image/jpeg",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to download cover file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download cover file")
+
+
+@router.get("/download/{platform_id}/music", tags=TAGS_DOWNLOAD)
+async def download_music_file(platform_id: str, auth: AuthDep):
+    """
+    Download music/audio file
+
+    Return audio file for browser download.
+
+    - **platform_id**: Video unique identifier
+
+    Authentication: Bearer Token or API Key (requires `videos:videos:read` scope)
+    """
+    try:
+        repo = MediaRepository()
+        video = await repo.get_by_platform_id(platform_id, user_id=auth.user_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        music_status = video.get("music_download_status", "").lower()
+        if music_status not in ("completed", "skipped"):
+            raise HTTPException(status_code=404, detail="Music file has not been downloaded")
+
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
+
+        # Look for audio file in the platform's storage directory
+        # yt-dlp saves as {platform_id}_audio.mp3 (or other ext)
+        storage_dir = None
+        download_path = video.get("download_path", "")
+        if download_path:
+            # Derive storage dir from video download_path
+            storage_dir = Path(base_path) / Path(download_path).parent
+        else:
+            # Fallback: try common paths
+            for pattern in [
+                f"global/resources/web/*/{platform_id}",
+                f"*/{platform_id}",
+            ]:
+                matches = list(Path(base_path).glob(pattern))
+                if matches:
+                    storage_dir = matches[0]
+                    break
+
+        if not storage_dir or not storage_dir.exists():
+            raise HTTPException(status_code=404, detail="Music file directory not found")
+
+        # Find audio file (could be .mp3, .m4a, .opus, etc.)
+        audio_file = None
+        for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
+            candidate = storage_dir / f"{platform_id}_audio.{ext}"
+            if candidate.exists():
+                audio_file = candidate
+                break
+
+        if not audio_file:
+            raise HTTPException(status_code=404, detail="Music file not found on disk")
+
+        video_title = video.get("title", platform_id)
+        safe_title = "".join(
+            c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip()
+        if not safe_title:
+            safe_title = platform_id
+        suffix = audio_file.suffix or ".mp3"
+        filename = f"{safe_title}_audio{suffix}"
+
+        content_type = {
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/mp4",
+            ".opus": "audio/opus",
+            ".ogg": "audio/ogg",
+            ".wav": "audio/wav",
+            ".aac": "audio/aac",
+        }.get(suffix, "audio/mpeg")
+
+        return FileResponse(
+            path=str(audio_file),
+            filename=filename,
+            media_type=content_type,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download music file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
 @router.get("/logs", tags=TAGS_LOGS)
@@ -1169,12 +1302,12 @@ async def _handle_ytdlp_fetch(
     if need_download:
         # Try Celery first, fallback to FastAPI background tasks
         try:
-            from app.celery_app import celery_app
             from app.tasks.download_tasks import download_unified_task
+            from app.services.system_monitor_service import check_worker_ready
 
-            workers = celery_app.control.ping(timeout=1)
-            if not workers:
-                raise RuntimeError("No Celery workers available")
+            ready, err_msg = check_worker_ready()
+            if not ready:
+                raise RuntimeError(err_msg)
 
             download_task = download_unified_task.delay(
                 url=url,

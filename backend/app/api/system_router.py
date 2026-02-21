@@ -29,7 +29,8 @@ class QueueStatus(BaseModel):
     active: int = 0
     pending: int = 0
     scheduled: int = 0
-    status: str = "offline"
+    status: str = "offline"  # offline | online | outdated
+    missing_tasks: list[str] = []
 
 
 class StorageStatus(BaseModel):
