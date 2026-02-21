@@ -102,7 +102,7 @@ export const parseShareLink = async (
       url,
       video_bool: options.video_bool ?? true,
       music_bool: options.music_bool ?? false,
-      cover_bool: true,  // cover always downloaded
+      cover_bool: options.cover_bool ?? true,
     }),
   });
 
@@ -137,7 +137,7 @@ export const parseBatchLinks = async (
       urls,
       video_bool: options.video_bool ?? true,
       music_bool: options.music_bool ?? false,
-      cover_bool: true,  // cover always downloaded
+      cover_bool: options.cover_bool ?? true,
     }),
   });
 
