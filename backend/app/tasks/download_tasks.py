@@ -421,6 +421,8 @@ def download_unified_task(
     media_type: int = 0,
     video_title: str = "undefined",
     resource_id: str = None,
+    _dedup_key: str = None,       # Orchestrator dedup key
+    _unified_task_id: str = None,  # Orchestrator task ID (for signals)
 ):
     """
     Unified download task for all platforms.
@@ -439,6 +441,8 @@ def download_unified_task(
         media_type: Media type (0=video, 2/68=images). Only used in Douyin path.
         video_title: Title for logging and task tracker display
         resource_id: User's resource record ID (for per-user status updates)
+        _dedup_key: Orchestrator dedup key (for Redis lock management)
+        _unified_task_id: Orchestrator task ID (for Celery signal hooks)
     """
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
@@ -469,6 +473,29 @@ def download_unified_task(
         run_async(tracker_unified.start(unified_task_id))
     except Exception as e:
         logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
+
+    # Store orchestrator metadata for Celery signals
+    if unified_task_id and _dedup_key:
+        try:
+            from app.services.task_orchestrator import get_orchestrator, TaskPhase
+            orchestrator = get_orchestrator()
+            # Update the unified_task row with dedup_key and phase
+            client = run_async(orchestrator._get_client())
+            run_async(
+                client.table("unified_tasks").update({
+                    "dedup_key": _dedup_key,
+                    "phase": TaskPhase.DEDUP_CHECK.value,
+                }).eq("id", unified_task_id).execute()
+            )
+        except Exception as e:
+            logger.warning(f"[Orchestrator] Failed to set dedup_key: {e}")
+
+    # Make unified_task_id available to signals via kwargs
+    if unified_task_id:
+        self.request.kwargs = self.request.kwargs or {}
+        self.request.kwargs["_unified_task_id"] = unified_task_id
+        if _dedup_key:
+            self.request.kwargs["_dedup_key"] = _dedup_key
 
     try:
         # ── Progress tracker setup (Redis real-time) ──

@@ -296,64 +296,95 @@ async def fetch_video(
         need_download = need_download_video or request.music_bool or request.cover_bool
 
         if need_download:
-            # Try Celery, fallback to FastAPI background tasks if unavailable
+            # ── Orchestrator dedup check ──
+            orchestrator_result = None
+            dedup_key = None
             try:
-                from app.tasks.download_tasks import download_unified_task
-                from app.services.system_monitor_service import check_worker_ready
-
-                ready, err_msg = check_worker_ready()
-                if not ready:
-                    raise RuntimeError(err_msg)
-
-                download_task = download_unified_task.delay(
-                    platform_id=platform_id,
+                from app.services.task_orchestrator import get_orchestrator
+                orchestrator = get_orchestrator()
+                orchestrator_result = await orchestrator.acquire_or_subscribe(
+                    task_type="download",
+                    dedup_identifier=platform_id,
                     user_id=auth.user_id,
-                    download_video=need_download_video,
-                    download_music=request.music_bool,
-                    download_cover=True,
-                    media_type=media_type,
-                    video_title=video_title[:50] if video_title else "undefined",
                     resource_id=resource_id,
                 )
-                download_task_id = download_task.id
-                logger.info(f"Celery download task submitted: {download_task_id}")
-            except Exception as celery_err:
-                # Celery unavailable, use FastAPI background tasks
-                logger.warning(
-                    f"Celery unavailable, using FastAPI background tasks: {celery_err}"
-                )
-                from app.services.downloader import DownloaderService
+                dedup_key = orchestrator_result.get("dedup_key")
 
-                # Add download tasks based on type
-                if int(media_type) in (0, 4, 61):  # Video types
-                    if need_download_video:
-                        background_tasks.add_task(
-                            DownloaderService.download_video_by_platform_id,
-                            platform_id,
-                            user_id=auth.user_id,
-                        )
-                elif int(media_type) in (2, 68):  # Image types
-                    if need_download_video:
-                        background_tasks.add_task(
-                            DownloaderService.download_images_by_platform_id,
-                            platform_id,
-                            user_id=auth.user_id,
-                        )
+                if orchestrator_result["action"] == "subscribed":
+                    logger.info(
+                        f"[Orchestrator] Subscribed to existing download for {platform_id}"
+                    )
+                    download_task_id = f"subscribed:{orchestrator_result['task_id']}"
+                    need_download = False
+                elif orchestrator_result["action"] == "completed":
+                    logger.info(
+                        f"[Orchestrator] Download already completed for {platform_id}"
+                    )
+                    download_task_id = f"completed:{orchestrator_result.get('task_id', '')}"
+                    need_download = False
+            except Exception as e:
+                logger.warning(f"[Orchestrator] Dedup check failed, proceeding normally: {e}")
 
-                if request.music_bool:
-                    background_tasks.add_task(
-                        DownloaderService.download_music_by_platform_id,
+            # ── Dispatch Celery task (only if not deduped) ──
+            if need_download:
+                try:
+                    from app.tasks.download_tasks import download_unified_task
+                    from app.services.system_monitor_service import check_worker_ready
+
+                    ready, err_msg = check_worker_ready()
+                    if not ready:
+                        raise RuntimeError(err_msg)
+
+                    download_task = download_unified_task.delay(
                         platform_id=platform_id,
                         user_id=auth.user_id,
+                        download_video=need_download_video,
+                        download_music=request.music_bool,
+                        download_cover=True,
+                        media_type=media_type,
+                        video_title=video_title[:50] if video_title else "undefined",
+                        resource_id=resource_id,
+                        _dedup_key=dedup_key,
                     )
+                    download_task_id = download_task.id
+                    logger.info(f"Celery download task submitted: {download_task_id}")
+                except Exception as celery_err:
+                    # Celery unavailable, use FastAPI background tasks
+                    logger.warning(
+                        f"Celery unavailable, using FastAPI background tasks: {celery_err}"
+                    )
+                    from app.services.downloader import DownloaderService
 
-                if request.cover_bool:
-                    background_tasks.add_task(
-                        DownloaderService.download_cover_by_platform_id,
-                        platform_id,
-                        user_id=auth.user_id,
-                    )
-                logger.info(f"FastAPI background download tasks added: {platform_id}")
+                    # Add download tasks based on type
+                    if int(media_type) in (0, 4, 61):  # Video types
+                        if need_download_video:
+                            background_tasks.add_task(
+                                DownloaderService.download_video_by_platform_id,
+                                platform_id,
+                                user_id=auth.user_id,
+                            )
+                    elif int(media_type) in (2, 68):  # Image types
+                        if need_download_video:
+                            background_tasks.add_task(
+                                DownloaderService.download_images_by_platform_id,
+                                platform_id,
+                                user_id=auth.user_id,
+                            )
+
+                    if request.music_bool:
+                        background_tasks.add_task(
+                            DownloaderService.download_music_by_platform_id,
+                            platform_id=platform_id,
+                            user_id=auth.user_id,
+                        )
+
+                    if request.cover_bool:
+                        background_tasks.add_task(
+                            DownloaderService.download_cover_by_platform_id,
+                            platform_id,
+                            user_id=auth.user_id,
+                        )
+                    logger.info(f"FastAPI background download tasks added: {platform_id}")
 
         # Log action
         background_tasks.add_task(
