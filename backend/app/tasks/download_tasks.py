@@ -420,6 +420,7 @@ def download_unified_task(
     download_cover: bool = True,
     media_type: int = 0,
     video_title: str = "undefined",
+    resource_id: str = None,
 ):
     """
     Unified download task for all platforms.
@@ -437,6 +438,7 @@ def download_unified_task(
         download_cover: Whether to download cover/thumbnail
         media_type: Media type (0=video, 2/68=images). Only used in Douyin path.
         video_title: Title for logging and task tracker display
+        resource_id: User's resource record ID (for per-user status updates)
     """
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
@@ -479,6 +481,58 @@ def download_unified_task(
             unified_tracker=tracker_unified,
             unified_task_id=unified_task_id,
         )
+
+        # ── Check global cache: skip download if file already on server ──
+        if resource_id:
+            from app.repositories.media_repository import MediaRepository as _MR
+            from app.repositories.resources_repository import ResourcesRepository as _RR
+            _res_repo = _RR()
+            _media_repo = _MR()
+            global_media = run_async(_media_repo.get_by_platform_id(platform_id))
+
+            if global_media:
+                cache_updates = {}
+                if download_video and global_media.get("video_download_status") == "completed":
+                    cache_updates["video_download_status"] = "completed"
+                if download_music and global_media.get("music_download_status") == "completed":
+                    cache_updates["music_download_status"] = "completed"
+                if download_cover and global_media.get("cover_download_status") == "completed":
+                    cache_updates["cover_download_status"] = "completed"
+                if download_video and int(media_type) in (2, 68) and global_media.get("image_download_status") == "completed":
+                    cache_updates["image_download_status"] = "completed"
+
+                if cache_updates:
+                    run_async(_res_repo.update_download_status(resource_id, cache_updates))
+
+                # If ALL requested types are cached, skip download entirely
+                all_cached = True
+                if download_video:
+                    if int(media_type) in (2, 68):
+                        all_cached = all_cached and global_media.get("image_download_status") == "completed"
+                    else:
+                        all_cached = all_cached and global_media.get("video_download_status") == "completed"
+                if download_music:
+                    all_cached = all_cached and global_media.get("music_download_status") == "completed"
+                if download_cover:
+                    all_cached = all_cached and global_media.get("cover_download_status") == "completed"
+
+                if all_cached:
+                    logger.info(f"[Download] All requested types cached for {platform_id}, skipping download")
+                    tracker.complete()
+                    if unified_task_id:
+                        try:
+                            run_async(tracker_unified.complete(unified_task_id))
+                        except Exception:
+                            pass
+                    # Update resource file paths from global media
+                    path_updates = {}
+                    if global_media.get("download_path"):
+                        path_updates["file_path"] = global_media["download_path"]
+                    if global_media.get("cover_download_path"):
+                        path_updates["cover_image_path"] = global_media["cover_download_path"]
+                    if path_updates:
+                        run_async(_res_repo.update_resource(resource_id, path_updates))
+                    return {"status": "success", "platform_id": platform_id, "cache_hit": True}
 
         # ── Dispatch to strategy ──
         if url:
@@ -523,14 +577,36 @@ def download_unified_task(
             )
         )
 
-        # Auto-create resource record (dedup-aware)
-        try:
-            from app.services.media_service import MediaService
-            run_async(MediaService._create_resource_record(platform_id, user_id))
-        except Exception as e:
-            logger.warning(
-                f"[Download] Failed to create resource record for {platform_id}: {e}"
-            )
+        # ── Update user resource download statuses ──
+        if resource_id:
+            try:
+                from app.repositories.media_repository import MediaRepository as _MR2
+                from app.repositories.resources_repository import ResourcesRepository as _RR2
+                _res_repo2 = _RR2()
+                status_updates = {}
+                path_updates = {}
+
+                if download_video:
+                    if int(media_type) in (2, 68):
+                        status_updates["image_download_status"] = "completed"
+                    else:
+                        status_updates["video_download_status"] = "completed"
+                if download_music:
+                    status_updates["music_download_status"] = "completed"
+                if download_cover:
+                    status_updates["cover_download_status"] = "completed"
+
+                # Also update file paths on resource
+                fresh_media = run_async(_MR2().get_by_platform_id(platform_id))
+                if fresh_media:
+                    if fresh_media.get("download_path"):
+                        path_updates["file_path"] = fresh_media["download_path"]
+                    if fresh_media.get("cover_download_path"):
+                        path_updates["cover_image_path"] = fresh_media["cover_download_path"]
+
+                run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
+            except Exception as e:
+                logger.warning(f"[Download] Failed to update resource status for {platform_id}: {e}")
 
         # Chain HLS transcode for video files
         _maybe_chain_transcode(platform_id, user_id)
@@ -558,6 +634,25 @@ def download_unified_task(
         if unified_task_id:
             try:
                 run_async(tracker_unified.fail(unified_task_id, error_msg))
+            except Exception:
+                pass
+
+        # Update user resource status to failed
+        if resource_id:
+            try:
+                from app.repositories.resources_repository import ResourcesRepository as _RR3
+                _res_repo3 = _RR3()
+                fail_updates = {}
+                if download_video:
+                    if int(media_type) in (2, 68):
+                        fail_updates["image_download_status"] = "failed"
+                    else:
+                        fail_updates["video_download_status"] = "failed"
+                if download_music:
+                    fail_updates["music_download_status"] = "failed"
+                if download_cover:
+                    fail_updates["cover_download_status"] = "failed"
+                run_async(_res_repo3.update_download_status(resource_id, fail_updates))
             except Exception:
                 pass
 
