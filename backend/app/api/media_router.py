@@ -1203,15 +1203,14 @@ async def retry_download(
         media_type = video.get("media_type", 0)
         media_id = video.get("id")
 
-        # Cover is always re-downloaded on retry
-        request.cover_bool = True
-
         # Reset download status on global parsed_media
         status_updates: dict = {"error_message": None}
         if request.video_bool:
             status_updates["video_download_status"] = DownloadStatus.PENDING.value
         if request.music_bool:
             status_updates["music_download_status"] = DownloadStatus.PENDING.value
+        if request.cover_bool:
+            status_updates["cover_download_status"] = DownloadStatus.PENDING.value
 
         await repo.update(platform_id, status_updates)
 
@@ -1235,38 +1234,19 @@ async def retry_download(
                 if res_status_updates:
                     await res_repo.update_download_status(resource_id, res_status_updates)
 
-        # Trigger Celery download task, fallback to background tasks
-        download_task_id = None
-        try:
-            from app.tasks.download_tasks import download_unified_task
-            from app.services.system_monitor_service import check_worker_ready
-
-            ready, err_msg = check_worker_ready()
-            if not ready:
-                raise RuntimeError(err_msg)
-
-            download_task = download_unified_task.delay(
-                platform_id=platform_id,
-                user_id=auth.user_id,
-                download_video=request.video_bool,
-                download_music=request.music_bool,
-                download_cover=True,
-                media_type=media_type,
-                video_title=video_title,
-                resource_id=resource_id,
-            )
-            download_task_id = download_task.id
-            logger.info(f"Celery retry task submitted: {download_task_id}")
-        except Exception as celery_err:
-            logger.warning(f"Celery unavailable for retry, using background tasks: {celery_err}")
-            from app.services.downloader import DownloaderService
-
-            if request.video_bool:
-                background_tasks.add_task(
-                    DownloaderService.download_video_by_platform_id,
-                    platform_id,
-                    user_id=auth.user_id,
-                )
+        # Dispatch via shared helper
+        dispatch_result = await _dedup_and_dispatch(
+            platform_id=platform_id,
+            user_id=auth.user_id,
+            resource_id=resource_id,
+            media_type=int(media_type) if str(media_type).isdigit() else 0,
+            video_title=video_title,
+            download_video=request.video_bool,
+            download_music=request.music_bool,
+            download_cover=request.cover_bool,
+            background_tasks=background_tasks,
+        )
+        download_task_id = dispatch_result["task_id"]
 
         # Log retry action
         background_tasks.add_task(
