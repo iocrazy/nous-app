@@ -249,51 +249,81 @@ export function PlayerPage() {
                   <div className="fixed inset-0 z-10" onClick={() => setShowDownloadMenu(false)} />
                   <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[180px]">
                     {(() => {
-                      // "on server" = downloaded to backend storage (completed or skipped = file exists)
-                      const onServer = (status?: string) => ['completed', 'skipped'].includes(status?.toLowerCase() || '');
-                      const videoOnServer = !!video.download_path || onServer(video.video_download_status);
-                      const coverOnServer = !!video.cover_download_path || onServer(video.cover_download_status);
-                      const audioOnServer = onServer(video.music_download_status);
+                      // User-level download status (from resource, overlaid by backend detail endpoint)
+                      const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
+                      const isPending = (s?: string) => { const l = s?.toLowerCase(); return l === 'pending' || l === 'downloading'; };
+                      const isFailed = (s?: string) => s?.toLowerCase() === 'failed';
+
+                      const videoStatus = video.video_download_status;
+                      const coverStatus = video.cover_download_status;
+                      const audioStatus = video.music_download_status;
+
+                      const btnClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors";
+                      const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-500 flex items-center gap-2 cursor-default";
                       return (
                         <div className="py-1">
                           {/* Video */}
-                          {isVideoType(video.media_type) && videoOnServer && (
-                            <button onClick={() => handleToolbarDownload('video')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                              <VideoIcon size={13} className="text-indigo-400" /> Video
-                            </button>
+                          {isVideoType(video.media_type) && (
+                            isCompleted(videoStatus) ? (
+                              <button onClick={() => handleToolbarDownload('video')} className={btnClass}>
+                                <VideoIcon size={13} className="text-indigo-400" /> Video
+                              </button>
+                            ) : isPending(videoStatus) ? (
+                              <button disabled className={disabledClass}>
+                                <Loader2 size={13} className="text-indigo-400 animate-spin" /> Video Downloading...
+                              </button>
+                            ) : isFailed(videoStatus) ? (
+                              <button onClick={() => handleFetchMedia({ video: true })} className={btnClass}>
+                                <CloudDownload size={13} className="text-red-400" /> Retry Video
+                              </button>
+                            ) : video.original_url ? (
+                              <button onClick={() => handleFetchMedia({ video: true })} className={btnClass}>
+                                <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+                              </button>
+                            ) : null
                           )}
-                          {isVideoType(video.media_type) && !videoOnServer && video.original_url && (
-                            <button onClick={() => handleFetchMedia({ video: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                              <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
-                            </button>
-                          )}
+                          {/* Images (carousel/image content) */}
                           {video.image_download_urls && video.image_download_urls.length > 0 && (
-                            <button onClick={() => handleToolbarDownload('images')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                            <button onClick={() => handleToolbarDownload('images')} className={btnClass}>
                               <ImageIcon size={13} className="text-pink-400" /> Images ({video.image_download_urls.length})
                             </button>
                           )}
-                          {/* Cover: show Download if on server, Fetch if not */}
-                          {coverOnServer && (
-                            <button onClick={() => handleToolbarDownload('cover')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                          {/* Cover */}
+                          {isCompleted(coverStatus) ? (
+                            <button onClick={() => handleToolbarDownload('cover')} className={btnClass}>
                               <ImageIcon size={13} className="text-emerald-400" /> Cover
                             </button>
-                          )}
-                          {!coverOnServer && video.original_url && (
-                            <button onClick={() => handleFetchMedia({ cover: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                          ) : isPending(coverStatus) ? (
+                            <button disabled className={disabledClass}>
+                              <Loader2 size={13} className="text-emerald-400 animate-spin" /> Cover Downloading...
+                            </button>
+                          ) : isFailed(coverStatus) ? (
+                            <button onClick={() => handleFetchMedia({ cover: true })} className={btnClass}>
+                              <CloudDownload size={13} className="text-red-400" /> Retry Cover
+                            </button>
+                          ) : video.original_url ? (
+                            <button onClick={() => handleFetchMedia({ cover: true })} className={btnClass}>
                               <CloudDownload size={13} className="text-emerald-400" /> Fetch Cover
                             </button>
-                          )}
-                          {/* Audio: show Download if on server, Fetch if not */}
-                          {audioOnServer && (
-                            <button onClick={() => handleToolbarDownload('audio')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                          ) : null}
+                          {/* Audio */}
+                          {isCompleted(audioStatus) ? (
+                            <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
                               <Music size={13} className="text-amber-400" /> Audio
                             </button>
-                          )}
-                          {!audioOnServer && video.original_url && (
-                            <button onClick={() => handleFetchMedia({ music: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                          ) : isPending(audioStatus) ? (
+                            <button disabled className={disabledClass}>
+                              <Loader2 size={13} className="text-amber-400 animate-spin" /> Audio Downloading...
+                            </button>
+                          ) : isFailed(audioStatus) ? (
+                            <button onClick={() => handleFetchMedia({ music: true })} className={btnClass}>
+                              <CloudDownload size={13} className="text-red-400" /> Retry Audio
+                            </button>
+                          ) : video.original_url ? (
+                            <button onClick={() => handleFetchMedia({ music: true })} className={btnClass}>
                               <CloudDownload size={13} className="text-amber-400" /> Fetch Audio
                             </button>
-                          )}
+                          ) : null}
                         </div>
                       );
                     })()}
