@@ -21,6 +21,41 @@ from app.core.config import settings
 # ---------------------------------------------------------------------------
 _queue_cache: dict = {"data": None, "timestamp": 0, "ttl": 5}
 
+# Critical tasks that MUST be registered for downloads to work
+_CRITICAL_TASKS = {
+    "app.tasks.download_tasks.download_unified_task",
+    "app.tasks.parse_tasks.parse_single_link_task",
+}
+
+
+def check_worker_ready(task_name: str = "app.tasks.download_tasks.download_unified_task") -> tuple[bool, str]:
+    """Check if a Celery worker is online and has the specified task registered.
+
+    Returns (is_ready, error_message).
+    """
+    try:
+        from app.celery_app import celery_app
+
+        inspect = celery_app.control.inspect(timeout=1.0)
+        ping = inspect.ping()
+        if not ping:
+            return False, "No Celery workers online. Start with: celery -A app.celery_app worker"
+
+        registered = inspect.registered() or {}
+        all_registered: set[str] = set()
+        for worker_tasks in registered.values():
+            all_registered.update(worker_tasks)
+
+        if task_name not in all_registered:
+            return False, (
+                f"Worker is online but task '{task_name}' is not registered. "
+                "Restart the Celery worker to load new code."
+            )
+
+        return True, ""
+    except Exception as e:
+        return False, f"Cannot reach Celery broker: {e}"
+
 
 def _format_speed(bytes_per_sec: float) -> str:
     if bytes_per_sec < 1024:
@@ -55,7 +90,13 @@ def _parse_speed(speed_str: str) -> float:
 
 
 def get_queue_status() -> dict:
-    """Return Celery queue metrics (with 5-second cache)."""
+    """Return Celery queue metrics (with 5-second cache).
+
+    Status values:
+    - "offline"  — no worker responds to ping
+    - "outdated" — worker online but missing critical tasks (needs restart)
+    - "online"   — worker online with all critical tasks registered
+    """
     current_time = time.time()
 
     if (
@@ -67,11 +108,33 @@ def get_queue_status() -> dict:
     try:
         from app.celery_app import celery_app
 
-        inspect = celery_app.control.inspect(timeout=0.5)
+        inspect = celery_app.control.inspect(timeout=1.0)
         ping = inspect.ping()
 
         if not ping:
             result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
+            _queue_cache.update(data=result, timestamp=current_time)
+            return result
+
+        # Check if critical tasks are registered
+        registered = inspect.registered() or {}
+        all_registered: set[str] = set()
+        for worker_tasks in registered.values():
+            all_registered.update(worker_tasks)
+
+        missing = _CRITICAL_TASKS - all_registered
+        if missing:
+            logger.warning(
+                f"Worker online but missing critical tasks: {missing}. "
+                "Restart the Celery worker to pick up new code."
+            )
+            result = {
+                "active": 0,
+                "pending": 0,
+                "scheduled": 0,
+                "status": "outdated",
+                "missing_tasks": list(missing),
+            }
             _queue_cache.update(data=result, timestamp=current_time)
             return result
 
