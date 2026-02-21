@@ -7,7 +7,7 @@ Parsed media data access layer based on Supabase, providing CRUD operations and 
 Uses async Supabase client.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -155,6 +155,64 @@ class MediaRepository:
         except Exception as e:
             logger.error(f"Failed to update parsed_media: {e}")
             raise
+
+    async def mark_stale_downloads_failed(
+        self, timeout_minutes: int = 30
+    ) -> int:
+        """Mark downloads stuck in 'downloading' state as 'failed'.
+
+        Scans both parsed_media (global file state) and resources
+        (per-user state) for any download status that has been
+        'downloading' for longer than timeout_minutes.
+
+        Returns total number of status fields reset.
+        """
+        cutoff = (datetime.now() - timedelta(minutes=timeout_minutes)).isoformat()
+        now = datetime.now().isoformat()
+        client = await self._get_client()
+        count = 0
+        status_fields = (
+            "video_download_status", "music_download_status",
+            "cover_download_status", "image_download_status",
+        )
+
+        for field in status_fields:
+            # Clean parsed_media (global physical file state)
+            try:
+                result = await (
+                    client.table("parsed_media")
+                    .update({
+                        field: "failed",
+                        "error_message": f"Download timed out (>{timeout_minutes}min)",
+                        "updated_at": now,
+                    })
+                    .eq(field, "downloading")
+                    .lt("updated_at", cutoff)
+                    .execute()
+                )
+                count += len(result.data) if result.data else 0
+            except Exception as e:
+                logger.debug(f"Stale cleanup parsed_media.{field}: {e}")
+
+            # Clean resources (per-user download state)
+            try:
+                result = await (
+                    client.table("resources")
+                    .update({
+                        field: "failed",
+                        "updated_at": now,
+                    })
+                    .eq(field, "downloading")
+                    .lt("updated_at", cutoff)
+                    .execute()
+                )
+                count += len(result.data) if result.data else 0
+            except Exception as e:
+                logger.debug(f"Stale cleanup resources.{field}: {e}")
+
+        if count > 0:
+            logger.info(f"Marked {count} stale download(s) as failed (timeout={timeout_minutes}min)")
+        return count
 
     async def delete(self, platform_id: str) -> bool:
         """Delete parsed_media record by platform_id (global).

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
-import { fetchLibraryPaginated, updateItem, deleteItem } from '../services/dataService';
+import { fetchLibraryPaginated, updateItem, deleteItem, cleanupStaleDownloads } from '../services/dataService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
 import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
@@ -94,6 +94,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
+        // Clean up downloads stuck in 'downloading' state before loading
+        await cleanupStaleDownloads().catch(() => {});
         const result = await fetchLibraryPaginated(0);
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
