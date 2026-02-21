@@ -11,7 +11,7 @@ import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { parseShareLink } from '../services/parserService';
+import { fetchMediaByType } from '../services/parserService';
 import { useToast } from '../components/Toast';
 
 const MIN_PANEL_WIDTH = 380;
@@ -124,24 +124,27 @@ export function PlayerPage() {
   };
 
   const handleFetchMedia = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
-    if (!video?.original_url) {
-      addToast('No original URL available for fetch', 'error');
+    if (!video?.platform_id) {
+      addToast('No platform ID available for fetch', 'error');
       return;
     }
     setShowDownloadMenu(false);
     setIsFetching(true);
     try {
-      await parseShareLink(video.original_url, {
-        video_bool: !!options.video,
-        music_bool: !!options.music,
-        cover_bool: !!options.cover,
-      });
+      const types: string[] = [];
+      if (options.video) types.push('video');
+      if (options.music) types.push('music');
+      if (options.cover) types.push('cover');
+      const result = await fetchMediaByType(video.platform_id, types);
       const items = [
         options.video && 'Video',
         options.cover && 'Cover',
         options.music && 'Audio',
       ].filter(Boolean);
-      addToast(`Fetch submitted: ${items.join(', ')}. Refreshing...`, 'success');
+      const detail = result.types_skipped?.length
+        ? ` (cached: ${result.types_skipped.join(', ')})`
+        : '';
+      addToast(`Fetch submitted: ${items.join(', ')}${detail}. Refreshing...`, 'success');
       // Auto-reload video data after a short delay so download status reflects the fetch
       setTimeout(async () => {
         if (displayId) {
