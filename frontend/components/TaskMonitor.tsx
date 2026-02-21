@@ -59,13 +59,17 @@ export const TaskMonitor = ({
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-zinc-800/50">
            <div className="flex flex-col items-center">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Queue</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Worker</span>
               <div className="flex items-center gap-1.5 text-zinc-300">
                  <ListVideo size={14} className={
-                   systemStatus?.queue.status === 'offline' ? 'text-red-400' :
-                   systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
+                   systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                     ? 'text-red-400' :
+                   systemStatus?.queue.active ? 'text-indigo-400' : 'text-green-400'
                  } />
-                 <span className="font-mono text-xs font-medium">
+                 <span className={`font-mono text-xs font-medium ${
+                   systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                     ? 'text-red-400' : ''
+                 }`}>
                    {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
                  </span>
               </div>
