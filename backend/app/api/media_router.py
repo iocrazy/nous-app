@@ -78,6 +78,129 @@ class BatchFetchRequest(BaseModel):
 
 
 # ============================================
+# Shared helpers
+# ============================================
+
+
+async def _dedup_and_dispatch(
+    *,
+    platform_id: str,
+    user_id: str,
+    resource_id: str | None,
+    media_type: int,
+    video_title: str,
+    download_video: bool,
+    download_music: bool,
+    download_cover: bool,
+    url: str | None = None,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Per-type Orchestrator dedup check + Celery dispatch.
+
+    Returns:
+        {
+            "task_id": str | None,
+            "types_submitted": [...],
+            "types_skipped": [...],
+            "types_subscribed": [...],
+        }
+    """
+    from app.services.task_orchestrator import get_orchestrator
+    from app.tasks.download_tasks import download_unified_task
+    from app.services.system_monitor_service import check_worker_ready
+
+    is_image_type = int(media_type) in (2, 68)
+
+    # Build requested types list
+    requested = {}
+    if download_video:
+        requested["image" if is_image_type else "video"] = True
+    if download_music:
+        requested["music"] = True
+    if download_cover:
+        requested["cover"] = True
+
+    if not requested:
+        return {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
+
+    # Per-type dedup
+    types_to_download = []
+    types_subscribed = []
+    types_skipped = []
+
+    orchestrator = get_orchestrator()
+    for dtype in requested:
+        try:
+            result = await orchestrator.acquire_or_subscribe(
+                task_type=f"download:{dtype}",
+                dedup_identifier=platform_id,
+                user_id=user_id,
+                resource_id=resource_id or "",
+            )
+            action = result["action"]
+            logger.info(f"[Download/Dedup] {dtype}={action} for {platform_id}")
+            if action == "created":
+                types_to_download.append(dtype)
+            elif action == "subscribed":
+                types_subscribed.append(dtype)
+            else:  # completed
+                types_skipped.append(dtype)
+        except Exception as e:
+            logger.warning(f"[Download/Dedup] {dtype} dedup failed, proceeding: {e}")
+            types_to_download.append(dtype)
+
+    task_id = None
+    if types_to_download:
+        # Map back to download_* bools
+        dl_video = ("video" in types_to_download) or ("image" in types_to_download)
+        dl_music = "music" in types_to_download
+        dl_cover = "cover" in types_to_download
+
+        try:
+            ready, err_msg = check_worker_ready()
+            if not ready:
+                raise RuntimeError(err_msg)
+
+            logger.info(
+                f"[Download/Init] Celery dispatch: platform_id={platform_id}, "
+                f"types={types_to_download}, user={user_id}"
+            )
+            celery_task = download_unified_task.delay(
+                platform_id=platform_id,
+                user_id=user_id,
+                url=url,
+                download_video=dl_video,
+                download_music=dl_music,
+                download_cover=dl_cover,
+                media_type=media_type,
+                video_title=video_title[:50] if video_title else "undefined",
+                resource_id=resource_id,
+            )
+            task_id = celery_task.id
+        except Exception as celery_err:
+            logger.warning(f"[Download/Init] Celery unavailable: {celery_err}")
+            if background_tasks:
+                from app.services.downloader import DownloaderService
+                if dl_video:
+                    if is_image_type:
+                        background_tasks.add_task(DownloaderService.download_images_by_platform_id, platform_id, user_id=user_id)
+                    else:
+                        background_tasks.add_task(DownloaderService.download_video_by_platform_id, platform_id, user_id=user_id)
+                if dl_music:
+                    background_tasks.add_task(DownloaderService.download_music_by_platform_id, platform_id=platform_id, user_id=user_id)
+                if dl_cover:
+                    background_tasks.add_task(DownloaderService.download_cover_by_platform_id, platform_id, user_id=user_id)
+                task_id = "background"
+
+    return {
+        "task_id": task_id,
+        "types_submitted": types_to_download,
+        "types_skipped": types_skipped,
+        "types_subscribed": types_subscribed,
+    }
+
+
+# ============================================
 # Route endpoints
 # ============================================
 
