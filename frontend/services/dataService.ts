@@ -90,7 +90,24 @@ export const getMusicDownloadUrl = (platformId: string): string => {
 };
 
 /**
- * Fetch a single video by platform_id
+ * Merge a resources row (with nested parsed_media from !inner join)
+ * into a flat ParsedMedia object.  Per-user download statuses from
+ * the resources table take precedence over parsed_media's global values.
+ */
+function flattenResourceMedia(row: any): ParsedMedia {
+  const pm = row.parsed_media || {};
+  return {
+    ...pm,
+    resource_id: String(row.id),
+    video_download_status: row.video_download_status ?? pm.video_download_status,
+    music_download_status: row.music_download_status ?? pm.music_download_status,
+    cover_download_status: row.cover_download_status ?? pm.cover_download_status,
+    image_download_status: row.image_download_status ?? pm.image_download_status,
+  };
+}
+
+/**
+ * Fetch a single video by platform_id (through resources table)
  */
 export const fetchVideoByPlatformId = async (platformId: string): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();
@@ -103,10 +120,11 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
     if (!user) return null;
 
     const { data, error } = await supabase
-      .from(VIEW_NAME)
-      .select('*')
-      .eq('platform_id', platformId)
-      .eq('user_id', user.id)
+      .from('resources')
+      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
+      .eq('creator_id', user.id)
+      .eq('source_type', 'web')
+      .eq('parsed_media.platform_id', platformId)
       .maybeSingle();
 
     if (error) {
@@ -114,7 +132,8 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
       return null;
     }
 
-    return data as ParsedMedia | null;
+    if (!data) return null;
+    return flattenResourceMedia(data);
   } catch (e) {
     console.error('Error fetching video by platform_id:', e);
     return null;
@@ -125,7 +144,7 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
 export const fetchVideoByAwemeId = fetchVideoByPlatformId;
 
 /**
- * Fetch a single video by id (Snowflake BIGINT)
+ * Fetch a single video by id (Snowflake BIGINT — parsed_media.id)
  */
 export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();
@@ -138,10 +157,11 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
     if (!user) return null;
 
     const { data, error } = await supabase
-      .from(VIEW_NAME)
-      .select('*')
-      .eq('id', displayId)
-      .eq('user_id', user.id)
+      .from('resources')
+      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
+      .eq('creator_id', user.id)
+      .eq('source_type', 'web')
+      .eq('parsed_media.id', displayId)
       .maybeSingle();
 
     if (error) {
@@ -149,7 +169,8 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
       return null;
     }
 
-    return data as ParsedMedia | null;
+    if (!data) return null;
+    return flattenResourceMedia(data);
   } catch (e) {
     console.error('Error fetching video by id:', e);
     return null;
@@ -168,7 +189,7 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * Fetch video library (paginated)
+ * Fetch video library (paginated) — queries through resources table
  */
 export const fetchLibraryPaginated = async (
   page: number = 0,
@@ -189,9 +210,11 @@ export const fetchLibraryPaginated = async (
     const to = from + pageSize - 1;
 
     const { data, error, count } = await supabase
-      .from(VIEW_NAME)
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
+      .from('resources')
+      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)', { count: 'exact' })
+      .eq('creator_id', user.id)
+      .eq('source_type', 'web')
+      .eq('is_trashed', false)
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -201,7 +224,7 @@ export const fetchLibraryPaginated = async (
     const hasMore = (page + 1) * pageSize < totalCount;
 
     return {
-      data: (data as ParsedMedia[]) || [],
+      data: (data || []).map(flattenResourceMedia) as ParsedMedia[],
       totalCount,
       hasMore,
       page,
@@ -227,21 +250,23 @@ export const fetchLibrary = async (): Promise<ParsedMedia[]> => {
     }
 
     const { data, error } = await supabase
-      .from(VIEW_NAME)
-      .select('*')
-      .eq('user_id', user.id)
+      .from('resources')
+      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
+      .eq('creator_id', user.id)
+      .eq('source_type', 'web')
+      .eq('is_trashed', false)
       .order('created_at', { ascending: false })
       .limit(LOCAL_CACHE_SIZE);
 
     if (error) throw error;
-    return (data as ParsedMedia[]) || [];
+    return (data || []).map(flattenResourceMedia) as ParsedMedia[];
   } catch (err: any) {
     throw err;
   }
 };
 
 /**
- * Fetch total video count
+ * Fetch total video count (user's resources)
  */
 export const fetchLibraryCount = async (): Promise<number> => {
   const supabase = getSupabaseClient();
@@ -256,9 +281,11 @@ export const fetchLibraryCount = async (): Promise<number> => {
     }
 
     const { count, error } = await supabase
-      .from(TABLE_NAME)
+      .from('resources')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id);
+      .eq('creator_id', user.id)
+      .eq('source_type', 'web')
+      .eq('is_trashed', false);
 
     if (error) throw error;
     return count || 0;
@@ -273,8 +300,8 @@ export const saveItem = async (item: ParsedMedia): Promise<ParsedMedia> => {
     throw new Error("Supabase is not configured");
   }
 
-  // Strip computed/joined fields that are not actual DB columns
-  const { tags, summary_text, ...dbFields } = item;
+  // Strip computed/joined fields and dropped columns
+  const { tags, summary_text, resource_id, user_id, need_download_video, need_download_music, need_download_cover, ...dbFields } = item as any;
   const payload = {
     ...dbFields,
     published_at: item.published_at || new Date().toISOString(),
@@ -302,16 +329,13 @@ export const updateItem = async (id: string, updates: Partial<ParsedMedia>): Pro
     throw new Error("Supabase is not configured");
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("User not authenticated");
-  }
+  // Strip fields that don't exist on parsed_media table
+  const { tags, summary_text, resource_id, user_id, ...dbUpdates } = updates as any;
 
   const { data, error } = await supabase
     .from(TABLE_NAME)
-    .update(updates)
+    .update(dbUpdates)
     .eq('platform_id', id)
-    .eq('user_id', user.id)
     .select()
     .single();
 

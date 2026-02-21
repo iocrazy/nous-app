@@ -408,7 +408,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
                 return result
 
@@ -485,7 +484,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
 
                 # Log failure
@@ -641,7 +639,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.COMPLETED,
                         "download_path": sub_download_relative_path,  # Use relative path
                     },
-                    user_id=user_id,
                 )
                 result.video_download_status = DownloadStatus.COMPLETED
 
@@ -676,7 +673,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.FAILED,
                         "error_message": error_msg,
                     },
-                    user_id=user_id,
                 )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = error_msg
@@ -791,7 +787,6 @@ class DownloaderService:
                         "music_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
 
             return result
@@ -910,7 +905,6 @@ class DownloaderService:
                                 "cover_download_status": DownloadStatus.COMPLETED.value,
                                 "cover_download_path": cover_relative_path,  # Use relative path
                             },
-                            user_id=user_id,
                         )
                     except Exception as e:
                         logger.error(f"更新封面下载状态失败: {e}")
@@ -945,7 +939,6 @@ class DownloaderService:
                     "cover_download_status": DownloadStatus.FAILED.value,
                     "error_message": result.error,
                 },
-                user_id=user_id,
             )
 
             # Log failure
@@ -972,7 +965,6 @@ class DownloaderService:
                     platform_id,
                     {"cover_download_status": DownloadStatus.FAILED.value,
                      "error_message": str(e)[:500]},
-                    user_id=user_id,
                 )
             except Exception:
                 logger.debug(f"Failed to persist cover failure status for {platform_id}")
