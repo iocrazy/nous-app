@@ -389,7 +389,7 @@ class MediaService:
             user_id = parsed_data.pop("user_id", None)
             need_download_video = parsed_data.pop("need_download_video", False)
             need_download_music = parsed_data.pop("need_download_music", False)
-            need_download_cover = parsed_data.pop("need_download_cover", True)  # cover always true
+            need_download_cover = parsed_data.pop("need_download_cover", False)
 
             title = parsed_data.get("title", "")
             media_type = parsed_data.get("media_type", "")
@@ -445,7 +445,7 @@ class MediaService:
                     data_dict["video_download_status"] = "pending" if need_download_video else "skipped"
                     data_dict["image_download_status"] = "skipped"
                 data_dict["music_download_status"] = "pending" if need_download_music else "skipped"
-                data_dict["cover_download_status"] = "pending"  # cover always downloads
+                data_dict["cover_download_status"] = "pending" if need_download_cover else "skipped"
 
                 result = await repo.create(data_dict)
                 media_id = result.get("id") if result else None

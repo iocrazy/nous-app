@@ -434,6 +434,10 @@ def download_unified_task(
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
     logger.info(f"[Download/{strategy}] Starting task {task_id} for {platform_id}")
+    logger.debug(
+        f"[Download/{strategy}] Params: video={download_video}, "
+        f"music={download_music}, cover={download_cover}"
+    )
 
     # ── TaskTracker setup (Supabase lifecycle) ──
     from app.services.task_tracker import get_task_tracker

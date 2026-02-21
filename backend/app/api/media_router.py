@@ -110,9 +110,6 @@ async def fetch_video(
 
         logger.info(f"User {auth.user_id} starting video fetch: {url}")
 
-        # Cover is always downloaded (mandatory)
-        request.cover_bool = True
-
         # === Points check ===
         points_service = PointsService()
         from app.db.supabase_client import get_async_supabase_admin as _get_admin
@@ -338,6 +335,10 @@ async def fetch_video(
                     if not ready:
                         raise RuntimeError(err_msg)
 
+                    logger.info(
+                        f"[Celery dispatch] video={need_download_video}, "
+                        f"music={request.music_bool}, cover={request.cover_bool}"
+                    )
                     download_task = download_unified_task.delay(
                         platform_id=platform_id,
                         user_id=auth.user_id,

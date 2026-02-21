@@ -156,7 +156,7 @@ start_backend() {
 
     echo -e "  ${YELLOW}Starting Backend (port $BACKEND_PORT)...${NC}"
     cd "$BACKEND_DIR"
-    nohup uv run uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" > "$LOG_DIR/backend.log" 2>&1 &
+    nohup uv run uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" > "$LOG_DIR/backend.log" 2>&1 </dev/null &
     sleep 3
     if check_backend; then
         echo -e "  ${GREEN}✓${NC} Backend running on port $BACKEND_PORT"
@@ -172,7 +172,7 @@ start_celery() {
 
     echo -e "  ${YELLOW}Starting Celery worker...${NC}"
     cd "$BACKEND_DIR"
-    nohup uv run celery -A app.celery_app worker --loglevel=info > "$LOG_DIR/celery.log" 2>&1 &
+    nohup uv run celery -A app.celery_app worker --loglevel=info > "$LOG_DIR/celery.log" 2>&1 </dev/null &
     sleep 3
     if check_celery; then
         echo -e "  ${GREEN}✓${NC} Celery worker running"
@@ -187,7 +187,7 @@ start_frontend() {
 
     echo -e "  ${YELLOW}Starting Frontend (port $FRONTEND_PORT)...${NC}"
     cd "$FRONTEND_DIR"
-    nohup npm run dev -- --port "$FRONTEND_PORT" > "$LOG_DIR/frontend.log" 2>&1 &
+    nohup npm run dev -- --port "$FRONTEND_PORT" > "$LOG_DIR/frontend.log" 2>&1 </dev/null &
     sleep 5
     if check_frontend; then
         echo -e "  ${GREEN}✓${NC} Frontend running on port $FRONTEND_PORT"
