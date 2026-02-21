@@ -119,11 +119,16 @@ def _fail_unified(unified_task_id: str, error_msg: str):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None):
+def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None, _dedup_key: str = None):
     """Extract audio from a downloaded video file.
 
     Produces a .wav file for Whisper transcription.
     """
+    # Store orchestrator keys in request for signal handlers
+    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
+    self.request.kwargs['_dedup_key'] = _dedup_key
+    self.request.kwargs['_unified_task_id'] = unified_task_id
+
     logger.info(f"[AI] Starting audio extraction for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Extracting audio...")
 
@@ -227,7 +232,7 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str = None, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None):
+def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str = None, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None, _dedup_key: str = None):
     """Transcribe audio using Whisper.
 
     Args:
@@ -237,7 +242,13 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         resource_id: Optional resource ID for status updates.
         unified_task_id: Optional unified task ID for progress tracking.
         next_task_id: Optional next unified task ID to start on completion.
+        _dedup_key: Optional dedup key for orchestrator signal handlers.
     """
+    # Store orchestrator keys in request for signal handlers
+    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
+    self.request.kwargs['_dedup_key'] = _dedup_key
+    self.request.kwargs['_unified_task_id'] = unified_task_id
+
     logger.info(f"[AI] Starting transcription for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Transcribing...")
 
@@ -334,7 +345,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None):
+def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None, _dedup_key: str = None):
     """Generate LLM summary from a video's transcript.
 
     Args:
@@ -342,7 +353,13 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         user_id: User ID (for loading AI settings).
         resource_id: Optional resource ID for status updates.
         unified_task_id: Optional unified task ID for progress tracking.
+        _dedup_key: Optional dedup key for orchestrator signal handlers.
     """
+    # Store orchestrator keys in request for signal handlers
+    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
+    self.request.kwargs['_dedup_key'] = _dedup_key
+    self.request.kwargs['_unified_task_id'] = unified_task_id
+
     logger.info(f"[AI] Starting summary generation for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Generating summary...")
 
@@ -468,6 +485,28 @@ def chain_ai_pipeline(
     group_id = str(uuid.uuid4())
     task_ids: dict[str, str] = {}
 
+    # ── Orchestrator dedup check for AI pipeline ──
+    dedup_key = None
+    try:
+        from app.services.task_orchestrator import get_orchestrator
+        orchestrator = get_orchestrator()
+        orchestrator_result = run_async(orchestrator.acquire_or_subscribe(
+            task_type="ai_extract",
+            dedup_identifier=platform_id,
+            user_id=user_id,
+            resource_id=resource_id or "",
+        ))
+        dedup_key = orchestrator_result.get("dedup_key")
+
+        if orchestrator_result["action"] == "subscribed":
+            logger.info(f"[AI] Already processing {platform_id}, subscribed to existing pipeline")
+            return
+        if orchestrator_result["action"] == "completed":
+            logger.info(f"[AI] AI pipeline already completed for {platform_id}")
+            return
+    except Exception as e:
+        logger.warning(f"[AI] Dedup check failed, proceeding normally: {e}")
+
     try:
         from app.services.task_tracker import get_task_tracker
         tracker = get_task_tracker()
@@ -515,22 +554,25 @@ def chain_ai_pipeline(
 
     tasks = []
     if transcript_bool:
-        # extract_audio_task(platform_id, user_id, resource_id, unified_task_id, next_task_id)
+        # extract_audio_task(platform_id, user_id, resource_id, unified_task_id, next_task_id, _dedup_key)
         tasks.append(extract_audio_task.si(
             platform_id, user_id, resource_id,
             task_ids.get('extract'), task_ids.get('transcribe'),
+            _dedup_key=dedup_key,
         ))
-        # transcribe_audio_task(platform_id, user_id, audio_path, resource_id, unified_task_id, next_task_id)
+        # transcribe_audio_task(platform_id, user_id, audio_path, resource_id, unified_task_id, next_task_id, _dedup_key)
         tasks.append(transcribe_audio_task.si(
             platform_id, user_id, None, resource_id,
             task_ids.get('transcribe'), task_ids.get('summary'),
+            _dedup_key=dedup_key,
         ))
 
     if summary_bool and transcript_bool:
-        # generate_summary_task(platform_id, user_id, resource_id, unified_task_id)
+        # generate_summary_task(platform_id, user_id, resource_id, unified_task_id, _dedup_key)
         tasks.append(generate_summary_task.si(
             platform_id, user_id, resource_id,
             task_ids.get('summary'),
+            _dedup_key=dedup_key,
         ))
 
     if tasks:
