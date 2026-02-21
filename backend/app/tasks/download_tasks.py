@@ -221,6 +221,81 @@ class UnifiedProgressTracker:
         )
 
 
+# ─── URL availability helpers ─────────────────────────────────────────
+
+
+def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]) -> dict:
+    """Check if download URLs are available for needed types. Re-parse if missing.
+
+    Mutates and returns the media dict with refreshed URLs if re-parsed.
+    """
+    url_fields = {
+        "video": "video_download_urls",
+        "music": "music_download_urls",
+        "cover": "cover_urls",
+        "image": "image_download_urls",
+    }
+
+    missing_types = []
+    for t in needed_types:
+        field = url_fields.get(t)
+        if field and not media.get(field):
+            missing_types.append(t)
+
+    if not missing_types:
+        return media
+
+    logger.info(
+        f"[Download/URL] Missing URLs for {missing_types} on {platform_id}, "
+        f"re-parsing original_url..."
+    )
+
+    original_url = media.get("original_url")
+    if not original_url:
+        logger.warning(f"[Download/URL] No original_url for {platform_id}, cannot re-parse")
+        return media
+
+    try:
+        from app.services.lightweight_parser import LightweightParser
+        from app.services.douyin_parser import DouyinParser
+
+        aweme_detail = run_async(LightweightParser.parse(original_url))
+        if not aweme_detail:
+            logger.warning(f"[Download/URL] Re-parse returned empty for {platform_id}")
+            return media
+
+        new_parsed = run_async(DouyinParser.parse_aweme_detail(
+            aweme_detail=aweme_detail,
+            valid_url=original_url,
+            download_video=True,
+            download_music=True,
+            download_cover=True,
+        ))
+        if not new_parsed:
+            logger.warning(f"[Download/URL] Re-parse yielded no data for {platform_id}")
+            return media
+
+        # Update DB with refreshed URLs
+        from app.repositories.media_repository import MediaRepository as _MR
+        update_fields = {}
+        for t in missing_types:
+            field = url_fields.get(t)
+            if field and new_parsed.get(field):
+                update_fields[field] = new_parsed[field]
+                media[field] = new_parsed[field]
+                logger.info(f"[Download/URL] Refreshed {field} for {platform_id} ({len(new_parsed[field])} URLs)")
+
+        if update_fields:
+            run_async(_MR().update(platform_id, update_fields))
+        else:
+            logger.warning(f"[Download/URL] Re-parse found no new URLs for {missing_types}")
+
+    except Exception as e:
+        logger.error(f"[Download/URL] Re-parse failed for {platform_id}: {e}")
+
+    return media
+
+
 # ─── Internal download strategies ─────────────────────────────────────
 
 def _do_douyin_download(
@@ -234,6 +309,19 @@ def _do_douyin_download(
 ) -> dict:
     """Douyin download strategy: reads URLs from DB, downloads via httpx."""
     results = {"video": None, "music": None, "cover": None}
+
+    # Ensure download URLs are available (re-parse if missing)
+    from app.repositories.media_repository import MediaRepository as _MR_urls
+    media = run_async(_MR_urls().get_by_platform_id(platform_id))
+    if media:
+        needed = []
+        if download_video:
+            needed.append("image" if int(media_type) in (2, 68) else "video")
+        if download_music:
+            needed.append("music")
+        if download_cover:
+            needed.append("cover")
+        media = _ensure_download_urls(platform_id, media, needed)
 
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
