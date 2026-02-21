@@ -868,12 +868,26 @@ export const RipVaultView: React.FC = () => {
           onClick={(e) => e.stopPropagation()}
         >
           <button
+            onClick={() => {
+              if (!contextMenu) return;
+              const v = contextMenu.video;
+              const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+              navigate(`${teamPath}/player/${v.id}?from=downloads`);
+              setContextMenu(null);
+            }}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
+            <Eye size={14} className="text-zinc-500" />
+            View Details
+          </button>
+          <button
             onClick={handleCtxOpenNewTab}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
           >
             <ExternalLink size={14} className="text-zinc-500" />
             Open in New Tab
           </button>
+          <div className="border-t border-zinc-800 my-1" />
           <button
             onClick={handleCtxDownloadVideo}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
