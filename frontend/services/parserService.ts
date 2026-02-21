@@ -209,6 +209,34 @@ export const fetchStatistics = async (): Promise<{
 };
 
 /**
+ * Fetch specific media types for an already-parsed media item.
+ * Used by PlayerPage when user clicks Fetch Video / Fetch Audio / Fetch Cover.
+ */
+export interface TypeFetchResponse {
+  task_id: string | null;
+  types_submitted: string[];
+  types_skipped: string[];
+  types_subscribed: string[];
+}
+
+export const fetchMediaByType = async (
+  platformId: string,
+  types: string[],
+): Promise<TypeFetchResponse> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/videos/${platformId}/fetch`, {
+    method: 'POST',
+    headers: await buildHeaders(),
+    body: JSON.stringify({ types }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+};
+
+/**
  * Retry download
  */
 export const retryDownload = async (platformId: string): Promise<{
