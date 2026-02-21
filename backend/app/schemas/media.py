@@ -279,3 +279,21 @@ class MediaFetchRequest(BaseModel):
             ]
         }
     }
+
+
+class MediaTypeFetchRequest(BaseModel):
+    """Request body for subsequent per-type fetch (POST /videos/{platform_id}/fetch)."""
+
+    types: list[str] = Field(
+        ...,
+        description="Media types to fetch: 'video', 'music', 'cover', 'image'",
+        min_length=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_types(self):
+        valid = {"video", "music", "cover", "image"}
+        invalid = set(self.types) - valid
+        if invalid:
+            raise ValueError(f"Invalid types: {invalid}. Must be one of {valid}")
+        return self
