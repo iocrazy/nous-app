@@ -351,6 +351,53 @@ class MediaRepository:
             logger.error(f"获取视频列表失败: {e}")
             return []
 
+    async def get_user_media_list(
+        self,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        order_by: str = "created_at",
+        ascending: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Get parsed_media list for a user by joining through resources.
+
+        Returns parsed_media rows with user's per-resource download statuses overlaid.
+        """
+        try:
+            client = await self._get_client()
+            # Query resources with embedded parsed_media via FK: resources.media_id -> parsed_media.id
+            resource_fields = (
+                "id, video_download_status, music_download_status, "
+                "cover_download_status, image_download_status, "
+                "media_id, created_at"
+            )
+            query = (
+                client.table("resources")
+                .select(f"{resource_fields}, parsed_media!inner(*)")
+                .eq("creator_id", user_id)
+                .eq("source_type", "web")
+                .eq("is_trashed", False)
+                .order(order_by, desc=not ascending)
+                .range(skip, skip + limit - 1)
+            )
+            result = await query.execute()
+
+            # Flatten: merge parsed_media into top-level, overlay user statuses
+            videos = []
+            for row in (result.data or []):
+                media = dict(row.get("parsed_media", {}))
+                media["resource_id"] = row["id"]
+                for field in ("video_download_status", "music_download_status",
+                              "cover_download_status", "image_download_status"):
+                    user_status = row.get(field)
+                    if user_status is not None:
+                        media[field] = user_status
+                videos.append(media)
+            return videos
+        except Exception as e:
+            logger.error(f"Failed to get user media list: {e}")
+            return []
+
     async def search(
         self,
         keyword: Optional[str] = None,
