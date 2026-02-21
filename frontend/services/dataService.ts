@@ -90,6 +90,32 @@ export const getMusicDownloadUrl = (platformId: string): string => {
 };
 
 /**
+ * Mark downloads stuck in 'downloading' for too long as 'failed'.
+ * Called once on library load to clean up stale records.
+ */
+export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promise<number> => {
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return 0;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return 0;
+
+    const response = await fetch(
+      `${getApiUrl()}/api/v1/videos/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      }
+    );
+    if (!response.ok) return 0;
+    const result = await response.json();
+    return result.cleaned || 0;
+  } catch {
+    return 0;
+  }
+};
+
+/**
  * Merge a resources row (with nested parsed_media from !inner join)
  * into a flat ParsedMedia object.  Per-user download statuses from
  * the resources table take precedence over parsed_media's global values.
