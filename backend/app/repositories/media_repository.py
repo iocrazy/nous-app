@@ -363,12 +363,24 @@ class MediaRepository:
         limit: int = 100,
         user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """获取待下载的视频列表"""
+        """获取待下载的视频列表。parsed_media 是全局表，user_id 通过 resources 表过滤。"""
         try:
             table = await self._get_table()
             query = table.select("*").eq("video_download_status", status.value)
             if user_id:
-                query = query.eq("user_id", user_id)
+                # Filter via resources table instead of dropped user_id column
+                client = await self._get_client()
+                res = (
+                    await client.table("resources")
+                    .select("media_id")
+                    .eq("creator_id", user_id)
+                    .eq("is_trashed", False)
+                    .execute()
+                )
+                media_ids = [r["media_id"] for r in res.data if r.get("media_id")]
+                if not media_ids:
+                    return []
+                query = query.in_("id", media_ids)
             result = await query.limit(limit).execute()
             return result.data or []
         except Exception as e:

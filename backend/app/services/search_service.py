@@ -132,9 +132,19 @@ class SearchService:
                 "id, platform_id, title, description, cover_url, author, view_count, created_at, hashtags"
             )
 
-            # Apply user filter first (required)
+            # Apply user filter via resources table (parsed_media is global)
             if user_id:
-                base_query = base_query.eq("user_id", user_id)
+                user_resources = (
+                    await client.table("resources")
+                    .select("media_id")
+                    .eq("creator_id", user_id)
+                    .eq("is_trashed", False)
+                    .execute()
+                )
+                user_media_ids = [r["media_id"] for r in user_resources.data if r.get("media_id")]
+                if not user_media_ids:
+                    return SearchResponse(results=[], total=0, query=query, search_type="hybrid")
+                base_query = base_query.in_("id", user_media_ids)
 
             # Apply other filters
             if author:
@@ -167,15 +177,16 @@ class SearchService:
                     f"No results in basic fields, searching resource_analysis for: {query_clean}"
                 )
 
-                # First get all user's media IDs
+                # Get user's media IDs via resources table
                 if user_id:
-                    user_media = (
-                        await client.table("parsed_media")
-                        .select("id")
-                        .eq("user_id", user_id)
+                    user_resources_2 = (
+                        await client.table("resources")
+                        .select("media_id")
+                        .eq("creator_id", user_id)
+                        .eq("is_trashed", False)
                         .execute()
                     )
-                    user_media_ids = [v["id"] for v in user_media.data]
+                    user_media_ids = [r["media_id"] for r in user_resources_2.data if r.get("media_id")]
                 else:
                     user_media = (
                         await client.table("parsed_media").select("id").limit(500).execute()
@@ -257,7 +268,17 @@ class SearchService:
         )
 
         if user_id:
-            base_query = base_query.eq("user_id", user_id)
+            user_resources_3 = (
+                await client.table("resources")
+                .select("media_id")
+                .eq("creator_id", user_id)
+                .eq("is_trashed", False)
+                .execute()
+            )
+            user_media_ids_3 = [r["media_id"] for r in user_resources_3.data if r.get("media_id")]
+            if not user_media_ids_3:
+                return SearchResponse(results=[], total=0, query=query or "", search_type="hybrid")
+            base_query = base_query.in_("id", user_media_ids_3)
         if author:
             base_query = base_query.ilike("author", f"%{author}%")
         if date_from:
