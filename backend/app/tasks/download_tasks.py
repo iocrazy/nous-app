@@ -325,7 +325,7 @@ def _do_douyin_download(
 
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
-            logger.info(f"[Download] Downloading douyin video: {platform_id}")
+            logger.info(f"[Download/Exec] video: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_video_by_platform_id(
                     platform_id, user_id=user_id, progress_tracker=tracker
@@ -336,12 +336,13 @@ def _do_douyin_download(
                 if hasattr(video_result, "video_download_status")
                 else "unknown"
             )
+            logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
             if results["video"] != "completed":
                 error_msg = getattr(video_result, "error", None) or "Download failed"
-                logger.warning(f"[Download] Video failed for {platform_id}: {error_msg}")
+                logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
 
         if download_music:
-            logger.info(f"[Download] Downloading douyin music: {platform_id}")
+            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
             result = run_async(
                 DownloaderService.download_music_by_platform_id(
                     platform_id=platform_id, user_id=user_id
@@ -352,10 +353,11 @@ def _do_douyin_download(
                 if hasattr(result, "music_download_status")
                 else "unknown"
             )
+            logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
-            logger.info(f"[Download] Downloading douyin images: {platform_id}")
+            logger.info(f"[Download/Exec] image: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_images_by_platform_id(
                     platform_id, user_id=user_id
@@ -366,12 +368,13 @@ def _do_douyin_download(
                 if hasattr(video_result, "video_download_status")
                 else "unknown"
             )
+            logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
             if results["video"] != "completed":
                 error_msg = getattr(video_result, "error", None) or "Image download failed"
-                logger.warning(f"[Download] Images failed for {platform_id}: {error_msg}")
+                logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
 
         if download_music:
-            logger.info(f"[Download] Downloading douyin music: {platform_id}")
+            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
             result = run_async(
                 DownloaderService.download_music_by_platform_id(
                     platform_id=platform_id, user_id=user_id
@@ -382,9 +385,10 @@ def _do_douyin_download(
                 if hasattr(result, "music_download_status")
                 else "unknown"
             )
+            logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
     if download_cover:
-        logger.info(f"[Download] Downloading douyin cover: {platform_id}")
+        logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         result = run_async(
             DownloaderService.download_cover_by_platform_id(
                 platform_id, user_id=user_id
@@ -395,6 +399,7 @@ def _do_douyin_download(
             if hasattr(result, "cover_download_status")
             else "unknown"
         )
+        logger.info(f"[Download/Exec] cover: {results['cover']} for {platform_id}")
 
     return results
 
@@ -421,7 +426,7 @@ def _do_ytdlp_download(
     )
 
     if download_video:
-        logger.info(f"[Download] Downloading video via yt-dlp: {platform_id}")
+        logger.info(f"[Download/Exec] video: downloading via yt-dlp {platform_id}...")
 
         def on_progress(downloaded: int, total: int, speed: str):
             tracker.update(downloaded, total)
@@ -449,12 +454,13 @@ def _do_ytdlp_download(
                 DownloaderService.optimize_video_for_streaming(result["file_path"])
             )
             results["video"] = DownloadStatus.COMPLETED.value
+            logger.info(f"[Download/Exec] video: completed for {platform_id}")
         else:
             results["video"] = DownloadStatus.FAILED.value
-            logger.warning(f"[Download] yt-dlp video failed for {platform_id}: no output file")
+            logger.warning(f"[Download/Exec] video failed via yt-dlp for {platform_id}: no output file")
 
     if download_music:
-        logger.info(f"[Download] Extracting audio via yt-dlp: {platform_id}")
+        logger.info(f"[Download/Exec] music: extracting via yt-dlp {platform_id}...")
         result = run_async(
             YtdlpService.download_audio(url, str(storage_dir), platform_id)
         )
@@ -462,11 +468,13 @@ def _do_ytdlp_download(
             repo = MediaRepository()
             run_async(repo.mark_music_as_downloaded(platform_id))
             results["music"] = DownloadStatus.COMPLETED.value
+            logger.info(f"[Download/Exec] music: completed for {platform_id}")
         else:
             results["music"] = DownloadStatus.FAILED.value
+            logger.warning(f"[Download/Exec] music failed via yt-dlp for {platform_id}")
 
     if download_cover:
-        logger.info(f"[Download] Downloading cover: {platform_id}")
+        logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         cover_result = run_async(
             DownloaderService.download_cover_by_platform_id(
                 platform_id, user_id=user_id
@@ -474,9 +482,10 @@ def _do_ytdlp_download(
         )
         if cover_result and cover_result.cover_download_status == DownloadStatus.COMPLETED:
             results["cover"] = DownloadStatus.COMPLETED.value
+            logger.info(f"[Download/Exec] cover: completed for {platform_id}")
         else:
             error = cover_result.error if cover_result else "Unknown error"
-            logger.warning(f"[Download] Cover download failed for {platform_id}: {error}")
+            logger.warning(f"[Download/Exec] cover failed for {platform_id}: {error}")
             results["cover"] = DownloadStatus.FAILED.value
 
     return results
@@ -521,10 +530,10 @@ def download_unified_task(
     """
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
-    logger.info(f"[Download/{strategy}] Starting task {task_id} for {platform_id}")
-    logger.debug(
-        f"[Download/{strategy}] Params: video={download_video}, "
-        f"music={download_music}, cover={download_cover}"
+    requested_types = [t for t, f in [("video", download_video), ("music", download_music), ("cover", download_cover)] if f]
+    logger.info(
+        f"[Download/Init] {platform_id}: strategy={strategy}, "
+        f"types=[{','.join(requested_types)}], task_id={task_id}"
     )
 
     # ── TaskTracker setup (Supabase lifecycle) ──
@@ -623,7 +632,7 @@ def download_unified_task(
                     all_cached = all_cached and global_media.get("cover_download_status") == "completed"
 
                 if all_cached:
-                    logger.info(f"[Download] All requested types cached for {platform_id}, skipping download")
+                    logger.info(f"[Download/Done] All requested types cached for {platform_id}, skipping download")
                     tracker.complete()
                     if unified_task_id:
                         try:
@@ -663,14 +672,20 @@ def download_unified_task(
             )
 
         # ── Common post-download: check partial failures ──
-        has_failures = any(
-            v not in (None, "completed")
-            for v in results.values()
+        completed_parts = [k for k, v in results.items() if v == "completed"]
+        failed_parts = [k for k, v in results.items() if v not in (None, "completed")]
+        skipped_parts = [k for k, v in results.items() if v is None]
+        logger.info(
+            f"[Download/Done] {platform_id}: "
+            f"completed={','.join(completed_parts) or '-'} / "
+            f"failed={','.join(failed_parts) or '-'} / "
+            f"skipped={','.join(skipped_parts) or '-'}"
         )
+
+        has_failures = len(failed_parts) > 0
         if has_failures:
-            failed_parts = [k for k, v in results.items() if v not in (None, "completed")]
             warn_msg = f"Partial failure: {', '.join(failed_parts)} did not complete"
-            logger.warning(f"[Download/{strategy}] {warn_msg}: {platform_id}")
+            logger.warning(f"[Download/Done] {warn_msg}: {platform_id}")
             tracker.complete()
             if unified_task_id:
                 try:
@@ -684,7 +699,7 @@ def download_unified_task(
                     run_async(tracker_unified.complete(unified_task_id))
                 except Exception:
                     pass
-            logger.success(f"[Download/{strategy}] Completed: {platform_id}")
+            logger.success(f"[Download/Done] All types completed: {platform_id}")
 
         # Log success
         run_async(
@@ -728,9 +743,13 @@ def download_unified_task(
                     if fresh_media.get("cover_download_path"):
                         path_updates["cover_image_path"] = fresh_media["cover_download_path"]
 
+                logger.info(
+                    f"[Download/DB] resource={resource_id}: "
+                    f"status={status_updates}, paths={list(path_updates.keys())}"
+                )
                 run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
             except Exception as e:
-                logger.warning(f"[Download] Failed to update resource status for {platform_id}: {e}")
+                logger.warning(f"[Download/DB] Failed to update resource status for {platform_id}: {e}")
 
         # Chain HLS transcode for video files
         _maybe_chain_transcode(platform_id, user_id)

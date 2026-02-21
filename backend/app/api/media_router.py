@@ -231,7 +231,7 @@ async def fetch_video(
                 status_code=400, detail="Cannot extract a valid link from input"
             )
 
-        logger.info(f"User {auth.user_id} starting video fetch: {url}")
+        logger.info(f"[Fetch/Parse] User {auth.user_id} parsing URL, url={url}")
 
         # === Points check ===
         points_service = PointsService()
@@ -377,7 +377,7 @@ async def fetch_video(
                 detail="Cannot fetch video info (both LightHTTP and BrowserAuto failed)",
             )
 
-        logger.info(f"[Parse Complete] Method used: {parse_method_name}")
+        logger.info(f"[Fetch/Parse] Complete, method={parse_method_name}, url={url}")
 
         # Parse video data (without downloading)
         parsed_data = await DouyinParser.parse_aweme_detail(
@@ -401,7 +401,7 @@ async def fetch_video(
         # Save metadata to database first (must wait for completion, otherwise Celery task can't find data)
         save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
         if not save_result.get("success"):
-            logger.error(f"Failed to save metadata: {save_result.get('message')}")
+            logger.error(f"[Fetch/Save] Failed to save metadata: {save_result.get('message')}")
             raise HTTPException(
                 status_code=500,
                 detail=save_result.get("message", "Failed to save metadata"),
@@ -410,6 +410,10 @@ async def fetch_video(
         # Download media files via shared helper
         resource_id = save_result.get("resource_id")
         dedup_hit = save_result.get("dedup_hit", False)
+        logger.info(
+            f"[Fetch/Save] platform_id={platform_id}, is_new={not dedup_hit}, "
+            f"resource_id={resource_id}"
+        )
         need_download_video = request.video_bool and not dedup_hit
 
         dispatch_result = {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
