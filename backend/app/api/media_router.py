@@ -110,6 +110,9 @@ async def fetch_video(
 
         logger.info(f"User {auth.user_id} starting video fetch: {url}")
 
+        # Cover is always downloaded (mandatory)
+        request.cover_bool = True
+
         # === Points check ===
         points_service = PointsService()
         from app.db.supabase_client import get_async_supabase_admin as _get_admin
@@ -286,18 +289,11 @@ async def fetch_video(
 
         # Download media files
         download_task_id = None
+        resource_id = save_result.get("resource_id")
         dedup_hit = save_result.get("dedup_hit", False)
         # If dedup hit, video download is already done; only need music/cover
         need_download_video = request.video_bool and not dedup_hit
         need_download = need_download_video or request.music_bool or request.cover_bool
-
-        if dedup_hit:
-            # Auto-create resource record immediately for dedup hits
-            background_tasks.add_task(
-                MediaService._create_resource_record,
-                platform_id,
-                auth.user_id,
-            )
 
         if need_download:
             # Try Celery, fallback to FastAPI background tasks if unavailable
@@ -314,9 +310,10 @@ async def fetch_video(
                     user_id=auth.user_id,
                     download_video=need_download_video,
                     download_music=request.music_bool,
-                    download_cover=request.cover_bool,
+                    download_cover=True,
                     media_type=media_type,
                     video_title=video_title[:50] if video_title else "undefined",
+                    resource_id=resource_id,
                 )
                 download_task_id = download_task.id
                 logger.info(f"Celery download task submitted: {download_task_id}")
@@ -356,12 +353,6 @@ async def fetch_video(
                         platform_id,
                         user_id=auth.user_id,
                     )
-                # Auto-create resource record after background downloads
-                background_tasks.add_task(
-                    MediaService._create_resource_record,
-                    platform_id,
-                    auth.user_id,
-                )
                 logger.info(f"FastAPI background download tasks added: {platform_id}")
 
         # Log action
@@ -961,8 +952,12 @@ async def retry_download(
 
         video_title = video.get("title", platform_id)[:30]
         media_type = video.get("media_type", 0)
+        media_id = video.get("id")
 
-        # Reset download status for requested media types
+        # Cover is always re-downloaded on retry
+        request.cover_bool = True
+
+        # Reset download status on global parsed_media
         status_updates: dict = {"error_message": None}
         if request.video_bool:
             status_updates["video_download_status"] = DownloadStatus.PENDING.value
@@ -970,6 +965,26 @@ async def retry_download(
             status_updates["music_download_status"] = DownloadStatus.PENDING.value
 
         await repo.update(platform_id, status_updates)
+
+        # Look up user's resource record and reset its statuses too
+        resource_id = None
+        if media_id:
+            from app.repositories.resources_repository import ResourcesRepository
+            res_repo = ResourcesRepository()
+            user_resource = await res_repo.get_resource_by_media_id_and_creator(
+                media_id, auth.user_id
+            )
+            if user_resource:
+                resource_id = user_resource.get("id")
+                res_status_updates = {}
+                if request.video_bool:
+                    res_status_updates["video_download_status"] = "pending"
+                if request.music_bool:
+                    res_status_updates["music_download_status"] = "pending"
+                if request.cover_bool:
+                    res_status_updates["cover_download_status"] = "pending"
+                if res_status_updates:
+                    await res_repo.update_download_status(resource_id, res_status_updates)
 
         # Trigger Celery download task, fallback to background tasks
         download_task_id = None
@@ -986,9 +1001,10 @@ async def retry_download(
                 user_id=auth.user_id,
                 download_video=request.video_bool,
                 download_music=request.music_bool,
-                download_cover=request.cover_bool,
+                download_cover=True,
                 media_type=media_type,
                 video_title=video_title,
+                resource_id=resource_id,
             )
             download_task_id = download_task.id
             logger.info(f"Celery retry task submitted: {download_task_id}")
@@ -1284,7 +1300,7 @@ async def _handle_ytdlp_fetch(
     parsed_data["user_id"] = auth.user_id
     parsed_data["need_download_video"] = request.video_bool
     parsed_data["need_download_music"] = request.music_bool
-    parsed_data["need_download_cover"] = request.cover_bool
+    parsed_data["need_download_cover"] = True  # cover always downloaded
 
     # Step 3: Save metadata to database
     save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
@@ -1295,9 +1311,11 @@ async def _handle_ytdlp_fetch(
             detail=save_result.get("message", "Failed to save metadata"),
         )
 
+    resource_id = save_result.get("resource_id")
+
     # Step 4: Dispatch download tasks
     download_task_id = None
-    need_download = request.video_bool or request.music_bool or request.cover_bool
+    need_download = request.video_bool or request.music_bool or True  # cover always
 
     if need_download:
         # Try Celery first, fallback to FastAPI background tasks
@@ -1315,8 +1333,9 @@ async def _handle_ytdlp_fetch(
                 user_id=auth.user_id,
                 download_video=request.video_bool,
                 download_music=request.music_bool,
-                download_cover=request.cover_bool,
+                download_cover=True,
                 video_title=video_title[:50] if video_title else "undefined",
+                resource_id=resource_id,
             )
             download_task_id = download_task.id
             logger.info(f"[yt-dlp] Celery download task submitted: {download_task_id}")
@@ -1406,9 +1425,6 @@ async def _handle_ytdlp_fetch(
                             platform_id, user_id=user_id
                         )
 
-                    # Auto-create resource record
-                    await MediaService._create_resource_record(platform_id, user_id)
-
                     # Mark task completed
                     if unified_task_id:
                         try:
@@ -1424,7 +1440,6 @@ async def _handle_ytdlp_fetch(
                             "video_download_status": DownloadStatus.FAILED.value,
                             "error_message": str(e)[:500],
                         },
-                        user_id=user_id,
                     )
                     # Mark task failed
                     if unified_task_id:
