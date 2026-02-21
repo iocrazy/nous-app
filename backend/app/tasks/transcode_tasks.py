@@ -29,7 +29,7 @@ def run_async(coro):
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = None):
+def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = None, _dedup_key: str = None):
     """
     Celery task: transcode a resource version to HLS multi-bitrate.
 
@@ -37,10 +37,15 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         resource_id: Resource UUID
         version_id: ResourceVersion UUID
         user_id: Optional user ID for unified task tracking
+        _dedup_key: Optional dedup key for orchestrator signal handlers.
 
     Returns:
         dict with status and hls_path
     """
+    # Store orchestrator keys in request for signal handlers
+    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
+    self.request.kwargs['_dedup_key'] = _dedup_key
+
     task_id = self.request.id
     logger.info(f"[Transcode] Starting HLS transcode: resource={resource_id}, version={version_id}")
 
@@ -59,6 +64,7 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 celery_task_id=task_id,
             ))
             run_async(tracker.start(unified_task_id))
+            self.request.kwargs['_unified_task_id'] = unified_task_id
         except Exception as e:
             logger.warning(f"[Transcode] Unified tracker create failed: {e}")
 
@@ -140,6 +146,25 @@ def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str, u
     if not mime_type or not mime_type.startswith("video/"):
         return
 
+    # ── Orchestrator dedup check ──
+    dedup_key = None
+    try:
+        from app.services.task_orchestrator import get_orchestrator
+        orchestrator = get_orchestrator()
+        result = run_async(orchestrator.acquire_or_subscribe(
+            task_type="transcode",
+            dedup_identifier=version_id,
+            user_id=user_id or "",
+            resource_id=resource_id,
+        ))
+        dedup_key = result.get("dedup_key")
+
+        if result["action"] in ("subscribed", "completed"):
+            logger.info(f"[Transcode] Dedup hit for version {version_id}: {result['action']}")
+            return
+    except Exception as e:
+        logger.warning(f"[Transcode] Dedup check failed, proceeding normally: {e}")
+
     try:
         # Mark as pending first
         from app.repositories.resources_repository import ResourcesRepository
@@ -147,7 +172,7 @@ def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str, u
         run_async(repo.update_version(version_id, {"transcode_status": "pending"}))
 
         # Dispatch Celery task
-        transcode_to_hls.delay(resource_id, version_id, user_id)
+        transcode_to_hls.delay(resource_id, version_id, user_id, _dedup_key=dedup_key)
         logger.info(
             f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
         )
