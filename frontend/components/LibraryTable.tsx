@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import Hls from 'hls.js';
 import { Video } from '../types';
 import {
-  Video as VideoIcon, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
+  Video as VideoIcon, Image as ImageIcon, Music, Tag, Check, X, ExternalLink,
   Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play,
   FileText, Sparkles, Eye
 } from 'lucide-react';
@@ -59,8 +59,6 @@ const getAIStatusClass = (status?: string): string => {
 };
 
 export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick }) => {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ notes: string }>({ notes: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
@@ -118,26 +116,6 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
       }
     };
   }, [activeMedia]);
-
-  const startEditing = (item: Video) => {
-    setEditingId(item.platform_id);
-    setEditForm({
-      notes: item.notes || ''
-    });
-  };
-
-  const cancelEditing = () => {
-    setEditingId(null);
-    setEditForm({ notes: '' });
-  };
-
-  const saveEditing = (id: string) => {
-    onUpdate(id, {
-      notes: editForm.notes
-    });
-    setEditingId(null);
-  };
-
 
   const handleSort = (key: SortKey) => {
     let direction: 'asc' | 'desc' = 'desc'; // Default to descending (highest first)
@@ -420,8 +398,6 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
               </th>
 
               <th className="px-4 py-4 w-1/6">Tags</th>
-              <th className="px-4 py-4 w-1/6">Notes</th>
-              <th className="px-4 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -565,49 +541,6 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                         );
                     })()}
                   </div>
-                </td>
-                <td className="px-4 py-4">
-                  {editingId === item.platform_id ? (
-                    <textarea 
-                      value={editForm.notes}
-                      onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
-                      placeholder="Add notes..."
-                      rows={2}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-indigo-500 resize-none text-xs"
-                    />
-                  ) : (
-                    <p className="text-xs text-zinc-400 line-clamp-2" title={item.notes}>
-                      {item.notes || <span className="text-zinc-600 italic">No notes</span>}
-                    </p>
-                  )}
-                </td>
-                <td className="px-4 py-4 text-right">
-                  {editingId === item.platform_id ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => saveEditing(item.platform_id)}
-                        className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded hover:bg-indigo-600/30 transition-colors"
-                        title="Save"
-                      >
-                        <Check size={14} />
-                      </button>
-                      <button 
-                        onClick={cancelEditing}
-                        className="p-1.5 bg-red-600/20 text-red-400 rounded hover:bg-red-600/30 transition-colors"
-                        title="Cancel"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => startEditing(item)}
-                      className="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                  )}
                 </td>
               </tr>
             ))}

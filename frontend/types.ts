@@ -63,9 +63,7 @@ export interface ParsedMedia {
   error_message?: string;
   download_time?: string;
 
-  // User Data
-  notes?: string;
-  rating?: number; // 0-5 star rating
+  // User Data (rating/notes are in resources table, not parsed_media)
   tags?: string[];
 
   // AI Processing Status
