@@ -291,21 +291,32 @@ export function ParserPage() {
 
       {!currentResult && batchResults.length === 0 && !isParsing && taskProgress === 0 && (
         <div className="grid grid-cols-3 gap-3 mt-8">
-           <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
+           <div className={`p-3 md:p-5 rounded-xl bg-zinc-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 ${
+              systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                ? 'border-red-800/60' : 'border-zinc-800/50 hover:border-zinc-700'
+           }`}>
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
-                systemStatus?.queue.status === 'offline' ? 'bg-red-900/30 text-red-400' :
+                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                  ? 'bg-red-900/30 text-red-400' :
                 systemStatus?.queue.active ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
               }`}>
                 <ListVideo size={16} className="md:hidden" />
                 <ListVideo size={20} className="hidden md:block" />
               </div>
-              <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Queue</h4>
+              <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Worker</h4>
               <p className={`text-xs md:text-sm font-mono ${
-                systemStatus?.queue.status === 'offline' ? 'text-red-400' :
-                systemStatus?.queue.active ? 'text-indigo-400' : 'text-zinc-500'
+                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                  ? 'text-red-400' :
+                systemStatus?.queue.active ? 'text-indigo-400' : 'text-green-400'
               }`}>
                 {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
               </p>
+              {systemStatus?.queue.status === 'outdated' && (
+                <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Restart worker</p>
+              )}
+              {systemStatus?.queue.status === 'offline' && (
+                <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Start worker</p>
+              )}
               {systemStatus?.queue.pending ? (
                 <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">{systemStatus.queue.pending} pending</p>
               ) : null}
