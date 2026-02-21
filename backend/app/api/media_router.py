@@ -296,34 +296,37 @@ async def fetch_video(
         need_download = need_download_video or request.music_bool or request.cover_bool
 
         if need_download:
-            # ── Orchestrator dedup check ──
+            # ── Orchestrator dedup check (video downloads only) ──
+            # Music/cover downloads are cheap and idempotent; only video
+            # downloads are expensive enough to warrant dedup protection.
             orchestrator_result = None
             dedup_key = None
-            try:
-                from app.services.task_orchestrator import get_orchestrator
-                orchestrator = get_orchestrator()
-                orchestrator_result = await orchestrator.acquire_or_subscribe(
-                    task_type="download",
-                    dedup_identifier=platform_id,
-                    user_id=auth.user_id,
-                    resource_id=resource_id,
-                )
-                dedup_key = orchestrator_result.get("dedup_key")
+            if need_download_video:
+                try:
+                    from app.services.task_orchestrator import get_orchestrator
+                    orchestrator = get_orchestrator()
+                    orchestrator_result = await orchestrator.acquire_or_subscribe(
+                        task_type="download",
+                        dedup_identifier=platform_id,
+                        user_id=auth.user_id,
+                        resource_id=resource_id,
+                    )
+                    dedup_key = orchestrator_result.get("dedup_key")
 
-                if orchestrator_result["action"] == "subscribed":
-                    logger.info(
-                        f"[Orchestrator] Subscribed to existing download for {platform_id}"
-                    )
-                    download_task_id = f"subscribed:{orchestrator_result['task_id']}"
-                    need_download = False
-                elif orchestrator_result["action"] == "completed":
-                    logger.info(
-                        f"[Orchestrator] Download already completed for {platform_id}"
-                    )
-                    download_task_id = f"completed:{orchestrator_result.get('task_id', '')}"
-                    need_download = False
-            except Exception as e:
-                logger.warning(f"[Orchestrator] Dedup check failed, proceeding normally: {e}")
+                    if orchestrator_result["action"] == "subscribed":
+                        logger.info(
+                            f"[Orchestrator] Subscribed to existing download for {platform_id}"
+                        )
+                        download_task_id = f"subscribed:{orchestrator_result['task_id']}"
+                        need_download = False
+                    elif orchestrator_result["action"] == "completed":
+                        logger.info(
+                            f"[Orchestrator] Download already completed for {platform_id}"
+                        )
+                        download_task_id = f"completed:{orchestrator_result.get('task_id', '')}"
+                        need_download = False
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Dedup check failed, proceeding normally: {e}")
 
             # ── Dispatch Celery task (only if not deduped) ──
             if need_download:
