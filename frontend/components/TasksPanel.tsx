@@ -23,10 +23,14 @@ import {
   useTaskManager,
   TaskType,
   TaskStatus,
+  TaskPhase,
   UnifiedTask,
   formatSpeed,
   formatFileSize,
   taskTypeLabel,
+  taskPhaseLabel,
+  isRetryable,
+  errorCodeMessage,
   getTaskCategory,
 } from '../contexts/TaskManagerContext';
 // ─── Helpers ──────────────────────────────────────────
@@ -434,8 +438,11 @@ const TaskRow: React.FC<{
         <div className="flex items-center gap-1.5">
           {getStatusIcon(task.status)}
           <span className={`text-xs capitalize ${getStatusColor(task.status)}`}>
-            {task.status}
+            {task.phase ? taskPhaseLabel(task.phase) : task.status}
           </span>
+          {task.phase === 'dedup_check' && (
+            <span className="text-[10px] text-blue-400 animate-pulse">●</span>
+          )}
         </div>
       </td>
       {/* Task title + subtitle */}
@@ -446,6 +453,11 @@ const TaskRow: React.FC<{
           </div>
           {task.subtitle && (
             <div className="text-[11px] text-zinc-500 truncate">{task.subtitle}</div>
+          )}
+          {task.status === 'failed' && task.error_code && (
+            <div className="text-[11px] text-red-400/70 truncate">
+              {errorCodeMessage(task.error_code)}
+            </div>
           )}
         </div>
       </td>
@@ -484,7 +496,7 @@ const TaskRow: React.FC<{
       {/* Actions */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-0.5">
-          {task.status === 'failed' && (
+          {task.status === 'failed' && isRetryable(task.error_code) && (
             <button
               onClick={onRetry}
               className="p-1.5 hover:bg-zinc-700 rounded transition-colors"
