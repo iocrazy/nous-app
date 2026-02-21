@@ -18,6 +18,8 @@ export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
+export type TaskPhase = 'queued' | 'dedup_check' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
 export interface UnifiedTask {
   id: string;
   user_id: string;
@@ -40,6 +42,10 @@ export interface UnifiedTask {
   started_at?: string;
   completed_at?: string;
   updated_at?: string;
+  phase?: TaskPhase;
+  dedup_key?: string;
+  subscribers?: Array<{ user_id: string; resource_id: string; subscribed_at: string }>;
+  error_code?: string;
 }
 
 /** Map task_type to its high-level category */
@@ -386,4 +392,35 @@ export function getTaskGroups(tasks: UnifiedTask[]): Map<string, UnifiedTask[]> 
     }
   }
   return groups;
+}
+
+export function taskPhaseLabel(phase?: TaskPhase): string {
+  switch (phase) {
+    case 'queued': return 'Queued';
+    case 'dedup_check': return 'Checking...';
+    case 'processing': return 'Processing';
+    case 'completed': return 'Done';
+    case 'failed': return 'Failed';
+    case 'cancelled': return 'Cancelled';
+    default: return '';
+  }
+}
+
+export function isRetryable(errorCode?: string): boolean {
+  if (!errorCode) return true;
+  const nonRetryable = ['RESOURCE_404', 'STORAGE_FULL', 'TRANSCODE_FAILED', 'AI_QUOTA_EXCEEDED'];
+  return !nonRetryable.includes(errorCode);
+}
+
+export function errorCodeMessage(errorCode?: string): string {
+  const messages: Record<string, string> = {
+    'NETWORK_TIMEOUT': 'Network timeout, will auto-retry',
+    'RESOURCE_404': 'Source deleted or unavailable',
+    'STORAGE_FULL': 'Storage full, please free space',
+    'RATE_LIMITED': 'Rate limited, retrying...',
+    'TRANSCODE_FAILED': 'Transcode failed: unsupported format',
+    'AI_QUOTA_EXCEEDED': 'AI quota exceeded',
+    'UNKNOWN': 'Unexpected error',
+  };
+  return messages[errorCode || ''] || errorCode || 'Unknown error';
 }
