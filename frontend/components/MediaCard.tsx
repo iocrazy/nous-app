@@ -880,7 +880,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
              </div>
 
-             {data.need_download_music && (
+             {data.music_download_status && data.music_download_status !== 'skipped' && data.music_download_status !== 'SKIPPED' && (
                <button
                  onClick={onDownloadAudio}
                  className="w-full flex items-between justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"

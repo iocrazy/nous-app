@@ -14,6 +14,7 @@ export interface ParsedMedia {
   // Media Identity
   id?: string;  // Snowflake BIGINT primary key (was UUID, migrated in 059)
   platform_id: string;
+  /** @deprecated — parsed_media is now global, user_id will be removed */
   user_id?: string;
 
   // Platform info
@@ -39,25 +40,24 @@ export interface ParsedMedia {
   description?: string;
 
   // Download Info
-  need_download_video?: boolean;
   video_download_urls?: string[];
   image_download_urls?: string[];
 
   // Audio Info
   music_download_urls?: string[];
   music_name?: string;
-  need_download_music?: boolean;
 
   // Cover Info
   cover_urls?: string[];
   dynamic_cover_url?: string;
-  need_download_cover?: boolean;
   cover_download_status?: DownloadStatus;
   cover_download_path?: string;
 
   // Tracking
   video_download_status?: DownloadStatus;
   music_download_status?: DownloadStatus;
+  image_download_status?: DownloadStatus;
+  image_download_path?: string;
   download_duration?: number;
   download_path?: string;
   error_message?: string;
@@ -304,6 +304,11 @@ export interface Resource {
   notes: string | null;
   url: string | null;
   rating: number; // 0-5
+  // Per-user download status
+  video_download_status: string | null;
+  music_download_status: string | null;
+  cover_download_status: string | null;
+  image_download_status: string | null;
   // AI Processing Status (moved from ParsedMedia to Resource)
   transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
