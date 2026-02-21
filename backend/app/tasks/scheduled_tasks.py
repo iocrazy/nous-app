@@ -412,6 +412,59 @@ def health_check():
     return result
 
 
+@shared_task(name="app.tasks.scheduled_tasks.recover_stale_orchestrator_locks")
+def recover_stale_orchestrator_locks():
+    """Recover orphaned dedup locks by checking unified_tasks.
+
+    Scans for tasks stuck in 'processing' phase for more than 1 hour
+    and marks them as failed with NETWORK_TIMEOUT error code.
+    Runs every hour via Celery Beat.
+    """
+    logger.info("[Celery Beat] Starting stale orchestrator lock recovery...")
+
+    try:
+        from datetime import timezone
+
+        from app.services.task_orchestrator import TaskPhase, get_orchestrator
+
+        async def _recover():
+            orchestrator = get_orchestrator()
+            client = await orchestrator._get_client()
+
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+            stale = await (
+                client.table("unified_tasks")
+                .select("id, dedup_key")
+                .eq("phase", "processing")
+                .lt("started_at", cutoff)
+                .execute()
+            )
+
+            recovered = 0
+            for task in (stale.data or []):
+                try:
+                    await orchestrator.transition(
+                        task["id"], TaskPhase.FAILED, error_code="NETWORK_TIMEOUT"
+                    )
+                    if task.get("dedup_key"):
+                        orchestrator.release_lock(task["dedup_key"])
+                    recovered += 1
+                    logger.info(f"[Recovery] Marked stale task {task['id']} as failed")
+                except Exception as e:
+                    logger.warning(f"[Recovery] Failed to recover task {task['id']}: {e}")
+
+            return recovered
+
+        count = run_async(_recover())
+        logger.success(f"[Celery Beat] Stale lock recovery complete: {count} tasks recovered")
+        return {"status": "success", "recovered": count}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Stale lock recovery failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
 @shared_task
 def cleanup_trashed_resources():
     """Permanently delete trashed resources older than 15 days."""
