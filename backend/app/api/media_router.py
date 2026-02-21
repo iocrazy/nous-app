@@ -343,7 +343,7 @@ async def fetch_video(
                         user_id=auth.user_id,
                         download_video=need_download_video,
                         download_music=request.music_bool,
-                        download_cover=True,
+                        download_cover=request.cover_bool,
                         media_type=media_type,
                         video_title=video_title[:50] if video_title else "undefined",
                         resource_id=resource_id,
