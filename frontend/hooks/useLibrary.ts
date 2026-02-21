@@ -232,21 +232,35 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           const newRecord = payload.new as Video;
           const oldRecord = payload.old as Video;
 
-          if (payload.eventType === 'INSERT' && newRecord.user_id === user.id) {
+          if (payload.eventType === 'INSERT') {
+            // parsed_media is global — verify ownership via resources table
+            const mediaId = newRecord.id;
+            if (!mediaId) return;
+            const { data: resource } = await supabase
+              .from('resources')
+              .select('id')
+              .eq('media_id', mediaId)
+              .eq('creator_id', user.id)
+              .maybeSingle();
+            if (!resource) return; // Not our media
             setLibrary(prev => {
               if (prev.find(item => item.platform_id === newRecord.platform_id)) return prev;
               return [newRecord, ...prev];
             });
-          } else if (payload.eventType === 'UPDATE' && newRecord.user_id === user.id) {
-            setLibrary(prev =>
-              prev.map(item => item.platform_id === newRecord.platform_id ? newRecord : item)
-            );
+          } else if (payload.eventType === 'UPDATE') {
+            // Only update if this video is already in our library
+            setLibrary(prev => {
+              const exists = prev.some(item => item.platform_id === newRecord.platform_id);
+              if (!exists) return prev;
+              return prev.map(item => item.platform_id === newRecord.platform_id ? newRecord : item);
+            });
             setSelectedLibraryItem(prev =>
               prev?.platform_id === newRecord.platform_id ? newRecord : prev
             );
             onVideoRealtimeUpdate?.(newRecord);
-          } else if (payload.eventType === 'DELETE' && oldRecord?.user_id === user.id) {
-            setLibrary(prev => prev.filter(item => item.platform_id !== oldRecord.platform_id));
+          } else if (payload.eventType === 'DELETE') {
+            // Remove from library if present (regardless of ownership)
+            setLibrary(prev => prev.filter(item => item.platform_id !== oldRecord?.platform_id));
           }
         }
       )

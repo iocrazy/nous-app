@@ -305,15 +305,30 @@ class CleanupService:
 
         return suggestions[:limit]
 
+    async def _get_user_media_ids(self, user_id: str) -> list:
+        """Get user's media IDs via resources table."""
+        client = await self._get_client()
+        result = (
+            await client.table("resources")
+            .select("media_id")
+            .eq("creator_id", user_id)
+            .eq("is_trashed", False)
+            .execute()
+        )
+        return [r["media_id"] for r in result.data if r.get("media_id")]
+
     async def _query_never_viewed(self, user_id: str, cutoff: str) -> List[dict]:
         """Query never viewed videos."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return []
         result = (
             await client.table("parsed_media")
             .select(
                 "id, title, cover_url, author, storage_size, created_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .eq("view_count", 0)
             .lt("created_at", cutoff)
@@ -325,12 +340,15 @@ class CleanupService:
     async def _query_old_unused(self, user_id: str, cutoff: str) -> List[dict]:
         """Query old unused videos."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return []
         result = (
             await client.table("parsed_media")
             .select(
                 "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .gt("view_count", 0)
             .lt("last_viewed_at", cutoff)
@@ -342,18 +360,11 @@ class CleanupService:
     async def _query_large_files(self, user_id: str) -> List[dict]:
         """Query large files."""
         client = await self._get_client()
-
-        # Get total count
-        count_result = (
-            await client.table("parsed_media")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        total = count_result.count or 0
-
-        if total == 0:
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
             return []
+
+        total = len(media_ids)
 
         # Get top N by size
         top_n = max(int(total * 0.1), 5)
@@ -363,7 +374,7 @@ class CleanupService:
             .select(
                 "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .not_.is_("storage_size", "null")
             .order("storage_size", desc=True)
@@ -457,10 +468,18 @@ class CleanupService:
     async def _get_cleanup_stats_fallback(self, user_id: str) -> dict:
         """Fallback stats calculation."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return {
+                "total_videos": 0, "total_storage_bytes": 0,
+                "videos_never_viewed": 0, "videos_not_viewed_30_days": 0,
+                "potential_duplicates": 0, "videos_marked_keep": 0,
+                "reclaimable_bytes": 0,
+            }
         total_result = (
             await client.table("parsed_media")
             .select("id, storage_size, view_count, last_viewed_at, keep_forever")
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .execute()
         )
 
@@ -501,25 +520,43 @@ class CleanupService:
     async def mark_keep_forever(self, media_id: int, user_id: str) -> bool:
         """Mark a media item to keep forever (exclude from suggestions)."""
         client = await self._get_client()
+        # Verify ownership via resources table
+        resource = (
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .eq("creator_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not resource.data:
+            return False
         result = (
             await client.table("parsed_media")
             .update({"keep_forever": True})
             .eq("id", media_id)
-            .eq("user_id", user_id)
             .execute()
         )
-
         return len(result.data) > 0
 
     async def unmark_keep_forever(self, media_id: int, user_id: str) -> bool:
         """Remove keep forever mark from a media item."""
         client = await self._get_client()
+        # Verify ownership via resources table
+        resource = (
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .eq("creator_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not resource.data:
+            return False
         result = (
             await client.table("parsed_media")
             .update({"keep_forever": False})
             .eq("id", media_id)
-            .eq("user_id", user_id)
             .execute()
         )
-
         return len(result.data) > 0
