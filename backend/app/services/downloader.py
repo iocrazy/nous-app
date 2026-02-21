@@ -733,6 +733,7 @@ class DownloaderService:
             except ValueError as e:
                 logger.error(f"Failed to retrieve music data: {e}")
                 result.error = str(e)
+                result.music_download_status = DownloadStatus.FAILED
                 return result
 
             # Get music URL list from dict

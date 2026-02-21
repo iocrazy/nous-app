@@ -583,14 +583,29 @@ def download_unified_task(
                 tracker=tracker,
             )
 
-        # ── Common post-download: mark complete ──
-        tracker.complete()
-        if unified_task_id:
-            try:
-                run_async(tracker_unified.complete(unified_task_id))
-            except Exception:
-                pass
-        logger.success(f"[Download/{strategy}] Completed: {platform_id}")
+        # ── Common post-download: check partial failures ──
+        has_failures = any(
+            v not in (None, "completed")
+            for v in results.values()
+        )
+        if has_failures:
+            failed_parts = [k for k, v in results.items() if v not in (None, "completed")]
+            warn_msg = f"Partial failure: {', '.join(failed_parts)} did not complete"
+            logger.warning(f"[Download/{strategy}] {warn_msg}: {platform_id}")
+            tracker.complete()
+            if unified_task_id:
+                try:
+                    run_async(tracker_unified.fail(unified_task_id, warn_msg))
+                except Exception:
+                    pass
+        else:
+            tracker.complete()
+            if unified_task_id:
+                try:
+                    run_async(tracker_unified.complete(unified_task_id))
+                except Exception:
+                    pass
+            logger.success(f"[Download/{strategy}] Completed: {platform_id}")
 
         # Log success
         run_async(
@@ -604,7 +619,7 @@ def download_unified_task(
             )
         )
 
-        # ── Update user resource download statuses ──
+        # ── Update user resource download statuses based on actual results ──
         if resource_id:
             try:
                 from app.repositories.media_repository import MediaRepository as _MR2
@@ -614,14 +629,17 @@ def download_unified_task(
                 path_updates = {}
 
                 if download_video:
+                    video_result = results.get("video")
                     if int(media_type) in (2, 68):
-                        status_updates["image_download_status"] = "completed"
+                        status_updates["image_download_status"] = video_result if video_result == "completed" else "failed"
                     else:
-                        status_updates["video_download_status"] = "completed"
+                        status_updates["video_download_status"] = video_result if video_result == "completed" else "failed"
                 if download_music:
-                    status_updates["music_download_status"] = "completed"
+                    music_result = results.get("music")
+                    status_updates["music_download_status"] = music_result if music_result == "completed" else "failed"
                 if download_cover:
-                    status_updates["cover_download_status"] = "completed"
+                    cover_result = results.get("cover")
+                    status_updates["cover_download_status"] = cover_result if cover_result == "completed" else "failed"
 
                 # Also update file paths on resource
                 fresh_media = run_async(_MR2().get_by_platform_id(platform_id))
