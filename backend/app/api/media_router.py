@@ -695,7 +695,7 @@ async def list_videos(
     """
     try:
         repo = MediaRepository()
-        videos = await repo.get_all(
+        videos = await repo.get_user_media_list(
             user_id=auth.user_id,
             skip=skip,
             limit=limit,
@@ -725,6 +725,22 @@ async def get_video(platform_id: str, auth: AuthDep):
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+
+        # Merge user's resource download statuses
+        media_id = video.get("id")
+        if media_id:
+            from app.repositories.resources_repository import ResourcesRepository
+            res_repo = ResourcesRepository()
+            user_resource = await res_repo.get_resource_by_media_id_and_creator(
+                media_id, auth.user_id
+            )
+            if user_resource:
+                video["resource_id"] = user_resource["id"]
+                for field in ("video_download_status", "music_download_status",
+                              "cover_download_status", "image_download_status"):
+                    user_status = user_resource.get(field)
+                    if user_status is not None:
+                        video[field] = user_status
 
         return {"success": True, "video": video}
     except HTTPException:
