@@ -81,6 +81,10 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.cleanup_old_unified_tasks",
             "schedule": 86400.0,  # 每天执行一次
         },
+        "recover-stale-orchestrator-locks-hourly": {
+            "task": "app.tasks.scheduled_tasks.recover_stale_orchestrator_locks",
+            "schedule": 3600.0,  # Every hour
+        },
     },
 )
 
