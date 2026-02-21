@@ -619,6 +619,144 @@ async def fetch_video(
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {str(e)}")
 
 
+@router.post("/{platform_id}/fetch", tags=TAGS_FETCH)
+async def fetch_media_by_type(
+    platform_id: str,
+    request: "MediaTypeFetchRequest",
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
+):
+    """
+    Fetch specific media types for an already-parsed video.
+
+    Unlike POST /fetch (first-time parse), this endpoint does NOT re-parse
+    the original URL. It uses existing metadata to trigger downloads for
+    the requested types.
+
+    - **platform_id**: The media's platform identifier
+    - **types**: List of types to fetch: "video", "music", "cover", "image"
+
+    Authentication: Bearer Token or API Key
+    """
+    from app.schemas.media import MediaTypeFetchRequest as _MTFR  # noqa: F811
+
+    # Validate request body
+    if not isinstance(request, _MTFR):
+        request = _MTFR(**request.dict() if hasattr(request, "dict") else request)
+
+    try:
+        logger.info(
+            f"[Download/Init] User {auth.user_id} requesting {request.types} "
+            f"for {platform_id}"
+        )
+
+        # 1) Load existing parsed_media
+        repo = MediaRepository()
+        media = await repo.get_by_platform_id(platform_id)
+        if not media:
+            raise HTTPException(status_code=404, detail="Media not found. Use POST /videos/fetch first.")
+
+        media_id = media.get("id")
+        media_type = media.get("media_type", 0)
+        video_title = media.get("title", platform_id)
+
+        # 2) Points check
+        points_service = PointsService()
+        from app.db.supabase_client import get_async_supabase_admin as _get_admin
+        _admin = await _get_admin()
+        _tm = (
+            await _admin.table("team_members")
+            .select("team_id")
+            .eq("user_id", auth.user_id)
+            .limit(1)
+            .execute()
+        )
+        _team_id = _tm.data[0]["team_id"] if _tm.data else None
+        _points_cost = 0
+        if _team_id:
+            await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
+            points_result = await points_service.check_and_consume(
+                team_id=_team_id,
+                user_id=auth.user_id,
+                action_type="video_parse",
+            )
+            if not points_result["success"]:
+                raise HTTPException(status_code=402, detail=points_result["reason"])
+            _points_cost = points_result.get("points_cost", 0)
+
+        # 3) Ensure user resource record exists
+        from app.repositories.resources_repository import ResourcesRepository
+
+        resources_repo = ResourcesRepository()
+        user_resource = await resources_repo.get_resource_by_media_id_and_creator(
+            media_id, auth.user_id
+        )
+        resource_id = user_resource.get("id") if user_resource else None
+
+        if not resource_id:
+            # Create a minimal resource record
+            resource_id = await MediaService._ensure_user_resource(
+                resources_repo=resources_repo,
+                media_id=media_id,
+                user_id=auth.user_id,
+                parsed_data=media,
+                need_download_video="video" in request.types or "image" in request.types,
+                need_download_music="music" in request.types,
+                need_download_cover="cover" in request.types,
+                is_image_type=int(media_type) in (2, 68),
+                dedup_hit=False,
+                existing_media=media,
+            )
+        else:
+            # Update status for newly requested types (skipped -> pending)
+            status_updates = {}
+            for t in request.types:
+                status_field = f"{t}_download_status"
+                if user_resource.get(status_field) == "skipped":
+                    status_updates[status_field] = "pending"
+            if status_updates:
+                await resources_repo.update_download_status(resource_id, status_updates)
+
+        # 4) Dedup + dispatch
+        dispatch_result = await _dedup_and_dispatch(
+            platform_id=platform_id,
+            user_id=auth.user_id,
+            resource_id=resource_id,
+            media_type=int(media_type) if str(media_type).isdigit() else 0,
+            video_title=video_title,
+            download_video="video" in request.types or "image" in request.types,
+            download_music="music" in request.types,
+            download_cover="cover" in request.types,
+            background_tasks=background_tasks,
+        )
+
+        # 5) Log action
+        background_tasks.add_task(
+            log_user_action,
+            user_id=auth.user_id,
+            action="fetch",
+            message=f"Fetch {request.types} for {video_title[:30]}...",
+            status="success",
+            aweme_id=platform_id,
+        )
+
+        return {
+            "success": True,
+            "message": "Fetch submitted",
+            "platform_id": platform_id,
+            "download_task_id": dispatch_result["task_id"],
+            "types_submitted": dispatch_result["types_submitted"],
+            "types_skipped": dispatch_result["types_skipped"],
+            "types_subscribed": dispatch_result["types_subscribed"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Download/Init] Failed: {platform_id}, error: {e}")
+        raise HTTPException(status_code=500, detail=f"Fetch failed: {str(e)}")
+
+
 @router.post("/fetch/batch", tags=TAGS_FETCH)
 async def fetch_videos_batch(
     request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
