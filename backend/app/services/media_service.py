@@ -134,7 +134,7 @@ class MediaService:
             repo = MediaRepository()
 
             # Check current user's video status (with user_id for data isolation)
-            existing_video = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            existing_video = await repo.get_by_platform_id(platform_id)
             data_exists = existing_video is not None
 
             # If current user doesn't have this video but it exists (belongs to another user), create new record
@@ -387,7 +387,7 @@ class MediaService:
             from app.services.resources_service import ResourcesService
 
             repo = MediaRepository()
-            media = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            media = await repo.get_by_platform_id(platform_id)
             if not media:
                 return
 
@@ -470,7 +470,7 @@ class MediaService:
             data_dict = video_data.model_dump()
 
             # Check if already exists
-            existing_video = await repo.get_by_platform_id(platform_id, user_id=user_id)
+            existing_video = await repo.get_by_platform_id(platform_id)
 
             # Cross-user dedup check: reuse files if another user already downloaded
             dedup_hit = False
@@ -505,33 +505,54 @@ class MediaService:
                             f"[Dedup] Reusing existing download for {platform_id}"
                         )
 
-            # Set download status to PENDING (waiting for Celery task to download)
-            if need_download_video:
-                data_dict["video_download_status"] = DownloadStatus.PENDING.value
-            elif not dedup_hit:
-                data_dict["video_download_status"] = DownloadStatus.SKIPPED.value
-
-            if need_download_music:
-                data_dict["music_download_status"] = DownloadStatus.PENDING.value
-            else:
-                data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
+            # Set download status based on request flags
+            need_download_cover = parsed_data.get("need_download_cover", False)
 
             media_id = None
             if existing_video:
-                # Update existing record
+                # Re-fetch: only set PENDING for requested types, don't touch others
                 media_id = existing_video.get("id")
-                exclude_keys = ["download_duration"]
+                if need_download_video:
+                    data_dict["video_download_status"] = DownloadStatus.PENDING.value
+                if need_download_music:
+                    data_dict["music_download_status"] = DownloadStatus.PENDING.value
+                if need_download_cover:
+                    data_dict["cover_download_status"] = DownloadStatus.PENDING.value
+
+                # Exclude fields that shouldn't overwrite existing values
+                exclude_keys = {"download_duration"}
                 if not dedup_hit:
-                    exclude_keys.append("download_path")
+                    exclude_keys.add("download_path")
+                # Preserve existing status/path for media types not being re-fetched
+                if not need_download_video and not dedup_hit:
+                    exclude_keys.update({"video_download_status", "download_path"})
+                if not need_download_music:
+                    exclude_keys.add("music_download_status")
+                if not need_download_cover and not dedup_hit:
+                    exclude_keys.update({"cover_download_status", "cover_download_path"})
+
                 update_data = {
                     k: v
                     for k, v in data_dict.items()
-                    if k not in exclude_keys
+                    if k not in exclude_keys and v is not None
                 }
                 await repo.update(platform_id, update_data)
                 message = f"媒体 {platform_id}_{title} 元数据已更新"
             else:
-                # Create new record
+                # New record: set PENDING for requested types, SKIPPED for others
+                if need_download_video:
+                    data_dict["video_download_status"] = DownloadStatus.PENDING.value
+                elif not dedup_hit:
+                    data_dict["video_download_status"] = DownloadStatus.SKIPPED.value
+                if need_download_music:
+                    data_dict["music_download_status"] = DownloadStatus.PENDING.value
+                else:
+                    data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
+                if need_download_cover:
+                    data_dict["cover_download_status"] = DownloadStatus.PENDING.value
+                else:
+                    data_dict["cover_download_status"] = DownloadStatus.SKIPPED.value
+
                 result = await repo.create(data_dict)
                 media_id = result.get("id") if result else None
                 message = f"媒体 {platform_id}_{title} 元数据已创建"

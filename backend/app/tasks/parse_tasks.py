@@ -118,7 +118,7 @@ def parse_single_link_task(
         repo = MediaRepository()
 
         # Check if exists
-        existing = run_async(repo.get_by_platform_id(platform_id, user_id=user_id))
+        existing = run_async(repo.get_by_platform_id(platform_id))
 
         # Prepare data
         try:

@@ -368,7 +368,7 @@ class DownloaderService:
 
             # Get video data
             try:
-                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+                video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
                 logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
@@ -533,7 +533,7 @@ class DownloaderService:
 
             # Get video data
             try:
-                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+                video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
                 logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
@@ -856,7 +856,7 @@ class DownloaderService:
 
             # Get video data
             try:
-                video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
+                video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
                 logger.error(f"DB query failed for cover {platform_id}: {db_err}", exc_info=True)
                 result.cover_download_status = DownloadStatus.FAILED
