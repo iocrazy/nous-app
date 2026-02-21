@@ -83,3 +83,6 @@ celery_app.conf.update(
         },
     },
 )
+
+# Register signal handlers (decorators auto-connect on import)
+import app.tasks.signals  # noqa: F401, E402
