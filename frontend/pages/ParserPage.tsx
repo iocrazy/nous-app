@@ -176,24 +176,17 @@ export function ParserPage() {
           </div>
         </button>
 
-        <button
-          onClick={() => setDownloadOptions(prev => ({ ...prev, cover: !prev.cover }))}
-          className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
-            downloadOptions.cover
-              ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
-              : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
-          }`}
-        >
-          <div className={`w-5 h-5 rounded flex items-center justify-center border flex-shrink-0 transition-colors ${
-            downloadOptions.cover ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600 bg-zinc-900'
-          }`}>
-            {downloadOptions.cover && <Check size={14} className="text-white" />}
+        {/* Cover is always downloaded — show as locked-on indicator */}
+        <div className="flex items-center gap-3 p-3.5 rounded-xl border bg-emerald-500/10 border-emerald-500/40 text-emerald-300 cursor-default">
+          <div className="w-5 h-5 rounded flex items-center justify-center border flex-shrink-0 bg-emerald-500 border-emerald-500">
+            <Check size={14} className="text-white" />
           </div>
           <div className="flex items-center gap-2">
             <ImageIcon size={16} />
             <span className="text-sm font-medium">{t('parser.downloadCover')}</span>
+            <span className="text-[10px] text-emerald-400/70">Always</span>
           </div>
-        </button>
+        </div>
       </div>
 
       {/* Tag Selector */}
