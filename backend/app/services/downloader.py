@@ -296,6 +296,8 @@ class DownloaderService:
                     )
 
                     if response.status_code == 200:
+                        content_len = len(response.content)
+                        logger.info(f"[Download/File] HTTP 200, content_length={content_len}, saving to {os.path.basename(file_path)}")
                         async with aiofiles.open(file_path, mode="wb") as f:
                             await f.write(response.content)
 
@@ -332,12 +334,13 @@ class DownloaderService:
                         return True
                     else:
                         logger.warning(
-                            f"下载失败 {url}, 状态码: {response.status_code}"
+                            f"[Download/File] HTTP {response.status_code} for {url[:100]}..., "
+                            f"headers={dict(response.headers)}"
                         )
                         return False
 
         except Exception as e:
-            logger.error(f"下载出错 {url}: {str(e)}")
+            logger.error(f"[Download/File] Exception downloading {url[:100]}...: {type(e).__name__}: {str(e)}")
             if progress_tracker:
                 progress_tracker.failed(str(e))
             return False
@@ -738,6 +741,16 @@ class DownloaderService:
 
             # Get music URL list from dict (guard against None from DB)
             music_urls = music_data.get("music_download_urls") or []
+            logger.info(
+                f"[Music/Diag] {platform_id}: found {len(music_urls)} music URLs, "
+                f"music_name={music_data.get('music_name', 'N/A')}"
+            )
+            if music_urls:
+                for i, u in enumerate(music_urls):
+                    logger.debug(f"[Music/Diag] {platform_id}: URL[{i}]={u[:120]}...")
+
+            if not music_urls:
+                logger.warning(f"[Music/Diag] {platform_id}: NO music URLs in DB — music download will fail")
 
             # Create structured path: global/resources/web/{platform}/{platform_id}/
             # Note: music_data doesn't have source_platform, default to douyin
@@ -750,7 +763,8 @@ class DownloaderService:
             music_relative_path = f"{relative_prefix}/music.mp3"
 
             # Try to download music
-            for url in music_urls:
+            for idx, url in enumerate(music_urls):
+                logger.info(f"[Music/Diag] {platform_id}: trying URL[{idx}] → {url[:80]}...")
                 if await DownloaderService.download_file(url, music_full_path, headers):
                     try:
                         await repo.mark_music_as_downloaded(platform_id)

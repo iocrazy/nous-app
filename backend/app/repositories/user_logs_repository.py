@@ -112,6 +112,95 @@ class UserLogsRepository:
             logger.error(f"获取日志记录失败: {e}")
             return []
 
+    async def get_paginated(
+        self,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 50,
+        level: Optional[str] = None,
+        date_range: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get paginated and filtered logs.
+
+        Returns:
+            Dict with 'logs', 'total', 'page', 'page_size', 'total_pages'
+        """
+        from datetime import datetime, timedelta
+
+        try:
+            table = await self._get_table()
+
+            # Count query
+            count_query = table.select("id", count="exact").eq("user_id", user_id)
+            # Data query
+            data_query = (
+                table.select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+            )
+
+            # Filter by status/level
+            if level and level != "all":
+                count_query = count_query.eq("status", level)
+                data_query = data_query.eq("status", level)
+
+            # Filter by date range
+            date_from = None
+            if date_range and date_range != "custom":
+                days_map = {"24h": 1, "7days": 7, "30days": 30, "90days": 90}
+                days = days_map.get(date_range)
+                if days:
+                    date_from = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            elif start_date:
+                date_from = start_date
+
+            if date_from:
+                count_query = count_query.gte("created_at", date_from)
+                data_query = data_query.gte("created_at", date_from)
+
+            if end_date:
+                count_query = count_query.lte("created_at", end_date)
+                data_query = data_query.lte("created_at", end_date)
+
+            # Search filter
+            if search:
+                count_query = count_query.ilike("message", f"%{search}%")
+                data_query = data_query.ilike("message", f"%{search}%")
+
+            # Execute count
+            count_result = await count_query.execute()
+            total = count_result.count if count_result.count is not None else 0
+
+            # Pagination
+            offset = (page - 1) * page_size
+            data_query = data_query.range(offset, offset + page_size - 1)
+
+            result = await data_query.execute()
+            logs = result.data or []
+            total_pages = max(1, (total + page_size - 1) // page_size)
+
+            return {
+                "logs": logs,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+
+        except Exception as e:
+            logger.error(f"获取分页日志失败: {e}")
+            return {
+                "logs": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": 1,
+            }
+
     async def get_by_aweme_id(
         self, user_id: str, aweme_id: str, limit: int = 10
     ) -> List[Dict]:

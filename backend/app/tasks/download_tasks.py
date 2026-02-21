@@ -239,10 +239,14 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
     missing_types = []
     for t in needed_types:
         field = url_fields.get(t)
-        if field and not media.get(field):
+        val = media.get(field)
+        has_urls = bool(val) and (isinstance(val, list) and len(val) > 0 if isinstance(val, list) else True)
+        logger.info(f"[Download/URL] Check {t}: field={field}, has_urls={has_urls}, type={type(val).__name__}")
+        if field and not has_urls:
             missing_types.append(t)
 
     if not missing_types:
+        logger.info(f"[Download/URL] All needed URLs available for {platform_id}")
         return media
 
     logger.info(
@@ -259,20 +263,69 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         from app.services.lightweight_parser import LightweightParser
         from app.services.douyin_parser import DouyinParser
 
+        # --- Attempt 1: LightweightParser (fast HTTP, no browser) ---
         aweme_detail = run_async(LightweightParser.parse(original_url))
-        if not aweme_detail:
-            logger.warning(f"[Download/URL] Re-parse returned empty for {platform_id}")
-            return media
+        parse_method = "LightHTTP"
 
-        new_parsed = run_async(DouyinParser.parse_aweme_detail(
-            aweme_detail=aweme_detail,
-            valid_url=original_url,
-            download_video=True,
-            download_music=True,
-            download_cover=True,
-        ))
+        if aweme_detail:
+            new_parsed = run_async(DouyinParser.parse_aweme_detail(
+                aweme_detail=aweme_detail,
+                valid_url=original_url,
+                download_video=True,
+                download_music=True,
+                download_cover=True,
+            ))
+        else:
+            new_parsed = None
+
+        # Check which types are still missing after LightHTTP
+        still_missing = []
+        if new_parsed:
+            for t in missing_types:
+                field = url_fields.get(t)
+                if field and not new_parsed.get(field):
+                    still_missing.append(t)
+        else:
+            still_missing = list(missing_types)
+
+        # --- Attempt 2: DouyinAnalysis browser fallback (if still missing) ---
+        if still_missing:
+            logger.info(
+                f"[Download/URL] LightHTTP still missing {still_missing}, "
+                f"falling back to BrowserAuto for {platform_id}"
+            )
+            try:
+                from app.services.douyin_analysis import DouyinAnalysis
+
+                browser_detail = run_async(DouyinAnalysis.fetch_one_video(original_url))
+                if browser_detail:
+                    parse_method = "BrowserAuto"
+                    browser_parsed = run_async(DouyinParser.parse_aweme_detail(
+                        aweme_detail=browser_detail,
+                        valid_url=original_url,
+                        download_video=True,
+                        download_music=True,
+                        download_cover=True,
+                    ))
+                    if browser_parsed:
+                        # Merge browser results into new_parsed (browser data wins)
+                        if new_parsed:
+                            for t in still_missing:
+                                field = url_fields.get(t)
+                                if field and browser_parsed.get(field):
+                                    new_parsed[field] = browser_parsed[field]
+                        else:
+                            new_parsed = browser_parsed
+                        logger.info(f"[Download/URL] BrowserAuto re-parse succeeded for {platform_id}")
+                    else:
+                        logger.warning(f"[Download/URL] BrowserAuto parse yielded no data for {platform_id}")
+                else:
+                    logger.warning(f"[Download/URL] BrowserAuto returned empty for {platform_id}")
+            except Exception as e:
+                logger.warning(f"[Download/URL] BrowserAuto fallback failed for {platform_id}: {e}")
+
         if not new_parsed:
-            logger.warning(f"[Download/URL] Re-parse yielded no data for {platform_id}")
+            logger.warning(f"[Download/URL] All re-parse attempts failed for {platform_id}")
             return media
 
         # Update DB with refreshed URLs
@@ -283,7 +336,10 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
             if field and new_parsed.get(field):
                 update_fields[field] = new_parsed[field]
                 media[field] = new_parsed[field]
-                logger.info(f"[Download/URL] Refreshed {field} for {platform_id} ({len(new_parsed[field])} URLs)")
+                logger.info(
+                    f"[Download/URL] Refreshed {field} for {platform_id} "
+                    f"({len(new_parsed[field])} URLs, via {parse_method})"
+                )
 
         if update_fields:
             run_async(_MR().update(platform_id, update_fields))
@@ -322,6 +378,13 @@ def _do_douyin_download(
         if download_cover:
             needed.append("cover")
         media = _ensure_download_urls(platform_id, media, needed)
+        # Diagnostic: log URL availability after ensure
+        for t in needed:
+            url_field = {"video": "video_download_urls", "music": "music_download_urls",
+                         "cover": "cover_urls", "image": "image_download_urls"}.get(t)
+            urls = media.get(url_field) if url_field else None
+            url_count = len(urls) if urls else 0
+            logger.info(f"[Download/Diag] {t}: {url_count} URLs available for {platform_id} (field={url_field})")
 
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
@@ -353,7 +416,11 @@ def _do_douyin_download(
                 if hasattr(result, "music_download_status")
                 else "unknown"
             )
-            logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
+            if results["music"] != "completed":
+                error_msg = getattr(result, "error", None) or "Music download failed"
+                logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
+            else:
+                logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too

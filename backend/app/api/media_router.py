@@ -27,6 +27,7 @@ from app.services.douyin_parser import DouyinParser
 from app.services.lightweight_parser import LightweightParser
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
+from app.schemas.media import MediaTypeFetchRequest
 from app.services.media_service import MediaService
 from app.services.ytdlp_service import YtdlpService
 
@@ -541,7 +542,7 @@ async def fetch_video(
 @router.post("/{platform_id}/fetch", tags=TAGS_FETCH)
 async def fetch_media_by_type(
     platform_id: str,
-    request: "MediaTypeFetchRequest",
+    request: MediaTypeFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
 ):
@@ -557,12 +558,6 @@ async def fetch_media_by_type(
 
     Authentication: Bearer Token or API Key
     """
-    from app.schemas.media import MediaTypeFetchRequest as _MTFR  # noqa: F811
-
-    # Validate request body
-    if not isinstance(request, _MTFR):
-        request = _MTFR(**request.dict() if hasattr(request, "dict") else request)
-
     try:
         logger.info(
             f"[Download/Init] User {auth.user_id} requesting {request.types} "
@@ -636,7 +631,15 @@ async def fetch_media_by_type(
             if status_updates:
                 await resources_repo.update_download_status(resource_id, status_updates)
 
-        # 4) Dedup + dispatch
+        # 4) Detect platform: pass URL for yt-dlp platforms so Celery uses the right strategy
+        original_url = media.get("original_url")
+        dispatch_url = None
+        if original_url:
+            _, handler_type = URLRouter.detect_platform(original_url)
+            if handler_type == "ytdlp":
+                dispatch_url = original_url
+
+        # 5) Dedup + dispatch
         dispatch_result = await _dedup_and_dispatch(
             platform_id=platform_id,
             user_id=auth.user_id,
@@ -646,10 +649,11 @@ async def fetch_media_by_type(
             download_video="video" in request.types or "image" in request.types,
             download_music="music" in request.types,
             download_cover="cover" in request.types,
+            url=dispatch_url,
             background_tasks=background_tasks,
         )
 
-        # 5) Log action
+        # 6) Log action
         background_tasks.add_task(
             log_user_action,
             user_id=auth.user_id,
@@ -1469,23 +1473,32 @@ async def download_music_file(platform_id: str, auth: AuthDep):
 @router.get("/logs", tags=TAGS_LOGS)
 async def get_user_logs(
     auth: AuthDep,
-    limit: int = Query(20, ge=1, le=100),
-    action: Optional[str] = Query(None, description="Filter by action type"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    level: Optional[str] = Query(None, description="Filter by status level"),
+    date_range: Optional[str] = Query(None, description="Preset date range: 24h, 7days, 30days, 90days"),
+    start_date: Optional[str] = Query(None, description="Custom start date (ISO)"),
+    end_date: Optional[str] = Query(None, description="Custom end date (ISO)"),
+    search: Optional[str] = Query(None, description="Search in message"),
 ):
     """
-    Get user action logs
-
-    Returns user's recent action log records.
-
-    - **limit**: Number of records (1-100)
-    - **action**: Filter specific action type (fetch, download, delete, retry, update)
+    Get user action logs (paginated)
 
     Authentication: Bearer Token or API Key
     """
     try:
         repo = UserLogsRepository()
-        logs = await repo.get_recent(user_id=auth.user_id, limit=limit, action=action)
-        return {"success": True, "count": len(logs), "logs": logs}
+        result = await repo.get_paginated(
+            user_id=auth.user_id,
+            page=page,
+            page_size=page_size,
+            level=level,
+            date_range=date_range,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+        )
+        return {"success": True, **result}
     except Exception as e:
         logger.error(f"Failed to get user logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user logs")
