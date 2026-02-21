@@ -101,17 +101,36 @@ export const getStreamUrl = (hlsPath: string): string => {
 };
 
 /**
+ * Check if a URL is a direct playable media URL (not a webpage).
+ * Webpage URLs from platforms like bilibili/youtube can't be used as <video src>.
+ */
+export const isPlayableUrl = (url: string): boolean => {
+  try {
+    const host = new URL(url).hostname;
+    const pageHosts = [
+      'www.bilibili.com', 'bilibili.com',
+      'www.youtube.com', 'youtube.com', 'youtu.be',
+      'www.douyin.com', 'douyin.com',
+      'www.tiktok.com', 'tiktok.com',
+      'www.xiaohongshu.com', 'xiaohongshu.com',
+      'twitter.com', 'x.com',
+    ];
+    return !pageHosts.includes(host);
+  } catch {
+    // Not a valid URL (likely a relative path) — treat as playable
+    return true;
+  }
+};
+
+/**
  * Get video playback URL
- * Priority: HLS > download_path > video_download_urls[0] > original_url
+ * Priority: HLS > download_path > video_download_urls[0] (if playable) > undefined
+ * Note: original_url is NOT used as video src — it's typically a webpage URL.
  */
 export const getVideoUrl = (data: {
   media_format?: string;
   hls_path?: string;
   download_path?: string;
-  video_download_urls?: string[];
-  original_url?: string;
-  // Legacy field support
-  video_original_url?: string;
 }): string | undefined => {
   // HLS format: return stream URL
   if (data.media_format === 'hls' && data.hls_path) {
@@ -121,12 +140,9 @@ export const getVideoUrl = (data: {
   if (data.download_path && data.download_path !== '#') {
     return convertPathToUrl(data.download_path);
   }
-  // video_download_urls
-  if (data.video_download_urls?.[0] && data.video_download_urls[0] !== '#') {
-    return data.video_download_urls[0];
-  }
-  // original_url (new field) or video_original_url (legacy)
-  return data.original_url || data.video_original_url;
+  // Only play verified local files (HLS or download_path).
+  // CDN URLs (video_download_urls) are not used — can't confirm download succeeded.
+  return undefined;
 };
 
 /**

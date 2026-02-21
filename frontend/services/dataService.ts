@@ -83,6 +83,13 @@ export const getCoverDownloadUrl = (platformId: string): string => {
 };
 
 /**
+ * Get music/audio download URL
+ */
+export const getMusicDownloadUrl = (platformId: string): string => {
+  return `${getApiUrl()}/api/v1/videos/download/${platformId}/music`;
+};
+
+/**
  * Fetch a single video by platform_id
  */
 export const fetchVideoByPlatformId = async (platformId: string): Promise<ParsedMedia | null> => {

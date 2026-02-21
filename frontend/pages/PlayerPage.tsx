@@ -3,14 +3,15 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
   Share2, Download, MoreHorizontal, ExternalLink, Copy,
-  Video as VideoIcon, Image as ImageIcon, Music,
+  Video as VideoIcon, Image as ImageIcon, Music, CloudDownload,
 } from 'lucide-react';
 import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
-import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
-import { getVideoUrl, getCoverUrl, isVideoType } from '../utils/awemeType';
+import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
+import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
+import { parseShareLink } from '../services/parserService';
 import { useToast } from '../components/Toast';
 
 const MIN_PANEL_WIDTH = 380;
@@ -33,6 +34,7 @@ export function PlayerPage() {
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
   const { addToast } = useToast();
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
@@ -89,42 +91,69 @@ export function PlayerPage() {
     });
   }, [displayId]);
 
-  // Toolbar download handler
+  // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
-    if (!video) return;
+    if (!video?.platform_id) return;
     setShowDownloadMenu(false);
     setIsDownloading(true);
-    const cbs = {
-      onSuccess: (f: string) => addToast(`Downloaded: ${f}`, 'success'),
-      onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
-    };
+    const onSuccess = (f: string) => addToast(`Downloaded: ${f}`, 'success');
     try {
+      let ok = false;
       if (type === 'video') {
-        if (video.video_download_status?.toLowerCase() === 'completed' && video.platform_id) {
-          const ok = await downloadWithAuth(getDownloadUrl(video.platform_id), `${video.platform_id}.mp4`, { onSuccess: cbs.onSuccess });
-          if (ok) return;
-        }
-        const vUrl = getVideoUrl(video);
-        if (vUrl) await downloadFile(vUrl, `${video.platform_id || 'video'}.mp4`, cbs);
-        else addToast('No video file available', 'error');
+        ok = await downloadWithAuth(getDownloadUrl(video.platform_id), `${video.platform_id}.mp4`, { onSuccess });
+        if (!ok) addToast('Video file not available for download', 'error');
       } else if (type === 'cover') {
-        if (video.cover_download_status?.toLowerCase() === 'completed' && video.platform_id) {
-          const ok = await downloadWithAuth(getCoverDownloadUrl(video.platform_id), `${video.platform_id}_cover.jpg`, { onSuccess: cbs.onSuccess });
-          if (ok) return;
-        }
-        const cUrl = getCoverUrl(video);
-        if (cUrl) await downloadFile(cUrl, `${video.platform_id || 'cover'}_cover.jpg`, cbs);
-        else addToast('No cover file available', 'error');
+        ok = await downloadWithAuth(getCoverDownloadUrl(video.platform_id), `${video.platform_id}_cover.jpg`, { onSuccess });
+        if (!ok) addToast('Cover file not available for download', 'error');
       } else if (type === 'audio') {
-        const url = video.music_download_urls?.[0];
-        if (url && url !== '#') await downloadFile(url, `${video.platform_id || 'audio'}.mp3`, cbs);
+        ok = await downloadWithAuth(getMusicDownloadUrl(video.platform_id), `${video.platform_id}_audio.mp3`, { onSuccess });
+        if (!ok) addToast('Audio file not available for download', 'error');
       } else if (type === 'images') {
-        video.image_download_urls?.forEach((url, idx) => {
-          setTimeout(() => downloadFile(url, `${video.platform_id || 'image'}_${idx + 1}.jpg`, cbs), idx * 500);
-        });
+        const urls = video.image_download_urls?.filter(u => u && u !== '#');
+        if (urls?.length) {
+          urls.forEach((url, idx) => {
+            setTimeout(() => downloadFile(url, `${video.platform_id || 'image'}_${idx + 1}.jpg`, { onSuccess }), idx * 500);
+          });
+        } else {
+          addToast('No images available for download', 'error');
+        }
       }
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleFetchMedia = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
+    if (!video?.original_url) {
+      addToast('No original URL available for fetch', 'error');
+      return;
+    }
+    setShowDownloadMenu(false);
+    setIsFetching(true);
+    try {
+      await parseShareLink(video.original_url, {
+        video_bool: !!options.video,
+        music_bool: !!options.music,
+        cover_bool: !!options.cover,
+      });
+      const items = [
+        options.video && 'Video',
+        options.cover && 'Cover',
+        options.music && 'Audio',
+      ].filter(Boolean);
+      addToast(`Fetch submitted: ${items.join(', ')}. Refreshing...`, 'success');
+      // Auto-reload video data after a short delay so download status reflects the fetch
+      setTimeout(async () => {
+        if (displayId) {
+          const data = await fetchVideoByDisplayId(displayId);
+          if (data) setVideo(data);
+        }
+      }, 3000);
+    } catch (error) {
+      console.error('Fetch error:', error);
+      addToast(error instanceof Error ? error.message : 'Fetch failed', 'error');
+    } finally {
+      setIsFetching(false);
     }
   };
 
@@ -209,38 +238,65 @@ export function PlayerPage() {
             <div className="relative">
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                disabled={isDownloading}
+                disabled={isDownloading || isFetching}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
               >
-                {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                 <span>Download</span>
               </button>
               {showDownloadMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowDownloadMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[160px]">
-                    <div className="py-1">
-                      {isVideoType(video.media_type) && getVideoUrl(video) && (
-                        <button onClick={() => handleToolbarDownload('video')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                          <VideoIcon size={13} className="text-indigo-400" /> Video
-                        </button>
-                      )}
-                      {video.image_download_urls && video.image_download_urls.length > 0 && (
-                        <button onClick={() => handleToolbarDownload('images')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                          <ImageIcon size={13} className="text-pink-400" /> Images ({video.image_download_urls.length})
-                        </button>
-                      )}
-                      {getCoverUrl(video) && (
-                        <button onClick={() => handleToolbarDownload('cover')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                          <ImageIcon size={13} className="text-emerald-400" /> Cover
-                        </button>
-                      )}
-                      {video.music_download_urls?.[0] && video.music_download_urls[0] !== '#' && (
-                        <button onClick={() => handleToolbarDownload('audio')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
-                          <Music size={13} className="text-amber-400" /> Audio
-                        </button>
-                      )}
-                    </div>
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[180px]">
+                    {(() => {
+                      // "on server" = downloaded to backend storage (completed or skipped = file exists)
+                      const onServer = (status?: string) => ['completed', 'skipped'].includes(status?.toLowerCase() || '');
+                      const videoOnServer = !!video.download_path || onServer(video.video_download_status);
+                      const coverOnServer = !!video.cover_download_path || onServer(video.cover_download_status);
+                      const audioOnServer = onServer(video.music_download_status);
+                      return (
+                        <div className="py-1">
+                          {/* Video */}
+                          {isVideoType(video.media_type) && videoOnServer && (
+                            <button onClick={() => handleToolbarDownload('video')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <VideoIcon size={13} className="text-indigo-400" /> Video
+                            </button>
+                          )}
+                          {isVideoType(video.media_type) && !videoOnServer && video.original_url && (
+                            <button onClick={() => handleFetchMedia({ video: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+                            </button>
+                          )}
+                          {video.image_download_urls && video.image_download_urls.length > 0 && (
+                            <button onClick={() => handleToolbarDownload('images')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <ImageIcon size={13} className="text-pink-400" /> Images ({video.image_download_urls.length})
+                            </button>
+                          )}
+                          {/* Cover: show Download if on server, Fetch if not */}
+                          {coverOnServer && (
+                            <button onClick={() => handleToolbarDownload('cover')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <ImageIcon size={13} className="text-emerald-400" /> Cover
+                            </button>
+                          )}
+                          {!coverOnServer && video.original_url && (
+                            <button onClick={() => handleFetchMedia({ cover: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <CloudDownload size={13} className="text-emerald-400" /> Fetch Cover
+                            </button>
+                          )}
+                          {/* Audio: show Download if on server, Fetch if not */}
+                          {audioOnServer && (
+                            <button onClick={() => handleToolbarDownload('audio')} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <Music size={13} className="text-amber-400" /> Audio
+                            </button>
+                          )}
+                          {!audioOnServer && video.original_url && (
+                            <button onClick={() => handleFetchMedia({ music: true })} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors">
+                              <CloudDownload size={13} className="text-amber-400" /> Fetch Audio
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </>
               )}
@@ -290,12 +346,33 @@ export function PlayerPage() {
         <div className="flex-1 min-h-0 flex">
           {/* Video Player — main area */}
           <div className="flex-1 min-w-0 relative">
-            <VideoPlayer
-              src={getVideoUrl(video) || ''}
-              playerRef={playerRef}
-              onTimeUpdate={handleTimeUpdate}
-              onDurationChange={handleDurationChange}
-            />
+            {getVideoUrl(video) ? (
+              <VideoPlayer
+                src={getVideoUrl(video)!}
+                playerRef={playerRef}
+                onTimeUpdate={handleTimeUpdate}
+                onDurationChange={handleDurationChange}
+              />
+            ) : (
+              <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
+                <VideoIcon size={48} className="text-zinc-600" />
+                <p className="text-zinc-400 text-sm font-medium">Video not available for streaming</p>
+                <p className="text-zinc-500 text-xs max-w-[300px] text-center">
+                  This video hasn't been downloaded yet. Use the Download button to fetch the media file.
+                </p>
+                {video.original_url && (
+                  <a
+                    href={video.original_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors"
+                  >
+                    <ExternalLink size={13} />
+                    Open Original Link
+                  </a>
+                )}
+              </div>
+            )}
             {video.author && (
               <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none">
                 {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
