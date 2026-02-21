@@ -234,7 +234,6 @@ def _do_douyin_download(
 ) -> dict:
     """Douyin download strategy: reads URLs from DB, downloads via httpx."""
     results = {"video": None, "music": None, "cover": None}
-    video_ok = False
 
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
@@ -249,15 +248,9 @@ def _do_douyin_download(
                 if hasattr(video_result, "video_download_status")
                 else "unknown"
             )
-            if hasattr(video_result, "video_download_status"):
-                video_ok = video_result.video_download_status == DownloadStatus.COMPLETED
-                if not video_ok:
-                    error_msg = (
-                        video_result.error
-                        if hasattr(video_result, "error") and video_result.error
-                        else "Download failed"
-                    )
-                    raise Exception(error_msg)
+            if results["video"] != "completed":
+                error_msg = getattr(video_result, "error", None) or "Download failed"
+                logger.warning(f"[Download] Video failed for {platform_id}: {error_msg}")
 
         if download_music:
             logger.info(f"[Download] Downloading douyin music: {platform_id}")
@@ -285,15 +278,9 @@ def _do_douyin_download(
                 if hasattr(video_result, "video_download_status")
                 else "unknown"
             )
-            if hasattr(video_result, "video_download_status"):
-                video_ok = video_result.video_download_status == DownloadStatus.COMPLETED
-                if not video_ok:
-                    error_msg = (
-                        video_result.error
-                        if hasattr(video_result, "error") and video_result.error
-                        else "Image download failed"
-                    )
-                    raise Exception(error_msg)
+            if results["video"] != "completed":
+                error_msg = getattr(video_result, "error", None) or "Image download failed"
+                logger.warning(f"[Download] Images failed for {platform_id}: {error_msg}")
 
         if download_music:
             logger.info(f"[Download] Downloading douyin music: {platform_id}")
@@ -376,7 +363,7 @@ def _do_ytdlp_download(
             results["video"] = DownloadStatus.COMPLETED.value
         else:
             results["video"] = DownloadStatus.FAILED.value
-            raise Exception("yt-dlp video download failed: no output file")
+            logger.warning(f"[Download] yt-dlp video failed for {platform_id}: no output file")
 
     if download_music:
         logger.info(f"[Download] Extracting audio via yt-dlp: {platform_id}")
