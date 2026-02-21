@@ -34,6 +34,7 @@ import {
   Presentation,
   Globe,
   Sparkles,
+  Eye,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { RipVaultView } from './RipVaultView';
@@ -1136,12 +1137,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       const resourceId = item.resource?.id;
       const items: ContextMenuItem[] = [
         {
+          label: t('resources.viewDetails', 'View Details'),
+          icon: <Eye size={14} />,
+          onClick: () => {
+            if (resourceId) navigate(resPath(`/resources/file/${resourceId}`));
+          },
+          disabled: !resourceId,
+        },
+        {
           label: t('resources.openInNewTab'),
           icon: <ExternalLink size={14} />,
           onClick: () => {
             if (resourceId) window.open(getResourceFileUrl(String(resourceId)), '_blank');
           },
           disabled: !resourceId,
+          divider: true,
         },
       ];
       if (canDo('download')) {

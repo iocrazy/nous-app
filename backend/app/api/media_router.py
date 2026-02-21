@@ -888,7 +888,7 @@ async def fetch_videos_batch(
     }
 
 
-@router.post("/videos/cleanup-stale-downloads", tags=TAGS_VIDEOS)
+@router.post("/cleanup-stale-downloads", tags=TAGS_VIDEOS)
 async def cleanup_stale_downloads(
     auth: AuthDep,
     timeout_minutes: int = Query(30, ge=5, le=120),
