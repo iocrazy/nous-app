@@ -167,6 +167,21 @@ class ResourcesRepository:
             logger.error(f"Failed to delete resource {resource_id}: {e}")
             raise
 
+    async def count_resources_by_media_id(self, media_id: str) -> int:
+        """Count how many resources reference a given parsed_media ID."""
+        try:
+            client = await self._get_client()
+            result = await (
+                client.table(self.TABLE_RESOURCES)
+                .select("id", count="exact")
+                .eq("media_id", media_id)
+                .execute()
+            )
+            return result.count or 0
+        except Exception as e:
+            logger.error(f"Failed to count resources for media {media_id}: {e}")
+            return 0
+
     # ------------------------------------------------------------------ #
     # Hash-based duplicate lookup
     # ------------------------------------------------------------------ #
@@ -517,6 +532,96 @@ class ResourcesRepository:
             logger.error(f"Failed to create folder: {e}")
             raise
 
+    async def get_trashed_folders(
+        self, scope_type: str, scope_id: str
+    ) -> List[Dict[str, Any]]:
+        """Get all trashed folders. Frontend handles root-level filtering."""
+        try:
+            client = await self._get_client()
+            result = await (
+                client.table(self.TABLE_FOLDERS)
+                .select("*")
+                .eq("scope_type", scope_type)
+                .eq("scope_id", scope_id)
+                .eq("is_trashed", True)
+                .order("trashed_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get trashed folders: {e}")
+            return []
+
+    async def restore_folder_cascade(self, folder_id: str) -> Dict[str, int]:
+        """Restore a folder, all descendant folders, and their resources."""
+        restore_data = {"is_trashed": False, "trashed_at": None}
+        restored_resources = 0
+        restored_folders = 0
+
+        try:
+            client = await self._get_client()
+
+            # Get all descendant trashed folders
+            all_ids: List[str] = [folder_id]
+            queue = [folder_id]
+            while queue:
+                parent_id = queue.pop(0)
+                result = await (
+                    client.table(self.TABLE_FOLDERS)
+                    .select("id")
+                    .eq("parent_id", parent_id)
+                    .eq("is_trashed", True)
+                    .execute()
+                )
+                for row in result.data or []:
+                    child_id = str(row["id"])
+                    all_ids.append(child_id)
+                    queue.append(child_id)
+
+            # 1. Restore resources in all affected folders
+            for fid in all_ids:
+                items_result = await (
+                    client.table(self.TABLE_ITEMS)
+                    .select("resource_id")
+                    .eq("folder_id", fid)
+                    .execute()
+                )
+                resource_ids = [
+                    str(item["resource_id"])
+                    for item in (items_result.data or [])
+                ]
+                for rid in resource_ids:
+                    await (
+                        client.table(self.TABLE_RESOURCES)
+                        .update(restore_data)
+                        .eq("id", rid)
+                        .eq("is_trashed", True)
+                        .execute()
+                    )
+                    restored_resources += 1
+
+            # 2. Restore all folders
+            for fid in all_ids:
+                await (
+                    client.table(self.TABLE_FOLDERS)
+                    .update(restore_data)
+                    .eq("id", fid)
+                    .execute()
+                )
+                restored_folders += 1
+
+            logger.info(
+                f"Cascade-restored folder {folder_id}: "
+                f"{restored_folders} folders, {restored_resources} resources"
+            )
+            return {
+                "restored_folders": restored_folders,
+                "restored_resources": restored_resources,
+            }
+        except Exception as e:
+            logger.error(f"Failed to cascade-restore folder {folder_id}: {e}")
+            raise
+
     async def get_folders(
         self, scope_type: str, scope_id: str, include_trashed: bool = False
     ) -> List[Dict[str, Any]]:
@@ -566,6 +671,115 @@ class ResourcesRepository:
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"Failed to update folder {folder_id}: {e}")
+            raise
+
+    async def get_descendant_folder_ids(self, folder_id: str) -> List[str]:
+        """Recursively get all descendant folder IDs (children, grandchildren, etc.)."""
+        all_ids: List[str] = []
+        queue = [folder_id]
+        try:
+            client = await self._get_client()
+            while queue:
+                parent_id = queue.pop(0)
+                result = await (
+                    client.table(self.TABLE_FOLDERS)
+                    .select("id")
+                    .eq("parent_id", parent_id)
+                    .eq("is_trashed", False)
+                    .execute()
+                )
+                for row in result.data or []:
+                    child_id = str(row["id"])
+                    all_ids.append(child_id)
+                    queue.append(child_id)
+            return all_ids
+        except Exception as e:
+            logger.error(f"Failed to get descendant folders for {folder_id}: {e}")
+            return []
+
+    async def count_folder_contents(
+        self, folder_ids: List[str]
+    ) -> Dict[str, int]:
+        """Count resources and sub-folders within the given folder IDs."""
+        try:
+            client = await self._get_client()
+            # Count resources via resource_items
+            resource_count = 0
+            for fid in folder_ids:
+                result = await (
+                    client.table(self.TABLE_ITEMS)
+                    .select("id", count="exact")
+                    .eq("folder_id", fid)
+                    .execute()
+                )
+                resource_count += result.count or 0
+            # Count sub-folders (excluding the root folder itself)
+            subfolder_count = len(folder_ids) - 1 if len(folder_ids) > 1 else 0
+            return {
+                "resource_count": resource_count,
+                "subfolder_count": subfolder_count,
+            }
+        except Exception as e:
+            logger.error(f"Failed to count folder contents: {e}")
+            return {"resource_count": 0, "subfolder_count": 0}
+
+    async def trash_folder_cascade(self, folder_id: str) -> Dict[str, int]:
+        """Trash a folder, all descendant folders, and their resources."""
+        now = datetime.now(timezone.utc).isoformat()
+        trash_data = {"is_trashed": True, "trashed_at": now}
+
+        descendant_ids = await self.get_descendant_folder_ids(folder_id)
+        all_folder_ids = [folder_id] + descendant_ids
+
+        trashed_resources = 0
+        trashed_folders = 0
+
+        try:
+            client = await self._get_client()
+
+            # 1. Trash resources in all affected folders
+            for fid in all_folder_ids:
+                # Get resource_ids in this folder
+                items_result = await (
+                    client.table(self.TABLE_ITEMS)
+                    .select("resource_id")
+                    .eq("folder_id", fid)
+                    .execute()
+                )
+                resource_ids = [
+                    str(item["resource_id"])
+                    for item in (items_result.data or [])
+                ]
+                for rid in resource_ids:
+                    await (
+                        client.table(self.TABLE_RESOURCES)
+                        .update(trash_data)
+                        .eq("id", rid)
+                        .eq("is_trashed", False)
+                        .execute()
+                    )
+                    trashed_resources += 1
+
+            # 2. Trash all folders (descendants first, then root)
+            for fid in reversed(all_folder_ids):
+                await (
+                    client.table(self.TABLE_FOLDERS)
+                    .update(trash_data)
+                    .eq("id", fid)
+                    .execute()
+                )
+                trashed_folders += 1
+
+            logger.info(
+                f"Cascade-trashed folder {folder_id}: "
+                f"{trashed_folders} folders, {trashed_resources} resources"
+            )
+            return {
+                "trashed_folders": trashed_folders,
+                "trashed_resources": trashed_resources,
+            }
+        except Exception as e:
+            logger.error(f"Failed to cascade-trash folder {folder_id}: {e}")
             raise
 
     async def delete_folder(self, folder_id: str) -> bool:

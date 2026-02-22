@@ -91,12 +91,45 @@ export async function updateResource(
 }
 
 export async function trashFolder(id: string): Promise<void> {
-  const { error } = await supabase
-    .from('folders')
-    .update({ is_trashed: true, trashed_at: new Date().toISOString() })
-    .eq('id', id);
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/trash`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to trash folder');
+}
 
-  if (error) throw error;
+export async function getFolderContentCount(id: string): Promise<{ resource_count: number; subfolder_count: number }> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/content-count`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to get folder content count');
+  const json = await response.json();
+  return json.data;
+}
+
+export async function fetchTrashedFolders(
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+): Promise<Folder[]> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/trash/folders?scope_type=${scopeType}&scope_id=${scopeId}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error('Failed to fetch trashed folders');
+  const json = await response.json();
+  return json.data || [];
+}
+
+export async function restoreFolder(id: string): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/restore`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to restore folder');
 }
 
 // Build folder tree from flat list
