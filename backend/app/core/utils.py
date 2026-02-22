@@ -44,23 +44,28 @@ class Utils:
         return valid_urls
 
     @classmethod
-    def setup_logging(cls):
-        """
-        配置loguru日志系统
-        - 输出到控制台（INFO级别）
-        - 输出到文件（INFO级别，自动轮转）
-        """
-        # 创建logs目录
+    def get_log_dir(cls) -> Path:
+        """Return the logs directory path (backend/logs/)."""
         log_dir = Path(settings.ROOT_DIR) / "logs"
         os.makedirs(log_dir, exist_ok=True)
+        return log_dir
 
-        # 日志文件路径
-        log_file = log_dir / "app.log"
+    @classmethod
+    def setup_logging(cls, log_name: str = "app"):
+        """
+        Configure loguru logging system.
 
-        # 移除默认的处理器
+        Args:
+            log_name: Log file name (without extension). E.g. "app", "celery".
+                      Writes to backend/logs/{log_name}.log
+        """
+        log_dir = cls.get_log_dir()
+        log_file = log_dir / f"{log_name}.log"
+
+        # Remove default handlers
         logger.remove()
 
-        # 添加控制台处理器
+        # Console handler
         logger.add(
             sys.stderr,
             level="INFO",
@@ -72,18 +77,18 @@ class Utils:
             ),
         )
 
-        # 添加文件处理器
+        # File handler
         logger.add(
             log_file,
-            rotation="10 MB",  # 当日志文件达到10MB时轮转
-            retention="1 month",  # 保留1个月的日志
-            compression="zip",  # 压缩旧日志
+            rotation="10 MB",
+            retention="1 month",
+            compression="zip",
             level="INFO",
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
             encoding="utf-8",
         )
 
-        logger.info(f"日志系统初始化完成，日志文件: {log_file}")
+        logger.info(f"Logging initialized: {log_file}")
 
     """文件处理工具类"""
 
