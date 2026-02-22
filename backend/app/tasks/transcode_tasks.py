@@ -7,25 +7,10 @@ Async task for transcoding video resources to multi-bitrate HLS.
 Triggered after upload or parser download for video/* mime types.
 """
 
-import asyncio
-
 from celery import shared_task
 from loguru import logger
 
-
-def run_async(coro):
-    """Run async coroutine in synchronous Celery environment."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)

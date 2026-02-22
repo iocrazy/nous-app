@@ -7,29 +7,13 @@ Tasks for audio extraction, transcription, summary generation,
 and visual analysis. Designed to be chained after media download.
 """
 
-import asyncio
 import os
 
 from celery import shared_task
 from loguru import logger
 
 from app.repositories.user_logs_repository import log_user_action
-
-
-def run_async(coro):
-    """Run async coroutine in synchronous Celery worker context."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 def _get_ai_settings(user_id: str) -> dict:
