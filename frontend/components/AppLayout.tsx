@@ -64,7 +64,7 @@ export function AppLayout() {
     teams, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
     currentTeam, userPermissions, isCreateTeamModalOpen, setIsCreateTeamModalOpen,
     isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
-    handleCreateTeam, handleTeamCreated, handleTeamUpdated,
+    handleCreateTeam, handleTeamCreated, handleTeamUpdated, handleTeamDeleted, handleTeamLeft,
     handleMarkNotificationRead, handleMarkAllNotificationsRead,
   } = useTeamContext();
 
@@ -222,6 +222,11 @@ export function AppLayout() {
         onUpdateSettings={handleUpdateSettings}
         aiSettings={aiSettings}
         onSaveAISettings={setAISettings}
+        currentTeam={currentTeam}
+        isTeamOwner={!!currentTeam && currentTeam.owner_id === currentUserId}
+        onTeamDeleted={handleTeamDeleted}
+        onTeamLeft={handleTeamLeft}
+        onTeamUpdated={handleTeamUpdated}
       />
 
       {/* Create Collection Modal */}
