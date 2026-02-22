@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
-  Share2, Download, MoreHorizontal, ExternalLink, Copy,
+  Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2, X,
   Video as VideoIcon, Image as ImageIcon, Music, CloudDownload,
 } from 'lucide-react';
 import { Video } from '../types';
@@ -13,6 +13,7 @@ import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType } from '../services/parserService';
 import { useToast } from '../components/Toast';
+import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 const MIN_PANEL_WIDTH = 380;
 const MAX_PANEL_WIDTH = 800;
@@ -33,6 +34,8 @@ export function PlayerPage() {
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const { addToast } = useToast();
@@ -91,6 +94,34 @@ export function PlayerPage() {
     });
   }, [displayId]);
 
+  // Realtime: auto-refresh when this parsed_media record is updated (e.g. download completes)
+  useEffect(() => {
+    if (!video?.id) return;
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    const channel = supabase
+      .channel(`player_media_${video.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'parsed_media',
+          filter: `id=eq.${video.id}`,
+        },
+        (payload) => {
+          console.log('[PlayerPage] Realtime update for media:', payload.new);
+          setVideo((prev) => prev ? { ...prev, ...payload.new } as Video : prev);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [video?.id]);
+
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
     if (!video?.platform_id) return;
@@ -144,14 +175,7 @@ export function PlayerPage() {
       const detail = result.types_skipped?.length
         ? ` (cached: ${result.types_skipped.join(', ')})`
         : '';
-      addToast(`Fetch submitted: ${items.join(', ')}${detail}. Refreshing...`, 'success');
-      // Auto-reload video data after a short delay so download status reflects the fetch
-      setTimeout(async () => {
-        if (displayId) {
-          const data = await fetchVideoByDisplayId(displayId);
-          if (data) setVideo(data);
-        }
-      }, 3000);
+      addToast(`Fetch submitted: ${items.join(', ')}${detail}. Will update automatically.`, 'success');
     } catch (error) {
       console.error('Fetch error:', error);
       addToast(error instanceof Error ? error.message : 'Fetch failed', 'error');
@@ -370,6 +394,16 @@ export function PlayerPage() {
                         <Copy size={13} /> Copy Link
                       </button>
                     )}
+                    <div className="border-t border-zinc-700 my-1" />
+                    <button
+                      className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        setShowDeleteDialog(true);
+                      }}
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
                   </div>
                 </>
               )}
@@ -439,6 +473,87 @@ export function PlayerPage() {
           </div>
         </div>
       </div>
+
+      {/* Move to Trash Dialog */}
+      {showDeleteDialog && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowDeleteDialog(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500/10 rounded-lg">
+                  <Trash2 className="w-5 h-5 text-amber-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
+              </div>
+              <button
+                onClick={() => setShowDeleteDialog(false)}
+                className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-sm text-zinc-400">
+                This item will be moved to the Recycle Bin. You can restore it later.
+              </p>
+              <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                <img
+                  src={(video.cover_urls?.[0]) || "https://picsum.photos/80/80"}
+                  alt="Preview"
+                  className="w-12 h-12 rounded-lg object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white font-medium truncate">
+                    {video.title || 'Untitled'}
+                  </p>
+                  <p className="text-xs text-zinc-500">@{video.author}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 px-5 py-4 bg-zinc-800/30 border-t border-zinc-800">
+              <button
+                onClick={() => setShowDeleteDialog(false)}
+                className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setIsDeleting(true);
+                  try {
+                    await handleDelete(video.id, false);
+                  } finally {
+                    setIsDeleting(false);
+                    setShowDeleteDialog(false);
+                  }
+                }}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Moving...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Move to Trash
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

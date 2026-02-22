@@ -45,6 +45,7 @@ export interface ParsedMedia {
 
   // Audio Info
   music_download_urls?: string[];
+  music_download_path?: string;
   music_name?: string;
 
   // Cover Info
