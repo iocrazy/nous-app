@@ -248,6 +248,22 @@ async def list_trashed_resources(
         raise HTTPException(status_code=500, detail="Failed to list trashed resources")
 
 
+@router.get("/trash/folders")
+async def list_trashed_folders(
+    auth: AuthDep,
+    scope_type: str = Query(..., pattern="^(personal|team)$"),
+    scope_id: str = Query(...),
+):
+    """List trashed folders in a scope."""
+    try:
+        repo = ResourcesRepository()
+        folders = await repo.get_trashed_folders(scope_type, scope_id)
+        return {"success": True, "data": folders}
+    except Exception as e:
+        logger.error(f"Failed to list trashed folders: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list trashed folders")
+
+
 # ============================================
 # Smart Folder endpoints
 # ============================================
@@ -1077,6 +1093,62 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to update folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update folder")
+
+
+@router.get("/folders/{folder_id}/content-count")
+async def get_folder_content_count(folder_id: str, auth: AuthDep):
+    """Get count of resources and sub-folders inside a folder (including nested)."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        descendant_ids = await repo.get_descendant_folder_ids(folder_id)
+        all_folder_ids = [folder_id] + descendant_ids
+        counts = await repo.count_folder_contents(all_folder_ids)
+        return {"success": True, "data": counts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to count folder contents {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to count folder contents")
+
+
+@router.post("/folders/{folder_id}/trash")
+async def trash_folder_cascade(folder_id: str, auth: AuthDep):
+    """Move a folder, all sub-folders, and their resources to the recycle bin."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        result = await repo.trash_folder_cascade(folder_id)
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to trash folder cascade {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trash folder")
+
+
+@router.post("/folders/{folder_id}/restore")
+async def restore_folder_cascade(folder_id: str, auth: AuthDep):
+    """Restore a trashed folder, all sub-folders, and their resources."""
+    try:
+        repo = ResourcesRepository()
+        folder = await repo.get_folder_by_id(folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        result = await repo.restore_folder_cascade(folder_id)
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restore folder cascade {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restore folder")
 
 
 @router.delete("/folders/{folder_id}")
