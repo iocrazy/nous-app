@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText,
+  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users,
 } from 'lucide-react';
 import { PersonalSettings } from './PersonalSettings';
 import { SettingsView } from './SettingsView';
-import { UserSettings, AISettings as AISettingsType } from '../types';
+import { TeamSettings } from './TeamSettings';
+import { UserSettings, AISettings as AISettingsType, Team } from '../types';
 
-type SettingsTab = 'personal' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs';
+type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -25,6 +26,12 @@ interface SettingsModalProps {
   onUpdateSettings: (s: UserSettings) => void;
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
+  // Team settings props (optional — shown only when in team mode)
+  currentTeam?: Team | null;
+  isTeamOwner?: boolean;
+  onTeamDeleted?: (teamId: string) => void;
+  onTeamLeft?: (teamId: string) => void;
+  onTeamUpdated?: (team: Team) => void;
 }
 
 // Nav item type
@@ -39,30 +46,37 @@ interface NavSection {
   items: NavItem[];
 }
 
-// Nav sections and items
-const NAV_SECTIONS: NavSection[] = [
-  {
-    label: 'ACCOUNT',
-    items: [
-      { id: 'personal', label: 'Personal Settings', icon: User },
-    ],
-  },
-  {
-    label: 'APP SETTINGS',
-    items: [
-      { id: 'general', label: 'General', icon: FolderOpen },
-      { id: 'api', label: 'API Management', icon: Key },
-      { id: 'logs', label: 'Logs', icon: ScrollText },
-      { id: 'tasks', label: 'Tasks', icon: ListTodo },
-      { id: 'tags', label: 'Tags', icon: Tag },
-      { id: 'ai', label: 'AI', icon: Sparkles },
-      { id: 'docs', label: 'API Docs', icon: FileText },
-    ],
-  },
-];
+// Static nav sections (team section added dynamically)
+const ACCOUNT_SECTION: NavSection = {
+  label: 'ACCOUNT',
+  items: [
+    { id: 'personal', label: 'Personal Settings', icon: User },
+  ],
+};
+
+const TEAM_SECTION: NavSection = {
+  label: 'TEAM',
+  items: [
+    { id: 'team', label: 'Team Settings', icon: Users },
+  ],
+};
+
+const APP_SETTINGS_SECTION: NavSection = {
+  label: 'APP SETTINGS',
+  items: [
+    { id: 'general', label: 'General', icon: FolderOpen },
+    { id: 'api', label: 'API Management', icon: Key },
+    { id: 'logs', label: 'Logs', icon: ScrollText },
+    { id: 'tasks', label: 'Tasks', icon: ListTodo },
+    { id: 'tags', label: 'Tags', icon: Tag },
+    { id: 'ai', label: 'AI', icon: Sparkles },
+    { id: 'docs', label: 'API Docs', icon: FileText },
+  ],
+};
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   personal: 'Personal Settings',
+  team: 'Team Settings',
   general: 'General',
   api: 'API Management',
   logs: 'Logs',
@@ -82,14 +96,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   aiSettings,
   onSaveAISettings,
+  currentTeam,
+  isTeamOwner = false,
+  onTeamDeleted,
+  onTeamLeft,
+  onTeamUpdated,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
+  // Build nav sections dynamically — show TEAM section only when in team mode
+  const navSections = useMemo<NavSection[]>(() => {
+    const sections = [ACCOUNT_SECTION];
+    if (currentTeam) {
+      sections.push(TEAM_SECTION);
+    }
+    sections.push(APP_SETTINGS_SECTION);
+    return sections;
+  }, [currentTeam]);
+
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab);
+      // If initialTab is 'team' but no team context, fall back to 'personal'
+      setActiveTab(!currentTeam && initialTab === 'team' ? 'personal' : initialTab);
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, currentTeam]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -108,7 +138,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   // Is it an app-settings tab (rendered by SettingsView)?
-  const isAppSettingsTab = activeTab !== 'personal';
+  const isAppSettingsTab = activeTab !== 'personal' && activeTab !== 'team';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -142,7 +172,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Mobile Tab Bar (scrollable) */}
         <div className="md:hidden flex overflow-x-auto border-b border-zinc-800 bg-zinc-950/30">
-          {NAV_SECTIONS.flatMap(s => s.items).map((item) => (
+          {navSections.flatMap(s => s.items).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
@@ -184,7 +214,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Navigation sections */}
           <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
-            {NAV_SECTIONS.map((section) => (
+            {navSections.map((section) => (
               <div key={section.label}>
                 <p className="px-3 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
                   {section.label}
@@ -231,6 +261,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="max-w-xl mx-auto md:mx-0">
                 <PersonalSettings user={user} onUserUpdated={onUserUpdated} />
               </div>
+            )}
+
+            {activeTab === 'team' && currentTeam && (
+              <TeamSettings
+                teamId={currentTeam.id}
+                teamName={currentTeam.name}
+                isOwner={isTeamOwner}
+                currentUserId={user.id}
+                currentUserName={user.name}
+                currentUserEmail={user.email}
+                onOpenInviteModal={() => {}}
+                onTeamDeleted={() => {
+                  onTeamDeleted?.(currentTeam.id);
+                  onClose();
+                }}
+                onTeamLeft={() => {
+                  onTeamLeft?.(currentTeam.id);
+                  onClose();
+                }}
+                onTeamUpdated={onTeamUpdated}
+              />
             )}
 
             {isAppSettingsTab && (

@@ -126,10 +126,9 @@ export const deleteTeam = async (teamId: string): Promise<void> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { error } = await supabase
-    .from('teams')
-    .delete()
-    .eq('id', teamId);
+  const { error } = await supabase.rpc('delete_team_with_cleanup', {
+    target_team_id: teamId,
+  });
 
   if (error) throw error;
 };

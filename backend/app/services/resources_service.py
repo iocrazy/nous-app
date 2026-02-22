@@ -418,20 +418,31 @@ class ResourcesService:
         if resource["creator_id"] != user_id:
             raise PermissionError("Only the creator can delete this resource")
 
-        self._delete_physical_files(resource)
-
         media_id = resource.get("media_id")
+
+        # 1. Delete resource DB record first
         result = await self.repo.delete_resource(resource_id)
 
+        # 2. Check if other resources still reference the same parsed_media
+        #    Only delete physical files + parsed_media when this was the last reference
         if media_id:
-            await self._delete_media_record(media_id)
+            remaining = await self.repo.count_resources_by_media_id(media_id)
+            if remaining == 0:
+                self._delete_physical_files(resource)
+                await self._delete_media_record(media_id)
+            else:
+                logger.info(
+                    f"Skipping file/media cleanup for media {media_id}: "
+                    f"{remaining} resource(s) still reference it"
+                )
 
         return result
 
     async def cleanup_expired_trash(self, older_than_days: int = 30) -> int:
         """
         Permanently delete trashed resources older than N days.
-        Removes physical files and database records.
+        Removes physical files and database records only when no other
+        resources reference the same parsed_media.
         Returns count of cleaned-up resources.
         """
         expired = await self.repo.get_expired_trashed_resources(older_than_days)
@@ -439,11 +450,16 @@ class ResourcesService:
 
         for resource in expired:
             try:
-                self._delete_physical_files(resource)
                 media_id = resource.get("media_id")
                 await self.repo.delete_resource(resource["id"])
+
+                # Only delete files + media when last reference is gone
                 if media_id:
-                    await self._delete_media_record(media_id)
+                    remaining = await self.repo.count_resources_by_media_id(media_id)
+                    if remaining == 0:
+                        self._delete_physical_files(resource)
+                        await self._delete_media_record(media_id)
+
                 cleaned += 1
             except Exception as e:
                 logger.error(
