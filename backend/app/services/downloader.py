@@ -767,15 +767,19 @@ class DownloaderService:
                 logger.info(f"[Music/Diag] {platform_id}: trying URL[{idx}] → {url[:80]}...")
                 if await DownloaderService.download_file(url, music_full_path, headers):
                     try:
-                        await repo.mark_music_as_downloaded(platform_id)
+                        await repo.update(
+                            platform_id,
+                            {
+                                "music_download_status": DownloadStatus.COMPLETED.value,
+                                "music_download_path": music_relative_path,
+                            },
+                        )
                     except Exception as e:
                         logger.error(
-                            f"Marked music {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
+                            f"Music {platform_id} downloaded but failed to update DB: {e}."
                         )
                         result.error = (
-                            f"Marked music {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
+                            f"Music {platform_id} downloaded but failed to update DB: {e}."
                         )
 
                     result.music_path = music_relative_path  # Return relative path

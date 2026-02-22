@@ -60,7 +60,7 @@ class CleanupService:
                     CleanupSuggestion(
                         media_id=video["media_id"],
                         title=video.get("title", ""),
-                        cover_url=video.get("cover_url"),
+                        cover_url=(video.get("cover_urls") or [None])[0],
                         author=video.get("author"),
                         reason=video.get("reason", "unknown"),
                         reason_detail=video.get("reason_detail", ""),
@@ -88,7 +88,7 @@ class CleanupService:
                                 CleanupSuggestion(
                                     media_id=dup["media_id"],
                                     title=dup.get("title", ""),
-                                    cover_url=dup.get("cover_url"),
+                                    cover_url=(dup.get("cover_urls") or [None])[0],
                                     author=dup.get("author"),
                                     reason="duplicate_content",
                                     reason_detail=f"Similar to another video ({dup['similarity_score']:.0%} match)",
@@ -166,7 +166,7 @@ class CleanupService:
                     CleanupSuggestion(
                         media_id=video["media_id"],
                         title=video.get("title", ""),
-                        cover_url=video.get("cover_url"),
+                        cover_url=(video.get("cover_urls") or [None])[0],
                         author=video.get("author"),
                         reason=reason,
                         reason_detail=video.get("reason_detail", ""),
@@ -193,7 +193,7 @@ class CleanupService:
                             CleanupSuggestion(
                                 media_id=dup["media_id"],
                                 title=dup.get("title", ""),
-                                cover_url=dup.get("cover_url"),
+                                cover_url=(dup.get("cover_urls") or [None])[0],
                                 author=dup.get("author"),
                                 reason="duplicate_content",
                                 reason_detail=f"Similar to another video ({dup['similarity_score']:.0%} match)",
@@ -326,7 +326,7 @@ class CleanupService:
         result = (
             await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, view_count"
             )
             .in_("id", media_ids)
             .eq("keep_forever", False)
@@ -346,7 +346,7 @@ class CleanupService:
         result = (
             await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
             )
             .in_("id", media_ids)
             .eq("keep_forever", False)
@@ -372,7 +372,7 @@ class CleanupService:
         result = (
             await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
             )
             .in_("id", media_ids)
             .eq("keep_forever", False)
@@ -406,7 +406,7 @@ class CleanupService:
                 CleanupSuggestion(
                     media_id=video["media_id"],
                     title=video.get("title", ""),
-                    cover_url=video.get("cover_url"),
+                    cover_url=(video.get("cover_urls") or [None])[0],
                     author=video.get("author"),
                     reason=reason,
                     reason_detail=video.get("reason_detail", ""),

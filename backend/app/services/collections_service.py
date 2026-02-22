@@ -321,7 +321,7 @@ class CollectionsService:
         result = (
             await client.table("parsed_media")
             .select(
-                "id, title, description, author, cover_url, duration, media_type, created_at, view_count, keep_forever"
+                "id, title, description, author, cover_urls, duration, media_type, created_at, view_count, keep_forever"
             )
             .in_("id", media_ids)
             .order(sort_by, desc=(sort_order == "desc"))

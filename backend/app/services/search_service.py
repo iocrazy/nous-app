@@ -87,7 +87,7 @@ class SearchService:
                     platform_id=r.get("platform_id", ""),
                     title=r.get("title", ""),
                     description=r.get("description"),
-                    cover_url=r.get("cover_url"),
+                    cover_url=(r.get("cover_urls") or [None])[0],
                     similarity=r.get("similarity", 0),
                     author=r.get("author"),
                     view_count=r.get("view_count", 0),
@@ -129,7 +129,7 @@ class SearchService:
             # Build the search query with OR conditions using Supabase's or_ filter
             # We search in: title, description, author, hashtags
             base_query = client.table("parsed_media").select(
-                "id, platform_id, title, description, cover_url, author, view_count, created_at, hashtags"
+                "id, platform_id, title, description, cover_urls, author, view_count, created_at, hashtags"
             )
 
             # Apply user filter via resources table (parsed_media is global)
@@ -215,7 +215,7 @@ class SearchService:
                         media_result = (
                             await client.table("parsed_media")
                             .select(
-                                "id, platform_id, title, description, cover_url, author, view_count, created_at"
+                                "id, platform_id, title, description, cover_urls, author, view_count, created_at"
                             )
                             .in_("id", matched_media_ids)
                             .execute()
@@ -250,7 +250,7 @@ class SearchService:
                         platform_id=video.get("platform_id", ""),
                         title=video.get("title", ""),
                         description=video.get("description"),
-                        cover_url=video.get("cover_url"),
+                        cover_url=(video.get("cover_urls") or [None])[0],
                         similarity=0.5,  # Default score for text matches
                         author=video.get("author"),
                         view_count=video.get("view_count", 0),
@@ -264,7 +264,7 @@ class SearchService:
 
         # No query, just return filtered results
         base_query = client.table("parsed_media").select(
-            "id, platform_id, title, description, cover_url, author, view_count, created_at"
+            "id, platform_id, title, description, cover_urls, author, view_count, created_at"
         )
 
         if user_id:
@@ -315,7 +315,7 @@ class SearchService:
                     platform_id=video.get("platform_id", ""),
                     title=video.get("title", ""),
                     description=video.get("description"),
-                    cover_url=video.get("cover_url"),
+                    cover_url=(video.get("cover_urls") or [None])[0],
                     similarity=1.0,  # No semantic ranking
                     author=video.get("author"),
                     view_count=video.get("view_count", 0),
@@ -375,7 +375,7 @@ class SearchService:
                         platform_id=r.get("platform_id", ""),
                         title=r.get("title", ""),
                         description=r.get("description"),
-                        cover_url=r.get("cover_url"),
+                        cover_url=(r.get("cover_urls") or [None])[0],
                         similarity=r.get("similarity", 0),
                         author=r.get("author"),
                         view_count=r.get("view_count", 0),

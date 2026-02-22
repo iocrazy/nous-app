@@ -114,7 +114,7 @@ class AnalysisRepository:
         # Get videos not in that list
         query = (
             client.table("parsed_media")
-            .select("id, title, description, cover_url")
+            .select("id, title, description, cover_urls")
             .limit(limit)
         )
 
@@ -130,7 +130,7 @@ class AnalysisRepository:
         """Get videos with a specific analysis level."""
         table = await self._get_table()
         result = (
-            await table.select("*, resources(id, title, description, cover_url)")
+            await table.select("*, resources(id, title, description)")
             .eq("analysis_level", level)
             .limit(limit)
             .execute()
