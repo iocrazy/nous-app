@@ -71,6 +71,9 @@ import {
   checkDuplicate,
   linkExistingResource,
   updateResource,
+  getFolderContentCount,
+  fetchTrashedFolders,
+  restoreFolder,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -79,6 +82,7 @@ import { createTag } from '../services/unifiedTagService';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
+import { FolderInfoPanel } from './FolderInfoPanel';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
@@ -194,6 +198,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Recycle bin
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
+  const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
+  const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
   const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
   const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
 
@@ -228,6 +234,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
   const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
   const [infoPanelWidth, setInfoPanelWidth] = useState(320);
@@ -472,15 +479,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const loadTrashedResources = useCallback(async () => {
     try {
-      const items = await fetchTrashedResources(scopeType, scopeId);
+      const [items, folders] = await Promise.all([
+        fetchTrashedResources(scopeType, scopeId),
+        fetchTrashedFolders(scopeType, scopeId),
+      ]);
       setTrashedResources(items);
+      setTrashedFolders(folders);
     } catch {
       setTrashedResources([]);
+      setTrashedFolders([]);
     }
   }, [scopeType, scopeId]);
 
   useEffect(() => {
     if (sidebarView === 'recycle') {
+      setRecycleFolderId(null);
       setLoading(true);
       loadTrashedResources().finally(() => setLoading(false));
     }
@@ -832,6 +845,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedIds(new Set());
     } else {
       setSelectedResource(item);
+      setSelectedFolder(null);
     }
   }, [selectedResource]);
 
@@ -1245,6 +1259,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         : resPath(`/resources/folder/${folder.id}`);
       const items: ContextMenuItem[] = [
         {
+          label: t('resources.getInfo', 'Get Info'),
+          icon: <Eye size={14} />,
+          onClick: () => {
+            setSelectedResource(null);
+            setSelectedFolder(folder);
+            setShowInfoPanel(true);
+          },
+        },
+        {
           label: t('resources.openInNewTab'),
           icon: <ExternalLink size={14} />,
           onClick: () => {
@@ -1273,7 +1296,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           label: t('resources.copyTo'),
           icon: <Copy size={14} />,
           onClick: () => {
-            // For folders, copy means copy contents - use move picker in copy mode
             setOperationTargetItems([]);
             setOperationTargetFolders([folder]);
             setFolderPickerMode('copy');
@@ -1306,10 +1328,35 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           icon: <Trash2 size={14} />,
           onClick: async () => {
             try {
+              // Check folder contents before trashing
+              const counts = await getFolderContentCount(folder.id);
+              const hasContents = counts.resource_count > 0 || counts.subfolder_count > 0;
+
+              if (hasContents) {
+                const parts: string[] = [];
+                if (counts.resource_count > 0) {
+                  parts.push(`${counts.resource_count} file(s)`);
+                }
+                if (counts.subfolder_count > 0) {
+                  parts.push(`${counts.subfolder_count} sub-folder(s)`);
+                }
+                const msg = t('resources.trashFolderConfirm', {
+                  defaultValue: 'This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?',
+                  contents: parts.join(' and '),
+                });
+                if (!confirm(msg)) return;
+              }
+
               const { trashFolder } = await import('../services/resourceService');
               await trashFolder(folder.id);
-              await Promise.all([loadFolders(), loadChildFolders()]);
-            } catch { /* ignore */ }
+              await loadFolders();
+              await loadChildFolders();
+              const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+              setResources(items);
+            } catch (err) {
+              console.error('Failed to trash folder:', err);
+              addToast(t('resources.trashFolderFailed', 'Failed to move folder to trash'), 'error');
+            }
           },
           danger: true,
           divider: true,
@@ -1452,7 +1499,35 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const breadcrumbSegments = useMemo((): BreadcrumbSegment[] => {
     if (isSharedView) return [{ label: t('resources.sharedManagement') }];
-    if (isRecycleView) return [{ label: t('resources.recycleBin') }];
+    if (isRecycleView) {
+      const segments: BreadcrumbSegment[] = [
+        {
+          label: t('resources.recycleBin'),
+          onClick: recycleFolderId ? () => setRecycleFolderId(null) : undefined,
+        },
+      ];
+      if (recycleFolderId) {
+        // Build folder chain from recycleFolderId up to root
+        const chain: Folder[] = [];
+        let currentId: string | null = recycleFolderId;
+        while (currentId) {
+          const f = trashedFolders.find((tf) => String(tf.id) === currentId);
+          if (!f) break;
+          chain.unshift(f);
+          currentId = f.parent_id ? String(f.parent_id) : null;
+          // Stop if parent is not in trashed set (we've reached the root trashed folder)
+          if (currentId && !trashedFolders.some((tf) => String(tf.id) === currentId)) break;
+        }
+        chain.forEach((f, idx) => {
+          const isLast = idx === chain.length - 1;
+          segments.push({
+            label: f.name,
+            onClick: isLast ? undefined : () => setRecycleFolderId(String(f.id)),
+          });
+        });
+      }
+      return segments;
+    }
     if (isDownloadsView) return [{ label: t('resources.downloads') }];
 
     if (selectedSmartFolderId) {
@@ -1504,12 +1579,63 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
 
     return segments;
-  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, folderChain, t, navigate, resPath]);
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders]);
 
   // ─── Sort ────────────────────────────────────────────
 
+  // Filter trashed resources by current recycle folder
+  const recycleItems = useMemo(() => {
+    if (!recycleFolderId) {
+      // Show only resources not inside any trashed folder
+      const trashedFolderIds = new Set(trashedFolders.map((f) => String(f.id)));
+      return trashedResources.filter((item) => {
+        const fid = item.folder_id ? String(item.folder_id) : null;
+        return !fid || !trashedFolderIds.has(fid);
+      });
+    }
+    // Show only resources in the selected recycle folder
+    return trashedResources.filter(
+      (item) => item.folder_id && String(item.folder_id) === recycleFolderId
+    );
+  }, [trashedResources, trashedFolders, recycleFolderId]);
+
+  // Sub-folders at current recycle level
+  const recycleSubFolders = useMemo(() => {
+    if (!recycleFolderId) {
+      // Root level: show only folders whose parent is NOT also trashed
+      const trashedIds = new Set(trashedFolders.map((f) => String(f.id)));
+      return trashedFolders.filter(
+        (f) => !f.parent_id || !trashedIds.has(String(f.parent_id))
+      );
+    }
+    // Inside a folder: show its direct children
+    return trashedFolders.filter(
+      (f) => f.parent_id && String(f.parent_id) === recycleFolderId
+    );
+  }, [trashedFolders, recycleFolderId]);
+
+  // Build preview thumbnails for trashed folders from trashedResources
+  const trashedFolderPreviews = useMemo(() => {
+    const map: Record<string, Array<{ resource_id?: string | null; thumbnail_path?: string | null; cover_image_path?: string | null; mime_type?: string | null }>> = {};
+    for (const item of trashedResources) {
+      const fid = item.folder_id ? String(item.folder_id) : null;
+      if (!fid) continue;
+      if (!map[fid]) map[fid] = [];
+      if (map[fid].length < 4) {
+        const r = item.resource;
+        map[fid].push({
+          resource_id: r?.id ? String(r.id) : null,
+          thumbnail_path: r?.thumbnail_path || null,
+          cover_image_path: r?.cover_image_path || null,
+          mime_type: r?.mime_type || null,
+        });
+      }
+    }
+    return map;
+  }, [trashedResources]);
+
   const currentItems = sidebarView === 'recycle'
-    ? trashedResources
+    ? recycleItems
     : sidebarView === 'downloads'
       ? downloadedResources
       : resources;
@@ -1974,7 +2100,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         {/* Toolbar */}
         <div
           className="px-6 py-3 border-b border-zinc-800/80"
-          style={{ paddingRight: selectedResource?.resource && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         >
           {/* Single row: Breadcrumb + controls */}
           <div className="flex items-center justify-between gap-4">
@@ -2281,7 +2407,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         {/* Content area */}
         <div
           className="flex-1 overflow-y-auto p-6 relative"
-          style={{ paddingRight: selectedResource?.resource && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
           onDragEnter={canUpload ? handleDragEnter : undefined}
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
@@ -2360,8 +2486,38 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {!isSharedView && (
             loading ? (
               viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-            ) : (filteredFolders.length > 0 || sortedItems.length > 0) ? (
+            ) : (filteredFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
               <div className="space-y-5">
+                {/* Trashed folders in recycle bin */}
+                {isRecycleView && recycleSubFolders.length > 0 && (
+                  <div>
+                    {sortedItems.length > 0 && (
+                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
+                    )}
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+                      {recycleSubFolders.map((folder) => (
+                        <FolderCard
+                          key={`trashed-folder-${folder.id}`}
+                          folder={folder}
+                          viewMode="grid"
+                          onClick={(e?: any) => {
+                            handleCardClick(`folder:${folder.id}`, e);
+                            if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
+                              setSelectedResource(null);
+                              setSelectedFolder(folder);
+                              setShowInfoPanel(true);
+                            }
+                          }}
+                          onDoubleClick={() => setRecycleFolderId(String(folder.id))}
+                          previewItems={trashedFolderPreviews[String(folder.id)]}
+                          selectable
+                          isChecked={selectedIds.has(`folder:${folder.id}`)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Folders section */}
                 {filteredFolders.length > 0 && (
                   <div>
@@ -2376,7 +2532,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             folder={folder}
                             onClick={(e?: any) => {
                               handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) setSelectedResource(null);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
+                                setSelectedResource(null);
+                                setSelectedFolder(folder);
+                                setShowInfoPanel(true);
+                              }
                             }}
                             onDoubleClick={() => {
                               if (selectedLibraryId) {
@@ -2410,7 +2570,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             folder={folder}
                             onClick={(e?: any) => {
                               handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) setSelectedResource(null);
+                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
+                                setSelectedResource(null);
+                                setSelectedFolder(folder);
+                                setShowInfoPanel(true);
+                              }
                             }}
                             onDoubleClick={() => {
                               if (selectedLibraryId) {
@@ -2443,7 +2607,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 {/* Files section */}
                 {sortedItems.length > 0 && (
                   <div>
-                    {filteredFolders.length > 0 && (
+                    {(filteredFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                     )}
                     {viewMode === 'list' && (
@@ -2485,7 +2649,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
                             onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable={!isRecycleView}
+                            selectable
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
                             forceShowCheckbox={multiSelectMode}
@@ -2518,7 +2682,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onRenameConfirm={handleRenameResourceConfirm}
                             onRenameCancel={() => setRenamingResourceId(null)}
                             onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable={!isRecycleView}
+                            selectable
                             isChecked={selectedIds.has(`item:${item.id}`)}
                             onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
                             forceShowCheckbox={multiSelectMode}
@@ -2555,7 +2719,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       </div>
 
       {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
-      {selectedResource?.resource && (
+      {(selectedResource?.resource || selectedFolder) && (
         <div
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
@@ -2578,23 +2742,45 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           />
 
           {/* Panel content */}
-          <ResourceInfoPanel
-            resource={selectedResource.resource}
-            allTags={allTags}
-            assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
-            folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
-            readOnly={isRecycleView}
-            onClose={() => setSelectedResource(null)}
-            onAddTag={handleAddTag}
-            onRemoveTag={handleRemoveTag}
-            onCreate={handleCreateTag}
-            onUpdate={handleResourceUpdate}
-          />
+          {selectedFolder ? (
+            <FolderInfoPanel
+              folder={selectedFolder}
+              previewItems={
+                isRecycleView
+                  ? trashedFolderPreviews[String(selectedFolder.id)]
+                  : folderPreviews[selectedFolder.id]
+              }
+              readOnly={isRecycleView}
+              onClose={() => setSelectedFolder(null)}
+              onRename={async (name) => {
+                try {
+                  await renameFolder(selectedFolder.id, name);
+                  setSelectedFolder(prev => prev ? { ...prev, name } : null);
+                  await Promise.all([loadFolders(), loadChildFolders()]);
+                } catch (err) {
+                  console.error('Failed to rename folder:', err);
+                }
+              }}
+            />
+          ) : selectedResource?.resource ? (
+            <ResourceInfoPanel
+              resource={selectedResource.resource}
+              allTags={allTags}
+              assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
+              folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
+              readOnly={isRecycleView}
+              onClose={() => setSelectedResource(null)}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
+              onCreate={handleCreateTag}
+              onUpdate={handleResourceUpdate}
+            />
+          ) : null}
         </div>
       )}
 
       {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
-      {selectedResource?.resource && !showInfoPanel && (
+      {(selectedResource?.resource || selectedFolder) && !showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
           className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
@@ -2615,13 +2801,23 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             <>
               <button
                 onClick={async () => {
+                  // Restore selected resources
                   const resourceIds = currentItems
                     .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
                     .map((i) => String(i.resource!.id));
                   for (const id of resourceIds) {
                     await restoreResource(id);
                   }
-                  setTrashedResources((prev) => prev.filter((r) => !resourceIds.includes(String(r.resource?.id))));
+                  // Restore selected folders (cascade)
+                  const folderIds = recycleSubFolders
+                    .filter((f) => selectedIds.has(`folder:${f.id}`))
+                    .map((f) => String(f.id));
+                  for (const fid of folderIds) {
+                    await restoreFolder(fid);
+                  }
+                  if (resourceIds.length > 0 || folderIds.length > 0) {
+                    await loadTrashedResources();
+                  }
                   setSelectedIds(new Set());
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 rounded-lg transition-colors"
@@ -2671,16 +2867,32 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </button>
               <button
                 onClick={async () => {
-                  const resourceIds = sortedItems
-                    .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
-                    .map((i) => String(i.resource!.id));
-                  if (resourceIds.length > 0) {
-                    try {
+                  try {
+                    // Trash selected resources
+                    const resourceIds = sortedItems
+                      .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
+                      .map((i) => String(i.resource!.id));
+                    if (resourceIds.length > 0) {
                       await trashResources(resourceIds);
+                    }
+
+                    // Trash selected folders (cascade)
+                    const folderIds = childFolders
+                      .filter((f) => selectedIds.has(`folder:${f.id}`))
+                      .map((f) => String(f.id));
+                    for (const fid of folderIds) {
+                      const { trashFolder } = await import('../services/resourceService');
+                      await trashFolder(fid);
+                    }
+
+                    if (resourceIds.length > 0 || folderIds.length > 0) {
                       const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
                       setResources(items);
+                      await Promise.all([loadFolders(), loadChildFolders()]);
                       setSelectedIds(new Set());
-                    } catch { /* ignore */ }
+                    }
+                  } catch (err) {
+                    console.error('Batch delete failed:', err);
                   }
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
