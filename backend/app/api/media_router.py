@@ -1408,34 +1408,40 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         except ValueError:
             raise HTTPException(status_code=404, detail="Download path not configured")
 
-        # Look for audio file in the platform's storage directory
-        # yt-dlp saves as {platform_id}_audio.mp3 (or other ext)
-        storage_dir = None
-        download_path = video.get("download_path", "")
-        if download_path:
-            # Derive storage dir from video download_path
-            storage_dir = Path(base_path) / Path(download_path).parent
-        else:
-            # Fallback: try common paths
-            for pattern in [
-                f"global/resources/web/*/{platform_id}",
-                f"*/{platform_id}",
-            ]:
-                matches = list(Path(base_path).glob(pattern))
-                if matches:
-                    storage_dir = matches[0]
-                    break
-
-        if not storage_dir or not storage_dir.exists():
-            raise HTTPException(status_code=404, detail="Music file directory not found")
-
-        # Find audio file (could be .mp3, .m4a, .opus, etc.)
+        # Prefer stored music_download_path (like cover_download_path)
+        music_download_path = video.get("music_download_path", "")
         audio_file = None
-        for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
-            candidate = storage_dir / f"{platform_id}_audio.{ext}"
+
+        if music_download_path:
+            candidate = Path(base_path) / music_download_path
             if candidate.exists():
                 audio_file = candidate
-                break
+
+        # Fallback: search by naming patterns in storage directory
+        if not audio_file:
+            storage_dir = None
+            download_path = video.get("download_path", "")
+            if download_path:
+                storage_dir = Path(base_path) / Path(download_path).parent
+            else:
+                for pattern in [
+                    f"global/resources/web/*/{platform_id}",
+                    f"*/{platform_id}",
+                ]:
+                    matches = list(Path(base_path).glob(pattern))
+                    if matches:
+                        storage_dir = matches[0]
+                        break
+
+            if storage_dir and storage_dir.exists():
+                for name in [f"{platform_id}_audio", "music", f"{platform_id}_music", "audio"]:
+                    for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
+                        candidate = storage_dir / f"{name}.{ext}"
+                        if candidate.exists():
+                            audio_file = candidate
+                            break
+                    if audio_file:
+                        break
 
         if not audio_file:
             raise HTTPException(status_code=404, detail="Music file not found on disk")

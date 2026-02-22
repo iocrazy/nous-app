@@ -28,7 +28,7 @@ logs_repo = LogsRepository()
 class LogEntry(BaseModel):
     """Log entry model."""
 
-    id: str
+    id: int
     action: str
     message: str
     status: str

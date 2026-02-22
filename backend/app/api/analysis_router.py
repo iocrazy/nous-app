@@ -180,7 +180,7 @@ async def trigger_analysis(
     # Get media info
     result = (
         await supabase.table("parsed_media")
-        .select("id, title, description, cover_url, download_path")
+        .select("id, title, description, cover_urls, download_path")
         .eq("id", media_id)
         .maybe_single()
         .execute()
@@ -192,16 +192,17 @@ async def trigger_analysis(
         )
 
     media = result.data
+    cover_url = (media.get("cover_urls") or [None])[0]
 
     if request.level == "L1":
-        if not media.get("cover_url"):
+        if not cover_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
         task = analyze_video_l1_task.delay(
             media_id=media_id,
-            cover_url=media["cover_url"],
+            cover_url=cover_url,
             title=media.get("title", ""),
             description=media.get("description", ""),
         )
@@ -229,7 +230,7 @@ async def trigger_analysis(
 
         task = analyze_video_l2_task.delay(
             media_id=media_id,
-            cover_url=media.get("cover_url", ""),
+            cover_url=cover_url or "",
             video_path=video_path,
             title=media.get("title", ""),
             description=media.get("description", ""),
