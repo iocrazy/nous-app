@@ -7,8 +7,6 @@ Contains async download tasks for video, image sets, music, and covers.
 Integrates with TaskManager for task status tracking and automatic retries.
 """
 
-import asyncio
-
 from celery import shared_task
 from loguru import logger
 
@@ -16,24 +14,7 @@ from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import log_user_action
 from app.services.downloader import DownloaderService
-
-
-def run_async(coro):
-    """Run async coroutine in synchronous environment"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If event loop is already running, create new task
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        # No event loop, create new one
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 def _maybe_chain_transcode(platform_id: str, user_id: str):
@@ -836,17 +817,6 @@ def download_unified_task(
             f"[Download/{strategy}] Failed: {platform_id}, error: {error_msg}"
         )
 
-        # Write failure to Redis + TaskTracker
-        try:
-            tracker.failed(error_msg)
-        except Exception:
-            pass
-        if unified_task_id:
-            try:
-                run_async(tracker_unified.fail(unified_task_id, error_msg))
-            except Exception:
-                pass
-
         # Update user resource status to failed
         if resource_id:
             try:
@@ -866,13 +836,36 @@ def download_unified_task(
             except Exception:
                 pass
 
-        # Celery retry with exponential backoff
+        # Celery retry with exponential backoff — do NOT mark as failed yet
         if self.request.retries < self.max_retries:
+            retry_num = self.request.retries + 1
             countdown = 30 * (2 ** self.request.retries)
             logger.info(
-                f"[Download/{strategy}] Retry {self.request.retries + 1}/3 for {platform_id} in {countdown}s"
+                f"[Download/{strategy}] Retry {retry_num}/{self.max_retries} "
+                f"for {platform_id} in {countdown}s"
             )
+            # Update unified task subtitle to show retry status (not failed)
+            if unified_task_id:
+                try:
+                    run_async(tracker_unified.update_progress(
+                        unified_task_id,
+                        progress=0,
+                        subtitle=f"Retrying ({retry_num}/{self.max_retries})...",
+                    ))
+                except Exception:
+                    pass
             raise self.retry(exc=e, countdown=countdown)
+
+        # ── Max retries exhausted — NOW mark as permanently failed ──
+        try:
+            tracker.failed(error_msg)
+        except Exception:
+            pass
+        if unified_task_id:
+            try:
+                run_async(tracker_unified.fail(unified_task_id, error_msg))
+            except Exception:
+                pass
 
         # Log failure after max retries
         run_async(
@@ -900,199 +893,3 @@ download_media_task = download_unified_task
 download_ytdlp_task = download_unified_task
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
-def download_video_task(self, platform_id: str, user_id: str = None):
-    """
-    Celery task for downloading a single video
-
-    Args:
-        platform_id: Video ID
-        user_id: User ID (for data isolation)
-
-    Returns:
-        dict: Download result
-    """
-    logger.info(f"[Celery] Starting video download task: {platform_id}")
-
-    try:
-        result = run_async(
-            DownloaderService.download_video_by_platform_id(
-                platform_id, user_id=user_id
-            )
-        )
-
-        if result.video_download_status == DownloadStatus.COMPLETED:
-            logger.success(f"[Celery] Video download successful: {platform_id}")
-            return {
-                "status": "success",
-                "platform_id": platform_id,
-                "path": result.video_path,
-                "duration": result.download_duration,
-            }
-        else:
-            logger.warning(
-                f"[Celery] Video download failed: {platform_id}, error: {result.error}"
-            )
-            # Retry
-            raise self.retry(
-                exc=Exception(result.error),
-                countdown=10 * (2**self.request.retries),  # Exponential backoff
-            )
-
-    except Exception as e:
-        logger.error(
-            f"[Celery] Video download task error: {platform_id}, error: {str(e)}"
-        )
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": str(e),
-        }
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
-def download_images_task(self, platform_id: str, user_id: str = None):
-    """
-    Celery task for downloading image sets
-
-    Args:
-        platform_id: Video ID
-        user_id: User ID (for data isolation)
-
-    Returns:
-        dict: Download result
-    """
-    logger.info(f"[Celery] Starting image set download task: {platform_id}")
-
-    try:
-        result = run_async(
-            DownloaderService.download_images_by_platform_id(
-                platform_id, user_id=user_id
-            )
-        )
-
-        if result.video_download_status == DownloadStatus.COMPLETED:
-            logger.success(f"[Celery] Image set download successful: {platform_id}")
-            return {
-                "status": "success",
-                "platform_id": platform_id,
-            }
-        else:
-            logger.warning(
-                f"[Celery] Image set download failed: {platform_id}, error: {result.error}"
-            )
-            raise self.retry(
-                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
-            )
-
-    except Exception as e:
-        logger.error(
-            f"[Celery] Image set download task error: {platform_id}, error: {str(e)}"
-        )
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": str(e),
-        }
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
-def download_music_task(self, platform_id: str, user_id: str = None):
-    """
-    Celery task for downloading music
-
-    Args:
-        platform_id: Video ID
-        user_id: User ID (for data isolation)
-
-    Returns:
-        dict: Download result
-    """
-    logger.info(f"[Celery] Starting music download task: {platform_id}")
-
-    try:
-        result = run_async(
-            DownloaderService.download_music_by_platform_id(
-                platform_id=platform_id, user_id=user_id
-            )
-        )
-
-        if result.music_download_status == DownloadStatus.COMPLETED:
-            logger.success(f"[Celery] Music download successful: {platform_id}")
-            return {
-                "status": "success",
-                "platform_id": platform_id,
-                "path": result.music_path,
-            }
-        else:
-            logger.warning(
-                f"[Celery] Music download failed: {platform_id}, error: {result.error}"
-            )
-            raise self.retry(
-                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
-            )
-
-    except Exception as e:
-        logger.error(
-            f"[Celery] Music download task error: {platform_id}, error: {str(e)}"
-        )
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": str(e),
-        }
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
-def download_cover_task(self, platform_id: str, user_id: str = None):
-    """
-    Celery task for downloading covers
-
-    Args:
-        platform_id: Video ID
-        user_id: User ID (for data isolation)
-
-    Returns:
-        dict: Download result
-    """
-    logger.info(f"[Celery] Starting cover download task: {platform_id}")
-
-    try:
-        result = run_async(
-            DownloaderService.download_cover_by_platform_id(
-                platform_id, user_id=user_id
-            )
-        )
-
-        if result.cover_download_status == DownloadStatus.COMPLETED:
-            logger.success(f"[Celery] Cover download successful: {platform_id}")
-            return {
-                "status": "success",
-                "platform_id": platform_id,
-                "path": result.cover_path,
-            }
-        else:
-            logger.warning(
-                f"[Celery] Cover download failed: {platform_id}, error: {result.error}"
-            )
-            raise self.retry(
-                exc=Exception(result.error), countdown=10 * (2**self.request.retries)
-            )
-
-    except Exception as e:
-        logger.error(
-            f"[Celery] Cover download task error: {platform_id}, error: {str(e)}"
-        )
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=10 * (2**self.request.retries))
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": str(e),
-        }

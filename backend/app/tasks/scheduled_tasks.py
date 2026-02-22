@@ -6,7 +6,6 @@ Scheduled Tasks Module
 Contains scheduled tasks dispatched by Celery Beat.
 """
 
-import asyncio
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,22 +14,7 @@ from celery import shared_task
 from loguru import logger
 
 from app.core.enums import DownloadStatus
-
-
-def run_async(coro):
-    """Run async coroutine in synchronous environment"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 @shared_task
@@ -124,7 +108,7 @@ def retry_failed_downloads():
 
     try:
         from app.repositories.media_repository import MediaRepository
-        from app.tasks.download_tasks import download_images_task, download_video_task
+        from app.tasks.download_tasks import download_unified_task
 
         repo = MediaRepository()
 
@@ -157,11 +141,14 @@ def retry_failed_downloads():
                     )
                 )
 
-                # Submit download task based on type
-                if int(media_type) in (0, 4, 61):  # Video types
-                    download_video_task.delay(platform_id, user_id)
-                elif int(media_type) in (2, 68):  # Image types
-                    download_images_task.delay(platform_id, user_id)
+                # Submit unified download task
+                download_unified_task.delay(
+                    platform_id,
+                    user_id,
+                    download_video=True,
+                    download_cover=True,
+                    media_type=int(media_type),
+                )
 
                 retried_count += 1
                 logger.debug(f"Resubmitted download task: {platform_id}")

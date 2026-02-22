@@ -1,6 +1,5 @@
 """Celery tasks for video analysis."""
 
-import asyncio
 import os
 import subprocess
 import tempfile
@@ -12,22 +11,7 @@ from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.tags_repository import TagsRepository
 from app.services.embedding_service import EmbeddingService
 from app.services.visual_analysis_service import VisualAnalysisService
-
-
-def run_async(coro):
-    """Helper to run async code in Celery task."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -287,7 +271,7 @@ def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
             # Get media info
             result = (
                 await supabase.table("parsed_media")
-                .select("id, title, description, cover_url")
+                .select("id, title, description, cover_urls")
                 .eq("id", media_id)
                 .maybe_single()
                 .execute()
@@ -295,7 +279,7 @@ def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
 
             if result.data:
                 media = result.data
-                cover_url = media.get("cover_url", "")
+                cover_url = (media.get("cover_urls") or [""])[0]
                 if cover_url:
                     analyze_video_l1_task.delay(
                         media_id=media["id"],
@@ -306,7 +290,7 @@ def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
                     dispatched += 1
                     logger.info(f"Dispatched L1 analysis for media {media_id}")
                 else:
-                    logger.warning(f"Media {media_id} has no cover_url, skipping")
+                    logger.warning(f"Media {media_id} has no cover_urls, skipping")
             else:
                 logger.warning(f"Media {media_id} not found, skipping")
 
@@ -330,7 +314,7 @@ def analyze_pending_videos_task(limit: int = 50):
         analysis_repo = AnalysisRepository()
         videos = await analysis_repo.get_videos_without_analysis(limit=limit)
 
-        media_ids = [v["id"] for v in videos if v.get("cover_url")]
+        media_ids = [v["id"] for v in videos if v.get("cover_urls")]
 
         if media_ids:
             batch_analyze_l1_task.delay(media_ids, batch_size=limit)
