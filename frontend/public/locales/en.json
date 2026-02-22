@@ -471,7 +471,15 @@
       "sourceWeb": "Web Download",
       "sourceUpload": "Upload",
       "aiStatus": "AI Status"
-    }
+    },
+    "folderInfoPanel": {
+      "title": "Folder Info",
+      "itemCount": "Items",
+      "typeFolder": "Folder"
+    },
+    "getInfo": "Get Info",
+    "trashFolderFailed": "Failed to move folder to trash",
+    "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

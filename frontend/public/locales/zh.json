@@ -471,7 +471,15 @@
       "sourceWeb": "网页下载",
       "sourceUpload": "上传",
       "aiStatus": "AI 状态"
-    }
+    },
+    "folderInfoPanel": {
+      "title": "文件夹信息",
+      "itemCount": "项目数",
+      "typeFolder": "文件夹"
+    },
+    "getInfo": "查看信息",
+    "trashFolderFailed": "移动文件夹到回收站失败",
+    "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
