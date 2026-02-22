@@ -78,7 +78,7 @@ const PAGE_SIZE_OPTIONS = [50, 100, 200];
 const getStatusDisplay = (status: string): { label: string; color: string; icon: React.ElementType } => {
   switch (status) {
     case 'success':
-      return { label: 'INFO', color: 'text-green-400 bg-green-500/10 border-green-500/20', icon: CheckCircle };
+      return { label: 'SUCCESS', color: 'text-green-400 bg-green-500/10 border-green-500/20', icon: CheckCircle };
     case 'info':
       return { label: 'INFO', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20', icon: Info };
     case 'warning':

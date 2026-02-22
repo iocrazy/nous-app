@@ -4,7 +4,7 @@ import Hls from 'hls.js';
 import { Video, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus,
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, FolderPlus, Plus,
   Sparkles, Eye, ExternalLink, MoreHorizontal,
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl } from '../utils/awemeType';
@@ -110,7 +110,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deleteWithFiles, setDeleteWithFiles] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // AI Feature States - 从数据中加载已有内容
@@ -177,7 +176,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     if (!onDelete || !data.platform_id) return;
     setIsDeleting(true);
     try {
-      await onDelete(data.platform_id, deleteWithFiles);
+      await onDelete(data.platform_id, false);
       setShowDeleteDialog(false);
     } catch (error) {
       console.error('Delete failed:', error);
@@ -547,7 +546,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.platform_id}</span>
-              {/* More actions (three-dots) */}
+              {/* More actions (three-dots) — hidden when inside PlayerPage */}
+              {!hidePreview && (
               <div className="relative shrink-0">
                 <button
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
@@ -646,6 +646,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   </>
                 )}
               </div>
+              )}
             </div>
           </div>
 
@@ -880,7 +881,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
              </div>
 
-             {data.music_download_status && data.music_download_status !== 'skipped' && data.music_download_status !== 'SKIPPED' && (
+             {!hidePreview && data.music_download_status && data.music_download_status !== 'skipped' && data.music_download_status !== 'SKIPPED' && (
                <button
                  onClick={onDownloadAudio}
                  className="w-full flex items-between justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
@@ -898,7 +899,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         </div>
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Move to Trash Dialog */}
       {showDeleteDialog && (
         <div
           className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
@@ -912,10 +913,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-red-500/10 rounded-lg">
-                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                <div className="p-2 bg-amber-500/10 rounded-lg">
+                  <Trash2 className="w-5 h-5 text-amber-500" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">Confirm Delete</h3>
+                <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(false)}
@@ -928,7 +929,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Content */}
             <div className="px-5 py-4 space-y-4">
               <p className="text-sm text-zinc-400">
-                Are you sure you want to delete this media? This action cannot be undone.
+                This item will be moved to the Recycle Bin. You can restore it later.
               </p>
 
               {/* Media Preview */}
@@ -946,22 +947,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   <p className="text-xs text-zinc-500">@{data.author}</p>
                 </div>
               </div>
-
-              {/* Delete files option */}
-              <label className="flex items-start gap-3 p-3 bg-zinc-800/30 rounded-lg border border-zinc-700/50 cursor-pointer hover:bg-zinc-800/50 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={deleteWithFiles}
-                  onChange={(e) => setDeleteWithFiles(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
-                />
-                <div>
-                  <p className="text-sm text-zinc-300 font-medium">Also delete local files</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    Delete downloaded videos, images, and cover files from server
-                  </p>
-                </div>
-              </label>
             </div>
 
             {/* Footer */}
@@ -975,17 +960,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
               >
                 {isDeleting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Deleting...
+                    Moving...
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    Confirm Delete
+                    Move to Trash
                   </>
                 )}
               </button>
