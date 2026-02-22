@@ -9,10 +9,18 @@ Celery 应用初始化模块
 import pkgutil
 
 from celery import Celery
+from celery.signals import worker_process_init
 from celery.schedules import crontab
 
 from app.core.config import settings
 import app.tasks as _tasks_pkg
+
+
+@worker_process_init.connect
+def _init_worker_logging(**kwargs):
+    """Initialize loguru for Celery worker processes."""
+    from app.core.utils import Utils
+    Utils.setup_logging("celery")
 
 # 自动扫描 app/tasks/ 下所有模块，新增 task 文件无需手动注册
 _task_modules = [
