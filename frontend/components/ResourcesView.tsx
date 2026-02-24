@@ -507,12 +507,31 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   }, [scopeType, scopeId]);
 
   useEffect(() => {
-    if (sidebarView === 'recycle') {
-      setRecycleFolderId(null);
-      setLoading(true);
-      loadTrashedResources().finally(() => setLoading(false));
-    }
-  }, [sidebarView, loadTrashedResources]);
+    if (sidebarView !== 'recycle') return;
+    let cancelled = false;
+    setRecycleFolderId(null);
+    setLoading(true);
+    Promise.all([
+      fetchTrashedResources(scopeType, scopeId),
+      fetchTrashedFolders(scopeType, scopeId),
+    ])
+      .then(([items, folders]) => {
+        if (!cancelled) {
+          setTrashedResources(items);
+          setTrashedFolders(folders);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTrashedResources([]);
+          setTrashedFolders([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [sidebarView, scopeType, scopeId]);
 
   // Load resource_items inside a trashed folder when navigating into it
   useEffect(() => {

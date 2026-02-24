@@ -779,21 +779,25 @@ class ResourcesRepository:
 
             # 1. Trash resources in all affected folders
             for fid in all_folder_ids:
-                # Get resource_ids in this folder
+                # Get resource_items with location info
                 items_result = await (
                     client.table(self.TABLE_ITEMS)
-                    .select("resource_id")
+                    .select("resource_id, folder_id, library_id, scope_type, scope_id")
                     .eq("folder_id", fid)
                     .execute()
                 )
-                resource_ids = [
-                    str(item["resource_id"])
-                    for item in (items_result.data or [])
-                ]
-                for rid in resource_ids:
+                for item in (items_result.data or []):
+                    rid = str(item["resource_id"])
+                    update_data = {
+                        **trash_data,
+                        "last_folder_id": item.get("folder_id"),
+                        "last_library_id": item.get("library_id"),
+                        "last_scope_type": item.get("scope_type"),
+                        "last_scope_id": item.get("scope_id"),
+                    }
                     await (
                         client.table(self.TABLE_RESOURCES)
-                        .update(trash_data)
+                        .update(update_data)
                         .eq("id", rid)
                         .eq("is_trashed", False)
                         .execute()
