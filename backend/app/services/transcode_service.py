@@ -1,0 +1,611 @@
+# app/services/transcode_service.py
+
+"""
+HLS Transcode Service
+
+Multi-bitrate HLS transcoding using ffmpeg. Generates adaptive streaming
+playlists (master.m3u8) with quality tiers: 480p, 720p, 1080p.
+Skips tiers above the original video resolution.
+"""
+
+import asyncio
+import json
+import re
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Coroutine, List, Optional, Tuple
+
+from loguru import logger
+
+from app.core.config import settings
+from app.repositories.resources_repository import ResourcesRepository
+
+
+@dataclass
+class TranscodeTier:
+    name: str
+    width: int
+    height: int
+    bitrate: int  # kbps
+    audio_bitrate: int  # kbps
+
+
+# Quality tiers — only tiers at or below original resolution are used
+TIERS = [
+    TranscodeTier(name="480p", width=854, height=480, bitrate=1500, audio_bitrate=128),
+    TranscodeTier(name="720p", width=1280, height=720, bitrate=4000, audio_bitrate=128),
+    TranscodeTier(name="1080p", width=1920, height=1080, bitrate=8000, audio_bitrate=192),
+]
+
+
+class TranscodeService:
+    """HLS multi-bitrate transcoding service."""
+
+    # GPU encoder priority order: (codec_name, hwaccel_input_args)
+    _GPU_ENCODERS = [
+        ("h264_nvenc", ["-hwaccel", "cuda"]),           # NVIDIA
+        ("h264_videotoolbox", []),                       # macOS
+        ("h264_qsv", ["-hwaccel", "qsv"]),              # Intel
+    ]
+
+    def __init__(self):
+        self.repo = ResourcesRepository()
+        self._encoder: Optional[str] = None  # lazy-init
+        self._hwaccel_args: List[str] = []
+        self._preset: str = settings.FFMPEG_PRESET
+
+    # ------------------------------------------------------------------ #
+    # GPU encoder detection
+    # ------------------------------------------------------------------ #
+
+    async def _detect_encoder(self) -> tuple[str, list[str], str]:
+        """Detect best available encoder. Returns (codec, hwaccel_args, preset)."""
+        if self._encoder:
+            return self._encoder, self._hwaccel_args, self._preset
+
+        configured = settings.FFMPEG_ENCODER
+        if configured != "auto":
+            # Explicit config — trust it
+            self._encoder = configured
+            for name, args in self._GPU_ENCODERS:
+                if name == configured:
+                    self._hwaccel_args = args
+                    break
+            return self._encoder, self._hwaccel_args, self._preset
+
+        # Auto-detect: probe each GPU encoder
+        for name, hwaccel_args in self._GPU_ENCODERS:
+            if await self._probe_encoder(name):
+                logger.info(f"[Transcode] GPU encoder detected: {name}")
+                self._encoder = name
+                self._hwaccel_args = hwaccel_args
+                if "nvenc" in name:
+                    self._preset = self._map_nvenc_preset(settings.FFMPEG_PRESET)
+                return self._encoder, self._hwaccel_args, self._preset
+
+        # Fallback to CPU
+        logger.info("[Transcode] No GPU encoder found, using libx264 (CPU)")
+        self._encoder = "libx264"
+        return self._encoder, self._hwaccel_args, self._preset
+
+    @staticmethod
+    async def _probe_encoder(encoder_name: str) -> bool:
+        """Test if ffmpeg supports the given encoder."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-hide_banner", "-encoders",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            return encoder_name in stdout.decode()
+        except Exception:
+            return False
+
+    @staticmethod
+    def _map_nvenc_preset(cpu_preset: str) -> str:
+        """Map CPU preset names to NVENC p1-p7 presets."""
+        mapping = {
+            "ultrafast": "p1", "veryfast": "p2", "fast": "p3",
+            "medium": "p4", "slow": "p5", "veryslow": "p6",
+        }
+        return mapping.get(cpu_preset, "p4")
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    # Type alias for async progress callback: (progress: int, subtitle: str) -> None
+    ProgressCallback = Callable[[int, str], Coroutine]
+
+    async def transcode_version(
+        self,
+        resource_id: str,
+        version_id: str,
+        on_progress: Optional["TranscodeService.ProgressCallback"] = None,
+    ) -> Optional[str]:
+        """
+        Transcode a resource version to HLS multi-bitrate.
+
+        Args:
+            on_progress: Optional async callback(progress_int, subtitle_str) for task tracking.
+
+        Returns the relative hls_path (e.g. "teams/.../v1/hls/master.m3u8")
+        or None on failure.
+        """
+        # Master toggle check
+        if not settings.TRANSCODE_ENABLED:
+            logger.info("[Transcode] Transcoding is disabled via settings")
+            return None
+
+        version = await self.repo.get_version_by_id(version_id)
+        if not version:
+            logger.error(f"Version {version_id} not found")
+            return None
+
+        file_path = version.get("file_path")
+        if not file_path:
+            logger.error(f"Version {version_id} has no file_path")
+            return None
+
+        # Mark as processing
+        await self.repo.update_version(version_id, {"transcode_status": "processing"})
+
+        base = Path(settings.DOWNLOAD_PATH)
+        source = base / file_path
+
+        if not source.exists():
+            logger.error(f"Source file not found: {source}")
+            await self.repo.update_version(version_id, {"transcode_status": "failed"})
+            return None
+
+        # Determine HLS output directory: sibling hls/ folder next to the source file
+        hls_dir = source.parent / "hls"
+
+        try:
+            # Probe video to get resolution and duration
+            width, height = await self._probe_resolution(str(source))
+            if not width or not height:
+                logger.warning(f"Could not probe resolution for {source}, skipping transcode")
+                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                return None
+
+            total_duration = await self._probe_duration(str(source))
+
+            # Select applicable tiers
+            applicable = self._select_tiers(width, height)
+            if not applicable:
+                logger.info(f"No applicable tiers for {width}x{height}, skipping")
+                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                return None
+
+            # Clean up old HLS if exists
+            if hls_dir.exists():
+                shutil.rmtree(hls_dir)
+            hls_dir.mkdir(parents=True, exist_ok=True)
+
+            # Ensure tier directories exist
+            for tier in applicable:
+                (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
+
+            num_tiers = len(applicable)
+
+            if settings.TRANSCODE_PARALLEL_TIERS and num_tiers > 1:
+                # ── Parallel tier encoding ──
+                tier_progress_map: dict[str, float] = {}
+
+                def _make_tier_progress(tier: TranscodeTier):
+                    async def _progress(pct: float):
+                        tier_progress_map[tier.name] = pct
+                        avg = sum(tier_progress_map.values()) / num_tiers
+                        overall = int(avg * 95 / 100)
+                        active = ", ".join(
+                            f"{k} {int(v)}%" for k, v in sorted(tier_progress_map.items())
+                        )
+                        if on_progress:
+                            await on_progress(min(overall, 95), f"Encoding {active}")
+                    return _progress
+
+                results = await asyncio.gather(
+                    *[
+                        self._transcode_tier(
+                            str(source), tier, str(hls_dir / tier.name),
+                            total_duration=total_duration,
+                            on_progress=_make_tier_progress(tier),
+                        )
+                        for tier in applicable
+                    ],
+                    return_exceptions=True,
+                )
+
+                # Check results — any failure is logged but doesn't block others
+                all_ok = True
+                for tier, result in zip(applicable, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Tier {tier.name} raised exception: {result}")
+                        all_ok = False
+                    elif result is False:
+                        logger.error(f"Tier {tier.name} failed")
+                        all_ok = False
+
+                if not all_ok:
+                    # If ALL tiers failed, mark as failed
+                    success_count = sum(
+                        1 for r in results if r is True
+                    )
+                    if success_count == 0:
+                        logger.error(f"All tiers failed for version {version_id}")
+                        await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                        return None
+                    # Partial success: filter applicable to only successful tiers
+                    applicable = [
+                        tier for tier, r in zip(applicable, results) if r is True
+                    ]
+            else:
+                # ── Serial tier encoding (fallback / single tier) ──
+                encode_weight = 95 / num_tiers
+                for i, tier in enumerate(applicable):
+                    base_progress = int(i * encode_weight)
+
+                    async def tier_progress(pct: float, _ew=encode_weight, _bp=base_progress, _tier=tier):
+                        overall = _bp + int(pct * _ew / 100)
+                        if on_progress:
+                            await on_progress(min(overall, 95), f"Encoding {_tier.name}")
+
+                    success = await self._transcode_tier(
+                        str(source), tier, str(hls_dir / tier.name),
+                        total_duration=total_duration,
+                        on_progress=tier_progress,
+                    )
+                    if not success:
+                        logger.error(f"Failed to transcode tier {tier.name} for version {version_id}")
+                        await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                        return None
+
+            # Add passthrough "Original" tier (copy codec, no re-encoding)
+            if on_progress:
+                await on_progress(95, "Remuxing original...")
+            source_bitrate = await self._probe_bitrate(str(source))
+            passthrough_ok = await self._transcode_passthrough(str(source), hls_dir)
+
+            # Generate master playlist
+            if on_progress:
+                await on_progress(98, "Writing playlist...")
+            self._write_master_playlist(
+                hls_dir,
+                applicable,
+                passthrough=passthrough_ok,
+                source_width=width,
+                source_height=height,
+                source_bitrate=source_bitrate,
+            )
+
+            # Build relative path
+            master_path = hls_dir / "master.m3u8"
+            relative_hls = str(master_path.relative_to(base))
+
+            # Update DB
+            from datetime import datetime, timezone
+            await self.repo.update_version(version_id, {
+                "hls_path": relative_hls,
+                "transcode_status": "completed",
+                "transcode_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+            if on_progress:
+                await on_progress(100, "Done")
+
+            logger.success(
+                f"Transcode completed: resource={resource_id}, version={version_id}, "
+                f"tiers={[t.name for t in applicable]}"
+            )
+            return relative_hls
+
+        except Exception as e:
+            logger.error(f"Transcode failed for version {version_id}: {e}")
+            await self.repo.update_version(version_id, {"transcode_status": "failed"})
+            return None
+
+    # ------------------------------------------------------------------ #
+    # ffprobe
+    # ------------------------------------------------------------------ #
+
+    async def _probe_resolution(self, filepath: str) -> Tuple[Optional[int], Optional[int]]:
+        """Probe video file for width and height."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams",
+                "-select_streams", "v:0",
+                filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None, None
+
+            info = json.loads(stdout)
+            for stream in info.get("streams", []):
+                w = stream.get("width")
+                h = stream.get("height")
+                if w and h:
+                    return int(w), int(h)
+            return None, None
+        except Exception as e:
+            logger.warning(f"ffprobe failed for {filepath}: {e}")
+            return None, None
+
+    async def _probe_duration(self, filepath: str) -> Optional[float]:
+        """Probe video file for duration in seconds."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None
+            info = json.loads(stdout)
+            dur = info.get("format", {}).get("duration")
+            return float(dur) if dur else None
+        except Exception as e:
+            logger.warning(f"ffprobe duration failed for {filepath}: {e}")
+            return None
+
+    async def _probe_bitrate(self, filepath: str) -> Optional[int]:
+        """Probe video file for overall bitrate (bps)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None
+            info = json.loads(stdout)
+            br = info.get("format", {}).get("bit_rate")
+            return int(br) if br else None
+        except Exception as e:
+            logger.warning(f"ffprobe bitrate failed for {filepath}: {e}")
+            return None
+
+    # ------------------------------------------------------------------ #
+    # Tier selection
+    # ------------------------------------------------------------------ #
+
+    def _select_tiers(self, width: int, height: int) -> List[TranscodeTier]:
+        """Select tiers at or below the source resolution, filtered by config."""
+        enabled_names = {
+            t.strip().lower()
+            for t in settings.TRANSCODE_TIERS.split(",")
+            if t.strip()
+        }
+        applicable = []
+        for tier in TIERS:
+            if tier.height <= height and tier.name.lower() in enabled_names:
+                applicable.append(tier)
+        return applicable
+
+    # ------------------------------------------------------------------ #
+    # ffmpeg transcoding
+    # ------------------------------------------------------------------ #
+
+    _TIME_RE = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})")
+
+    async def _transcode_tier(
+        self,
+        source: str,
+        tier: TranscodeTier,
+        output_dir: str,
+        total_duration: Optional[float] = None,
+        on_progress: Optional[Callable] = None,
+    ) -> bool:
+        """Transcode source video to a single HLS tier with progress tracking."""
+        encoder, hwaccel_args, preset = await self._detect_encoder()
+        success = await self._run_ffmpeg_tier(
+            source, tier, output_dir, encoder, hwaccel_args, preset,
+            total_duration=total_duration, on_progress=on_progress,
+        )
+
+        # GPU fallback: if GPU encoder failed, retry with libx264
+        if not success and encoder != "libx264":
+            logger.warning(
+                f"[Transcode] GPU encoder {encoder} failed for {tier.name}, "
+                f"falling back to libx264"
+            )
+            success = await self._run_ffmpeg_tier(
+                source, tier, output_dir, "libx264", [], "medium",
+                total_duration=total_duration, on_progress=on_progress,
+            )
+
+        return success
+
+    async def _run_ffmpeg_tier(
+        self,
+        source: str,
+        tier: TranscodeTier,
+        output_dir: str,
+        encoder: str,
+        hwaccel_args: List[str],
+        preset: str,
+        total_duration: Optional[float] = None,
+        on_progress: Optional[Callable] = None,
+    ) -> bool:
+        """Run ffmpeg for a single HLS tier with the given encoder settings."""
+        segment_path = f"{output_dir}/segment_%03d.ts"
+        playlist_path = f"{output_dir}/stream.m3u8"
+
+        cmd = ["ffmpeg", "-y"]
+
+        # GPU hwaccel input flags (before -i)
+        if hwaccel_args:
+            cmd.extend(hwaccel_args)
+
+        scale_filter = (
+            f"scale={tier.width}:{tier.height}"
+            f":force_original_aspect_ratio=decrease,"
+            f"pad={tier.width}:{tier.height}:(ow-iw)/2:(oh-ih)/2"
+        )
+
+        cmd.extend([
+            "-i", source,
+            "-vf", scale_filter,
+            "-c:v", encoder,
+            "-preset", preset,
+            "-b:v", f"{tier.bitrate}k",
+            "-maxrate", f"{int(tier.bitrate * 1.2)}k",
+            "-bufsize", f"{tier.bitrate * 2}k",
+            "-c:a", "aac",
+            "-b:a", f"{tier.audio_bitrate}k",
+            "-ac", "2",
+            "-ar", "44100",
+            "-f", "hls",
+            "-hls_time", "6",
+            "-hls_list_size", "0",
+            "-hls_segment_filename", segment_path,
+            "-hls_playlist_type", "vod",
+            playlist_path,
+        ])
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            # Read stderr incrementally to parse ffmpeg progress
+            stderr_tail = b""
+            while True:
+                chunk = await proc.stderr.read(512)
+                if not chunk:
+                    break
+                stderr_tail = (stderr_tail + chunk)[-2048:]  # keep last 2KB for error msg
+
+                if on_progress and total_duration and total_duration > 0:
+                    # Parse time= from ffmpeg output
+                    text = chunk.decode(errors="ignore")
+                    match = self._TIME_RE.search(text)
+                    if match:
+                        h, m, s, cs = (int(x) for x in match.groups())
+                        current_sec = h * 3600 + m * 60 + s + cs / 100
+                        pct = min(current_sec / total_duration * 100, 99.0)
+                        await on_progress(pct)
+
+            await proc.wait()
+
+            if proc.returncode != 0:
+                logger.error(
+                    f"ffmpeg [{encoder}] failed for tier {tier.name}: "
+                    f"{stderr_tail.decode(errors='ignore')[-500:]}"
+                )
+                return False
+
+            logger.info(f"Tier {tier.name} transcoded [{encoder}] → {playlist_path}")
+            return True
+        except Exception as e:
+            logger.error(f"ffmpeg [{encoder}] execution error for tier {tier.name}: {e}")
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Passthrough (original quality, no re-encoding)
+    # ------------------------------------------------------------------ #
+
+    async def _transcode_passthrough(self, source: str, hls_dir: Path) -> bool:
+        """Remux source into HLS segments without re-encoding (preserves original quality)."""
+        out_dir = hls_dir / "source"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        segment_path = f"{out_dir}/segment_%03d.ts"
+        playlist_path = f"{out_dir}/stream.m3u8"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", source,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-f", "hls",
+            "-hls_time", "6",
+            "-hls_list_size", "0",
+            "-hls_segment_filename", segment_path,
+            "-hls_playlist_type", "vod",
+            playlist_path,
+        ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode != 0:
+                # Passthrough failed (e.g. non-H.264 source) — not critical, skip it
+                logger.warning(
+                    f"Passthrough remux failed (codec incompatible?): {stderr.decode()[-300:]}"
+                )
+                shutil.rmtree(out_dir, ignore_errors=True)
+                return False
+
+            logger.info(f"Passthrough tier (Original) created → {playlist_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Passthrough execution error: {e}")
+            shutil.rmtree(out_dir, ignore_errors=True)
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Master playlist
+    # ------------------------------------------------------------------ #
+
+    def _write_master_playlist(
+        self,
+        hls_dir: Path,
+        tiers: List[TranscodeTier],
+        *,
+        passthrough: bool = False,
+        source_width: Optional[int] = None,
+        source_height: Optional[int] = None,
+        source_bitrate: Optional[int] = None,
+    ) -> None:
+        """Write the multi-bitrate master.m3u8 playlist."""
+        lines = ["#EXTM3U"]
+        for tier in tiers:
+            bandwidth = tier.bitrate * 1000  # kbps → bps
+            lines.append(
+                f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},"
+                f"RESOLUTION={tier.width}x{tier.height},"
+                f"NAME=\"{tier.name}\""
+            )
+            lines.append(f"{tier.name}/stream.m3u8")
+
+        # Passthrough tier — original quality, highest bandwidth
+        if passthrough and source_width and source_height:
+            # Use probed bitrate or a generous fallback
+            bw = source_bitrate if source_bitrate else 20_000_000
+            lines.append(
+                f"#EXT-X-STREAM-INF:BANDWIDTH={bw},"
+                f"RESOLUTION={source_width}x{source_height},"
+                f"NAME=\"Original\""
+            )
+            lines.append("source/stream.m3u8")
+
+        master = hls_dir / "master.m3u8"
+        master.write_text("\n".join(lines) + "\n")
+        logger.info(f"Master playlist written: {master}")

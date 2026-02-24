@@ -6,6 +6,6 @@ Pydantic Schema module
 
 
 __all__ = [
-    # video schemas
+    # media schemas
     # tags schemas
 ]

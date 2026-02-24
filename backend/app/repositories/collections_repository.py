@@ -14,13 +14,11 @@ class CollectionsRepository:
     TABLE_NAME = "smart_collections"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """获取表引用"""
@@ -114,14 +112,14 @@ class CollectionsRepository:
         return len(result.data) > 0
 
     async def update_cache(
-        self, collection_id: str, video_ids: List[int], count: int
+        self, collection_id: str, media_ids: List[int], count: int
     ) -> dict:
-        """Update the cached video IDs and count for a collection."""
+        """Update the cached media IDs and count for a collection."""
         table = await self._get_table()
         result = (
             await table.update(
                 {
-                    "cached_video_ids": video_ids,
+                    "cached_media_ids": media_ids,
                     "cached_count": count,
                     "cached_at": datetime.utcnow().isoformat(),
                 }

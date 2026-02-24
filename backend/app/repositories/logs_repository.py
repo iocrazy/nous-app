@@ -14,13 +14,11 @@ class LogsRepository:
     TABLE_NAME = "user_logs"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """Get async client."""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """Get table reference."""

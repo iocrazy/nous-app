@@ -1,6 +1,11 @@
 import { getSupabaseClient } from '../supabaseClient';
 import { Team, TeamMember } from '../types';
 
+// PostgREST returns BIGINT as JSON number; ensure IDs are always strings
+function normalizeTeam(t: any): Team {
+  return { ...t, id: String(t.id) };
+}
+
 export const fetchMyTeams = async (): Promise<Team[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -16,10 +21,34 @@ export const fetchMyTeams = async (): Promise<Team[]> => {
     .from('teams')
     .select('*')
     .in('id', teamIds)
+    .eq('is_personal', false)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return data || [];
+  return (data || []).map(normalizeTeam);
+};
+
+export const fetchPersonalTeam = async (): Promise<Team | null> => {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data: memberships } = await supabase
+    .from('team_members')
+    .select('team_id');
+
+  if (!memberships?.length) return null;
+
+  const teamIds = memberships.map(m => m.team_id);
+  const { data, error } = await supabase
+    .from('teams')
+    .select('*')
+    .in('id', teamIds)
+    .eq('is_personal', true)
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+  return normalizeTeam(data);
 };
 
 export const createTeam = async (name: string): Promise<Team> => {
@@ -47,7 +76,7 @@ export const createTeam = async (name: string): Promise<Team> => {
   }
 
   console.log('Team created:', data);
-  return data;
+  return normalizeTeam(data);
 };
 
 export const joinTeamByCode = async (inviteCode: string): Promise<Team> => {
@@ -74,7 +103,7 @@ export const joinTeamByCode = async (inviteCode: string): Promise<Team> => {
     throw memberError;
   }
 
-  return team;
+  return normalizeTeam(team);
 };
 
 export const leaveTeam = async (teamId: string): Promise<void> => {
@@ -97,12 +126,14 @@ export const deleteTeam = async (teamId: string): Promise<void> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { error } = await supabase
-    .from('teams')
-    .delete()
-    .eq('id', teamId);
+  const { error } = await supabase.rpc('delete_team_with_cleanup', {
+    target_team_id: teamId,
+  });
 
-  if (error) throw error;
+  if (error) {
+    console.error('[teamService] deleteTeam RPC failed:', error);
+    throw error;
+  }
 };
 
 export const fetchTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
@@ -131,7 +162,7 @@ export const updateTeam = async (teamId: string, updates: { name?: string; descr
     .single();
 
   if (error) throw error;
-  return data;
+  return normalizeTeam(data);
 };
 
 export const updateMemberRole = async (

@@ -24,7 +24,7 @@ export const fetchPointsBalance = async (teamId?: string): Promise<TeamQuota> =>
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -58,7 +58,7 @@ export const fetchPointsTransactions = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -81,7 +81,7 @@ export const fetchPointsPricing = async (): Promise<PointPricing[]> => {
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -108,7 +108,7 @@ export const fetchUsageStats = async (teamId?: string): Promise<any> => {
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -140,7 +140,7 @@ export const checkQuota = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -153,4 +153,34 @@ export const checkQuota = async (
     throw new Error(result.message || 'Failed to check quota');
   }
   return result.data;
+};
+
+/**
+ * Admin: adjust a team's points balance.
+ */
+export const adjustPoints = async (
+  teamId: string,
+  amount: number,
+  description: string
+): Promise<{ new_balance: number }> => {
+  const url = `${API_BASE}/api/v1/points/admin/adjust`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...(await getAuthHeaders()),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ team_id: teamId, amount, description }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to adjust points' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error(result.message || 'Failed to adjust points');
+  }
+  return result;
 };

@@ -53,7 +53,7 @@ export interface QueueStats {
 export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -69,7 +69,7 @@ export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse>
 export const cancelTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -93,7 +93,7 @@ export const getActiveTasks = async (queue?: string, limit: number = 100): Promi
 
   const response = await fetch(`${API_BASE}/api/v1/tasks/?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -113,7 +113,7 @@ export const getWorkerStats = async (): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/stats/workers`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -133,7 +133,7 @@ export const getQueueStats = async (): Promise<{
 }> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/stats/queues`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -293,7 +293,7 @@ export interface DownloadProgressResponse {
 export const getDownloadProgress = async (taskId: string): Promise<DownloadProgressResponse> => {
   const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}/progress`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -342,160 +342,6 @@ export const pollDownloadProgress = (
   return () => {
     isPolling = false;
   };
-};
-
-// ========== Task Manager Types ==========
-
-export interface TaskManagerItem {
-  platform_id: string;
-  title: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed';
-  percent: number;
-  downloaded: number;
-  total: number;
-  speed: string;
-  retry_count: number;
-  max_retries: number;
-  error: string | null;
-  started_at: string;
-  updated_at: string;
-}
-
-export interface TaskManagerStats {
-  pending: number;
-  downloading: number;
-  completed: number;
-  failed: number;
-  worker_online: boolean;
-  storage_free: string;
-  storage_used_percent: number;
-}
-
-export interface TaskManagerListResponse {
-  items: TaskManagerItem[];
-  total: number;
-}
-
-// ========== Task Manager API ==========
-
-/**
- * Get task list from TaskManager
- */
-export const getTaskManagerTasks = async (
-  status?: string,
-  limit: number = 50,
-  offset: number = 0
-): Promise<TaskManagerListResponse> => {
-  const params = new URLSearchParams();
-  if (status) params.append('status', status);
-  params.append('limit', String(limit));
-  params.append('offset', String(offset));
-
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks?${params}`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch tasks: ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Get task statistics from TaskManager
- */
-export const getTaskManagerStats = async (): Promise<TaskManagerStats> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/stats`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch task stats: ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Retry a failed task
- */
-export const retryFailedTask = async (platformId: string, force: boolean = false): Promise<{
-  success: boolean;
-  message: string;
-  platform_id?: string;
-}> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}/retry?force=${force}`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to retry task: ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Retry all failed tasks
- */
-export const retryAllFailedTasks = async (force: boolean = false): Promise<{
-  success: boolean;
-  message: string;
-  retried_count: number;
-  failed_ids: string[];
-}> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/retry-all?force=${force}`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to retry all tasks: ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Delete a task from TaskManager
- */
-export const deleteTaskManagerTask = async (platformId: string): Promise<{
-  success: boolean;
-  message: string;
-}> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/${platformId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete task: ${response.statusText}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Cleanup completed tasks
- */
-export const cleanupCompletedTasks = async (keepRecent: number = 100): Promise<{
-  success: boolean;
-  removed_count: number;
-}> => {
-  const response = await fetch(`${API_BASE}/api/v1/download-tasks/cleanup?keep_recent=${keepRecent}`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to cleanup tasks: ${response.statusText}`);
-  }
-
-  return response.json();
 };
 
 /**

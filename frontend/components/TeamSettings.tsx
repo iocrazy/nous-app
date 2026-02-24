@@ -14,6 +14,7 @@ interface TeamSettingsProps {
   onOpenInviteModal: () => void;
   onTeamDeleted: () => void;
   onTeamLeft: () => void;
+  onTeamUpdated?: (team: any) => void;
 }
 
 // Per-member usage info returned from usage stats
@@ -35,6 +36,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
   onOpenInviteModal,
   onTeamDeleted,
   onTeamLeft,
+  onTeamUpdated,
 }) => {
   const [name, setName] = useState(teamName);
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -112,7 +114,8 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     if (name === teamName) return;
     setIsSaving(true);
     try {
-      await updateTeam(teamId, { name });
+      const updated = await updateTeam(teamId, { name });
+      onTeamUpdated?.(updated);
     } catch (err) {
       setError('Failed to update team name');
     } finally {
@@ -150,8 +153,9 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     try {
       await deleteTeam(teamId);
       onTeamDeleted();
-    } catch (err) {
-      setError('Failed to delete team');
+    } catch (err: any) {
+      console.error('[TeamSettings] Delete team failed:', err);
+      setError(err?.message || 'Failed to delete team');
     } finally {
       setIsDeleting(false);
     }

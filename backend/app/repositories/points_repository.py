@@ -25,13 +25,11 @@ class PointsRepository:
     TABLE_TRANSACTIONS = "point_transactions"
 
     def __init__(self):
-        self._client = None  # Lazy initialisation
+        pass
 
     async def _get_client(self):
-        """Get async Supabase admin client"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     # ------------------------------------------------------------------ #
     # Point Pricing
@@ -214,14 +212,10 @@ class PointsRepository:
                 .eq("team_id", team_id)
                 .execute()
             )
-            logger.info(
-                f"Updated points balance for team {team_id} to {new_balance}"
-            )
+            logger.info(f"Updated points balance for team {team_id} to {new_balance}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(
-                f"Failed to update points balance for {team_id}: {e}"
-            )
+            logger.error(f"Failed to update points balance for {team_id}: {e}")
             raise
 
     async def update_storage_used(
@@ -250,9 +244,7 @@ class PointsRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(
-                f"Failed to update storage used for {team_id}: {e}"
-            )
+            logger.error(f"Failed to update storage used for {team_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -318,9 +310,7 @@ class PointsRepository:
                 )
                 .execute()
             )
-            logger.info(
-                f"Upserted member quota for user {user_id} in team {team_id}"
-            )
+            logger.info(f"Upserted member quota for user {user_id} in team {team_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(
@@ -374,9 +364,7 @@ class PointsRepository:
             )
             raise
 
-    async def get_team_member_quotas(
-        self, team_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_team_member_quotas(self, team_id: str) -> List[Dict[str, Any]]:
         """
         Get all member quotas for a team.
 
@@ -396,9 +384,7 @@ class PointsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to get member quotas for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get member quotas for team {team_id}: {e}")
             return []
 
     # ------------------------------------------------------------------ #
@@ -418,11 +404,7 @@ class PointsRepository:
         """
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_TRANSACTIONS)
-                .insert(data)
-                .execute()
-            )
+            result = await client.table(self.TABLE_TRANSACTIONS).insert(data).execute()
             logger.info(
                 f"Created transaction for team {data.get('team_id')}: "
                 f"{data.get('type')} {data.get('amount')}"
@@ -455,9 +437,7 @@ class PointsRepository:
         try:
             client = await self._get_client()
             query = (
-                client.table(self.TABLE_TRANSACTIONS)
-                .select("*")
-                .eq("team_id", team_id)
+                client.table(self.TABLE_TRANSACTIONS).select("*").eq("team_id", team_id)
             )
             if type_filter:
                 query = query.eq("type", type_filter)
@@ -466,10 +446,61 @@ class PointsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to get transactions for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get transactions for team {team_id}: {e}")
             return []
+
+    async def get_admin_overview(self) -> Dict[str, Any]:
+        """
+        Aggregate system-wide points statistics for admin overview.
+
+        Returns:
+            Dict with total_points_in_system, total_consumed, total_purchased,
+            active_teams_count, total_transactions_count.
+        """
+        try:
+            client = await self._get_client()
+
+            # Fetch all team quotas for balance sum and active count
+            quotas_result = await (
+                client.table(self.TABLE_TEAM_QUOTAS).select("points_balance").execute()
+            )
+            quotas = quotas_result.data or []
+            total_points_in_system = sum(q.get("points_balance", 0) for q in quotas)
+            active_teams_count = len(quotas)
+
+            # Fetch all transactions for aggregation
+            txn_result = await (
+                client.table(self.TABLE_TRANSACTIONS).select("amount,type").execute()
+            )
+            txns = txn_result.data or []
+            total_transactions_count = len(txns)
+
+            total_consumed = 0
+            total_purchased = 0
+            for txn in txns:
+                amount = txn.get("amount", 0)
+                txn_type = txn.get("type", "")
+                if amount < 0:
+                    total_consumed += abs(amount)
+                if txn_type == "purchase" and amount > 0:
+                    total_purchased += amount
+
+            return {
+                "total_points_in_system": total_points_in_system,
+                "total_consumed": total_consumed,
+                "total_purchased": total_purchased,
+                "active_teams_count": active_teams_count,
+                "total_transactions_count": total_transactions_count,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get admin overview: {e}")
+            return {
+                "total_points_in_system": 0,
+                "total_consumed": 0,
+                "total_purchased": 0,
+                "active_teams_count": 0,
+                "total_transactions_count": 0,
+            }
 
     async def get_usage_stats(self, team_id: str) -> Dict[str, Any]:
         """
@@ -521,9 +552,7 @@ class PointsRepository:
                 "by_type": by_type,
             }
         except Exception as e:
-            logger.error(
-                f"Failed to get usage stats for team {team_id}: {e}"
-            )
+            logger.error(f"Failed to get usage stats for team {team_id}: {e}")
             return {
                 "total_consumed": 0,
                 "total_purchased": 0,

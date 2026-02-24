@@ -14,7 +14,7 @@ from app.db.supabase_client import get_async_supabase_admin
 class CleanupSuggestion:
     """A cleanup suggestion."""
 
-    video_id: int
+    media_id: int
     title: str
     cover_url: Optional[str]
     author: Optional[str]
@@ -32,13 +32,11 @@ class CleanupService:
     """Service for generating and managing cleanup suggestions (异步)."""
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def get_cleanup_data(
         self, user_id: str, limit: int = 50, include_duplicates: bool = True
@@ -60,9 +58,9 @@ class CleanupService:
             for video in data.get("suggestions", []):
                 suggestions.append(
                     CleanupSuggestion(
-                        video_id=video["video_id"],
+                        media_id=video["media_id"],
                         title=video.get("title", ""),
-                        cover_url=video.get("cover_url"),
+                        cover_url=(video.get("cover_urls") or [None])[0],
                         author=video.get("author"),
                         reason=video.get("reason", "unknown"),
                         reason_detail=video.get("reason_detail", ""),
@@ -83,14 +81,14 @@ class CleanupService:
             if include_duplicates:
                 try:
                     duplicates = await self._get_duplicates_via_rpc(user_id)
-                    existing_ids = {s.video_id for s in suggestions}
+                    existing_ids = {s.media_id for s in suggestions}
                     for dup in duplicates:
-                        if dup["video_id"] not in existing_ids:
+                        if dup["media_id"] not in existing_ids:
                             suggestions.append(
                                 CleanupSuggestion(
-                                    video_id=dup["video_id"],
+                                    media_id=dup["media_id"],
                                     title=dup.get("title", ""),
-                                    cover_url=dup.get("cover_url"),
+                                    cover_url=(dup.get("cover_urls") or [None])[0],
                                     author=dup.get("author"),
                                     reason="duplicate_content",
                                     reason_detail=f"Similar to another video ({dup['similarity_score']:.0%} match)",
@@ -166,9 +164,9 @@ class CleanupService:
                 reason = video.get("reason", "unknown")
                 suggestions.append(
                     CleanupSuggestion(
-                        video_id=video["video_id"],
+                        media_id=video["media_id"],
                         title=video.get("title", ""),
-                        cover_url=video.get("cover_url"),
+                        cover_url=(video.get("cover_urls") or [None])[0],
                         author=video.get("author"),
                         reason=reason,
                         reason_detail=video.get("reason_detail", ""),
@@ -188,14 +186,14 @@ class CleanupService:
                     logger.warning(f"RPC find_duplicate_videos failed: {results[1]}")
                     duplicates = []
 
-                existing_ids = {s.video_id for s in suggestions}
+                existing_ids = {s.media_id for s in suggestions}
                 for dup in duplicates:
-                    if dup["video_id"] not in existing_ids:
+                    if dup["media_id"] not in existing_ids:
                         suggestions.append(
                             CleanupSuggestion(
-                                video_id=dup["video_id"],
+                                media_id=dup["media_id"],
                                 title=dup.get("title", ""),
-                                cover_url=dup.get("cover_url"),
+                                cover_url=(dup.get("cover_urls") or [None])[0],
                                 author=dup.get("author"),
                                 reason="duplicate_content",
                                 reason_detail=f"Similar to another video ({dup['similarity_score']:.0%} match)",
@@ -273,7 +271,7 @@ class CleanupService:
                 suggestions.append(
                     {
                         **v,
-                        "video_id": v["id"],
+                        "media_id": v["id"],
                         "reason": "never_viewed",
                         "reason_detail": "Downloaded over 7 days ago but never viewed",
                     }
@@ -285,7 +283,7 @@ class CleanupService:
                 suggestions.append(
                     {
                         **v,
-                        "video_id": v["id"],
+                        "media_id": v["id"],
                         "reason": "old_unused",
                         "reason_detail": "Not viewed in over 30 days",
                     }
@@ -293,13 +291,13 @@ class CleanupService:
 
         # Large files
         if not isinstance(results[2], Exception):
-            existing_ids = {s["video_id"] for s in suggestions}
+            existing_ids = {s["media_id"] for s in suggestions}
             for v in results[2]:
                 if v["id"] not in existing_ids:
                     suggestions.append(
                         {
                             **v,
-                            "video_id": v["id"],
+                            "media_id": v["id"],
                             "reason": "large_file",
                             "reason_detail": f"Large file: {self._format_size(v.get('storage_size', 0))}",
                         }
@@ -307,15 +305,30 @@ class CleanupService:
 
         return suggestions[:limit]
 
+    async def _get_user_media_ids(self, user_id: str) -> list:
+        """Get user's media IDs via resources table."""
+        client = await self._get_client()
+        result = (
+            await client.table("resources")
+            .select("media_id")
+            .eq("creator_id", user_id)
+            .eq("is_trashed", False)
+            .execute()
+        )
+        return [r["media_id"] for r in result.data if r.get("media_id")]
+
     async def _query_never_viewed(self, user_id: str, cutoff: str) -> List[dict]:
         """Query never viewed videos."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return []
         result = (
-            await client.table("videos")
+            await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .eq("view_count", 0)
             .lt("created_at", cutoff)
@@ -327,12 +340,15 @@ class CleanupService:
     async def _query_old_unused(self, user_id: str, cutoff: str) -> List[dict]:
         """Query old unused videos."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return []
         result = (
-            await client.table("videos")
+            await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .gt("view_count", 0)
             .lt("last_viewed_at", cutoff)
@@ -344,28 +360,21 @@ class CleanupService:
     async def _query_large_files(self, user_id: str) -> List[dict]:
         """Query large files."""
         client = await self._get_client()
-
-        # Get total count
-        count_result = (
-            await client.table("videos")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        total = count_result.count or 0
-
-        if total == 0:
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
             return []
+
+        total = len(media_ids)
 
         # Get top N by size
         top_n = max(int(total * 0.1), 5)
 
         result = (
-            await client.table("videos")
+            await client.table("parsed_media")
             .select(
-                "id, title, cover_url, author, storage_size, created_at, last_viewed_at, view_count"
+                "id, title, cover_urls, author, storage_size, created_at, last_viewed_at, view_count"
             )
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .eq("keep_forever", False)
             .not_.is_("storage_size", "null")
             .order("storage_size", desc=True)
@@ -395,9 +404,9 @@ class CleanupService:
             reason = video.get("reason", "unknown")
             suggestions.append(
                 CleanupSuggestion(
-                    video_id=video["video_id"],
+                    media_id=video["media_id"],
                     title=video.get("title", ""),
-                    cover_url=video.get("cover_url"),
+                    cover_url=(video.get("cover_urls") or [None])[0],
                     author=video.get("author"),
                     reason=reason,
                     reason_detail=video.get("reason_detail", ""),
@@ -459,10 +468,18 @@ class CleanupService:
     async def _get_cleanup_stats_fallback(self, user_id: str) -> dict:
         """Fallback stats calculation."""
         client = await self._get_client()
+        media_ids = await self._get_user_media_ids(user_id)
+        if not media_ids:
+            return {
+                "total_videos": 0, "total_storage_bytes": 0,
+                "videos_never_viewed": 0, "videos_not_viewed_30_days": 0,
+                "potential_duplicates": 0, "videos_marked_keep": 0,
+                "reclaimable_bytes": 0,
+            }
         total_result = (
-            await client.table("videos")
+            await client.table("parsed_media")
             .select("id, storage_size, view_count, last_viewed_at, keep_forever")
-            .eq("user_id", user_id)
+            .in_("id", media_ids)
             .execute()
         )
 
@@ -500,28 +517,46 @@ class CleanupService:
             "reclaimable_bytes": reclaimable,
         }
 
-    async def mark_keep_forever(self, video_id: int, user_id: str) -> bool:
-        """Mark a video to keep forever (exclude from suggestions)."""
+    async def mark_keep_forever(self, media_id: int, user_id: str) -> bool:
+        """Mark a media item to keep forever (exclude from suggestions)."""
         client = await self._get_client()
-        result = (
-            await client.table("videos")
-            .update({"keep_forever": True})
-            .eq("id", video_id)
-            .eq("user_id", user_id)
+        # Verify ownership via resources table
+        resource = (
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .eq("creator_id", user_id)
+            .limit(1)
             .execute()
         )
-
+        if not resource.data:
+            return False
+        result = (
+            await client.table("parsed_media")
+            .update({"keep_forever": True})
+            .eq("id", media_id)
+            .execute()
+        )
         return len(result.data) > 0
 
-    async def unmark_keep_forever(self, video_id: int, user_id: str) -> bool:
-        """Remove keep forever mark from a video."""
+    async def unmark_keep_forever(self, media_id: int, user_id: str) -> bool:
+        """Remove keep forever mark from a media item."""
         client = await self._get_client()
-        result = (
-            await client.table("videos")
-            .update({"keep_forever": False})
-            .eq("id", video_id)
-            .eq("user_id", user_id)
+        # Verify ownership via resources table
+        resource = (
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .eq("creator_id", user_id)
+            .limit(1)
             .execute()
         )
-
+        if not resource.data:
+            return False
+        result = (
+            await client.table("parsed_media")
+            .update({"keep_forever": False})
+            .eq("id", media_id)
+            .execute()
+        )
         return len(result.data) > 0

@@ -29,7 +29,7 @@ async def migrate_storage_sizes():
     base_path = settings.DOWNLOAD_PATH
 
     # 获取所有有 download_path 但没有 storage_size 的视频
-    result = await client.table("videos").select(
+    result = await client.table("parsed_media").select(
         "id, platform_id, download_path, storage_size"
     ).not_.is_("download_path", "null").execute()
 
@@ -63,7 +63,7 @@ async def migrate_storage_sizes():
 
             # 更新数据库
             try:
-                await client.table("videos").update({
+                await client.table("parsed_media").update({
                     "storage_size": file_size
                 }).eq("id", video_id).execute()
 

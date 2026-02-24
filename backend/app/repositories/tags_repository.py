@@ -11,31 +11,29 @@ class TagsRepository:
     """Repository for tags CRUD operations (异步)."""
 
     TABLE_NAME = "tags"
-    VIDEO_TAGS_TABLE = "video_tags"
+    RESOURCE_TAGS_TABLE = "resource_tags"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """获取表引用"""
         client = await self._get_client()
         return client.table(self.TABLE_NAME)
 
-    async def _get_video_tags_table(self):
-        """获取视频标签关联表引用"""
+    async def _get_resource_tags_table(self):
+        """获取资源标签关联表引用"""
         client = await self._get_client()
-        return client.table(self.VIDEO_TAGS_TABLE)
+        return client.table(self.RESOURCE_TAGS_TABLE)
 
     async def get_all_tags(self, user_id: Optional[str] = None) -> List[dict]:
-        """Get all tags (system + time + user's own tags) with video_count."""
+        """Get all tags (system + time + user's own tags) with media_count."""
         table = await self._get_table()
-        video_tags_table = await self._get_video_tags_table()
+        resource_tags_table = await self._get_resource_tags_table()
 
         # Get system tags
         system_result = await table.select("*").eq("type", "system").execute()
@@ -50,15 +48,15 @@ class TagsRepository:
             user_result = await table.select("*").eq("user_id", user_id).execute()
             tags.extend(user_result.data)
 
-        # Calculate video_count for each tag
+        # Calculate media_count for each tag
         for tag in tags:
             tag_id = str(tag.get("id"))
             count_result = (
-                await video_tags_table.select("*", count="exact")
+                await resource_tags_table.select("*", count="exact")
                 .eq("tag_id", tag_id)
                 .execute()
             )
-            tag["video_count"] = count_result.count or 0
+            tag["media_count"] = count_result.count or 0
 
         return tags
 
@@ -166,89 +164,110 @@ class TagsRepository:
         )
         return len(result.data) > 0
 
-    async def add_tag_to_video(
+    async def add_tag_to_resource(
         self,
-        video_id: str,
+        resource_id: str,
         tag_id: str,
         confidence: Optional[float] = None,
         source: str = "manual",
     ) -> dict:
-        """Add a tag to a video.
+        """Add a tag to a resource item.
 
         Args:
-            video_id: The video UUID
+            resource_id: The resource UUID
             tag_id: The tag UUID
             confidence: Optional confidence score for auto-assigned tags
             source: How the tag was added ('manual', 'auto', 'ai')
         """
-        data = {"video_id": video_id, "tag_id": tag_id, "source": source}
+        data = {"resource_id": resource_id, "tag_id": tag_id, "source": source}
         if confidence is not None:
             data["confidence"] = confidence
 
-        video_tags_table = await self._get_video_tags_table()
-        result = await video_tags_table.upsert(data).execute()
-        logger.info(f"Added tag {tag_id} to video {video_id}")
+        resource_tags_table = await self._get_resource_tags_table()
+        result = await resource_tags_table.upsert(data).execute()
+        logger.info(f"Added tag {tag_id} to resource {resource_id}")
         return result.data[0]
 
-    async def remove_tag_from_video(self, video_id: str, tag_id: str) -> bool:
-        """Remove a tag from a video."""
-        video_tags_table = await self._get_video_tags_table()
+    async def remove_tag_from_resource(self, resource_id: str, tag_id: str) -> bool:
+        """Remove a tag from a resource item."""
+        resource_tags_table = await self._get_resource_tags_table()
         result = (
-            await video_tags_table.delete()
-            .eq("video_id", video_id)
+            await resource_tags_table.delete()
+            .eq("resource_id", resource_id)
             .eq("tag_id", tag_id)
             .execute()
         )
         return len(result.data) > 0
 
-    async def get_video_tags(self, video_id: str) -> List[dict]:
-        """Get all tags for a video with tag details."""
-        video_tags_table = await self._get_video_tags_table()
+    async def resolve_media_id_to_resource_id(self, media_id: str) -> Optional[str]:
+        """Resolve a parsed_media ID to its corresponding resource ID.
+
+        Args:
+            media_id: The parsed_media Snowflake ID
+
+        Returns:
+            The resource Snowflake ID, or None if no resource exists for this media.
+        """
+        client = await self._get_client()
         result = (
-            await video_tags_table.select("*, tags(*)")
-            .eq("video_id", video_id)
+            await client.table("resources")
+            .select("id")
+            .eq("media_id", media_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data and len(result.data) > 0:
+            return str(result.data[0]["id"])
+        return None
+
+    async def get_resource_tags(self, resource_id: str) -> List[dict]:
+        """Get all tags for a resource item with tag details."""
+        resource_tags_table = await self._get_resource_tags_table()
+        result = (
+            await resource_tags_table.select("*, tags(*)")
+            .eq("resource_id", resource_id)
             .execute()
         )
 
         return result.data
 
-    async def get_videos_by_tag(
+    async def get_resources_by_tag(
         self, tag_id: str, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[dict]:
-        """Get all videos with a specific tag."""
-        video_tags_table = await self._get_video_tags_table()
+        """Get all resources with a specific tag."""
+        resource_tags_table = await self._get_resource_tags_table()
         result = (
-            await video_tags_table.select("video_id, videos(*)")
+            await resource_tags_table.select("resource_id, resources(*)")
             .eq("tag_id", tag_id)
             .range(offset, offset + limit - 1)
             .execute()
         )
 
-        return [r["videos"] for r in result.data if r.get("videos")]
+        return [r["resources"] for r in result.data if r.get("resources")]
 
-    async def bulk_add_tags_to_video(
-        self, video_id: str, tag_ids: List[str], source: str = "manual"
+    async def bulk_add_tags_to_resource(
+        self, resource_id: str, tag_ids: List[str], source: str = "manual"
     ) -> List[dict]:
-        """Add multiple tags to a video at once."""
+        """Add multiple tags to a resource item at once."""
         data = [
-            {"video_id": video_id, "tag_id": tag_id, "source": source}
+            {"resource_id": resource_id, "tag_id": tag_id, "source": source}
             for tag_id in tag_ids
         ]
 
-        video_tags_table = await self._get_video_tags_table()
-        result = await video_tags_table.upsert(data).execute()
-        logger.info(f"Added {len(tag_ids)} tags to video {video_id}")
+        resource_tags_table = await self._get_resource_tags_table()
+        result = await resource_tags_table.upsert(data).execute()
+        logger.info(f"Added {len(tag_ids)} tags to resource {resource_id}")
         return result.data
 
     async def get_tag_counts(self, user_id: str, limit: int = 10) -> List[dict]:
-        """Get tag usage counts for a user's videos.
+        """Get tag usage counts for a user's resources.
 
         Returns tags sorted by usage count (most used first).
         """
         client = await self._get_client()
 
-        # Query video_tags joined with tags and videos to filter by user
-        # We need to count how many videos each tag is associated with for this user
+        # Query resource_tags joined with tags and resources to filter by user
+        # We need to count how many resources each tag is associated with for this user
         result = await client.rpc(
             "get_user_tag_counts", {"p_user_id": user_id, "p_limit": limit}
         ).execute()
@@ -266,29 +285,29 @@ class TagsRepository:
         """Fallback method to get tag counts without RPC."""
         client = await self._get_client()
 
-        # Get all video IDs for this user
-        videos_result = (
-            await client.table("videos").select("id").eq("user_id", user_id).execute()
+        # Get all resource IDs for this user
+        resource_result = (
+            await client.table("resources").select("id").eq("user_id", user_id).execute()
         )
-        if not videos_result.data:
+        if not resource_result.data:
             return []
 
-        video_ids = [v["id"] for v in videos_result.data]
+        resource_ids = [v["id"] for v in resource_result.data]
 
-        # Get all video_tags for these videos
-        video_tags_result = (
-            await client.table("video_tags")
+        # Get all resource_tags for these resources
+        resource_tags_result = (
+            await client.table("resource_tags")
             .select("tag_id, tags(id, name, color, icon, type)")
-            .in_("video_id", video_ids)
+            .in_("resource_id", resource_ids)
             .execute()
         )
 
-        if not video_tags_result.data:
+        if not resource_tags_result.data:
             return []
 
         # Count tags
         tag_counts: dict = {}
-        for vt in video_tags_result.data:
+        for vt in resource_tags_result.data:
             tag_info = vt.get("tags")
             if tag_info:
                 tag_id = tag_info["id"]

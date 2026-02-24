@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
@@ -21,6 +20,14 @@ interface VideoDetailPanelProps {
   videoCollectionIds?: string[];
   onToggleCollection?: (collectionId: string) => void;
   onCreateCollection?: (name: string, teamId: string | null) => Promise<void>;
+  /** Hide video preview in MediaCard (when external player is already shown) */
+  hidePreview?: boolean;
+  // Resource-level rating & notes
+  resourceRating?: number;
+  resourceNotes?: string;
+  onRatingChange?: (rating: number) => void;
+  onNotesChange?: (notes: string) => void;
+  onNotesBlur?: () => void;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis';
@@ -46,8 +53,8 @@ const generateSRT = (segments: TranscriptData['segments']): string => {
   }).join('\n\n');
 };
 
-// Download text as file
-const downloadFile = (content: string, filename: string, mimeType: string) => {
+// Download text content as file (for SRT/TXT export)
+const downloadTextFile = (content: string, filename: string, mimeType: string) => {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -68,6 +75,12 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   videoCollectionIds,
   onToggleCollection,
   onCreateCollection,
+  hidePreview = false,
+  resourceRating,
+  resourceNotes,
+  onRatingChange,
+  onNotesChange,
+  onNotesBlur,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -174,12 +187,12 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const handleExportSRT = () => {
     if (!transcript) return;
     const srt = generateSRT(transcript.segments);
-    downloadFile(srt, `${video.platform_id}_transcript.srt`, 'text/srt');
+    downloadTextFile(srt, `${video.platform_id}_transcript.srt`, 'text/srt');
   };
 
   const handleExportTXT = () => {
     if (!transcript) return;
-    downloadFile(transcript.text, `${video.platform_id}_transcript.txt`, 'text/plain');
+    downloadTextFile(transcript.text, `${video.platform_id}_transcript.txt`, 'text/plain');
   };
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
@@ -242,6 +255,12 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             videoCollectionIds={videoCollectionIds}
             onToggleCollection={onToggleCollection}
             onCreateCollection={onCreateCollection}
+            hidePreview={hidePreview}
+            resourceRating={resourceRating}
+            resourceNotes={resourceNotes}
+            onRatingChange={onRatingChange}
+            onNotesChange={onNotesChange}
+            onNotesBlur={onNotesBlur}
           />
         )}
 
@@ -260,7 +279,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             )}
 
             {/* Not started / pending */}
-            {(!video.transcript_status || video.transcript_status === 'pending') && !transcript && (
+            {(!video.transcript_status || video.transcript_status === 'pending') && !transcript && !transcriptLoading && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
                   <FileText size={32} className="text-zinc-500" />

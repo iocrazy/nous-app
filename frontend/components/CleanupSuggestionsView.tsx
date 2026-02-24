@@ -107,7 +107,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
   };
 
   const selectAll = () => {
-    setSelectedIds(new Set(filteredSuggestions.map((s) => s.video_id)));
+    setSelectedIds(new Set(filteredSuggestions.map((s) => s.media_id)));
   };
 
   const deselectAll = () => {
@@ -115,15 +115,15 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
   };
 
   // Action handlers
-  const handleAction = async (videoId: number, action: 'delete' | 'keep_forever' | 'dismiss') => {
-    setProcessingIds((prev) => new Set(prev).add(videoId));
+  const handleAction = async (mediaId: number, action: 'delete' | 'keep_forever' | 'dismiss') => {
+    setProcessingIds((prev) => new Set(prev).add(mediaId));
     try {
-      await takeCleanupAction(videoId, action);
+      await takeCleanupAction(mediaId, action);
       // Remove from suggestions
-      setSuggestions((prev) => prev.filter((s) => s.video_id !== videoId));
+      setSuggestions((prev) => prev.filter((s) => s.media_id !== mediaId));
       setSelectedIds((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(videoId);
+        newSet.delete(mediaId);
         return newSet;
       });
     } catch (err) {
@@ -131,7 +131,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
     } finally {
       setProcessingIds((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(videoId);
+        newSet.delete(mediaId);
         return newSet;
       });
     }
@@ -145,7 +145,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
     try {
       await batchCleanupAction(ids, action);
       // Remove from suggestions
-      setSuggestions((prev) => prev.filter((s) => !selectedIds.has(s.video_id)));
+      setSuggestions((prev) => prev.filter((s) => !selectedIds.has(s.media_id)));
       setSelectedIds(new Set());
     } catch (err) {
       console.error('Batch action failed:', err);
@@ -160,7 +160,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
     0
   );
   const selectedReclaimable = Array.from(selectedIds).reduce((sum, id) => {
-    const item = suggestions.find((s) => s.video_id === id);
+    const item = suggestions.find((s) => s.media_id === id);
     return sum + (item?.storage_size || 0);
   }, 0);
 
@@ -316,12 +316,12 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
         <div className="space-y-3">
           {filteredSuggestions.map((suggestion) => (
             <SuggestionCard
-              key={suggestion.video_id}
+              key={suggestion.media_id}
               suggestion={suggestion}
-              isSelected={selectedIds.has(suggestion.video_id)}
-              isProcessing={processingIds.has(suggestion.video_id)}
-              onToggleSelect={() => toggleSelect(suggestion.video_id)}
-              onAction={(action) => handleAction(suggestion.video_id, action)}
+              isSelected={selectedIds.has(suggestion.media_id)}
+              isProcessing={processingIds.has(suggestion.media_id)}
+              onToggleSelect={() => toggleSelect(suggestion.media_id)}
+              onAction={(action) => handleAction(suggestion.media_id, action)}
             />
           ))}
         </div>

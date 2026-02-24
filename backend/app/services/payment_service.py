@@ -76,9 +76,7 @@ class PaymentService:
             )
 
             # Placeholder payment URL
-            payment_url = (
-                f"https://payment.placeholder/{payment_method}/{trade_no}"
-            )
+            payment_url = f"https://payment.placeholder/{payment_method}/{trade_no}"
 
             order_data = {
                 "team_id": team_id,
@@ -180,8 +178,7 @@ class PaymentService:
                     order_id, {"payment_status": "failed"}
                 )
                 logger.info(
-                    f"Order {order_id} marked as failed "
-                    f"(trade_no={trade_no})"
+                    f"Order {order_id} marked as failed " f"(trade_no={trade_no})"
                 )
                 return {
                     "success": True,
@@ -234,9 +231,7 @@ class PaymentService:
             }
 
         except Exception as e:
-            logger.error(
-                f"Failed to handle callback for trade_no={trade_no}: {e}"
-            )
+            logger.error(f"Failed to handle callback for trade_no={trade_no}: {e}")
             return {
                 "success": False,
                 "message": str(e),

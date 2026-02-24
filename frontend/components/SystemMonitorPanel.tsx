@@ -104,7 +104,7 @@ export const SystemMonitorPanel: React.FC = () => {
     const apiUrl = getApiUrl();
 
     try {
-      const statusRes = await fetch(`${apiUrl}/api/v1/system/status`, { headers: getAuthHeaders() });
+      const statusRes = await fetch(`${apiUrl}/api/v1/system/status`, { headers: await getAuthHeaders() });
       if (statusRes.ok) {
         const status = await statusRes.json();
         setQueue(status.queue);

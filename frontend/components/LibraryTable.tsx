@@ -4,12 +4,11 @@ import { createPortal } from 'react-dom';
 import Hls from 'hls.js';
 import { Video } from '../types';
 import {
-  Video as VideoIcon, Image as ImageIcon, Music, Tag, Edit2, Check, X, ExternalLink,
-  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play, Plus,
+  Video as VideoIcon, Image as ImageIcon, Music, Tag, Check, X, ExternalLink,
+  Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play,
   FileText, Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
-import { TagSelector } from './TagSelector';
 
 interface LibraryTableProps {
   data: Video[];
@@ -60,8 +59,6 @@ const getAIStatusClass = (status?: string): string => {
 };
 
 export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick }) => {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ notes: string }>({ notes: '' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
@@ -70,36 +67,26 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
   const modalVideoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
-  // Tag selector state
-  const [tagSelectorVideoId, setTagSelectorVideoId] = useState<number | null>(null);
-  const [tagSelectorPosition, setTagSelectorPosition] = useState<{ top: number; left: number } | null>(null);
-  const tagSelectorRef = useRef<HTMLDivElement>(null);
 
   // Sorting State - 默认按添加时间降序（最新在前）
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
 
-  // ESC 键关闭全屏预览和标签选择器
+  // ESC to close preview modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (activeMedia) {
-          setActiveMedia(null);
-        }
-        if (tagSelectorVideoId) {
-          setTagSelectorVideoId(null);
-          setTagSelectorPosition(null);
-        }
+      if (e.key === 'Escape' && activeMedia) {
+        setActiveMedia(null);
       }
     };
 
-    if (activeMedia || tagSelectorVideoId) {
+    if (activeMedia) {
       document.addEventListener('keydown', handleKeyDown);
     }
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeMedia, tagSelectorVideoId]);
+  }, [activeMedia]);
 
   // Setup HLS.js for .m3u8 video playback in modal
   useEffect(() => {
@@ -129,52 +116,6 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
       }
     };
   }, [activeMedia]);
-
-  const startEditing = (item: Video) => {
-    setEditingId(item.platform_id);
-    setEditForm({
-      notes: item.notes || ''
-    });
-  };
-
-  const cancelEditing = () => {
-    setEditingId(null);
-    setEditForm({ notes: '' });
-  };
-
-  const saveEditing = (id: string) => {
-    onUpdate(id, {
-      notes: editForm.notes
-    });
-    setEditingId(null);
-  };
-
-  // Handle tag cell click to open TagSelector
-  const handleTagCellClick = (item: Video, event: React.MouseEvent<HTMLTableCellElement>) => {
-    if (!item.id) return;
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    setTagSelectorPosition({
-      top: rect.bottom + window.scrollY + 8,
-      left: rect.left + window.scrollX
-    });
-    setTagSelectorVideoId(item.id);
-  };
-
-  // Close TagSelector when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (tagSelectorRef.current && !tagSelectorRef.current.contains(event.target as Node)) {
-        setTagSelectorVideoId(null);
-        setTagSelectorPosition(null);
-      }
-    };
-
-    if (tagSelectorVideoId) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [tagSelectorVideoId]);
 
   const handleSort = (key: SortKey) => {
     let direction: 'asc' | 'desc' = 'desc'; // Default to descending (highest first)
@@ -457,8 +398,6 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
               </th>
 
               <th className="px-4 py-4 w-1/6">Tags</th>
-              <th className="px-4 py-4 w-1/6">Notes</th>
-              <th className="px-4 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -578,11 +517,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                   )}
                 </td>
 
-                <td
-                  className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors group/tags"
-                  onClick={(e) => handleTagCellClick(item, e)}
-                  title="Click to manage tags"
-                >
+                <td className="px-4 py-4">
                   <div className="flex flex-wrap gap-1.5 items-center">
                     {(() => {
                       const displayTags = item.tags || [];
@@ -602,87 +537,16 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                           </>
                         )
                         : (
-                          <span className="text-zinc-600 italic text-xs flex items-center gap-1 group-hover/tags:text-zinc-400 transition-colors">
-                            <Plus size={10} className="opacity-0 group-hover/tags:opacity-100 transition-opacity" />
-                            Add tags
-                          </span>
+                          <span className="text-zinc-600 italic text-xs">No tags</span>
                         );
                     })()}
                   </div>
-                </td>
-                <td className="px-4 py-4">
-                  {editingId === item.platform_id ? (
-                    <textarea 
-                      value={editForm.notes}
-                      onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
-                      placeholder="Add notes..."
-                      rows={2}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-indigo-500 resize-none text-xs"
-                    />
-                  ) : (
-                    <p className="text-xs text-zinc-400 line-clamp-2" title={item.notes}>
-                      {item.notes || <span className="text-zinc-600 italic">No notes</span>}
-                    </p>
-                  )}
-                </td>
-                <td className="px-4 py-4 text-right">
-                  {editingId === item.platform_id ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => saveEditing(item.platform_id)}
-                        className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded hover:bg-indigo-600/30 transition-colors"
-                        title="Save"
-                      >
-                        <Check size={14} />
-                      </button>
-                      <button 
-                        onClick={cancelEditing}
-                        className="p-1.5 bg-red-600/20 text-red-400 rounded hover:bg-red-600/30 transition-colors"
-                        title="Cancel"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => startEditing(item)}
-                      className="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {/* Tag Selector Popup - Using React Portal */}
-      {tagSelectorVideoId && tagSelectorPosition && createPortal(
-        <div
-          ref={tagSelectorRef}
-          style={{
-            position: 'absolute',
-            top: tagSelectorPosition.top,
-            left: tagSelectorPosition.left,
-            zIndex: 9999,
-          }}
-          className="animate-in fade-in slide-in-from-top-2 duration-200"
-        >
-          <div className="w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
-            <TagSelector
-              videoId={tagSelectorVideoId}
-              inline={true}
-              onTagsChange={() => {
-                // Tags will be updated via Realtime subscription in App.tsx
-              }}
-            />
-          </div>
-        </div>,
-        document.body
-      )}
 
       {/* Media Preview Modal - Using React Portal to render outside component hierarchy */}
       {activeMedia && createPortal(

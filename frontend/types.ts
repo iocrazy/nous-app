@@ -10,16 +10,15 @@ export enum DownloadStatus {
 // AI processing status for transcript/summary/visual analysis
 export type AIStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
 
-export interface Video {
-  // Video Identity
-  id?: string;  // UUID primary key
+export interface ParsedMedia {
+  // Media Identity
+  id?: string;  // Snowflake BIGINT primary key (was UUID, migrated in 059)
   platform_id: string;
+  /** @deprecated — parsed_media is now global, user_id will be removed */
   user_id?: string;
 
   // Platform info
   source_platform?: string;  // 'douyin', 'youtube', 'bilibili', 'twitter', 'other'
-  source_url?: string;       // Original user input URL
-  external_id?: string;      // Platform's original ID
 
   // Interaction Data
   like_count?: number;
@@ -41,33 +40,37 @@ export interface Video {
   description?: string;
 
   // Download Info
-  need_download_video?: boolean;
   video_download_urls?: string[];
   image_download_urls?: string[];
 
   // Audio Info
   music_download_urls?: string[];
+  music_download_path?: string;
   music_name?: string;
-  need_download_music?: boolean;
 
   // Cover Info
   cover_urls?: string[];
   dynamic_cover_url?: string;
-  need_download_cover?: boolean;
   cover_download_status?: DownloadStatus;
   cover_download_path?: string;
 
   // Tracking
   video_download_status?: DownloadStatus;
   music_download_status?: DownloadStatus;
+  image_download_status?: DownloadStatus;
+  image_download_path?: string;
   download_duration?: number;
   download_path?: string;
   error_message?: string;
   download_time?: string;
 
-  // User Data
-  notes?: string;
+  // User Data (rating/notes are in resources table, not parsed_media)
   tags?: string[];
+
+  // AI Processing Status
+  transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
 
   // AI Generated Content (legacy)
   ai_extract_text?: string;
@@ -75,24 +78,24 @@ export interface Video {
   ai_analyze_text?: string;
   ai_generated_at?: string;
 
-  // AI Processing Status (new)
-  transcript_status?: AIStatus;
-  summary_status?: AIStatus;
-  visual_analysis_status?: AIStatus;
-  transcript_bool?: boolean;
-  summary_bool?: boolean;
-
   // HLS Streaming
   hls_path?: string;
   media_format?: 'mp4' | 'hls';
 
-  // Summary preview (joined from video_summaries)
+  // Summary preview (joined from resource_summaries)
   summary_text?: string;
+
+  // Resource linkage (joined from resources table via media_id)
+  resource_id?: string;
 
   // Timestamps
   created_at?: string;
   updated_at?: string;
 }
+
+// Backward-compat alias — allows existing components to keep using `Video`
+// TODO: Remove after all component files are migrated to ParsedMedia
+export type Video = ParsedMedia;
 
 // AI Transcript/Summary Data
 export interface TranscriptSegment {
@@ -117,9 +120,9 @@ export interface SummaryData {
 }
 
 // Keep backward compatibility alias
-export type DouyinBase = Video;
+export type DouyinBase = ParsedMedia;
 
-export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points';
+export type ViewState = 'parser' | 'library' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'management' | 'shared';
 
 export interface ApiKey {
   id: number;
@@ -145,6 +148,12 @@ export interface UserSettings {
   apiUrl?: string;
   apiKey?: string;
   progressStyle?: 'neon' | 'wave';
+  // Transcode settings
+  transcodeEnabled?: boolean;
+  transcodeTiers?: string;
+  ffmpegEncoder?: string;
+  ffmpegPreset?: string;
+  transcodeParallelTiers?: boolean;
 }
 
 export interface UserProfile {
@@ -162,11 +171,14 @@ export interface ApiResponse<T = unknown> {
   data?: T;
 }
 
-export interface VideoListResponse {
+export interface MediaListResponse {
   success: boolean;
   count: number;
-  videos: Video[];
+  media: ParsedMedia[];
 }
+
+// Backward-compat alias
+export type VideoListResponse = MediaListResponse;
 
 export interface StatisticsResponse {
   success: boolean;
@@ -185,6 +197,7 @@ export interface Team {
   name: string;
   owner_id: string;
   invite_code: string;
+  is_personal?: boolean;
   created_at: string;
 }
 
@@ -198,6 +211,22 @@ export interface TeamMember {
   name?: string;
 }
 
+// Sidebar modes
+export type SidebarMode = 'personal' | 'team' | 'project';
+
+// Permission system
+export type Permission =
+  | 'project.view'
+  | 'project.create'
+  | 'project.manage'
+  | 'resource.view'
+  | 'resource.upload'
+  | 'member.view'
+  | 'member.manage'
+  | 'billing.view'
+  | 'review.view'
+  | 'review.approve';
+
 // Collection types
 export interface Collection {
   id: string;
@@ -206,16 +235,137 @@ export interface Collection {
   team_id: string | null;
   created_at: string;
   // Computed
+  media_count?: number;
+  /** @deprecated Use media_count */
   video_count?: number;
   is_shared?: boolean;
-  thumbnail_url?: string; // First video's cover
+  thumbnail_url?: string; // First media's cover
 }
 
-export interface CollectionVideo {
+export interface CollectionMedia {
   collection_id: number;
-  video_id: number;
+  media_id: number;
   added_by: string;
   added_at: string;
+}
+
+// Backward-compat alias
+export type CollectionVideo = CollectionMedia;
+
+// Library (team-scoped resource library)
+export interface Library {
+  id: string;
+  name: string;
+  scope_type: 'team';
+  scope_id: string;
+  created_by: string;
+  icon: string | null;
+  color: string | null;
+  sort_order: number;
+  visibility: 'inherited' | 'restricted';
+  created_at: string;
+  updated_at: string;
+}
+
+// Folder (virtual folder tree)
+export interface Folder {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  library_id: string | null;
+  scope_type: 'personal' | 'team';
+  scope_id: string;
+  created_by: string;
+  sort_order: number;
+  is_system: boolean;
+  icon: string | null;
+  color: string | null;
+  visibility: 'inherited' | 'restricted';
+  is_smart: boolean;
+  smart_rules: Record<string, unknown> | null;
+  is_trashed: boolean;
+  trashed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // Computed
+  children?: Folder[];
+  resource_count?: number;
+}
+
+// Resource (core resource record)
+export interface Resource {
+  id: string;
+  creator_id: string;
+  source_type: 'web' | 'upload';
+  media_id: string | null;
+  filename: string;
+  file_type: string | null;
+  mime_type: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  current_version: number;
+  notes: string | null;
+  url: string | null;
+  rating: number; // 0-5
+  // Per-user download status
+  video_download_status: string | null;
+  music_download_status: string | null;
+  cover_download_status: string | null;
+  image_download_status: string | null;
+  // AI Processing Status (moved from ParsedMedia to Resource)
+  transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  is_trashed: boolean;
+  trashed_at: string | null;
+  // Last location (for restore after orphan GC)
+  last_folder_id?: string | null;
+  last_library_id?: string | null;
+  last_scope_type?: string | null;
+  last_scope_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  tags?: Tag[];
+  folder_name?: string;
+}
+
+// Resource item (resource <-> workspace mapping)
+export interface ResourceItem {
+  id: string;
+  resource_id: string;
+  scope_type: 'personal' | 'team';
+  scope_id: string;
+  folder_id: string | null;
+  library_id: string | null;
+  added_by: string | null;
+  created_at: string;
+  // Joined
+  resource?: Resource;
+}
+
+// Resource version
+export interface ResourceVersion {
+  id: string;
+  resource_id: string;
+  version_number: number;
+  filename: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  thumbnail_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  hls_path: string | null;
+  transcode_status: string | null;
+  transcode_at: string | null;
+  created_at: string;
 }
 
 // Notification types
@@ -254,19 +404,25 @@ export interface Tag {
 
 // Smart Collections
 export interface SmartCollection {
-  id: number;
+  id: number | string;
   name: string;
-  description: string | null;
-  icon: string | null;
-  color: string | null;
-  rules: CollectionRules;
-  is_preset: boolean;
-  is_active: boolean;
-  sort_by: string;
-  sort_order: 'asc' | 'desc';
-  video_count: number;
-  created_at: string;
-  updated_at: string;
+  description?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  rules?: CollectionRules;
+  smart_rules?: {
+    operator: 'AND' | 'OR';
+    match: boolean;
+    conditions: Array<{ field: string; op: string; value: string }>;
+  };
+  is_preset?: boolean;
+  is_active?: boolean;
+  is_smart?: boolean;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  video_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CollectionCondition {
@@ -284,7 +440,7 @@ export interface CollectionRules {
 export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
 
 export interface CleanupSuggestion {
-  video_id: number;
+  media_id: number;
   title: string;
   cover_url: string | null;
   author: string | null;
@@ -300,7 +456,7 @@ export interface CleanupSuggestion {
 
 // Search
 export interface SearchResult {
-  video_id: number;
+  media_id: number;
   platform_id: string;
   title: string;
   cover_url: string | null;
@@ -313,8 +469,8 @@ export interface SearchResult {
 }
 
 // Analysis
-export interface VideoAnalysis {
-  video_id: number;
+export interface MediaAnalysis {
+  media_id: number;
   platform_id: string;
   visual_analysis: string | null;
   content_categories: string[];
@@ -323,6 +479,9 @@ export interface VideoAnalysis {
   suggested_tags: string[];
   analyzed_at: string | null;
 }
+
+// Backward-compat alias
+export type VideoAnalysis = MediaAnalysis;
 
 // AI Provider settings
 export interface AIProviderConfig {
@@ -414,4 +573,163 @@ export interface QuotaCheck {
   points_cost: number;
   current_balance: number;
   reason: string | null;
+}
+
+
+// Project types (MediaTrack)
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_id: string;
+  team_id: string | null;
+  project_type: 'internal' | 'external' | 'personal';
+  project_group: string | null;
+  announcement: string | null;
+  is_starred: boolean;
+  color_label: string | null;
+  file_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: 'admin' | 'editor' | 'viewer';
+  invited_by: string | null;
+  email?: string;
+  created_at: string;
+}
+
+export interface ProjectFolder {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
+
+export interface ProjectShare {
+  id: string;
+  project_file_id: string | null;
+  share_type: string;
+  share_code: string;
+  password: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  view_count: number;
+  created_at: string;
+}
+
+export interface FileVersion {
+  id: string;
+  file_id: string;
+  version_number: number;
+  filename: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  fps: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  video_bitrate_kbps: number | null;
+  audio_bitrate_kbps: number | null;
+  audio_channels: number | null;
+  audio_sample_rate: number | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+// Annotation / Drawing types
+export interface DrawingData {
+  strokes: Stroke[];
+  width: number;
+  height: number;
+}
+
+export interface Stroke {
+  id: string;
+  tool: 'pen' | 'arrow' | 'rect' | 'circle' | 'text';
+  points: { x: number; y: number }[];
+  color: string;
+  strokeWidth: number;
+  text?: string;  // For text tool
+}
+
+export interface ReviewComment {
+  id: string;
+  file_id: string;
+  version_id: string | null;
+  author_id: string;
+  author_email?: string;
+  content: string;
+  timestamp_seconds: number | null;
+  drawing_data?: DrawingData | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  filename: string;
+  file_type: string | null;
+  mime_type: string | null;
+  file_path: string | null;
+  file_size_bytes: number | null;
+  media_id: string | null;
+  duration_seconds: number | null;
+  resolution: string | null;
+  fps: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  video_bitrate_kbps: number | null;
+  audio_bitrate_kbps: number | null;
+  audio_channels: number | null;
+  audio_sample_rate: number | null;
+  thumbnail_path: string | null;
+  cover_image_path: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  is_trashed: boolean;
+  trashed_at: string | null;
+  review_status: ReviewStatus | null;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Share types
+export type ShareType = 'link' | 'review' | 'presentation' | 'delivery';
+export type ShareStatus = 'active' | 'expired' | 'cancelled';
+
+export interface Share {
+  id: string;
+  resource_id: string | null;
+  project_file_id: string | null;
+  folder_id: string | null;
+  version_id: string | null;
+  share_type: ShareType;
+  shared_by: string;
+  share_name: string;
+  share_code: string;
+  password: string | null;
+  allow_download: boolean;
+  expires_at: string | null;
+  max_views: number | null;
+  view_count: number;
+  watermark: boolean;
+  status: ShareStatus;
+  created_at: string;
 }

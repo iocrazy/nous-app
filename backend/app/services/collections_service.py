@@ -1,7 +1,7 @@
 """Smart Collections service with rule engine (异步)."""
 
 from datetime import datetime, timedelta
-from typing import Any, List
+from typing import Any, Dict, List
 
 from loguru import logger
 
@@ -10,19 +10,37 @@ from app.repositories.collections_repository import CollectionsRepository
 
 
 class CollectionsService:
-    """Service for smart collection rule evaluation and video matching (异步)."""
+    """Service for smart collection rule evaluation and media matching (异步)."""
 
     def __init__(self):
         self.repo = CollectionsRepository()
-        self._client = None
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
-    async def get_collection_videos(
+    async def _get_user_resource_mapping(self, user_id: str) -> Dict[int, int]:
+        """Get user's resource mapping {resource_id: media_id} from resources table.
+
+        Since parsed_media is now a global table (no user_id column),
+        we identify the user's media through the resources table.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("resources")
+            .select("id, media_id")
+            .eq("creator_id", user_id)
+            .eq("source_type", "web")
+            .eq("is_trashed", False)
+            .execute()
+        )
+        return {
+            r["id"]: r["media_id"]
+            for r in result.data
+            if r.get("media_id")
+        }
+
+    async def get_collection_media(
         self,
         collection_id: str,
         user_id: str,
@@ -31,9 +49,9 @@ class CollectionsService:
         use_cache: bool = True,
     ) -> tuple[List[dict], int]:
         """
-        Get videos matching a collection's rules.
+        Get media matching a collection's rules.
 
-        Returns tuple of (videos, total_count).
+        Returns tuple of (media_list, total_count).
         """
         collection = await self.repo.get_collection_by_id(collection_id, user_id)
         if not collection:
@@ -47,59 +65,58 @@ class CollectionsService:
             cache_age = datetime.utcnow() - datetime.fromisoformat(
                 cached_at.replace("Z", "+00:00").replace("+00:00", "")
             )
-            if cache_age < timedelta(minutes=5) and collection.get("cached_video_ids"):
-                # Use cached video IDs
-                video_ids = collection["cached_video_ids"]
-                total = collection.get("cached_count", len(video_ids))
+            if cache_age < timedelta(minutes=5) and collection.get("cached_media_ids"):
+                # Use cached media IDs
+                media_ids = collection["cached_media_ids"]
+                total = collection.get("cached_count", len(media_ids))
 
                 # Paginate
                 start = (page - 1) * page_size
                 end = start + page_size
-                page_ids = video_ids[start:end]
+                page_ids = media_ids[start:end]
 
                 if page_ids:
-                    videos = await self._fetch_videos_by_ids(page_ids, collection)
-                    return videos, total
+                    media_list = await self._fetch_media_by_ids(page_ids, collection)
+                    return media_list, total
 
-        # Evaluate rules to get matching videos
-        video_ids = await self._evaluate_rules(rules, user_id)
-        total = len(video_ids)
+        # Evaluate rules to get matching media
+        media_ids = await self._evaluate_rules(rules, user_id)
+        total = len(media_ids)
 
         # Update cache
         await self.repo.update_cache(
-            collection_id, video_ids[:1000], total
+            collection_id, media_ids[:1000], total
         )  # Cache up to 1000 IDs
 
         # Paginate
         start = (page - 1) * page_size
         end = start + page_size
-        page_ids = video_ids[start:end]
+        page_ids = media_ids[start:end]
 
         if not page_ids:
             return [], total
 
-        videos = await self._fetch_videos_by_ids(page_ids, collection)
-        return videos, total
+        media_list = await self._fetch_media_by_ids(page_ids, collection)
+        return media_list, total
 
     async def _evaluate_rules(self, rules: dict, user_id: str) -> List[int]:
-        """Evaluate collection rules and return matching video IDs."""
+        """Evaluate collection rules and return matching media IDs."""
         match_type = rules.get("match", "all")
         conditions = rules.get("conditions", [])
 
-        client = await self._get_client()
+        # Get user's media IDs through resources table
+        resource_map = await self._get_user_resource_mapping(user_id)
+        user_media_ids = list(resource_map.values())
+
+        if not user_media_ids:
+            return []
 
         if not conditions:
-            # No conditions = all user videos
-            result = (
-                await client.table("videos")
-                .select("id")
-                .eq("user_id", user_id)
-                .execute()
-            )
-            return [r["id"] for r in result.data]
+            # No conditions = all user media
+            return user_media_ids
 
         # Start with base query
-        video_sets = []
+        media_sets = []
 
         for condition in conditions:
             field = condition.get("field")
@@ -107,41 +124,51 @@ class CollectionsService:
             value = condition.get("value")
 
             matching_ids = await self._evaluate_condition(
-                field, operator, value, user_id
+                field, operator, value, user_id, user_media_ids, resource_map
             )
-            video_sets.append(set(matching_ids))
+            media_sets.append(set(matching_ids))
 
-        if not video_sets:
+        if not media_sets:
             return []
 
         # Combine sets based on match type
         if match_type == "all":
-            result_set = video_sets[0]
-            for s in video_sets[1:]:
+            result_set = media_sets[0]
+            for s in media_sets[1:]:
                 result_set = result_set.intersection(s)
         else:  # "any"
             result_set = set()
-            for s in video_sets:
+            for s in media_sets:
                 result_set = result_set.union(s)
 
         return list(result_set)
 
     async def _evaluate_condition(
-        self, field: str, operator: str, value: Any, user_id: str
+        self,
+        field: str,
+        operator: str,
+        value: Any,
+        user_id: str,
+        user_media_ids: List[int],
+        resource_map: Dict[int, int],
     ) -> List[int]:
-        """Evaluate a single condition and return matching video IDs."""
+        """Evaluate a single condition and return matching media IDs."""
         client = await self._get_client()
 
         # Tag-based conditions
         if field == "tag":
-            return await self._match_tag_condition(operator, value, user_id)
+            return await self._match_tag_condition(
+                operator, value, resource_map
+            )
 
         # Date-based conditions
         if field == "date":
-            return await self._match_date_condition(operator, value, user_id)
+            return await self._match_date_condition(
+                operator, value, user_media_ids
+            )
 
-        # Direct field conditions on videos
-        query = client.table("videos").select("id").eq("user_id", user_id)
+        # Direct field conditions on parsed_media (scoped to user's media)
+        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
 
         field_mapping = {
             "author": "author",
@@ -176,71 +203,85 @@ class CollectionsService:
         return [r["id"] for r in result.data]
 
     async def _match_tag_condition(
-        self, operator: str, value: Any, user_id: str
+        self, operator: str, value: Any, resource_map: Dict[int, int]
     ) -> List[int]:
-        """Match videos by tag conditions."""
+        """Match media by tag conditions.
+
+        resource_tags.resource_id references resources.id,
+        so we query by user's resource IDs and map back to media IDs.
+        """
         client = await self._get_client()
 
-        # Get user's videos first
-        user_videos = (
-            await client.table("videos").select("id").eq("user_id", user_id).execute()
-        )
-        user_video_ids = [v["id"] for v in user_videos.data]
-
-        if not user_video_ids:
+        resource_ids = list(resource_map.keys())
+        if not resource_ids:
             return []
 
         if operator == "has":
-            # Videos that have a specific tag
+            # Media that have a specific tag
             result = (
-                await client.table("video_tags")
-                .select("video_id")
+                await client.table("resource_tags")
+                .select("resource_id")
                 .eq("tag_id", value)
-                .in_("video_id", user_video_ids)
+                .in_("resource_id", resource_ids)
                 .execute()
             )
-            return list(set(r["video_id"] for r in result.data))
+            # Map resource_id back to media_id
+            return list(set(
+                resource_map[r["resource_id"]]
+                for r in result.data
+                if r["resource_id"] in resource_map
+            ))
 
         elif operator == "has_any":
-            # Videos that have any of the specified tags
+            # Media that have any of the specified tags
             if isinstance(value, list):
                 result = (
-                    await client.table("video_tags")
-                    .select("video_id")
+                    await client.table("resource_tags")
+                    .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("video_id", user_video_ids)
+                    .in_("resource_id", resource_ids)
                     .execute()
                 )
-                return list(set(r["video_id"] for r in result.data))
+                return list(set(
+                    resource_map[r["resource_id"]]
+                    for r in result.data
+                    if r["resource_id"] in resource_map
+                ))
 
         elif operator == "has_all":
-            # Videos that have all of the specified tags
+            # Media that have all of the specified tags
             if isinstance(value, list):
-                video_tag_counts = {}
+                media_tag_counts: Dict[int, int] = {}
                 result = (
-                    await client.table("video_tags")
-                    .select("video_id")
+                    await client.table("resource_tags")
+                    .select("resource_id")
                     .in_("tag_id", value)
-                    .in_("video_id", user_video_ids)
+                    .in_("resource_id", resource_ids)
                     .execute()
                 )
                 for r in result.data:
-                    vid = r["video_id"]
-                    video_tag_counts[vid] = video_tag_counts.get(vid, 0) + 1
+                    rid = r["resource_id"]
+                    if rid in resource_map:
+                        mid = resource_map[rid]
+                        media_tag_counts[mid] = media_tag_counts.get(mid, 0) + 1
                 return [
-                    vid
-                    for vid, count in video_tag_counts.items()
+                    mid
+                    for mid, count in media_tag_counts.items()
                     if count == len(value)
                 ]
 
         return []
 
     async def _match_date_condition(
-        self, operator: str, value: Any, user_id: str
+        self, operator: str, value: Any, user_media_ids: List[int]
     ) -> List[int]:
-        """Match videos by date conditions."""
+        """Match media by date conditions."""
         client = await self._get_client()
-        query = client.table("videos").select("id").eq("user_id", user_id)
+
+        if not user_media_ids:
+            return []
+
+        query = client.table("parsed_media").select("id").in_("id", user_media_ids)
 
         # Handle relative date values
         if isinstance(value, str):
@@ -266,11 +307,11 @@ class CollectionsService:
         result = await query.execute()
         return [r["id"] for r in result.data]
 
-    async def _fetch_videos_by_ids(
-        self, video_ids: List[int], collection: dict
+    async def _fetch_media_by_ids(
+        self, media_ids: List[int], collection: dict
     ) -> List[dict]:
-        """Fetch full video details for given IDs."""
-        if not video_ids:
+        """Fetch full media details for given IDs."""
+        if not media_ids:
             return []
 
         client = await self._get_client()
@@ -278,11 +319,11 @@ class CollectionsService:
         sort_order = collection.get("sort_order", "desc")
 
         result = (
-            await client.table("videos")
+            await client.table("parsed_media")
             .select(
-                "id, title, description, author, cover_url, duration, media_type, created_at, view_count, keep_forever"
+                "id, title, description, author, cover_urls, duration, media_type, created_at, view_count, keep_forever"
             )
-            .in_("id", video_ids)
+            .in_("id", media_ids)
             .order(sort_by, desc=(sort_order == "desc"))
             .execute()
         )
@@ -296,10 +337,10 @@ class CollectionsService:
             return 0
 
         rules = collection.get("rules", {})
-        video_ids = await self._evaluate_rules(rules, user_id)
-        total = len(video_ids)
+        media_ids = await self._evaluate_rules(rules, user_id)
+        total = len(media_ids)
 
-        await self.repo.update_cache(collection_id, video_ids[:1000], total)
+        await self.repo.update_cache(collection_id, media_ids[:1000], total)
 
-        logger.info(f"Refreshed cache for collection {collection_id}: {total} videos")
+        logger.info(f"Refreshed cache for collection {collection_id}: {total} media")
         return total

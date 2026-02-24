@@ -20,7 +20,7 @@ export const fetchPackages = async (): Promise<PointPackage[]> => {
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -47,7 +47,7 @@ export const createOrder = async (
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       package_id: packageId,
       payment_method: paymentMethod,
@@ -78,7 +78,7 @@ export const pollOrderStatus = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -110,7 +110,7 @@ export const fetchOrders = async (
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

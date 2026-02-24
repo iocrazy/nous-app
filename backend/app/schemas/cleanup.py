@@ -9,7 +9,7 @@ from pydantic import BaseModel
 class CleanupSuggestion(BaseModel):
     """A single cleanup suggestion."""
 
-    video_id: int
+    media_id: int
     title: str
     cover_url: Optional[str]
     author: Optional[str]
@@ -19,7 +19,7 @@ class CleanupSuggestion(BaseModel):
     created_at: datetime
     last_viewed_at: Optional[datetime]
     view_count: int
-    similarity_to: Optional[int] = None  # video_id if duplicate
+    similarity_to: Optional[int] = None  # media_id if duplicate
     similarity_score: Optional[float] = None
 
 
@@ -41,7 +41,7 @@ class CleanupAction(BaseModel):
 class CleanupBatchAction(BaseModel):
     """Batch action on multiple suggestions."""
 
-    video_ids: List[int]
+    media_ids: List[int]
     action: Literal["delete", "keep_forever", "dismiss"]
 
 

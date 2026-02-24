@@ -8,6 +8,8 @@ usage statistics, quota checks, and admin adjustments.
 Requires authentication (JWT or API Key).
 """
 
+import random
+import string
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -32,7 +34,9 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
     Resolve the team ID for a user.
 
     If *team_id_param* is provided, return it directly.  Otherwise look up
-    the user's first team from the ``team_members`` table.
+    the user's first team from the ``team_members`` table.  If the user has
+    no team at all, a personal workspace team is auto-created with free
+    quota so that every user can use the Points system out of the box.
 
     Args:
         user_id: UUID of the authenticated user.
@@ -40,9 +44,6 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
 
     Returns:
         The resolved team ID string.
-
-    Raises:
-        HTTPException 404: If the user has no team membership.
     """
     if team_id_param:
         return team_id_param
@@ -57,14 +58,105 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
             .execute()
         )
         if result.data:
-            return result.data[0]["team_id"]
+            return str(result.data[0]["team_id"])
     except Exception as e:
         logger.error(f"Failed to resolve team_id for user {user_id}: {e}")
 
-    raise HTTPException(
-        status_code=404,
-        detail="No team found for the current user. Please join or create a team first.",
+    # Auto-create a personal team for the user
+    team_id = await _auto_create_personal_team(user_id)
+    return team_id
+
+
+async def _auto_create_personal_team(user_id: str) -> str:
+    """
+    Create a personal workspace team for a user who has none.
+
+    Inserts into ``teams`` (the DB trigger auto-adds the owner to
+    ``team_members``), then provisions a free-tier quota.
+
+    Returns:
+        The new team ID as a string.
+    """
+    client = await get_async_supabase_admin()
+
+    # Check if personal team already exists (prevent duplicates)
+    existing = (
+        await client.table("teams")
+        .select("id")
+        .eq("owner_id", user_id)
+        .eq("is_personal", True)
+        .limit(1)
+        .execute()
     )
+    if existing.data:
+        team_id = str(existing.data[0]["id"])
+        logger.info(f"Found existing personal team {team_id} for user {user_id}")
+        svc = PointsService()
+        await svc.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
+        return team_id
+
+    # Get username for team name
+    username = "User"
+    try:
+        profile = (
+            await client.table("user_profiles")
+            .select("username")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if profile.data:
+            username = profile.data[0].get("username") or "User"
+        else:
+            # user_profiles might be missing — try auth metadata
+            user_resp = await client.auth.admin.get_user_by_id(user_id)
+            if user_resp and user_resp.user:
+                meta = user_resp.user.user_metadata or {}
+                username = (
+                    meta.get("username")
+                    or (user_resp.user.email or "User").split("@")[0]
+                )
+                # Also create the missing user_profiles row
+                await client.table("user_profiles").upsert(
+                    {"id": user_id, "username": username, "role": "user"}
+                ).execute()
+    except Exception as e:
+        logger.warning(f"Failed to resolve username for {user_id}: {e}")
+
+    # Generate a random invite code
+    invite_code = "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=8)
+    )
+
+    # Insert team — id uses DEFAULT generate_snowflake_id()
+    team_result = (
+        await client.table("teams")
+        .insert(
+            {
+                "name": f"{username}'s Workspace",
+                "owner_id": user_id,
+                "invite_code": invite_code,
+                "is_personal": True,
+            }
+        )
+        .execute()
+    )
+
+    if not team_result.data:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create personal team",
+        )
+
+    team_id = str(team_result.data[0]["id"])
+    logger.info(f"Auto-created personal team {team_id} for user {user_id}")
+
+    # The DB trigger add_owner_as_member() handles team_members insertion.
+    # Now provision free quota.
+    svc = PointsService()
+    await svc.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
+
+    return team_id
 
 
 async def _check_admin_role(user_id: str) -> bool:
@@ -100,7 +192,9 @@ async def _check_admin_role(user_id: str) -> bool:
 @router.get("/balance")
 async def get_balance(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Get team points balance and storage info.
@@ -127,7 +221,9 @@ async def get_balance(
 @router.get("/transactions")
 async def get_transactions(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     type: Optional[str] = Query(None, description="Filter by transaction type"),
@@ -154,7 +250,11 @@ async def get_transactions(
             offset=offset,
             type_filter=type,
         )
-        return {"success": True, "count": len(transactions), "transactions": transactions}
+        return {
+            "success": True,
+            "count": len(transactions),
+            "transactions": transactions,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -183,7 +283,9 @@ async def get_pricing(auth: AuthDep):
 @router.get("/usage-stats")
 async def get_usage_stats(
     auth: AuthDep,
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Get team usage statistics.
@@ -210,9 +312,13 @@ async def get_usage_stats(
 @router.get("/check")
 async def check_quota(
     auth: AuthDep,
-    action_type: str = Query(..., description="Action type to check (e.g. video_parse)"),
+    action_type: str = Query(
+        ..., description="Action type to check (e.g. video_parse)"
+    ),
     count: int = Query(1, ge=1, description="Number of actions to check"),
-    team_id: Optional[str] = Query(None, description="Team ID (auto-resolved if omitted)"),
+    team_id: Optional[str] = Query(
+        None, description="Team ID (auto-resolved if omitted)"
+    ),
 ):
     """
     Pre-check whether an action is allowed.
@@ -337,3 +443,30 @@ async def admin_adjust_points(
     except Exception as e:
         logger.error(f"Failed to adjust points: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust points")
+
+
+@router.get("/admin/overview")
+async def admin_overview(auth: AuthDep):
+    """
+    Admin: get system-wide points overview.
+
+    Returns aggregated statistics including total points in system,
+    total consumed, total purchased, active teams count, and total
+    transactions count.
+
+    Authentication: Bearer Token or API Key (admin only)
+    """
+    is_admin = await _check_admin_role(auth.user_id)
+    if not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: admin role required for this operation",
+        )
+
+    try:
+        repo = PointsRepository()
+        overview = await repo.get_admin_overview()
+        return {"success": True, "data": overview}
+    except Exception as e:
+        logger.error(f"Failed to get admin overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get admin overview")

@@ -1,6 +1,37 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * Custom fetch wrapper that converts large integers (Snowflake BIGINT IDs)
+ * to strings in JSON responses to prevent JavaScript number precision loss.
+ * JavaScript's Number.MAX_SAFE_INTEGER is 2^53-1 (9007199254740991, 16 digits).
+ * Snowflake IDs can exceed this, causing silent data corruption.
+ */
+const bigIntSafeFetch: typeof globalThis.fetch = async (input, init) => {
+  const response = await globalThis.fetch(input, init);
+  const contentType = response.headers.get('content-type');
+
+  // Only process JSON responses (application/json, application/vnd.pgrst.object+json, etc.)
+  if (!contentType || (!contentType.includes('application/json') && !contentType.includes('+json'))) {
+    return response;
+  }
+
+  const text = await response.text();
+
+  // Replace bare integers of 16+ digits with quoted strings in JSON value positions.
+  // Matches numbers after : [ or , (JSON value positions) but NOT inside quoted strings.
+  const safeText = text.replace(
+    /([:\[,])\s*(\d{16,})\s*(?=[,\}\]])/g,
+    (_match, prefix, num) => `${prefix}"${num}"`
+  );
+
+  return new Response(safeText, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+};
+
 // Safe environment variable access
 const getEnv = (key: string): string | undefined => {
   try {
@@ -85,6 +116,9 @@ const initializeClient = (): SupabaseClient | null => {
         persistSession: true,        // Enable session persistence in localStorage
         autoRefreshToken: true,      // Automatically refresh tokens before expiry
         detectSessionInUrl: true,    // Handle OAuth redirects
+      },
+      global: {
+        fetch: bigIntSafeFetch,      // Prevent Snowflake BIGINT ID precision loss
       },
     });
     console.log(`Supabase Client initialized with URL: ${supabaseUrl}`);

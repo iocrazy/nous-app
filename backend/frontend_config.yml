@@ -7,8 +7,8 @@
 # Supabase 数据库配置
 # 如果为空，前端将使用 .env 中的 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY
 supabase:
-  url: "https://sb-mediahub.heygo.cn:88"
-  anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzU1MzYwMDAwLCJleHAiOjE5MTMxMjY0MDB9.wPhnjPuLiTrDMGiUpSyS68ns-8kP6Zt86CDiE_QGvVo"
+  url: ""
+  anon_key: ""
 
 # 注意: default_download_path 已移至 .env 的 DOWNLOAD_PATH
 # API /api/v1/config 会自动返回 .env 中的值

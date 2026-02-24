@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # Docker 部署时使用默认值 /app/downloads（容器内路径）
     # 本地开发时可通过 .env 覆盖为实际路径
     DOWNLOAD_PATH: str = Field(default="/app/downloads", description="视频存储路径")
+    COOKIES_DIR: str = Field(
+        default="", description="Path to directory containing platform cookie files"
+    )
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
 
@@ -85,6 +88,30 @@ class Settings(BaseSettings):
     )
     CELERY_TASK_TIME_LIMIT: int = Field(default=600, description="任务超时时间(秒)")
     CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Worker 并发数")
+
+    # ============================================
+    # Transcode 配置
+    # ============================================
+    TRANSCODE_ENABLED: bool = Field(
+        default=True,
+        description="Master switch: enable/disable HLS transcoding",
+    )
+    TRANSCODE_TIERS: str = Field(
+        default="480p,720p,1080p",
+        description="Comma-separated list of enabled tiers: 480p,720p,1080p",
+    )
+    FFMPEG_ENCODER: str = Field(
+        default="auto",
+        description="Video encoder: auto (detect GPU), libx264, h264_nvenc, h264_videotoolbox, h264_qsv",
+    )
+    FFMPEG_PRESET: str = Field(
+        default="medium",
+        description="Encoding preset: ultrafast/fast/medium/slow (CPU) or p1-p7 (NVENC)",
+    )
+    TRANSCODE_PARALLEL_TIERS: bool = Field(
+        default=True,
+        description="Encode tiers (480p/720p/1080p) in parallel",
+    )
 
     # ============================================
     # OpenAI Configuration (for visual analysis)

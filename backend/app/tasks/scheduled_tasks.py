@@ -6,7 +6,6 @@ Scheduled Tasks Module
 Contains scheduled tasks dispatched by Celery Beat.
 """
 
-import asyncio
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,22 +14,7 @@ from celery import shared_task
 from loguru import logger
 
 from app.core.enums import DownloadStatus
-
-
-def run_async(coro):
-    """Run async coroutine in synchronous environment"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+from app.tasks.utils import run_async
 
 
 @shared_task
@@ -123,10 +107,10 @@ def retry_failed_downloads():
     logger.info("[Celery Beat] Starting retry of failed downloads...")
 
     try:
-        from app.repositories.video_repository import VideoRepository
-        from app.tasks.download_tasks import download_images_task, download_video_task
+        from app.repositories.media_repository import MediaRepository
+        from app.tasks.download_tasks import download_unified_task
 
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Get failed downloads (max 50)
         failed_videos = run_async(
@@ -157,11 +141,14 @@ def retry_failed_downloads():
                     )
                 )
 
-                # Submit download task based on type
-                if int(media_type) in (0, 4, 61):  # Video types
-                    download_video_task.delay(platform_id, user_id)
-                elif int(media_type) in (2, 68):  # Image types
-                    download_images_task.delay(platform_id, user_id)
+                # Submit unified download task
+                download_unified_task.delay(
+                    platform_id,
+                    user_id,
+                    download_video=True,
+                    download_cover=True,
+                    media_type=int(media_type),
+                )
 
                 retried_count += 1
                 logger.debug(f"Resubmitted download task: {platform_id}")
@@ -197,9 +184,9 @@ def update_statistics():
     logger.info("[Celery Beat] Starting statistics update...")
 
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
 
-        repo = VideoRepository()
+        repo = MediaRepository()
 
         # Get global statistics
         stats = run_async(repo.get_statistics())
@@ -264,6 +251,86 @@ def update_system_status():
 
 
 @shared_task
+def reset_monthly_quotas():
+    """
+    Reset monthly quota usage for all members.
+
+    Sets points_used_this_month to 0 and advances reset_at to the 1st of next month.
+    Runs on the 1st of every month at 00:00.
+    """
+    logger.info("[Celery Beat] Starting monthly quota reset...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _reset():
+            supabase = await get_async_supabase_admin()
+
+            # Calculate next month's reset date
+            now = datetime.now()
+            if now.month == 12:
+                next_reset = datetime(now.year + 1, 1, 1)
+            else:
+                next_reset = datetime(now.year, now.month + 1, 1)
+
+            response = (
+                await supabase.table("member_quotas")
+                .update({
+                    "points_used_this_month": 0,
+                    "reset_at": next_reset.isoformat(),
+                    "updated_at": now.isoformat(),
+                })
+                .gte("points_used_this_month", 0)  # match all rows
+                .execute()
+            )
+            return response.data
+
+        rows = run_async(_reset())
+        count = len(rows) if rows else 0
+
+        logger.success(f"[Celery Beat] Monthly quota reset complete: {count} rows reset")
+        return {"status": "success", "count": count}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Monthly quota reset failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
+def cleanup_old_unified_tasks():
+    """
+    Clean up old completed/failed/cancelled unified tasks.
+
+    Removes tasks older than 7 days that are in terminal state.
+    Runs once daily.
+    """
+    logger.info("[Celery Beat] Starting unified_tasks cleanup...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _cleanup():
+            supabase = await get_async_supabase_admin()
+            cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+            result = (
+                await supabase.table("unified_tasks")
+                .delete()
+                .in_("status", ["completed", "failed", "cancelled"])
+                .lt("updated_at", cutoff)
+                .execute()
+            )
+            return len(result.data) if result.data else 0
+
+        deleted = run_async(_cleanup())
+        logger.success(f"[Celery Beat] Unified tasks cleanup: {deleted} old tasks removed")
+        return {"status": "success", "deleted": deleted}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Unified tasks cleanup failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def health_check():
     """
     Health check task
@@ -291,9 +358,9 @@ def health_check():
 
     # Check Supabase
     try:
-        from app.repositories.video_repository import VideoRepository
+        from app.repositories.media_repository import MediaRepository
 
-        repo = VideoRepository()
+        repo = MediaRepository()
         # Simple query to test connection
         run_async(repo.get_statistics())
         checks["supabase"] = "ok"
@@ -330,3 +397,74 @@ def health_check():
         logger.warning(f"[Celery Beat] Health check found issues: {checks}")
 
     return result
+
+
+@shared_task(name="app.tasks.scheduled_tasks.recover_stale_orchestrator_locks")
+def recover_stale_orchestrator_locks():
+    """Recover orphaned dedup locks by checking unified_tasks.
+
+    Scans for tasks stuck in 'processing' phase for more than 1 hour
+    and marks them as failed with NETWORK_TIMEOUT error code.
+    Runs every hour via Celery Beat.
+    """
+    logger.info("[Celery Beat] Starting stale orchestrator lock recovery...")
+
+    try:
+        from datetime import timezone
+
+        from app.services.task_orchestrator import TaskPhase, get_orchestrator
+
+        async def _recover():
+            orchestrator = get_orchestrator()
+            client = await orchestrator._get_client()
+
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+            stale = await (
+                client.table("unified_tasks")
+                .select("id, dedup_key")
+                .eq("phase", "processing")
+                .lt("started_at", cutoff)
+                .execute()
+            )
+
+            recovered = 0
+            for task in (stale.data or []):
+                try:
+                    await orchestrator.transition(
+                        task["id"], TaskPhase.FAILED, error_code="NETWORK_TIMEOUT"
+                    )
+                    if task.get("dedup_key"):
+                        orchestrator.release_lock(task["dedup_key"])
+                    recovered += 1
+                    logger.info(f"[Recovery] Marked stale task {task['id']} as failed")
+                except Exception as e:
+                    logger.warning(f"[Recovery] Failed to recover task {task['id']}: {e}")
+
+            return recovered
+
+        count = run_async(_recover())
+        logger.success(f"[Celery Beat] Stale lock recovery complete: {count} tasks recovered")
+        return {"status": "success", "recovered": count}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Stale lock recovery failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
+def cleanup_trashed_resources():
+    """Permanently delete trashed resources older than 15 days."""
+    logger.info("[Celery Beat] Starting trashed resource cleanup...")
+    try:
+        from app.services.resources_service import ResourcesService
+
+        svc = ResourcesService()
+        cleaned = run_async(svc.cleanup_expired_trash(older_than_days=15))
+        logger.success(
+            f"[Celery Beat] Trashed resource cleanup done: {cleaned} deleted"
+        )
+        return {"status": "success", "cleaned": cleaned}
+    except Exception as e:
+        logger.error(f"[Celery Beat] Trashed resource cleanup failed: {e}")
+        return {"status": "error", "error": str(e)}

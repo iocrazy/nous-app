@@ -17,7 +17,8 @@ export interface QueueStatus {
   active: number;
   pending: number;
   scheduled: number;
-  status: 'online' | 'offline' | 'degraded';
+  status: 'online' | 'offline' | 'outdated' | 'degraded';
+  missing_tasks?: string[];
 }
 
 export interface StorageStatus {
@@ -48,7 +49,7 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/system/status`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -85,6 +86,9 @@ export function getStorageDisplay(storage: StorageStatus): string {
 export function getQueueDisplay(queue: QueueStatus): string {
   if (queue.status === 'offline') {
     return 'Offline';
+  }
+  if (queue.status === 'outdated') {
+    return 'Outdated';
   }
   const total = queue.active + queue.pending;
   if (total === 0) {

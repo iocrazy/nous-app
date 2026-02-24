@@ -14,9 +14,6 @@ from app.schemas.tags import (
     TagResponse,
     TagStatisticsResponse,
     TagUpdate,
-    VideoTagCreate,
-    VideoTagResponse,
-    VideoTagsResponse,
 )
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -191,67 +188,4 @@ async def delete_tag(
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
-        )
-
-
-# Video-Tag association endpoints
-
-
-@router.get("/videos/{video_id}/tags", response_model=VideoTagsResponse)
-async def get_video_tags(
-    video_id: str,
-    auth: AuthDep = None,
-):
-    """Get all tags associated with a video."""
-    repo = TagsRepository()
-    tags_data = await repo.get_video_tags(video_id)
-
-    tags = []
-    for item in tags_data:
-        if item.get("tags"):
-            tags.append(
-                VideoTagResponse(
-                    tag=item["tags"],
-                    confidence=item.get("confidence"),
-                    source=item.get("source", "manual"),
-                    created_at=item.get("created_at"),
-                )
-            )
-
-    return VideoTagsResponse(video_id=video_id, tags=tags)
-
-
-@router.post("/videos/{video_id}/tags", status_code=status.HTTP_201_CREATED)
-async def add_tag_to_video(
-    video_id: str,
-    video_tag: VideoTagCreate,
-    auth: AuthDep = None,
-):
-    """Add a tag to a video."""
-    repo = TagsRepository()
-    result = await repo.add_tag_to_video(
-        video_id=video_id,
-        tag_id=str(video_tag.tag_id),
-        confidence=video_tag.confidence,
-        source=video_tag.source,
-    )
-
-    return {"message": "Tag added successfully", "data": result}
-
-
-@router.delete(
-    "/videos/{video_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
-)
-async def remove_tag_from_video(
-    video_id: str,
-    tag_id: str,
-    auth: AuthDep = None,
-):
-    """Remove a tag from a video."""
-    repo = TagsRepository()
-    removed = await repo.remove_tag_from_video(video_id, tag_id)
-
-    if not removed:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tag association not found"
         )
