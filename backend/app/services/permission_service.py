@@ -35,7 +35,7 @@ CAPABILITIES: Dict[str, List[str]] = {
 TEAM_ROLE_MAP: Dict[str, str] = {
     "owner": "admin",
     "admin": "admin",
-    "member": "viewer",
+    "member": "editor",
 }
 
 

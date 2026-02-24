@@ -9,6 +9,7 @@ import {
   Trash2,
   LayoutGrid,
   LayoutList,
+  ArrowUpDown,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -28,7 +29,6 @@ import {
   Move,
   RefreshCw,
   Filter,
-  Search,
   FileText,
   Table2,
   Presentation,
@@ -37,7 +37,9 @@ import {
   Eye,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { RipVaultView } from './RipVaultView';
+import { DownloadsView } from './DownloadsView';
+import { ToolbarSearch } from './ToolbarSearch';
+import { semanticSearch, hybridSearch } from '../services/searchService';
 import { usePermission } from '../hooks/usePermission';
 import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
@@ -49,6 +51,7 @@ import {
   trashResource,
   restoreResource,
   permanentDeleteResource,
+  permanentDeleteFolder,
   fetchTrashedResources,
   fetchDownloadedResources,
   fetchResourceTags,
@@ -79,6 +82,7 @@ import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { createTag } from '../services/unifiedTagService';
+import { useTaskManager } from '../contexts/TaskManagerContext';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
@@ -165,6 +169,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   scopeId,
 }) => {
   const { t } = useTranslation();
+  const { tasks: allUnifiedTasks } = useTaskManager();
   const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
   const resPath = (path: string) => teamId ? `/t/${teamId}${path}` : path;
@@ -202,6 +207,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
   const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
   const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
+  const [pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders] = useState<string[] | null>(null);
 
   // Downloads (parser-created resources)
   const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
@@ -231,6 +237,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
+  const [isAISearching, setIsAISearching] = useState(false);
 
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
@@ -284,6 +292,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Smart folder editor
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartCollection | null>(null);
+  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(true);
+  const [librariesExpanded, setLibrariesExpanded] = useState(true);
 
   // Share target (for ShareModal)
   const [shareTarget, setShareTarget] = useState<{
@@ -359,12 +369,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   useEffect(() => {
     // State resets for folder/view/smart folder handled by URL navigation
     setSelectedResource(null);
+    setSmartFolders([]);
     loadFolders();
     fetchTags().then(setAllTags).catch(() => {});
-    fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => {});
+    fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
     // Load libraries in team mode
     if (scopeType === 'team') {
       fetchLibraries(scopeId).then(setLibraries).catch(() => setLibraries([]));
+    } else {
+      setLibraries([]);
     }
   }, [loadFolders, scopeType, scopeId]);
 
@@ -687,6 +700,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               scopeType,
               scopeId,
               selectedFolderId,
+              selectedLibraryId,
             );
             linkedCount++;
             completedCount++;
@@ -721,6 +735,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             const overall = Math.round(((completedCount + progress / 100) / validFiles.length) * 100);
             upload.setOverallProgress(overall);
           },
+          selectedLibraryId,
         );
 
         completedCount++;
@@ -751,13 +766,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     // Refresh resource list
     try {
-      const items = await fetchResources(scopeType, scopeId, selectedFolderId);
+      const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
       setResources(items);
     } catch { /* ignore */ }
 
     upload.setIsUploading(false);
     upload.setOverallProgress(0);
-  }, [scopeType, scopeId, selectedFolderId, uploading, t, upload, addToast]);
+  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast]);
 
   // ─── Drag & drop (robust nested-element handling) ────
 
@@ -821,12 +836,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const confirmPermanentDelete = useCallback(async () => {
     const ids = pendingBatchPermanentDelete || (pendingPermanentDelete ? [pendingPermanentDelete] : []);
-    if (ids.length === 0) return;
+    const folderIds = pendingBatchPermanentDeleteFolders || [];
+    if (ids.length === 0 && folderIds.length === 0) return;
     try {
       for (const id of ids) {
         await permanentDeleteResource(id);
       }
-      setTrashedResources((prev) => prev.filter((r) => !ids.includes(String(r.resource?.id))));
+      for (const fid of folderIds) {
+        await permanentDeleteFolder(fid);
+      }
+      // Folder cascade deletes resources inside, so re-fetch trash to get accurate state
+      if (folderIds.length > 0) {
+        await loadTrashedResources();
+      } else {
+        setTrashedResources((prev) => prev.filter((r) => !ids.includes(String(r.resource?.id))));
+      }
       setSelectedIds(new Set());
       addToast(t('resources.permanentDeleteSuccess'), 'success');
     } catch {
@@ -834,7 +858,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
     setPendingPermanentDelete(null);
     setPendingBatchPermanentDelete(null);
-  }, [pendingPermanentDelete, pendingBatchPermanentDelete, addToast, t]);
+    setPendingBatchPermanentDeleteFolders(null);
+  }, [pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders, loadTrashedResources, addToast, t]);
 
   // ─── Resource selection & detail panel ───────────────
 
@@ -949,10 +974,40 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [searchQuery]);
 
+  // ToolbarSearch callbacks for resources
+  const handleResourceQueryChange = useCallback((q: string) => {
+    setAiSearchMatchedMediaIds(null);
+    setSearchQuery(q);
+  }, []);
+
+  const handleResourceAISearch = useCallback(async (q: string, mode: 'hybrid' | 'semantic') => {
+    setIsAISearching(true);
+    try {
+      const response = mode === 'semantic'
+        ? await semanticSearch(q, 50)
+        : await hybridSearch(q, {}, 50, 0.5);
+      const ids = new Set(response.results.map(r => String(r.media_id)));
+      setAiSearchMatchedMediaIds(ids);
+      setSearchQuery(''); // Clear keyword filter
+      setDebouncedSearch('');
+    } catch (error) {
+      console.error('AI search failed:', error);
+    } finally {
+      setIsAISearching(false);
+    }
+  }, []);
+
+  const handleResourceSearchClear = useCallback(() => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setAiSearchMatchedMediaIds(null);
+  }, []);
+
   // Clear search/filter on view/folder change
   useEffect(() => {
     setSearchQuery('');
     setDebouncedSearch('');
+    setAiSearchMatchedMediaIds(null);
   }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
 
   // Clear selection on view/folder/library change
@@ -1667,18 +1722,38 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       });
     }
 
-    // Apply search
+    // Apply keyword search
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.trim().toLowerCase();
       items = items.filter((item) => {
         const filename = (item.resource?.filename || '').toLowerCase();
         const folderName = (item.resource?.folder_name || '').toLowerCase();
-        return filename.includes(q) || folderName.includes(q);
+        const notes = (item.resource?.notes || '').toLowerCase();
+        return filename.includes(q) || folderName.includes(q) || notes.includes(q);
+      });
+    }
+
+    // Apply AI search filter (match by media_id)
+    if (aiSearchMatchedMediaIds) {
+      items = items.filter((item) => {
+        const mediaId = item.resource?.media_id;
+        return mediaId && aiSearchMatchedMediaIds.has(String(mediaId));
       });
     }
 
     return items;
-  }, [currentItems, activeFilters, debouncedSearch]);
+  }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds]);
+
+  // Set of resource IDs currently being transcoded (active transcode tasks)
+  const transcodingResourceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of allUnifiedTasks) {
+      if (task.task_type === 'transcode' && (task.status === 'pending' || task.status === 'processing') && task.resource_id) {
+        ids.add(task.resource_id);
+      }
+    }
+    return ids;
+  }, [allUnifiedTasks]);
 
   const sortedItems = useMemo(() => {
     const items = [...filteredItems];
@@ -1698,7 +1773,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       default:
         return items;
     }
-  }, [currentItems, sortBy]);
+  }, [filteredItems, sortBy]);
 
   // Filter folders by search query
   const filteredFolders = useMemo(() => {
@@ -1882,7 +1957,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Render ──────────────────────────────────────────
 
   const sidebarItemClass = (active: boolean) =>
-    `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left ${
+    `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
       active ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
     }`;
 
@@ -1915,13 +1990,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* ── Main section: Team Libraries / Personal Resources ── */}
           {scopeType === 'team' ? (
             <>
-              {/* Team Libraries with ➕ */}
-              <div className="flex items-center justify-between pr-1 mb-0.5">
-                <span className="px-3 py-1 text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
-                  {t('resources.teamLibraries')}
-                </span>
+              {/* ── Library — collapsible parent item ── */}
+              <div className="flex items-center justify-between pr-1">
                 <button
-                  onClick={() => setCreatingLibrary(true)}
+                  onClick={() => setLibrariesExpanded(!librariesExpanded)}
+                  className={sidebarItemClass(isResourcesView && !!selectedLibraryId && !librariesExpanded)}
+                >
+                  <BookOpen size={15} className="shrink-0 opacity-70" />
+                  <span className="flex-1 truncate">{t('resources.library')}</span>
+                  <ChevronDown
+                    size={12}
+                    className={`shrink-0 text-zinc-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
+                  />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCreatingLibrary(true); setLibrariesExpanded(true); }}
                   className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
                   title={t('resources.newLibrary')}
                 >
@@ -1929,53 +2012,61 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </button>
               </div>
 
-              {/* Library list */}
-              {libraries.map((lib) => (
-                <button
-                  key={lib.id}
-                  onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
-                  className={sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}
-                >
-                  <BookOpen size={15} className="shrink-0 opacity-70" />
-                  <span className="truncate">{lib.name}</span>
-                </button>
-              ))}
+              {/* Library children (indented with left border) */}
+              {librariesExpanded && (
+                <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
+                  {libraries.map((lib) => (
+                    <button
+                      key={lib.id}
+                      onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
+                      className={`group ${sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}`}
+                    >
+                      <BookOpen size={14} className="shrink-0 opacity-60" />
+                      <span className="truncate flex-1">{lib.name}</span>
+                    </button>
+                  ))}
 
-              {/* Inline new library input */}
-              {creatingLibrary && (
-                <div className="flex items-center gap-1.5 px-2 py-1">
-                  <input
-                    ref={newLibraryInputRef}
-                    type="text"
-                    value={newLibraryName}
-                    onChange={(e) => setNewLibraryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleCreateLibrary();
-                      if (e.key === 'Escape') {
-                        setCreatingLibrary(false);
-                        setNewLibraryName('');
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!newLibraryName.trim()) {
-                        setCreatingLibrary(false);
-                        setNewLibraryName('');
-                      }
-                    }}
-                    placeholder={t('resources.libraryName')}
-                    disabled={savingLibrary}
-                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                  />
-                  {savingLibrary && (
-                    <Loader2 size={12} className="animate-spin text-zinc-400" />
+                  {/* Inline new library input */}
+                  {creatingLibrary && (
+                    <div className="flex items-center gap-1.5 px-2 py-1">
+                      <input
+                        ref={newLibraryInputRef}
+                        type="text"
+                        value={newLibraryName}
+                        onChange={(e) => setNewLibraryName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleCreateLibrary();
+                          if (e.key === 'Escape') {
+                            setCreatingLibrary(false);
+                            setNewLibraryName('');
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!newLibraryName.trim()) {
+                            setCreatingLibrary(false);
+                            setNewLibraryName('');
+                          }
+                        }}
+                        placeholder={t('resources.libraryName')}
+                        disabled={savingLibrary}
+                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                      />
+                      {savingLibrary && (
+                        <Loader2 size={12} className="animate-spin text-zinc-400" />
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
 
-
-              {libraries.length === 0 && !creatingLibrary && (
-                <div className="px-3 py-4 text-center">
-                  <p className="text-xs text-zinc-500">{t('resources.noLibraries')}</p>
+                  {/* Create library button */}
+                  {!creatingLibrary && (
+                    <button
+                      onClick={() => setCreatingLibrary(true)}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
+                    >
+                      <Plus size={14} className="shrink-0 opacity-70" />
+                      <span>{t('resources.newLibrary')}</span>
+                    </button>
+                  )}
                 </div>
               )}
             </>
@@ -2013,22 +2104,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </button>
               </div>
 
-              {/* Folder tree */}
-              {scopeType === 'team' && (
-                <SidebarFolderTree
-                  folders={folders}
-                  currentFolderId={selectedFolderId}
-                  onNavigate={(folderId) => {
-                    if (folderId) {
-                      navigate(resPath(`/resources/folder/${folderId}`));
-                    } else {
-                      navigate(resPath('/resources'));
-                    }
-                  }}
-                  onDragOver={handleSidebarDragOver}
-                  onDrop={handleSidebarDrop}
-                />
-              )}
+              {/* Folder tree for personal resources */}
+              <SidebarFolderTree
+                folders={folders}
+                currentFolderId={selectedFolderId}
+                onNavigate={(folderId) => {
+                  if (folderId) {
+                    navigate(resPath(`/resources/folder/${folderId}`));
+                  } else {
+                    navigate(resPath('/resources'));
+                  }
+                }}
+                onDragOver={handleSidebarDragOver}
+                onDrop={handleSidebarDrop}
+              />
 
             </>
           )}
@@ -2036,11 +2125,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* ── Divider ── */}
           <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
 
-          {/* ── Smart Folders with ➕ ── */}
-          <div className="flex items-center justify-between pr-1 mb-0.5">
-            <span className="px-3 py-1 text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
-              {t('resources.smartFolders')}
-            </span>
+          {/* ── Smart Folders — collapsible parent item ── */}
+          <div className="flex items-center justify-between pr-1">
+            <button
+              onClick={() => setSmartFoldersExpanded(!smartFoldersExpanded)}
+              className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId && !smartFoldersExpanded)}
+            >
+              <Zap size={15} className="shrink-0 opacity-70" />
+              <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
+              <ChevronDown
+                size={12}
+                className={`shrink-0 text-zinc-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
+              />
+            </button>
             <button
               className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
               title={t('smartFolder.createTitle')}
@@ -2050,41 +2147,45 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </button>
           </div>
 
-          {/* Smart folder items */}
-          {smartFolders.map((sf) => (
-            <button
-              key={sf.id}
-              onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
-              }}
-              className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
-            >
-              <Zap size={15} className="shrink-0 opacity-70" />
-              <span className="truncate flex-1">{sf.name}</span>
-              <span
-                className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingSmartFolder(sf);
-                }}
-                title={t('smartFolder.editSmartFolder')}
-              >
-                <Pencil size={12} />
-              </span>
-            </button>
-          ))}
+          {/* Smart folder children (indented with left border) */}
+          {smartFoldersExpanded && (
+            <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
+              {smartFolders.map((sf) => (
+                <button
+                  key={sf.id}
+                  onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
+                  }}
+                  className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
+                >
+                  <Zap size={14} className="shrink-0 opacity-60" />
+                  <span className="truncate flex-1">{sf.name}</span>
+                  <span
+                    className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingSmartFolder(sf);
+                    }}
+                    title={t('smartFolder.editSmartFolder')}
+                  >
+                    <Pencil size={12} />
+                  </span>
+                </button>
+              ))}
 
-          {smartFolders.length === 0 && (
-            <button
-              onClick={() => setShowSmartFolderEditor(true)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
-            >
-              <Plus size={15} className="shrink-0 opacity-70" />
-              <span>{t('smartFolder.createTitle')}</span>
-            </button>
+              {smartFolders.length === 0 && (
+                <button
+                  onClick={() => setShowSmartFolderEditor(true)}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
+                >
+                  <Plus size={14} className="shrink-0 opacity-70" />
+                  <span>{t('smartFolder.createTitle')}</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -2094,7 +2195,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         className="flex-1 min-w-0 flex flex-col"
       >
         {isDownloadsView ? (
-          <RipVaultView />
+          <DownloadsView />
         ) : (
         <>
         {/* Toolbar */}
@@ -2115,38 +2216,29 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
             <div className="flex items-center gap-2 shrink-0">
               {/* Search box */}
-              <div className="relative flex items-center">
-                <Search size={14} className="absolute left-2.5 text-zinc-500 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t('resources.searchFiles')}
-                  className="w-44 pl-8 pr-7 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 text-zinc-500 hover:text-zinc-300"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
+              <ToolbarSearch
+                onQueryChange={handleResourceQueryChange}
+                onAISearch={handleResourceAISearch}
+                onClear={handleResourceSearchClear}
+                isSearching={isAISearching}
+                placeholder={t('resources.searchFiles')}
+                className="w-48"
+              />
 
               {/* Filter button */}
               <div className="relative">
                 <button
                   onClick={() => setShowFilterPanel(!showFilterPanel)}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                  className={`relative p-1.5 rounded-lg transition-colors ${
                     activeFilters.size > 0
                       ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
                   }`}
+                  title={t('resources.filter')}
                 >
                   <Filter size={14} />
                   {activeFilters.size > 0 && (
-                    <span className="min-w-[16px] h-4 flex items-center justify-center text-[10px] font-medium bg-indigo-500 text-white rounded-full px-1">
+                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[9px] font-bold bg-indigo-500 text-white rounded-full px-0.5">
                       {activeFilters.size}
                     </span>
                   )}
@@ -2154,14 +2246,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 {showFilterPanel && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowFilterPanel(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
                       {filterOptions.map((opt) => (
                         <button
                           key={opt.value}
                           onClick={() => toggleFilter(opt.value)}
-                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center justify-between ${
+                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                             activeFilters.has(opt.value)
-                              ? 'bg-zinc-800 text-indigo-400'
+                              ? 'bg-indigo-500/10 text-indigo-400'
                               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                           }`}
                         >
@@ -2173,10 +2265,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       ))}
                       {activeFilters.size > 0 && (
                         <>
-                          <div className="mx-2 my-1 border-t border-zinc-700" />
+                          <div className="mx-2.5 my-1.5 border-t border-zinc-700/60" />
                           <button
                             onClick={() => { setActiveFilters(new Set()); setShowFilterPanel(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
                           >
                             {t('resources.clearFilters')}
                           </button>
@@ -2191,26 +2283,33 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <div className="relative">
                 <button
                   onClick={() => setShowSortMenu(!showSortMenu)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 rounded-lg transition-colors"
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    sortBy !== 'newest'
+                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                  title={currentSortLabel}
                 >
-                  <span>{currentSortLabel}</span>
-                  <ChevronDown size={12} />
+                  <ArrowUpDown size={14} />
                 </button>
                 {showSortMenu && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                    <div className="absolute left-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
                       {sortOptions.map((opt) => (
                         <button
                           key={opt.value}
                           onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
-                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                             sortBy === opt.value
-                              ? 'bg-zinc-800 text-indigo-400'
+                              ? 'bg-indigo-500/10 text-indigo-400'
                               : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                           }`}
                         >
-                          {opt.label}
+                          <span>{opt.label}</span>
+                          {sortBy === opt.value && (
+                            <Check size={12} className="text-indigo-400" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -2218,10 +2317,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 )}
               </div>
 
-              {/* View toggle — single button */}
+              {/* View toggle */}
               <button
                 onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                className="p-1.5 rounded-lg bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors"
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
                 title={viewMode === 'grid' ? t('resources.listView') : t('resources.gridView')}
               >
                 {viewMode === 'grid' ? <LayoutList size={14} /> : <LayoutGrid size={14} />}
@@ -2331,7 +2430,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           {t('resources.newProject')}
                         </button>
                         <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                          onClick={() => { setShowSmartFolderEditor(true); setShowNewDropdown(false); }}
                           className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
                         >
                           <FolderSearch size={14} className="text-purple-400" />
@@ -2412,7 +2511,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
           onDrop={canUpload ? handleDrop : undefined}
-          onContextMenu={canUpload ? handleEmptyAreaContextMenu : undefined}
+          onContextMenu={isResourcesView ? handleEmptyAreaContextMenu : undefined}
           onClick={(e) => {
             // Click on empty area → deselect all
             const target = e.target as HTMLElement;
@@ -2422,6 +2521,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 setMultiSelectMode(false);
               }
               setSelectedResource(null);
+              setSelectedFolder(null);
             }
           }}
         >
@@ -2504,14 +2604,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             handleCardClick(`folder:${folder.id}`, e);
                             if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
                               setSelectedResource(null);
-                              setSelectedFolder(folder);
-                              setShowInfoPanel(true);
+                              if (selectedFolder?.id === folder.id) {
+                                setSelectedFolder(null);
+                              } else {
+                                setSelectedFolder(folder);
+                                setShowInfoPanel(true);
+                              }
                             }
                           }}
                           onDoubleClick={() => setRecycleFolderId(String(folder.id))}
                           previewItems={trashedFolderPreviews[String(folder.id)]}
                           selectable
                           isChecked={selectedIds.has(`folder:${folder.id}`)}
+                          onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
+                          forceShowCheckbox={multiSelectMode}
                         />
                       ))}
                     </div>
@@ -2534,8 +2640,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                               handleCardClick(`folder:${folder.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
                                 setSelectedResource(null);
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
+                                if (selectedFolder?.id === folder.id) {
+                                  setSelectedFolder(null);
+                                } else {
+                                  setSelectedFolder(folder);
+                                  setShowInfoPanel(true);
+                                }
                               }
                             }}
                             onDoubleClick={() => {
@@ -2572,8 +2682,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                               handleCardClick(`folder:${folder.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
                                 setSelectedResource(null);
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
+                                if (selectedFolder?.id === folder.id) {
+                                  setSelectedFolder(null);
+                                } else {
+                                  setSelectedFolder(folder);
+                                  setShowInfoPanel(true);
+                                }
                               }
                             }}
                             onDoubleClick={() => {
@@ -2655,6 +2769,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             forceShowCheckbox={multiSelectMode}
                             selectedIds={selectedIds}
                             compositeId={`item:${item.id}`}
+                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                           />
                         ))}
                       </div>
@@ -2688,6 +2803,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             forceShowCheckbox={multiSelectMode}
                             selectedIds={selectedIds}
                             compositeId={`item:${item.id}`}
+                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                           />
                         ))}
                       </div>
@@ -2719,7 +2835,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       </div>
 
       {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
-      {(selectedResource?.resource || selectedFolder) && (
+      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && (
         <div
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
@@ -2780,7 +2896,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       )}
 
       {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
-      {(selectedResource?.resource || selectedFolder) && !showInfoPanel && (
+      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && !showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
           className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
@@ -2830,7 +2946,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   const resourceIds = currentItems
                     .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
                     .map((i) => String(i.resource!.id));
+                  const folderIds = recycleSubFolders
+                    .filter((f) => selectedIds.has(`folder:${f.id}`))
+                    .map((f) => String(f.id));
                   setPendingBatchPermanentDelete(resourceIds);
+                  setPendingBatchPermanentDeleteFolders(folderIds);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
               >
@@ -2993,11 +3113,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       )}
 
       {/* ── Permanent Delete Confirmation Dialog ── */}
-      {(pendingPermanentDelete || pendingBatchPermanentDelete) && (
+      {(pendingPermanentDelete || pendingBatchPermanentDelete || pendingBatchPermanentDeleteFolders) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); }}
+            onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); setPendingBatchPermanentDeleteFolders(null); }}
           />
           <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
             <div className="p-6 text-center">
@@ -3013,7 +3133,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
             <div className="flex gap-3 p-4 border-t border-zinc-800">
               <button
-                onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); }}
+                onClick={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); setPendingBatchPermanentDeleteFolders(null); }}
                 className="flex-1 px-4 py-2 text-sm font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
               >
                 {t('common.cancel')}
