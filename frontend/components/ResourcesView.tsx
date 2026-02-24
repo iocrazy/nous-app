@@ -77,6 +77,7 @@ import {
   getFolderContentCount,
   fetchTrashedFolders,
   restoreFolder,
+  fetchFolderContents,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { fetchLibraries, createLibrary } from '../services/libraryService';
@@ -205,6 +206,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
   const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
   const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
+  const [recycleFolderItems, setRecycleFolderItems] = useState<ResourceItem[]>([]);
   const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
   const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
   const [pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders] = useState<string[] | null>(null);
@@ -511,6 +513,21 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       loadTrashedResources().finally(() => setLoading(false));
     }
   }, [sidebarView, loadTrashedResources]);
+
+  // Load resource_items inside a trashed folder when navigating into it
+  useEffect(() => {
+    if (!recycleFolderId) {
+      setRecycleFolderItems([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    fetchFolderContents(recycleFolderId, true)
+      .then((items) => { if (!cancelled) setRecycleFolderItems(items); })
+      .catch((err) => { console.error('Failed to load trashed folder contents', err); if (!cancelled) setRecycleFolderItems([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [recycleFolderId]);
 
   // ─── Load downloaded resources ─────────────────────
 
@@ -1648,11 +1665,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         return !fid || !trashedFolderIds.has(fid);
       });
     }
-    // Show only resources in the selected recycle folder
-    return trashedResources.filter(
-      (item) => item.folder_id && String(item.folder_id) === recycleFolderId
-    );
-  }, [trashedResources, trashedFolders, recycleFolderId]);
+    // Inside a trashed folder: use items fetched directly from resource_items
+    return recycleFolderItems;
+  }, [trashedResources, trashedFolders, recycleFolderId, recycleFolderItems]);
 
   // Sub-folders at current recycle level
   const recycleSubFolders = useMemo(() => {

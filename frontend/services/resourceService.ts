@@ -109,6 +109,23 @@ export async function getFolderContentCount(id: string): Promise<{ resource_coun
   return json.data;
 }
 
+// Fetch resource_items inside a specific folder (used for trashed folder contents in recycle bin)
+export async function fetchFolderContents(
+  folderId: string,
+  includeTrashed = false,
+): Promise<ResourceItem[]> {
+  let query = supabase
+    .from('resource_items')
+    .select('*, resource:resources!inner(*)')
+    .eq('folder_id', folderId);
+  if (!includeTrashed) {
+    query = query.eq('resource.is_trashed', false);
+  }
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 export async function fetchTrashedFolders(
   scopeType: 'personal' | 'team',
   scopeId: string,
