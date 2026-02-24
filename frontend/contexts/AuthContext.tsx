@@ -78,6 +78,14 @@ export function AuthProvider({
       try {
         const config = await fetchFrontendConfig();
         if (config) {
+          // Transcode settings (always apply if present)
+          const transcodeUpdates: Partial<typeof DEFAULT_SETTINGS> = {};
+          if (config.transcode_enabled != null) transcodeUpdates.transcodeEnabled = config.transcode_enabled;
+          if (config.transcode_tiers != null) transcodeUpdates.transcodeTiers = config.transcode_tiers;
+          if (config.ffmpeg_encoder != null) transcodeUpdates.ffmpegEncoder = config.ffmpeg_encoder;
+          if (config.ffmpeg_preset != null) transcodeUpdates.ffmpegPreset = config.ffmpeg_preset;
+          if (config.transcode_parallel_tiers != null) transcodeUpdates.transcodeParallelTiers = config.transcode_parallel_tiers;
+
           if (config.supabase_url && config.supabase_anon_key) {
             reinitializeSupabaseClient(config.supabase_url, config.supabase_anon_key);
             setUserSettings(prev => ({
@@ -85,11 +93,13 @@ export function AuthProvider({
               supabaseUrl: config.supabase_url || '',
               supabaseAnonKey: config.supabase_anon_key || '',
               downloadPath: config.default_download_path || prev.downloadPath,
+              ...transcodeUpdates,
             }));
-          } else if (config.default_download_path) {
+          } else {
             setUserSettings(prev => ({
               ...prev,
               downloadPath: config.default_download_path || prev.downloadPath,
+              ...transcodeUpdates,
             }));
           }
         }
@@ -216,6 +226,11 @@ export function AuthProvider({
         supabase_url: newSettings.supabaseUrl || undefined,
         supabase_anon_key: newSettings.supabaseAnonKey || undefined,
         default_download_path: newSettings.downloadPath,
+        transcode_enabled: newSettings.transcodeEnabled,
+        transcode_tiers: newSettings.transcodeTiers,
+        ffmpeg_encoder: newSettings.ffmpegEncoder,
+        ffmpeg_preset: newSettings.ffmpegPreset,
+        transcode_parallel_tiers: newSettings.transcodeParallelTiers,
       });
 
       if (isAuthenticated && isSupabaseConfigured()) {

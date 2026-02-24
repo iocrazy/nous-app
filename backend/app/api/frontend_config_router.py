@@ -34,6 +34,12 @@ class FrontendConfig(BaseModel):
     supabase_url: Optional[str] = None
     supabase_anon_key: Optional[str] = None
     default_download_path: Optional[str] = None
+    # Transcode settings
+    transcode_enabled: Optional[bool] = None
+    transcode_tiers: Optional[str] = None
+    ffmpeg_encoder: Optional[str] = None
+    ffmpeg_preset: Optional[str] = None
+    transcode_parallel_tiers: Optional[bool] = None
 
 
 class UpdateConfigRequest(BaseModel):
@@ -42,6 +48,12 @@ class UpdateConfigRequest(BaseModel):
     supabase_url: Optional[str] = None
     supabase_anon_key: Optional[str] = None
     default_download_path: Optional[str] = None
+    # Transcode settings
+    transcode_enabled: Optional[bool] = None
+    transcode_tiers: Optional[str] = None
+    ffmpeg_encoder: Optional[str] = None
+    ffmpeg_preset: Optional[str] = None
+    transcode_parallel_tiers: Optional[bool] = None
 
 
 # ============================================
@@ -73,6 +85,7 @@ def load_config() -> dict:
 def save_config(config: dict) -> bool:
     """保存配置文件"""
     try:
+        transcode = config.get("transcode", {})
         # 构建 YAML 内容（带注释）
         content = """# ===========================================
 # 前端配置文件 (frontend_config.yml)
@@ -89,12 +102,34 @@ supabase:
 # 默认下载路径（服务器端）
 # 如果用户已登录，将使用数据库中的用户设置覆盖此值
 default_download_path: "{default_download_path}"
+
+# Transcode settings
+# enabled: true | false (master switch)
+# tiers: comma-separated enabled resolutions (480p, 720p, 1080p)
+# encoder: auto | libx264 | h264_nvenc | h264_videotoolbox | h264_qsv
+# preset: ultrafast | veryfast | fast | medium | slow | veryslow (NVENC: p1-p7)
+# parallel_tiers: true | false
+transcode:
+  enabled: {transcode_enabled}
+  tiers: "{transcode_tiers}"
+  encoder: "{transcode_encoder}"
+  preset: "{transcode_preset}"
+  parallel_tiers: {transcode_parallel}
 """.format(
             supabase_url=config.get("supabase", {}).get("url", ""),
             supabase_anon_key=config.get("supabase", {}).get("anon_key", ""),
             default_download_path=config.get(
                 "default_download_path", get_default_download_path()
             ),
+            transcode_enabled="true" if transcode.get(
+                "enabled", settings.TRANSCODE_ENABLED
+            ) else "false",
+            transcode_tiers=transcode.get("tiers", settings.TRANSCODE_TIERS),
+            transcode_encoder=transcode.get("encoder", settings.FFMPEG_ENCODER),
+            transcode_preset=transcode.get("preset", settings.FFMPEG_PRESET),
+            transcode_parallel="true" if transcode.get(
+                "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+            ) else "false",
         )
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -123,11 +158,19 @@ async def get_frontend_config():
     try:
         config = load_config()
 
+        transcode = config.get("transcode", {})
         return FrontendConfig(
             supabase_url=config.get("supabase", {}).get("url") or None,
             supabase_anon_key=config.get("supabase", {}).get("anon_key") or None,
             default_download_path=config.get("default_download_path")
             or get_default_download_path(),
+            transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
+            transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
+            ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
+            ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
+            transcode_parallel_tiers=transcode.get(
+                "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+            ),
         )
     except Exception as e:
         logger.error(f"获取前端配置失败: {e}")
@@ -160,15 +203,47 @@ async def update_frontend_config(request: UpdateConfigRequest):
         if request.default_download_path is not None:
             config["default_download_path"] = request.default_download_path
 
+        # Handle transcode settings
+        if "transcode" not in config:
+            config["transcode"] = {}
+
+        if request.transcode_enabled is not None:
+            config["transcode"]["enabled"] = request.transcode_enabled
+            settings.TRANSCODE_ENABLED = request.transcode_enabled
+
+        if request.transcode_tiers is not None:
+            config["transcode"]["tiers"] = request.transcode_tiers
+            settings.TRANSCODE_TIERS = request.transcode_tiers
+
+        if request.ffmpeg_encoder is not None:
+            config["transcode"]["encoder"] = request.ffmpeg_encoder
+            settings.FFMPEG_ENCODER = request.ffmpeg_encoder
+
+        if request.ffmpeg_preset is not None:
+            config["transcode"]["preset"] = request.ffmpeg_preset
+            settings.FFMPEG_PRESET = request.ffmpeg_preset
+
+        if request.transcode_parallel_tiers is not None:
+            config["transcode"]["parallel_tiers"] = request.transcode_parallel_tiers
+            settings.TRANSCODE_PARALLEL_TIERS = request.transcode_parallel_tiers
+
         # 保存配置
         if not save_config(config):
             raise HTTPException(status_code=500, detail="保存配置失败")
 
+        transcode = config.get("transcode", {})
         return FrontendConfig(
             supabase_url=config["supabase"].get("url") or None,
             supabase_anon_key=config["supabase"].get("anon_key") or None,
             default_download_path=config.get("default_download_path")
             or get_default_download_path(),
+            transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
+            transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
+            ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
+            ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
+            transcode_parallel_tiers=transcode.get(
+                "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+            ),
         )
     except HTTPException:
         raise
