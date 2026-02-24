@@ -299,6 +299,29 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource_item: {e}")
             return None
 
+    async def get_resource_item_in_folder(
+        self, resource_id: str, scope_type: str, scope_id: str, folder_id: str | None
+    ) -> Optional[Dict[str, Any]]:
+        """Get a specific resource_item by resource_id + scope + folder_id."""
+        try:
+            client = await self._get_client()
+            query = (
+                client.table(self.TABLE_ITEMS)
+                .select("*")
+                .eq("resource_id", resource_id)
+                .eq("scope_type", scope_type)
+                .eq("scope_id", scope_id)
+            )
+            if folder_id:
+                query = query.eq("folder_id", folder_id)
+            else:
+                query = query.is_("folder_id", "null")
+            result = await query.limit(1).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get resource_item in folder: {e}")
+            return None
+
     async def get_first_resource_item(
         self, resource_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -499,6 +522,23 @@ class ResourcesRepository:
         except Exception as e:
             logger.error(f"Failed to update version {version_id}: {e}")
             raise
+
+    async def get_untranscoded_video_versions(self) -> List[Dict[str, Any]]:
+        """Get video versions that have never been transcoded (NULL status, has file)."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_VERSIONS)
+                .select("id, resource_id, mime_type, file_path")
+                .like("mime_type", "video/%")
+                .is_("transcode_status", "null")
+                .not_.is_("file_path", "null")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get untranscoded video versions: {e}")
+            return []
 
     async def get_next_version_number(self, resource_id: str) -> int:
         try:

@@ -577,7 +577,7 @@ async def serve_preview_sprite(resource_id: str):
 
 @router.patch("/{resource_id}")
 async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep):
-    """Update resource metadata."""
+    """Update resource metadata. Use DELETE endpoint for trashing."""
     try:
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
@@ -586,10 +586,13 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 
         update_data = data.model_dump(exclude_none=True)
 
-        if data.is_trashed is True:
-            update_data["trashed_at"] = datetime.now(timezone.utc).isoformat()
-        elif data.is_trashed is False:
-            update_data["trashed_at"] = None
+        # Prevent direct is_trashed manipulation via PATCH.
+        # Trash must go through DELETE (resource_item removal).
+        update_data.pop("is_trashed", None)
+        update_data.pop("trashed_at", None)
+
+        if not update_data:
+            return {"success": True, "data": resource}
 
         result = await repo.update_resource(resource_id, update_data)
         return {"success": True, "data": result}
@@ -607,7 +610,7 @@ async def trash_resource_by_platform_id(
     scope_type: str = Query("personal", pattern="^(personal|team)$"),
     scope_id: Optional[str] = Query(None),
 ):
-    """Soft-delete a downloaded video by moving it to the recycle bin."""
+    """Soft-delete a downloaded video by removing its resource_item reference."""
     try:
         svc = ResourcesService()
         resource = await svc.repo.get_resource_by_platform_id(platform_id)
@@ -615,15 +618,12 @@ async def trash_resource_by_platform_id(
             raise ValueError("No resource found for this platform_id")
 
         resource_id = str(resource["id"])
-        if resource["creator_id"] != auth.user_id:
-            raise PermissionError("Only the creator can trash this resource")
-
-        await svc.repo.update_resource(
-            resource_id,
-            {
-                "is_trashed": True,
-                "trashed_at": datetime.now(timezone.utc).isoformat(),
-            },
+        target_scope_id = scope_id or auth.user_id
+        await svc.remove_from_library(
+            resource_id=resource_id,
+            user_id=auth.user_id,
+            scope_type=scope_type,
+            scope_id=target_scope_id,
         )
         return {"success": True, "message": "Resource moved to trash"}
     except ValueError as e:
@@ -687,8 +687,9 @@ async def delete_resource(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    folder_id: Optional[str] = Query(None),
 ):
-    """Remove a resource from the user's library.
+    """Remove a resource from a specific folder.
 
     Deletes the resource_item reference. If this was the last reference,
     the DB trigger auto-trashes the parent resource (orphan GC).
@@ -700,6 +701,7 @@ async def delete_resource(
             user_id=auth.user_id,
             scope_type=scope_type,
             scope_id=scope_id,
+            folder_id=folder_id,
         )
         return {"success": True, "message": "Resource removed from library"}
     except ValueError as e:

@@ -390,15 +390,29 @@ class ResourcesService:
         user_id: str,
         scope_type: str,
         scope_id: str,
+        folder_id: str | None = None,
     ) -> bool:
         """
-        Remove a resource from the user's library by deleting their
-        resource_item. The DB trigger auto-trashes the resource if this
-        was the last reference (orphan detection).
+        Remove a resource from a specific folder by deleting the resource_item.
+        Saves last location on the resource for restore.
+        The DB trigger auto-trashes the resource if this was the last reference.
         """
-        item = await self.repo.get_resource_item(resource_id, scope_type, scope_id)
+        if folder_id is not None:
+            item = await self.repo.get_resource_item_in_folder(
+                resource_id, scope_type, scope_id, folder_id
+            )
+        else:
+            item = await self.repo.get_resource_item(resource_id, scope_type, scope_id)
         if not item:
-            raise ValueError("Resource not found in this scope")
+            raise ValueError("Resource not found in this scope/folder")
+
+        # Save last location for restore
+        await self.repo.update_resource(resource_id, {
+            "last_folder_id": item.get("folder_id"),
+            "last_library_id": item.get("library_id"),
+            "last_scope_type": scope_type,
+            "last_scope_id": scope_id,
+        })
 
         return await self.repo.delete_resource_item(item["id"])
 
@@ -423,7 +437,40 @@ class ResourcesService:
             raise ValueError("Resource not found")
         if resource["creator_id"] != user_id:
             raise PermissionError("Only the creator can restore this resource")
+        if not resource.get("is_trashed"):
+            raise ValueError("Resource is not in trash")
 
+        # Determine restore location
+        folder_id = resource.get("last_folder_id")
+        library_id = resource.get("last_library_id")
+        scope_type = resource.get("last_scope_type") or "personal"
+        scope_id = resource.get("last_scope_id") or user_id
+
+        # If last_folder_id references a trashed/deleted folder, clear it
+        if folder_id:
+            from app.db.supabase_client import get_async_supabase_admin
+            client = await get_async_supabase_admin()
+            folder_check = await (
+                client.table("folders")
+                .select("id, is_trashed")
+                .eq("id", folder_id)
+                .limit(1)
+                .execute()
+            )
+            if not folder_check.data or folder_check.data[0].get("is_trashed"):
+                folder_id = None  # Folder gone or trashed -> restore to library root
+
+        # Recreate the resource_item
+        await self.repo.create_resource_item({
+            "resource_id": resource_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "folder_id": folder_id,
+            "library_id": library_id,
+            "added_by": user_id,
+        })
+
+        # Un-trash the resource
         return await self.repo.update_resource(
             resource_id,
             {"is_trashed": False, "trashed_at": None},
