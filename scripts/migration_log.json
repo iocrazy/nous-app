@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-02-17T12:20:33.097829",
+  "dry_run": false,
+  "download_path": "/Volumes/sources/MediaHub.library",
+  "entries": [
+    {
+      "resource_id": "275326896918575",
+      "old_path": "resources/275326896918575/7600991783564135714_\u6d77\u540e\u7f8e\u5a1c\u79c0\u76d8\u70b9 \u4e00\u4e2a\u5973\u4eba\u600e\u4e48\u80fd\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275326896918575/7600991783564135714_\u6d77\u540e\u7f8e\u5a1c\u79c0\u76d8\u70b9 \u4e00\u4e2a\u5973\u4eba\u600e\u4e48\u80fd\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275372103385136",
+      "old_path": "resources/275372103385136/7594741116964998438_\u62d2\u7edd\u5e73\u5eb8\u7684\u8d28\u611f\u4e4b\u9009\u4e13\u67dc\u540c\u6e90\u5de5\u827a\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275372103385136/7594741116964998438_\u62d2\u7edd\u5e73\u5eb8\u7684\u8d28\u611f\u4e4b\u9009\u4e13\u67dc\u540c\u6e90\u5de5\u827a\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275375345311794",
+      "old_path": "resources/275375345311794/7581002830502388322_\u5728\u67d0\u9c7c\u770b\u5230\u4e00\u4e2a\u54c8\u66fc\u5361\u987f\u7fe1\u7fe0\u97f3\u54cd\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275375345311794/7581002830502388322_\u5728\u67d0\u9c7c\u770b\u5230\u4e00\u4e2a\u54c8\u66fc\u5361\u987f\u7fe1\u7fe0\u97f3\u54cd\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275375300747313",
+      "old_path": "resources/275375300747313/7571766842058968358_\u641e\u7b11\u8131\u53e3\u79c0 \u5c0f\u59d0\u59d0 \u6709\u94b1\u4eba \u70ed\u70b9.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275375300747313/7571766842058968358_\u641e\u7b11\u8131\u53e3\u79c0 \u5c0f\u59d0\u59d0 \u6709\u94b1\u4eba \u70ed\u70b9.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275379088453683",
+      "old_path": "resources/275379088453683/7571766842058968358_\u641e\u7b11\u8131\u53e3\u79c0 \u5c0f\u59d0\u59d0 \u6709\u94b1\u4eba \u70ed\u70b9.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275379088453683/7571766842058968358_\u641e\u7b11\u8131\u53e3\u79c0 \u5c0f\u59d0\u59d0 \u6709\u94b1\u4eba \u70ed\u70b9.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275380113260596",
+      "old_path": "resources/275380113260596/7592562179377149435_\u7ed9\u5973\u670b\u53cb\u51c6\u5907\u4e861\u5c81-31\u5c81\u7684\u751f\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275380113260596/7592562179377149435_\u7ed9\u5973\u670b\u53cb\u51c6\u5907\u4e861\u5c81-31\u5c81\u7684\u751f\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275380320968757",
+      "old_path": "resources/275380320968757/7595905529352834356_\u62bd\u8c61\u5c3a\u5ea6\u9f50\u98de\u77f3\u5934\u59d0\u8fd9\u6b21\u53c8\u6740\u75af\u4e86\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275380320968757/7595905529352834356_\u62bd\u8c61\u5c3a\u5ea6\u9f50\u98de\u77f3\u5934\u59d0\u8fd9\u6b21\u53c8\u6740\u75af\u4e86\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "resource_id": "275380917084214",
+      "old_path": "resources/275380917084214/7581002830502388322_\u5728\u67d0\u9c7c\u770b\u5230\u4e00\u4e2a\u54c8\u66fc\u5361\u987f\u7fe1\u7fe0\u97f3\u54cd\u2026.mp4",
+      "new_path": "teams/eca35212-e210-4baf-b7fc-a6f0fe39c9fa/uploads/275380917084214/7581002830502388322_\u5728\u67d0\u9c7c\u770b\u5230\u4e00\u4e2a\u54c8\u66fc\u5361\u987f\u7fe1\u7fe0\u97f3\u54cd\u2026.mp4",
+      "status": "migrated"
+    },
+    {
+      "type": "web_directory",
+      "old_path": "resources/web",
+      "new_path": "global/web",
+      "status": "migrated"
+    }
+  ]
+}
