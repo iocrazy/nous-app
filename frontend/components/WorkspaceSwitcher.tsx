@@ -93,36 +93,106 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     ? (userName?.charAt(0)?.toUpperCase() || 'P')
     : (currentTeam?.name.charAt(0).toUpperCase() || 'T');
 
+  // ── Collapsed: trigger avatar + icon-only popup ──
+  if (collapsed) {
+    return (
+      <div ref={containerRef} className="relative flex flex-col items-center">
+        {/* Trigger — current workspace avatar */}
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
+          style={{ background: undefined }}
+          title={displayName}
+        >
+          <div className={`w-8 h-8 rounded-lg ${activeColor} flex items-center justify-center`}>
+            <span className="text-white text-sm font-bold leading-none">{activeInitial}</span>
+          </div>
+        </button>
+
+        {/* Popup — icon-only vertical list */}
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl p-1.5 flex flex-col items-center gap-1 animate-dropdown select-none">
+              {/* Personal */}
+              <button
+                onClick={() => handleSelect(personalTeamId)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
+                  isPersonal
+                    ? 'bg-zinc-600 ring-2 ring-indigo-500 ring-offset-1 ring-offset-zinc-950'
+                    : 'bg-zinc-700 hover:bg-zinc-600'
+                }`}
+                title={capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal')}
+              >
+                <span className="text-white text-xs font-bold leading-none pointer-events-none">
+                  {userName?.charAt(0)?.toUpperCase() || 'P'}
+                </span>
+              </button>
+
+              {/* Teams */}
+              {teams.map((team) => {
+                const color = getTeamColor(team.name);
+                const isActive = activeTeamId === team.id;
+                return (
+                  <button
+                    key={team.id}
+                    onClick={() => handleSelect(team.id)}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all ${color} ${
+                      isActive
+                        ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-zinc-950'
+                        : 'opacity-70 hover:opacity-100'
+                    }`}
+                    title={team.name}
+                  >
+                    <span className="text-white text-xs font-bold leading-none pointer-events-none">
+                      {team.name.charAt(0).toUpperCase()}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* Create */}
+              <div className="w-6 mx-auto my-0.5 border-t border-zinc-700/60" />
+              <button
+                onClick={handleCreateTeam}
+                className="w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                title={t('user.createTeam') || 'Create Team'}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── Expanded: trigger + dropdown ──
   return (
     <div ref={containerRef} className="relative">
       {/* Trigger — single-line: icon + name + chevron + badge */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center w-full hover:bg-zinc-800/50 rounded-lg ${collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} transition-colors group text-left min-w-0`}
-        title={collapsed ? displayName : undefined}
+        className="flex items-center w-full hover:bg-zinc-800/50 rounded-lg px-3 py-2.5 transition-colors group text-left min-w-0"
       >
-        <div className={`${collapsed ? 'w-8 h-8' : 'w-5 h-5'} rounded ${activeColor} flex items-center justify-center flex-shrink-0 ${collapsed ? '' : 'mr-2.5'} transition-all duration-200`}>
-          <span className={`text-white ${collapsed ? 'text-sm' : 'text-[10px]'} font-bold leading-none`}>{activeInitial}</span>
+        <div className={`w-5 h-5 rounded ${activeColor} flex items-center justify-center flex-shrink-0 mr-2.5`}>
+          <span className="text-white text-[10px] font-bold leading-none">{activeInitial}</span>
         </div>
-        {!collapsed && (
-          <>
-            <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">
-              {displayName}
-            </span>
-            <ChevronDown
-              size={12}
-              className={`text-zinc-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-            />
-            <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2">
-              {t('plans.free')}
-            </span>
-          </>
-        )}
+        <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">
+          {displayName}
+        </span>
+        <ChevronDown
+          size={12}
+          className={`text-zinc-500 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+        />
+        <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2">
+          {t('plans.free')}
+        </span>
       </button>
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-150 overflow-hidden">
+        <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl z-50 animate-dropdown overflow-hidden">
           <div className="py-1">
             {/* Personal workspace */}
             <button

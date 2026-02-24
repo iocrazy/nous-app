@@ -302,6 +302,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [originalFileUrl, setOriginalFileUrl] = useState<string | null>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -492,13 +493,18 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           resource?.mime_type?.startsWith('video/')
         ) {
           setFileUrl(getVersionHlsUrl(resourceId, viewingVersion.id, token || undefined));
+          // Also provide direct file URL for "Original" quality option
+          setOriginalFileUrl(getVersionFileUrl(resourceId, viewingVersion.id, token || undefined));
         } else if (selectedVersionId) {
           setFileUrl(getVersionFileUrl(resourceId, selectedVersionId, token || undefined));
+          setOriginalFileUrl(null);
         } else {
           setFileUrl(getResourceFileUrl(resourceId, token || undefined));
+          setOriginalFileUrl(null);
         }
       } catch {
         if (cancelled) return;
+        setOriginalFileUrl(null);
         if (selectedVersionId) {
           setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
         } else {
@@ -1064,6 +1070,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
             <div className="w-full h-full relative">
               <VideoPlayer
                 src={fileUrl}
+                originalSrc={originalFileUrl || undefined}
                 mimeType={resource.mime_type || undefined}
                 authToken={authToken || undefined}
                 playerRef={videoRef}

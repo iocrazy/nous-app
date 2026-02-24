@@ -217,7 +217,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
     <div className="flex-1 min-w-0 h-full bg-zinc-900 overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
-        <h3 className="text-sm font-semibold text-white">{t('resources.infoPanel.title')}</h3>
+        <h3 className="text-sm font-semibold text-white select-none">{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}
           className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"

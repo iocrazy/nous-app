@@ -124,16 +124,18 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   }, [onDropItems]);
 
   const checkbox = selectable ? (
-    <button
-      onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
-      className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
-        isChecked
-          ? 'bg-indigo-500 text-white opacity-100'
-          : `bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 ${forceShowCheckbox ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`
-      }`}
-    >
-      <Check size={12} />
-    </button>
+    <div className={`absolute top-2 left-2 z-10 ${forceShowCheckbox || isChecked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
+        className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+          isChecked
+            ? 'bg-indigo-500 text-white shadow-lg'
+            : 'bg-black/50 border border-zinc-400 text-transparent hover:border-zinc-200'
+        }`}
+      >
+        <Check size={12} />
+      </button>
+    </div>
   ) : null;
 
   // ⋮ more button

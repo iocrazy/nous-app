@@ -224,7 +224,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer select-none ${
                         activeTab === item.id
                           ? 'bg-zinc-800 text-white'
                           : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'

@@ -12,8 +12,9 @@ import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCover
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType } from '../services/parserService';
+import { updateResource, getVersionHlsUrl } from '../services/resourceService';
 import { useToast } from '../components/Toast';
-import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured, getSupabaseAccessToken } from '../supabaseClient';
 
 const MIN_PANEL_WIDTH = 380;
 const MAX_PANEL_WIDTH = 800;
@@ -42,6 +43,13 @@ export function PlayerPage() {
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
+
+  // Resource-level data (from resources table, linked via media_id)
+  const [resourceId, setResourceId] = useState<string | null>(null);
+  const [resourceRating, setResourceRating] = useState(0);
+  const [resourceNotes, setResourceNotes] = useState('');
+  const [hlsUrl, setHlsUrl] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   const handleTimeUpdate = useCallback((seconds: number) => {
     setCurrentTime(seconds);
@@ -121,6 +129,70 @@ export function PlayerPage() {
       supabase.removeChannel(channel);
     };
   }, [video?.id]);
+
+  // Fetch associated resource (rating/notes/HLS) from resources + resource_versions
+  useEffect(() => {
+    if (!video?.id) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    (async () => {
+      // Step 1: Get the resource linked to this parsed_media
+      const { data: resource } = await supabase
+        .from('resources')
+        .select('id, rating, notes, current_version, mime_type')
+        .eq('media_id', video.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (!resource) return;
+
+      const resId = String(resource.id);
+      setResourceId(resId);
+      setResourceRating(resource.rating || 0);
+      setResourceNotes(resource.notes || '');
+
+      // Step 2: Check if the current version has completed HLS transcoding
+      if (resource.mime_type?.startsWith('video/')) {
+        const { data: versions } = await supabase
+          .from('resource_versions')
+          .select('id, hls_path, transcode_status, version_number')
+          .eq('resource_id', resource.id)
+          .eq('version_number', resource.current_version || 1)
+          .limit(1)
+          .maybeSingle();
+
+        if (versions?.hls_path && versions.transcode_status === 'completed') {
+          const token = await getSupabaseAccessToken();
+          setAuthToken(token);
+          setHlsUrl(getVersionHlsUrl(resId, String(versions.id), token || undefined));
+        }
+      }
+    })();
+  }, [video?.id]);
+
+  const handleRatingChange = useCallback(async (rating: number) => {
+    if (!resourceId) return;
+    setResourceRating(rating);
+    try {
+      await updateResource(resourceId, { rating });
+    } catch (err) {
+      console.error('Failed to update rating:', err);
+    }
+  }, [resourceId]);
+
+  const handleNotesChange = useCallback((notes: string) => {
+    setResourceNotes(notes);
+  }, []);
+
+  const handleNotesBlur = useCallback(async () => {
+    if (!resourceId) return;
+    try {
+      await updateResource(resourceId, { notes: resourceNotes || null });
+    } catch (err) {
+      console.error('Failed to update notes:', err);
+    }
+  }, [resourceId, resourceNotes]);
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
@@ -413,9 +485,11 @@ export function PlayerPage() {
         <div className="flex-1 min-h-0 flex">
           {/* Video Player — main area */}
           <div className="flex-1 min-w-0 relative">
-            {getVideoUrl(video) ? (
+            {(hlsUrl || getVideoUrl(video)) ? (
               <VideoPlayer
-                src={getVideoUrl(video)!}
+                src={hlsUrl || getVideoUrl(video)!}
+                originalSrc={hlsUrl ? getVideoUrl(video) || undefined : undefined}
+                authToken={authToken || undefined}
                 playerRef={playerRef}
                 onTimeUpdate={handleTimeUpdate}
                 onDurationChange={handleDurationChange}
@@ -469,6 +543,11 @@ export function PlayerPage() {
               onUpdate={handleUpdate}
               onDelete={handleDelete}
               hidePreview
+              resourceRating={resourceRating}
+              resourceNotes={resourceNotes}
+              onRatingChange={resourceId ? handleRatingChange : undefined}
+              onNotesChange={resourceId ? handleNotesChange : undefined}
+              onNotesBlur={resourceId ? handleNotesBlur : undefined}
             />
           </div>
         </div>

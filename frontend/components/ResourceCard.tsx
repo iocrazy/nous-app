@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useState } from 'react';
-import { File, Film, Image, Music, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical } from 'lucide-react';
+import { File, Film, Image, Music, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
@@ -31,6 +31,8 @@ interface ResourceCardProps {
   // Drag support
   selectedIds?: Set<string>;
   compositeId?: string;
+  // Transcode indicator
+  isTranscoding?: boolean;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -108,6 +110,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   forceShowCheckbox = false,
   selectedIds,
   compositeId,
+  isTranscoding = false,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -236,16 +239,18 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   }, [compositeId, item.id, selectedIds, filename]);
 
   const checkbox = selectable ? (
-    <button
-      onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
-      className={`absolute top-2 left-2 z-10 w-5 h-5 rounded flex items-center justify-center transition-all ${
-        isChecked
-          ? 'bg-indigo-500 text-white opacity-100'
-          : `bg-zinc-800/80 border border-zinc-600 text-transparent group-hover:text-zinc-400 ${forceShowCheckbox ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`
-      }`}
-    >
-      <Check size={12} />
-    </button>
+    <div className={`absolute top-2 left-2 z-10 ${forceShowCheckbox || isChecked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggleSelect?.(e); }}
+        className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+          isChecked
+            ? 'bg-indigo-500 text-white shadow-lg'
+            : 'bg-black/50 border border-zinc-400 text-transparent hover:border-zinc-200'
+        }`}
+      >
+        <Check size={12} />
+      </button>
+    </div>
   ) : null;
 
   // ⋮ more button that triggers context menu
@@ -294,7 +299,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             />
           ) : (
             <p
-              className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+              className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
             >
               {filename}
@@ -461,11 +466,17 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           />
         ) : (
           <p
-            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium"
+            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
             onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
           >
             {filename}
           </p>
+        )}
+        {isTranscoding && (
+          <div className="flex items-center gap-1.5 mt-1">
+            <Loader2 size={11} className="text-amber-400 animate-spin" />
+            <span className="text-[11px] text-amber-400 animate-pulse">Transcoding...</span>
+          </div>
         )}
         {showRestoreAction && resource?.trashed_at ? (() => {
           const days = getDaysUntilDeletion(resource.trashed_at);

@@ -11,6 +11,7 @@ interface HlsLevel {
 
 interface VideoPlayerProps {
   src: string;
+  originalSrc?: string;  // Direct file URL (non-HLS) for "Original" quality option
   mimeType?: string;
   fps?: number;
   authToken?: string;
@@ -39,6 +40,7 @@ const formatTimeWithFrames = (seconds: number, fps: number): string => {
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   src,
+  originalSrc,
   mimeType,
   fps = 30,
   authToken,
@@ -66,6 +68,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [currentHlsLevel, setCurrentHlsLevel] = useState(-1);
   const [isAutoQuality, setIsAutoQuality] = useState(true);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [isOriginalMode, setIsOriginalMode] = useState(false); // Playing original file directly
 
   const effectiveFps = fps || 30;
   const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
@@ -104,12 +107,79 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Change HLS quality level (-1 = auto)
   const changeQuality = useCallback((levelIndex: number) => {
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = levelIndex;
+    const video = playerRef.current;
+    if (!video) return;
+
+    // If currently in original mode, re-create HLS instance
+    if (isOriginalMode && isHls && Hls.isSupported()) {
+      setIsOriginalMode(false);
+      const hlsConfig: Partial<Hls['config']> = {};
+      if (authToken) {
+        hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
+          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+        };
+      }
+      const pos = video.currentTime;
+      const wasPlaying = !video.paused;
+      const hls = new Hls(hlsConfig);
+      hlsRef.current = hls;
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.currentLevel = levelIndex;
+        video.currentTime = pos;
+        if (wasPlaying) video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        setCurrentHlsLevel(data.level);
+      });
+      setCurrentHlsLevel(levelIndex >= 0 ? levelIndex : -1);
       setIsAutoQuality(levelIndex === -1);
+      setShowQualityMenu(false);
+      return;
     }
+
+    const hls = hlsRef.current;
+    if (!hls) return;
+
+    hls.currentLevel = levelIndex;
+    setCurrentHlsLevel(levelIndex >= 0 ? levelIndex : hls.currentLevel);
+    setIsAutoQuality(levelIndex === -1);
     setShowQualityMenu(false);
-  }, []);
+
+    // Force reload current position when paused to make switch visible
+    if (video.paused && levelIndex >= 0) {
+      const pos = video.currentTime;
+      setTimeout(() => {
+        if (video.currentTime === pos) {
+          video.currentTime = pos; // trigger fragment load
+        }
+      }, 100);
+    }
+  }, [isOriginalMode, isHls, authToken, src, playerRef]);
+
+  // Switch to original (non-HLS) direct file playback
+  const switchToOriginal = useCallback(() => {
+    if (!originalSrc || !playerRef.current) return;
+    const video = playerRef.current;
+    const pos = video.currentTime;
+    const wasPlaying = !video.paused;
+
+    // Destroy HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    // Switch to direct file
+    video.src = originalSrc;
+    video.currentTime = pos;
+    if (wasPlaying) video.play().catch(() => {});
+
+    setIsOriginalMode(true);
+    setIsAutoQuality(false);
+    setShowQualityMenu(false);
+  }, [originalSrc, playerRef]);
 
   // Attach or detach HLS / native source
   useEffect(() => {
@@ -572,7 +642,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
 
           {/* Quality selector (HLS) or static resolution label */}
-          {hlsLevels.length > 1 ? (
+          {(hlsLevels.length > 1 || (hlsLevels.length > 0 && originalSrc)) ? (
             <div className="relative">
               {showQualityMenu && (
                 <div
@@ -582,23 +652,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
               <button
                 onClick={() => setShowQualityMenu(!showQualityMenu)}
-                className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
+                className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
                 title="Quality"
               >
-                {isAutoQuality
-                  ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].name === 'Original' ? 'Original' : hlsLevels[currentHlsLevel].height + 'p'})` : ''}`
-                  : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
-                    ? hlsLevels[currentHlsLevel].name === 'Original'
-                      ? 'Original'
-                      : `${hlsLevels[currentHlsLevel].height}p`
-                    : 'Auto'}
+                {isOriginalMode
+                  ? 'Original'
+                  : isAutoQuality
+                    ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].height}p)` : ''}`
+                    : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
+                      ? `${hlsLevels[currentHlsLevel].height}p`
+                      : 'Auto'}
               </button>
               {showQualityMenu && (
                 <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl py-1 min-w-[100px] z-20">
                   <button
                     onClick={() => changeQuality(-1)}
                     className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                      isAutoQuality
+                      isAutoQuality && !isOriginalMode
                         ? 'text-indigo-400 bg-indigo-500/10'
                         : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
                     }`}
@@ -607,29 +677,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   {hlsLevels
                     .map((level, idx) => ({ level, idx }))
+                    .filter(({ level }) => level.name !== 'Original')
                     .sort((a, b) => b.level.bitrate - a.level.bitrate)
-                    .map(({ level, idx }) => {
-                      const isOriginal = level.name === 'Original';
-                      const label = isOriginal ? `Original (${level.height}p)` : `${level.height}p`;
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => changeQuality(idx)}
-                          className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                            !isAutoQuality && currentHlsLevel === idx
-                              ? 'text-indigo-400 bg-indigo-500/10'
-                              : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
+                    .map(({ level, idx }) => (
+                      <button
+                        key={idx}
+                        onClick={() => changeQuality(idx)}
+                        className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                          !isAutoQuality && !isOriginalMode && currentHlsLevel === idx
+                            ? 'text-indigo-400 bg-indigo-500/10'
+                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        }`}
+                      >
+                        {level.height}p
+                      </button>
+                    ))}
+                  {originalSrc && (
+                    <button
+                      onClick={switchToOriginal}
+                      className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
+                        isOriginalMode
+                          ? 'text-indigo-400 bg-indigo-500/10'
+                          : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                      }`}
+                    >
+                      Original
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           ) : resolution ? (
-            <span className="px-2 py-1 text-xs font-mono text-zinc-400">
+            <span className="px-2 py-1 text-xs font-mono text-zinc-400 select-none">
               {resolution.height >= 2160 ? '4K' : resolution.height >= 1080 ? '1080p' : resolution.height >= 720 ? '720p' : `${resolution.height}p`}
             </span>
           ) : null}
