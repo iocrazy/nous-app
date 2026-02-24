@@ -41,6 +41,12 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# ── GPU Transcode Support (uncomment as needed) ──
+# NVIDIA: Install CUDA toolkit for h264_nvenc
+# RUN apt-get update && apt-get install -y nvidia-cuda-toolkit && rm -rf /var/lib/apt/lists/*
+# Intel QSV: Install VA-API drivers for h264_qsv
+# RUN apt-get update && apt-get install -y intel-media-va-driver-non-free libmfx1 && rm -rf /var/lib/apt/lists/*
+
 # Set Chrome environment variables
 ENV CHROME_PATH=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
