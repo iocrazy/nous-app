@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api import api_router
+from app.api.frontend_config_router import load_config as load_frontend_config
 from app.core.config import settings
 from app.core.utils import Utils
 from app.services.douyin_analysis import DouyinAnalysis
@@ -22,6 +23,23 @@ Utils.setup_logging()
 async def lifespan(app: FastAPI):
 
     # app.state.redis = await init_redis() # 在启动时初始化redis
+
+    # Load persisted transcode settings from frontend_config.yml
+    try:
+        config = load_frontend_config()
+        transcode = config.get("transcode", {})
+        if transcode.get("encoder"):
+            settings.FFMPEG_ENCODER = transcode["encoder"]
+        if transcode.get("preset"):
+            settings.FFMPEG_PRESET = transcode["preset"]
+        if "parallel_tiers" in transcode:
+            settings.TRANSCODE_PARALLEL_TIERS = transcode["parallel_tiers"]
+        logger.info(
+            f"Transcode config loaded: encoder={settings.FFMPEG_ENCODER}, "
+            f"preset={settings.FFMPEG_PRESET}, parallel={settings.TRANSCODE_PARALLEL_TIERS}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load transcode config from frontend_config.yml: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
@@ -155,9 +173,12 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # 添加CORS中间件
+# allow_origin_regex 匹配所有 localhost 端口，无需逐个配置
+# allow_origins 保留生产域名列表
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"^http://localhost:\d+$",
     allow_credentials=settings.CORS_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,25 +186,33 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api/v1")
 
-# 挂载静态文件服务 - 用于访问下载的视频和封面
-# 优先从 frontend_config.yml 读取路径
+# 媒体文件服务 - 用于访问下载的视频和封面
+# 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
 try:
-    media_base_path = Utils.get_download_base_path()
-    media_path = Path(media_base_path)
-    if media_path.exists():
-        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-        logger.info(f"静态文件服务已挂载: /media -> {media_path}")
-    else:
-        # 尝试创建目录
-        media_path.mkdir(parents=True, exist_ok=True)
-        app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-        logger.info(f"已创建媒体目录并挂载: /media -> {media_path}")
+    _media_base_path = Path(Utils.get_download_base_path()).resolve()
+    _media_base_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"媒体文件路由已注册: /media -> {_media_base_path}")
+
+    @app.get("/media/{file_path:path}")
+    async def serve_media_file(file_path: str):
+        """Serve media files with CORS support."""
+        import mimetypes
+
+        full_path = (_media_base_path / file_path).resolve()
+        # Security: prevent path traversal
+        if not str(full_path).startswith(str(_media_base_path)):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        return FileResponse(str(full_path), media_type=mime_type)
+
 except ValueError:
     logger.warning(
-        "未配置下载路径，静态文件服务未挂载。请在设置中配置 Default Download Path。"
+        "未配置下载路径，媒体文件路由未注册。请在设置中配置 Default Download Path。"
     )
 except Exception as e:
-    logger.warning(f"静态文件服务挂载失败: {e}")
+    logger.warning(f"媒体文件路由注册失败: {e}")
 
 
 @app.get("/health")

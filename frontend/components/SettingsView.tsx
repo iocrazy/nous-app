@@ -4,7 +4,7 @@ import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
 import {
   Save, FolderOpen, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle
+  Clock, CheckCircle, Power, Database, Zap, Check, Loader2, AlertCircle, Film
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
@@ -19,6 +19,8 @@ interface SettingsViewProps {
   activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
+  /** When true, hides the outer wrapper/header for embedding in a modal */
+  embedded?: boolean;
 }
 
 // Default scopes (will be overwritten by backend scopes if available)
@@ -40,7 +42,7 @@ const DEFAULT_SCOPES = [
   'system:read',
 ];
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false }) => {
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -284,13 +286,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* Header */}
+    <div className={embedded ? 'space-y-6' : 'max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500'}>
+
+      {/* Header - hidden in embedded mode */}
+      {!embedded && (
       <div>
          <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
          <p className="text-zinc-400">Manage your application preferences and API access credentials.</p>
       </div>
+      )}
 
       {/* General Settings Tab */}
       {activeTab === 'general' && (
@@ -494,9 +498,170 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </div>
            </div>
 
+           {/* Section 4: Transcode Configuration */}
+           <div className="px-6 py-4 border-y border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+              <div className="p-2 bg-orange-500/10 rounded-lg text-orange-400">
+                 <Film size={20} />
+              </div>
+              <h2 className="font-semibold text-zinc-200">Transcode Configuration</h2>
+           </div>
+           <div className="p-6 space-y-6">
+              {/* Master Toggle */}
+              <div className="flex items-center justify-between p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
+                 <div className="space-y-1">
+                    <div className="text-sm font-medium text-zinc-300">Enable Transcoding</div>
+                    <div className="text-xs text-zinc-500">
+                       When enabled, uploaded videos are transcoded to HLS multi-bitrate format for adaptive streaming.
+                    </div>
+                 </div>
+                 <button
+                    type="button"
+                    onClick={() => setLocalSettings({
+                       ...localSettings,
+                       transcodeEnabled: !(localSettings.transcodeEnabled ?? true),
+                    })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
+                       (localSettings.transcodeEnabled ?? true)
+                          ? 'bg-indigo-600'
+                          : 'bg-zinc-700'
+                    }`}
+                 >
+                    <span
+                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          (localSettings.transcodeEnabled ?? true)
+                             ? 'translate-x-6'
+                             : 'translate-x-1'
+                       }`}
+                    />
+                 </button>
+              </div>
+
+              {/* Resolution Tiers */}
+              <div className={`space-y-3 ${(localSettings.transcodeEnabled ?? true) ? '' : 'opacity-40 pointer-events-none'}`}>
+                 <label className="text-sm font-medium text-zinc-400">Resolution Tiers</label>
+                 <p className="text-xs text-zinc-500">
+                    Select which resolutions to encode. Unchecked tiers will be skipped.
+                 </p>
+                 <div className="grid grid-cols-3 gap-3">
+                    {[
+                       { name: '480p', label: '480p', desc: '854 x 480 · 1500 kbps' },
+                       { name: '720p', label: '720p', desc: '1280 x 720 · 4000 kbps' },
+                       { name: '1080p', label: '1080p', desc: '1920 x 1080 · 8000 kbps' },
+                    ].map((tier) => {
+                       const enabledTiers = (localSettings.transcodeTiers || '480p,720p,1080p').split(',').map(t => t.trim().toLowerCase());
+                       const isChecked = enabledTiers.includes(tier.name.toLowerCase());
+                       return (
+                          <button
+                             key={tier.name}
+                             type="button"
+                             onClick={() => {
+                                const current = (localSettings.transcodeTiers || '480p,720p,1080p').split(',').map(t => t.trim().toLowerCase());
+                                let next: string[];
+                                if (current.includes(tier.name.toLowerCase())) {
+                                   next = current.filter(t => t !== tier.name.toLowerCase());
+                                } else {
+                                   next = [...current, tier.name.toLowerCase()];
+                                }
+                                // Keep at least one tier, sort by resolution
+                                if (next.length === 0) return;
+                                const order = ['480p', '720p', '1080p'];
+                                next.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+                                setLocalSettings({ ...localSettings, transcodeTiers: next.join(',') });
+                             }}
+                             className={`p-3 rounded-lg border text-left transition-all ${
+                                isChecked
+                                   ? 'border-indigo-500 bg-indigo-500/10'
+                                   : 'border-zinc-800 bg-zinc-950/50 hover:border-zinc-700'
+                             }`}
+                          >
+                             <div className="flex items-center gap-2 mb-1">
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                                   isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-zinc-600'
+                                }`}>
+                                   {isChecked && <Check size={12} className="text-white" />}
+                                </div>
+                                <span className={`text-sm font-medium ${isChecked ? 'text-zinc-200' : 'text-zinc-500'}`}>{tier.label}</span>
+                             </div>
+                             <div className="text-xs text-zinc-500 ml-6">{tier.desc}</div>
+                          </button>
+                       );
+                    })}
+                 </div>
+              </div>
+
+              {/* Encoder */}
+              <div className={`space-y-2 ${(localSettings.transcodeEnabled ?? true) ? '' : 'opacity-40 pointer-events-none'}`}>
+                 <label className="text-sm font-medium text-zinc-400">Video Encoder</label>
+                 <select
+                    value={localSettings.ffmpegEncoder || 'auto'}
+                    onChange={(e) => setLocalSettings({...localSettings, ffmpegEncoder: e.target.value})}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-zinc-200 outline-none focus:border-indigo-500 transition-colors text-sm"
+                 >
+                    <option value="auto">Auto Detect (GPU preferred)</option>
+                    <option value="libx264">libx264 (CPU)</option>
+                    <option value="h264_nvenc">h264_nvenc (NVIDIA GPU)</option>
+                    <option value="h264_videotoolbox">h264_videotoolbox (macOS)</option>
+                    <option value="h264_qsv">h264_qsv (Intel QSV)</option>
+                 </select>
+                 <p className="text-xs text-zinc-500">
+                    Auto mode detects GPU hardware and falls back to CPU if unavailable.
+                 </p>
+              </div>
+
+              {/* Preset */}
+              <div className={`space-y-2 ${(localSettings.transcodeEnabled ?? true) ? '' : 'opacity-40 pointer-events-none'}`}>
+                 <label className="text-sm font-medium text-zinc-400">Encoding Preset</label>
+                 <select
+                    value={localSettings.ffmpegPreset || 'medium'}
+                    onChange={(e) => setLocalSettings({...localSettings, ffmpegPreset: e.target.value})}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-zinc-200 outline-none focus:border-indigo-500 transition-colors text-sm"
+                 >
+                    <option value="ultrafast">Ultrafast (lowest quality, fastest)</option>
+                    <option value="veryfast">Very Fast</option>
+                    <option value="fast">Fast</option>
+                    <option value="medium">Medium (balanced)</option>
+                    <option value="slow">Slow (higher quality)</option>
+                    <option value="veryslow">Very Slow (best quality, slowest)</option>
+                 </select>
+                 <p className="text-xs text-zinc-500">
+                    For NVENC, presets are auto-mapped to p1-p7 equivalents.
+                 </p>
+              </div>
+
+              {/* Parallel Tiers Toggle */}
+              <div className={`flex items-center justify-between p-4 bg-zinc-950/50 rounded-lg border border-zinc-800 ${(localSettings.transcodeEnabled ?? true) ? '' : 'opacity-40 pointer-events-none'}`}>
+                 <div className="space-y-1">
+                    <div className="text-sm font-medium text-zinc-300">Parallel Tier Encoding</div>
+                    <div className="text-xs text-zinc-500">
+                       Encode selected tiers simultaneously for faster transcoding.
+                    </div>
+                 </div>
+                 <button
+                    type="button"
+                    onClick={() => setLocalSettings({
+                       ...localSettings,
+                       transcodeParallelTiers: !(localSettings.transcodeParallelTiers ?? true),
+                    })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
+                       (localSettings.transcodeParallelTiers ?? true)
+                          ? 'bg-indigo-600'
+                          : 'bg-zinc-700'
+                    }`}
+                 >
+                    <span
+                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          (localSettings.transcodeParallelTiers ?? true)
+                             ? 'translate-x-6'
+                             : 'translate-x-1'
+                       }`}
+                    />
+                 </button>
+              </div>
+           </div>
+
            {/* Actions Footer */}
            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end">
-              <button 
+              <button
                   onClick={handleSaveSettings}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-lg shadow-indigo-900/20"
               >

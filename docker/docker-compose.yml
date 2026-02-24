@@ -71,6 +71,14 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # ── GPU Transcode Support (uncomment as needed) ──
+    # NVIDIA GPU:
+    #   runtime: nvidia
+    #   environment:
+    #     - NVIDIA_VISIBLE_DEVICES=all
+    # Intel iGPU (QSV / VA-API):
+    #   devices:
+    #     - /dev/dri:/dev/dri
 
   # Celery Beat - Scheduled task scheduler
   celery-beat:

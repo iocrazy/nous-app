@@ -15,11 +15,9 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.services.system_monitor_service import (
-    get_active_tasks,
     get_network_status,
     get_queue_status,
     get_storage_status,
-    get_worker_stats,
 )
 
 router = APIRouter(prefix="/system")
@@ -31,7 +29,8 @@ class QueueStatus(BaseModel):
     active: int = 0
     pending: int = 0
     scheduled: int = 0
-    status: str = "offline"
+    status: str = "offline"  # offline | online | outdated
+    missing_tasks: list[str] = []
 
 
 class StorageStatus(BaseModel):
@@ -77,4 +76,6 @@ async def get_system_status(auth: AuthDep):
 
     except Exception as e:
         logger.error(f"Failed to get system status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get system status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get system status: {str(e)}"
+        )

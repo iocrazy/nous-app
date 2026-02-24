@@ -16,7 +16,7 @@ const getApiUrl = (): string => {
 
 // Types
 export interface SearchResultItem {
-  video_id: number;
+  media_id: number;
   platform_id: string;
   title: string;
   cover_url: string | null;
@@ -66,7 +66,7 @@ export const semanticSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/semantic`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       query,
       limit,
@@ -95,7 +95,7 @@ export const hybridSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/hybrid`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify({
       query,
       limit,
@@ -116,7 +116,7 @@ export const hybridSearch = async (
  * Find similar videos based on a source video
  */
 export const findSimilarVideos = async (
-  videoId: number,
+  mediaId: number,
   limit: number = 10,
   threshold: number = 0.7
 ): Promise<SearchResponse> => {
@@ -128,10 +128,10 @@ export const findSimilarVideos = async (
   });
 
   const response = await fetch(
-    `${apiUrl}/api/v1/search/similar/${videoId}?${params}`,
+    `${apiUrl}/api/v1/search/similar/${mediaId}?${params}`,
     {
       method: 'GET',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
     }
   );
 
@@ -162,7 +162,7 @@ export const quickSearch = async (
 
   const response = await fetch(`${apiUrl}/api/v1/search/quick?${params}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -238,7 +238,7 @@ export const localSearch = (
 
     if (match) {
       results.push({
-        video_id: video.id || 0,
+        media_id: video.id || 0,
         platform_id: video.platform_id,
         title: video.title || '',
         description: video.description || null,

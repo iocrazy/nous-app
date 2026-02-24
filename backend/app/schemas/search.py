@@ -40,7 +40,7 @@ class HybridSearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     """A single search result item."""
 
-    video_id: int
+    media_id: int
     platform_id: str  # Required for frontend filtering
     title: str
     description: Optional[str] = None
@@ -61,8 +61,8 @@ class SearchResponse(BaseModel):
     search_type: str  # "semantic", "hybrid", "similar"
 
 
-class SimilarVideosRequest(BaseModel):
-    """Request schema for finding similar videos."""
+class SimilarMediaRequest(BaseModel):
+    """Request schema for finding similar media."""
 
     limit: int = Field(10, ge=1, le=50, description="Maximum number of similar videos")
     threshold: float = Field(

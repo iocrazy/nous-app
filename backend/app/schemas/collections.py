@@ -60,8 +60,8 @@ class CollectionResponse(BaseModel):
     color: Optional[str] = None
     description: Optional[str]
     rules: CollectionRules
-    video_count: int = Field(
-        default=0, description="Number of videos matching this collection"
+    media_count: int = Field(
+        default=0, description="Number of media matching this collection"
     )
     cached_at: Optional[datetime]
     is_preset: bool
@@ -84,12 +84,12 @@ class CollectionListResponse(BaseModel):
     total: int
 
 
-class CollectionVideosResponse(BaseModel):
-    """Response schema for videos in a collection."""
+class CollectionMediaResponse(BaseModel):
+    """Response schema for media in a collection."""
 
     collection_id: UUID
     collection_name: str
-    videos: List[dict]
+    media: List[dict]
     total: int
     page: int
     page_size: int

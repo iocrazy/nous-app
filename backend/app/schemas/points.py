@@ -20,10 +20,14 @@ class PointPackage(BaseModel):
     id: str = Field(..., description="Package ID")
     name: str = Field(..., description="Package display name")
     description: Optional[str] = Field(None, description="Package description")
-    points_amount: int = Field(..., gt=0, description="Number of points in this package")
+    points_amount: int = Field(
+        ..., gt=0, description="Number of points in this package"
+    )
     price_cents: int = Field(..., gt=0, description="Price in cents")
     currency: str = Field(default="CNY", description="Currency code")
-    is_active: bool = Field(default=True, description="Whether the package is available for purchase")
+    is_active: bool = Field(
+        default=True, description="Whether the package is available for purchase"
+    )
     sort_order: int = Field(default=0, description="Display sort order (ascending)")
 
 
@@ -35,7 +39,9 @@ class TeamQuota(BaseModel):
     storage_limit_bytes: int = Field(
         default=5368709120, description="Storage limit in bytes (default 5 GB)"
     )
-    storage_used_bytes: int = Field(default=0, ge=0, description="Storage used in bytes")
+    storage_used_bytes: int = Field(
+        default=0, ge=0, description="Storage used in bytes"
+    )
     free_points_granted: bool = Field(
         default=False, description="Whether free initial points have been granted"
     )
@@ -71,9 +77,15 @@ class PointTransaction(BaseModel):
 
     id: str = Field(..., description="Transaction ID")
     team_id: str = Field(..., description="Team ID")
-    user_id: Optional[str] = Field(None, description="User who triggered the transaction")
-    amount: int = Field(..., description="Points amount (positive = credit, negative = debit)")
-    balance_after: int = Field(..., ge=0, description="Team points balance after this transaction")
+    user_id: Optional[str] = Field(
+        None, description="User who triggered the transaction"
+    )
+    amount: int = Field(
+        ..., description="Points amount (positive = credit, negative = debit)"
+    )
+    balance_after: int = Field(
+        ..., ge=0, description="Team points balance after this transaction"
+    )
     type: str = Field(
         ...,
         pattern="^(purchase|consume|refund|gift|admin_adjust)$",
@@ -82,9 +94,7 @@ class PointTransaction(BaseModel):
     reference_type: Optional[str] = Field(
         None, description="Type of the referenced entity (e.g. order, video)"
     )
-    reference_id: Optional[str] = Field(
-        None, description="ID of the referenced entity"
-    )
+    reference_id: Optional[str] = Field(None, description="ID of the referenced entity")
     description: Optional[str] = Field(None, description="Human-readable description")
     created_at: datetime = Field(..., description="Transaction timestamp")
 
@@ -92,10 +102,14 @@ class PointTransaction(BaseModel):
 class PointPricing(BaseModel):
     """Points cost definition for a specific action type"""
 
-    action_type: str = Field(..., description="Action identifier (e.g. video_parse, ai_summary)")
+    action_type: str = Field(
+        ..., description="Action identifier (e.g. video_parse, ai_summary)"
+    )
     points_cost: int = Field(..., ge=0, description="Points required for this action")
     description: Optional[str] = Field(None, description="Action description")
-    is_active: bool = Field(default=True, description="Whether this pricing rule is active")
+    is_active: bool = Field(
+        default=True, description="Whether this pricing rule is active"
+    )
 
 
 class PointsBalanceResponse(BaseModel):
@@ -117,9 +131,7 @@ class PointsAdjustRequest(BaseModel):
     amount: int = Field(
         ..., description="Points to adjust (positive to add, negative to deduct)"
     )
-    description: str = Field(
-        ..., min_length=1, description="Reason for the adjustment"
-    )
+    description: str = Field(..., min_length=1, description="Reason for the adjustment")
 
 
 class QuotaCheckResult(BaseModel):

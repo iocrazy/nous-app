@@ -95,25 +95,25 @@ class LLMAnalysisService:
 
     async def generate_summary_and_save(
         self,
-        video_id: str,
+        media_id: str,
         transcript_text: str,
         video_info: dict = None,
         model: str = None,
     ) -> Optional[SummaryResult]:
         """Generate summary and persist to database.
 
-        Updates video status to 'processing' before starting and
+        Updates media status to 'processing' before starting and
         'completed' or 'failed' after.
         """
-        await self._repo.update_video_ai_status(
-            video_id, "summary_status", "processing"
+        await self._repo.update_media_ai_status(
+            media_id, "summary_status", "processing"
         )
 
         try:
             result = await self.generate_summary(transcript_text, video_info, model)
 
             await self._repo.save_summary(
-                video_id,
+                media_id,
                 {
                     "summary_type": "transcript",
                     "summary_text": result.summary,
@@ -124,16 +124,16 @@ class LLMAnalysisService:
                 },
             )
 
-            await self._repo.update_video_ai_status(
-                video_id, "summary_status", "completed"
+            await self._repo.update_media_ai_status(
+                media_id, "summary_status", "completed"
             )
-            logger.info(f"Summary saved for video {video_id}")
+            logger.info(f"Summary saved for media {media_id}")
             return result
 
         except Exception as e:
-            logger.error(f"Summary generation failed for video {video_id}: {e}")
-            await self._repo.update_video_ai_status(
-                video_id, "summary_status", "failed"
+            logger.error(f"Summary generation failed for media {media_id}: {e}")
+            await self._repo.update_media_ai_status(
+                media_id, "summary_status", "failed"
             )
             raise
 

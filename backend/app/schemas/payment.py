@@ -43,7 +43,9 @@ class OrderResponse(BaseModel):
     trade_no: Optional[str] = Field(
         None, description="Third-party payment provider trade number"
     )
-    paid_at: Optional[datetime] = Field(None, description="Payment completion timestamp")
+    paid_at: Optional[datetime] = Field(
+        None, description="Payment completion timestamp"
+    )
     expired_at: datetime = Field(..., description="Order expiration timestamp")
     created_at: datetime = Field(..., description="Order creation timestamp")
 
@@ -53,5 +55,9 @@ class OrderStatusResponse(BaseModel):
 
     order_id: str = Field(..., description="Order ID")
     payment_status: str = Field(..., description="Current payment status")
-    points_amount: int = Field(..., gt=0, description="Points associated with the order")
-    paid_at: Optional[datetime] = Field(None, description="Payment completion timestamp")
+    points_amount: int = Field(
+        ..., gt=0, description="Points associated with the order"
+    )
+    paid_at: Optional[datetime] = Field(
+        None, description="Payment completion timestamp"
+    )

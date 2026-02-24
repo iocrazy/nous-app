@@ -3,7 +3,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-import { Video } from '../types';
+import { ParsedMedia } from '../types';
 
 // API configuration - empty string means use relative paths (via Vite proxy)
 const getApiUrl = (): string => {
@@ -65,7 +65,7 @@ export interface SmartCollectionUpdate {
 }
 
 export interface SmartCollectionVideosResponse {
-  videos: Video[];
+  media: ParsedMedia[];
   total: number;
   page: number;
   page_size: number;
@@ -81,7 +81,7 @@ export const fetchSmartCollections = async (): Promise<SmartCollection[]> => {
 
   const response = await fetch(`${apiUrl}/api/v1/collections`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -101,7 +101,7 @@ export const getSmartCollection = async (collectionId: string): Promise<SmartCol
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -122,7 +122,7 @@ export const createSmartCollection = async (
 
   const response = await fetch(`${apiUrl}/api/v1/collections`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(collection),
   });
 
@@ -145,7 +145,7 @@ export const updateSmartCollection = async (
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: JSON.stringify(updates),
   });
 
@@ -165,7 +165,7 @@ export const deleteSmartCollection = async (collectionId: string): Promise<void>
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -195,7 +195,7 @@ export const getSmartCollectionVideos = async (
     `${apiUrl}/api/v1/collections/${collectionId}/videos?${params}`,
     {
       method: 'GET',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
     }
   );
 
@@ -217,7 +217,7 @@ export const refreshSmartCollection = async (
 
   const response = await fetch(`${apiUrl}/api/v1/collections/${collectionId}/refresh`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -236,7 +236,7 @@ export const initPresetCollections = async (): Promise<SmartCollection[]> => {
 
   const response = await fetch(`${apiUrl}/api/v1/collections/init-presets`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {

@@ -24,8 +24,6 @@ USER_AGENTS:
 # CORS 配置（结构化对象）
 # 注意：当 CORS_CREDENTIALS=true 时，不能使用 "*"，必须明确列出允许的域名
 CORS_ORIGINS:
-  - "http://localhost:3000"
-  - "http://localhost:8080"
   - "https://mediahub.heygo.cn"
   - "https://mediahubserver.heygo.cn:88"
   - "https://mediahubserver.heygo.cn"
@@ -37,3 +35,7 @@ CORS_CREDENTIALS: true
 APP_PORT: 9999  # Docker 容器内部固定端口
 
 # 注意: DOWNLOAD_PATH 已移至 .env，作为唯一配置源
+
+# Cookie 管理: 平台 cookie 文件目录
+# 文件名对应平台: bilibili.txt, youtube.txt, twitter.txt 等
+COOKIES_DIR: ""

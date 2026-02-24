@@ -11,34 +11,32 @@ from app.db.supabase_client import get_async_supabase_admin
 class AnalysisRepository:
     """Repository for video analysis CRUD operations (异步)."""
 
-    TABLE_NAME = "video_analysis"
+    TABLE_NAME = "resource_analysis"
 
     def __init__(self):
-        self._client = None
+        pass
 
     async def _get_client(self):
-        """获取异步客户端"""
-        if self._client is None:
-            self._client = await get_async_supabase_admin()
-        return self._client
+        """Get async client (loop-aware, safe for Celery workers)."""
+        return await get_async_supabase_admin()
 
     async def _get_table(self):
         """获取表引用"""
         client = await self._get_client()
         return client.table(self.TABLE_NAME)
 
-    async def get_analysis(self, video_id: int) -> Optional[dict]:
+    async def get_analysis(self, resource_id: int) -> Optional[dict]:
         """Get analysis for a video."""
         table = await self._get_table()
         result = (
-            await table.select("*").eq("video_id", video_id).maybe_single().execute()
+            await table.select("*").eq("resource_id", resource_id).maybe_single().execute()
         )
         return result.data
 
-    async def create_analysis(self, video_id: int, **kwargs) -> dict:
+    async def create_analysis(self, resource_id: int, **kwargs) -> dict:
         """Create analysis record for a video."""
         data = {
-            "video_id": video_id,
+            "resource_id": resource_id,
             "analysis_level": kwargs.get("analysis_level", "none"),
             "visual_description": kwargs.get("visual_description"),
             "detected_objects": kwargs.get("detected_objects", []),
@@ -56,34 +54,34 @@ class AnalysisRepository:
 
         table = await self._get_table()
         result = await table.insert(data).execute()
-        logger.info(f"Created analysis for video {video_id}")
+        logger.info(f"Created analysis for video {resource_id}")
         return result.data[0]
 
-    async def update_analysis(self, video_id: int, **kwargs) -> Optional[dict]:
+    async def update_analysis(self, resource_id: int, **kwargs) -> Optional[dict]:
         """Update analysis record."""
         # Filter out None values
         update_data = {k: v for k, v in kwargs.items() if v is not None}
 
         if not update_data:
-            return await self.get_analysis(video_id)
+            return await self.get_analysis(resource_id)
 
         update_data["analyzed_at"] = datetime.utcnow().isoformat()
 
         table = await self._get_table()
-        result = await table.update(update_data).eq("video_id", video_id).execute()
+        result = await table.update(update_data).eq("resource_id", resource_id).execute()
         return result.data[0] if result.data else None
 
-    async def upsert_analysis(self, video_id: int, **kwargs) -> dict:
+    async def upsert_analysis(self, resource_id: int, **kwargs) -> dict:
         """Create or update analysis record."""
-        existing = await self.get_analysis(video_id)
+        existing = await self.get_analysis(resource_id)
 
         if existing:
-            return await self.update_analysis(video_id, **kwargs)
+            return await self.update_analysis(resource_id, **kwargs)
         else:
-            return await self.create_analysis(video_id, **kwargs)
+            return await self.create_analysis(resource_id, **kwargs)
 
     async def update_embedding(
-        self, video_id: int, embedding: List[float], full_text: str
+        self, resource_id: int, embedding: List[float], full_text: str
     ) -> dict:
         """Update the embedding vector for a video."""
         # Convert list to PostgreSQL vector format
@@ -97,11 +95,11 @@ class AnalysisRepository:
                     "full_text_for_embedding": full_text,
                 }
             )
-            .eq("video_id", video_id)
+            .eq("resource_id", resource_id)
             .execute()
         )
 
-        logger.info(f"Updated embedding for video {video_id}")
+        logger.info(f"Updated embedding for video {resource_id}")
         return result.data[0] if result.data else None
 
     async def get_videos_without_analysis(self, limit: int = 100) -> List[dict]:
@@ -110,13 +108,13 @@ class AnalysisRepository:
         client = await self._get_client()
 
         # Get video IDs that have analysis
-        analyzed = await table.select("video_id").execute()
-        analyzed_ids = [r["video_id"] for r in analyzed.data]
+        analyzed = await table.select("resource_id").execute()
+        analyzed_ids = [r["resource_id"] for r in analyzed.data]
 
         # Get videos not in that list
         query = (
-            client.table("videos")
-            .select("id, title, description, cover_url")
+            client.table("parsed_media")
+            .select("id, title, description, cover_urls")
             .limit(limit)
         )
 
@@ -132,7 +130,7 @@ class AnalysisRepository:
         """Get videos with a specific analysis level."""
         table = await self._get_table()
         result = (
-            await table.select("*, videos(id, title, description, cover_url)")
+            await table.select("*, resources(id, title, description)")
             .eq("analysis_level", level)
             .limit(limit)
             .execute()
@@ -162,10 +160,10 @@ class AnalysisRepository:
 
         return result.data
 
-    async def delete_analysis(self, video_id: int) -> bool:
+    async def delete_analysis(self, resource_id: int) -> bool:
         """Delete analysis record for a video."""
         table = await self._get_table()
-        result = await table.delete().eq("video_id", video_id).execute()
+        result = await table.delete().eq("resource_id", resource_id).execute()
         return len(result.data) > 0
 
     async def get_analysis_stats(self) -> dict:

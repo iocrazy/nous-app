@@ -6,21 +6,33 @@ Celery 应用初始化模块
 用于创建和配置 Celery 实例，支持异步任务处理。
 """
 
+import pkgutil
+
 from celery import Celery
+from celery.signals import worker_process_init
+from celery.schedules import crontab
 
 from app.core.config import settings
+import app.tasks as _tasks_pkg
+
+
+@worker_process_init.connect
+def _init_worker_logging(**kwargs):
+    """Initialize loguru for Celery worker processes."""
+    from app.core.utils import Utils
+    Utils.setup_logging("celery")
+
+# 自动扫描 app/tasks/ 下所有模块，新增 task 文件无需手动注册
+_task_modules = [
+    f"app.tasks.{name}" for _, name, _ in pkgutil.iter_modules(_tasks_pkg.__path__)
+]
 
 # 创建 Celery 应用实例
 celery_app = Celery(
     "mediahub",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=[
-        "app.tasks.download_tasks",
-        "app.tasks.parse_tasks",
-        "app.tasks.scheduled_tasks",
-        "app.tasks.ai_tasks",
-    ],
+    include=_task_modules,
 )
 
 # Celery 配置
@@ -65,5 +77,24 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.update_system_status",
             "schedule": 30.0,  # 每 30 秒执行一次
         },
+        "reset-monthly-quotas": {
+            "task": "app.tasks.scheduled_tasks.reset_monthly_quotas",
+            "schedule": crontab(minute=0, hour=0, day_of_month=1),
+        },
+        "cleanup-trashed-resources-daily": {
+            "task": "app.tasks.scheduled_tasks.cleanup_trashed_resources",
+            "schedule": 86400.0,  # 每天执行一次
+        },
+        "cleanup-old-unified-tasks-daily": {
+            "task": "app.tasks.scheduled_tasks.cleanup_old_unified_tasks",
+            "schedule": 86400.0,  # 每天执行一次
+        },
+        "recover-stale-orchestrator-locks-hourly": {
+            "task": "app.tasks.scheduled_tasks.recover_stale_orchestrator_locks",
+            "schedule": 3600.0,  # Every hour
+        },
     },
 )
+
+# Register signal handlers (decorators auto-connect on import)
+import app.tasks.signals  # noqa: F401, E402

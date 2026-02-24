@@ -45,6 +45,7 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
+            *YtdlpService._get_cookie_args(url),
             url,
         ]
 
@@ -107,7 +108,8 @@ class YtdlpService:
             "--no-warnings",
             "--newline",
             "--progress-template",
-            "download:%(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            *YtdlpService._get_cookie_args(url),
             "-o",
             output_template,
             url,
@@ -131,15 +133,24 @@ class YtdlpService:
                         break
                     decoded = line.decode("utf-8", errors="replace").strip()
                     if decoded.startswith("download:") and progress_callback:
+                        # Format: "download:<percent_str> <downloaded_bytes> <total_bytes> <speed_str>"
                         parts = decoded[len("download:") :].split()
-                        if len(parts) >= 2:
+                        if parts:
                             try:
-                                downloaded = int(float(parts[0]))
-                                total = int(float(parts[1]))
-                                speed = parts[2] if len(parts) > 2 else "0 B/s"
+                                # Try byte-level progress first (parts[1]=downloaded, parts[2]=total)
+                                downloaded = int(float(parts[1]))
+                                total = int(float(parts[2]))
+                                speed = parts[3] if len(parts) > 3 else "0 B/s"
                                 progress_callback(downloaded, total, speed)
                             except (ValueError, IndexError):
-                                pass
+                                # Fallback: parse percent string (e.g. "45.2%")
+                                # Needed for DASH streams where byte totals are N/A
+                                try:
+                                    pct = float(parts[0].rstrip("%"))
+                                    speed = parts[3] if len(parts) > 3 else "0 B/s"
+                                    progress_callback(int(pct * 100), 10000, speed)
+                                except (ValueError, IndexError):
+                                    pass
 
             async def read_stderr():
                 while True:
@@ -201,6 +212,7 @@ class YtdlpService:
             "0",  # Best quality
             "--no-playlist",
             "--no-warnings",
+            *YtdlpService._get_cookie_args(url),
             "-o",
             output_template,
             url,
@@ -241,16 +253,16 @@ class YtdlpService:
         }
 
     @staticmethod
-    def _map_metadata_to_video(ytdlp_info: dict, url: str) -> dict:
+    def _map_metadata_to_media(ytdlp_info: dict, url: str) -> dict:
         """
-        Map yt-dlp info_dict to our Video schema fields.
+        Map yt-dlp info_dict to our Media schema fields.
 
         Args:
             ytdlp_info: yt-dlp --dump-json output
             url: Original input URL
 
         Returns:
-            dict: Data compatible with VideoCreate schema
+            dict: Data compatible with MediaCreate schema
         """
         platform, handler_type = URLRouter.detect_platform(url)
 
@@ -311,7 +323,6 @@ class YtdlpService:
         # Engagement metrics
         like_count = ytdlp_info.get("like_count") or 0
         comment_count = ytdlp_info.get("comment_count") or 0
-        view_count = ytdlp_info.get("view_count") or 0
 
         # Hashtags
         tags = ytdlp_info.get("tags") or []
@@ -319,9 +330,7 @@ class YtdlpService:
 
         return {
             "platform_id": platform_id,
-            "external_id": video_id,
             "source_platform": platform,
-            "source_url": url,
             "original_url": original_url,
             "title": title,
             "description": description,
@@ -364,6 +373,26 @@ class YtdlpService:
         except Exception as e:
             logger.warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
         return None
+
+    @staticmethod
+    def _get_cookie_args(url: str) -> list[str]:
+        """Return ['--cookies', '/path/to/platform.txt'] if a cookie file exists for this URL's platform."""
+        from app.core.config import settings
+
+        cookies_dir = settings.COOKIES_DIR
+        if not cookies_dir:
+            return []
+
+        platform, _ = URLRouter.detect_platform(url)
+        if not platform or platform == "unknown":
+            return []
+
+        cookie_file = os.path.join(cookies_dir, f"{platform}.txt")
+        if os.path.isfile(cookie_file):
+            logger.info(f"[yt-dlp] Using cookies for {platform}: {cookie_file}")
+            return ["--cookies", cookie_file]
+
+        return []
 
     @staticmethod
     def _find_downloaded_file(directory: str, prefix: str) -> Optional[str]:

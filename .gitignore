@@ -226,6 +226,7 @@ frontend/public/*
 !frontend/public/404.html
 !frontend/public/500.html
 !frontend/public/offline.html
+!frontend/public/icons/
 
 # Storybook build outputs
 .out
@@ -256,7 +257,12 @@ cache/
 
 # Git worktrees
 .worktrees/
+.worktree.env
+.worktree-registry.json
 backend/.celery/
+
+# Cookie files (contain sensitive session data)
+backend/config/cookies/*.txt
 
 # MCP
 .playwright-mcp/

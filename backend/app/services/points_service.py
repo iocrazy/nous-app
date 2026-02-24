@@ -83,9 +83,7 @@ class PointsService:
         # 2. Check team balance
         team_quota = await self.repo.get_team_quota(team_id)
         if team_quota is None:
-            logger.warning(
-                f"No team quota found for team {team_id}; denying action"
-            )
+            logger.warning(f"No team quota found for team {team_id}; denying action")
             return {
                 "success": False,
                 "points_cost": points_cost,
@@ -348,8 +346,7 @@ class PointsService:
         team_quota = await self.repo.get_team_quota(team_id)
         if team_quota is None:
             logger.warning(
-                f"add_points: no team quota for team {team_id}; "
-                f"creating one first"
+                f"add_points: no team quota for team {team_id}; " f"creating one first"
             )
             team_quota = await self.repo.create_team_quota(team_id)
 
@@ -453,9 +450,7 @@ class PointsService:
         storage_used = team_quota.get("storage_used_bytes", 0)
 
         if storage_limit > 0:
-            storage_used_percent = round(
-                (storage_used / storage_limit) * 100, 2
-            )
+            storage_used_percent = round((storage_used / storage_limit) * 100, 2)
         else:
             storage_used_percent = 0.0
 
@@ -475,6 +470,7 @@ class PointsService:
         self,
         team_id: str,
         grant_free_points: bool = True,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Ensure a team has a quota record. If no record exists, create one
@@ -512,20 +508,17 @@ class PointsService:
             await self.repo.create_transaction(
                 {
                     "team_id": team_id,
-                    "user_id": None,
+                    "user_id": user_id,
                     "amount": initial_balance,
                     "balance_after": initial_balance,
                     "type": "gift",
                     "reference_type": "welcome_bonus",
                     "reference_id": None,
-                    "description": (
-                        f"Welcome bonus: {initial_balance} free points"
-                    ),
+                    "description": (f"Welcome bonus: {initial_balance} free points"),
                 }
             )
             logger.info(
-                f"Granted {initial_balance} welcome bonus points "
-                f"to team {team_id}"
+                f"Granted {initial_balance} welcome bonus points " f"to team {team_id}"
             )
 
         return quota

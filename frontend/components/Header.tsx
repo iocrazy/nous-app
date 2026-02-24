@@ -3,6 +3,7 @@ import { Bell, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { PointsBadge } from './PointsBadge';
+import { QuotaBar } from './QuotaBar';
 
 interface HeaderProps {
   userProfile: {
@@ -32,6 +33,10 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Points Badge */}
       <PointsBadge onClick={onPointsClick} />
+
+      {/* Storage Usage Bar */}
+      <QuotaBar />
+
 
       {/* Notification Bell */}
       <button

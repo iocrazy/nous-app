@@ -164,15 +164,15 @@ class ClassificationService:
         )
 
     @staticmethod
-    async def auto_tag_video(
-        video_id: int,
+    async def auto_tag_media(
+        media_id: int,
         title: str,
         description: Optional[str] = None,
         original_tags: Optional[List[str]] = None,
         min_confidence: float = 0.3,
     ) -> List[dict]:
         """
-        Automatically tag a video based on its content.
+        Automatically tag a media item based on its content.
         Returns list of tags added.
         """
         result = ClassificationService.classify_by_keywords(
@@ -186,15 +186,15 @@ class ClassificationService:
         primary_tag = await repo.get_tag_by_name(result.primary_tag)
 
         if primary_tag and result.confidence >= min_confidence:
-            await repo.add_tag_to_video(
-                video_id=video_id,
+            await repo.add_tag_to_media(
+                media_id=media_id,
                 tag_id=primary_tag["id"],
                 confidence=result.confidence,
                 source=result.source,
             )
             added_tags.append({"tag": primary_tag, "confidence": result.confidence})
             logger.info(
-                f"Auto-tagged video {video_id} as '{result.primary_tag}' (confidence: {result.confidence})"
+                f"Auto-tagged media {media_id} as '{result.primary_tag}' (confidence: {result.confidence})"
             )
 
         # Add secondary tag if confidence is reasonable
@@ -204,8 +204,8 @@ class ClassificationService:
                 secondary_confidence = round(
                     result.confidence * 0.7, 2
                 )  # Lower confidence for secondary
-                await repo.add_tag_to_video(
-                    video_id=video_id,
+                await repo.add_tag_to_media(
+                    media_id=media_id,
                     tag_id=secondary_tag["id"],
                     confidence=secondary_confidence,
                     source=result.source,
@@ -214,7 +214,7 @@ class ClassificationService:
                     {"tag": secondary_tag, "confidence": secondary_confidence}
                 )
                 logger.info(
-                    f"Auto-tagged video {video_id} with secondary tag '{result.secondary_tag}'"
+                    f"Auto-tagged media {media_id} with secondary tag '{result.secondary_tag}'"
                 )
 
         return added_tags

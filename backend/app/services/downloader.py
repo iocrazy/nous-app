@@ -21,8 +21,8 @@ from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import log_user_action
-from app.repositories.video_repository import VideoRepository
-from app.schemas.video import (
+from app.repositories.media_repository import MediaRepository
+from app.schemas.media import (
     DownloadCoverResult,
     DownloadImagesResult,
     DownloadMusicResult,
@@ -296,6 +296,8 @@ class DownloaderService:
                     )
 
                     if response.status_code == 200:
+                        content_len = len(response.content)
+                        logger.info(f"[Download/File] HTTP 200, content_length={content_len}, saving to {os.path.basename(file_path)}")
                         async with aiofiles.open(file_path, mode="wb") as f:
                             await f.write(response.content)
 
@@ -332,12 +334,13 @@ class DownloaderService:
                         return True
                     else:
                         logger.warning(
-                            f"下载失败 {url}, 状态码: {response.status_code}"
+                            f"[Download/File] HTTP {response.status_code} for {url[:100]}..., "
+                            f"headers={dict(response.headers)}"
                         )
                         return False
 
         except Exception as e:
-            logger.error(f"下载出错 {url}: {str(e)}")
+            logger.error(f"[Download/File] Exception downloading {url[:100]}...: {type(e).__name__}: {str(e)}")
             if progress_tracker:
                 progress_tracker.failed(str(e))
             return False
@@ -364,28 +367,35 @@ class DownloaderService:
         try:
 
             # Establish database connection
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                result.video_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
             logger.info(f"准备下载视频: {platform_id}")
 
-            # create file path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
-            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
+            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            source_platform = video_data.get("source_platform", "douyin")
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                source_platform, platform_id
+            )
+            logger.debug(f"下载路径: {full_path}, 相对前缀: {relative_prefix}")
 
-            # generate file name
+            video_full_path = os.path.join(full_path, "video.mp4")
+            video_relative_path = f"{relative_prefix}/video.mp4"
             video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-            video_full_path = os.path.join(full_path, file_name + ".mp4")
-            video_relative_path = f"{relative_month}/{file_name}.mp4"  # Relative path
-            logger.debug(f"视频文件名: {file_name}")
+            logger.debug(f"视频文件: {video_relative_path}")
 
             # Download video
             video_urls = video_data.get("video_download_urls")
@@ -398,10 +408,9 @@ class DownloaderService:
                 await repo.update(
                     platform_id,
                     {
-                        "download_status": DownloadStatus.FAILED,
+                        "video_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
                 return result
 
@@ -427,7 +436,7 @@ class DownloaderService:
                         )
 
                         # Store relative path and file size to database
-                        await repo.mark_video_as_downloaded(
+                        await repo.mark_media_as_downloaded(
                             platform_id=platform_id,
                             download_path=video_relative_path,  # Use relative path
                             duration=download_duration,
@@ -459,7 +468,10 @@ class DownloaderService:
                             message=f"Video downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
-                            details={"media_type": "video", "platform": video_data.get("source_platform", "douyin")},
+                            details={
+                                "media_type": "video",
+                                "platform": video_data.get("source_platform", "douyin"),
+                            },
                         )
                     break
 
@@ -475,7 +487,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
 
                 # Log failure
@@ -486,7 +497,10 @@ class DownloaderService:
                         message=f"Video download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": result.error, "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "error": result.error,
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
             return result
@@ -516,35 +530,32 @@ class DownloaderService:
 
         try:
             # Establish database connection
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
                 result.video_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                result.video_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
             logger.info(f"准备下载 {platform_id} 的图片集")
 
-            # create file path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
-            logger.debug(f"下载基础路径: {full_path}, 相对路径: {relative_month}")
-
-            # generate file name
+            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            source_platform = video_data.get("source_platform", "douyin")
+            sub_download_full_path, sub_download_relative_path = (
+                Utils.create_web_resource_path(source_platform, platform_id)
+            )
             video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-
-            # Full path and relative path
-            sub_download_full_path = os.path.join(full_path, file_name)
-            sub_download_relative_path = (
-                f"{relative_month}/{file_name}"  # Relative path
-            )
-            os.makedirs(sub_download_full_path, exist_ok=True)
-            logger.success(
-                f"Successfully created download file path: {sub_download_full_path}"
-            )
+            file_name = platform_id  # Use platform_id as base name for image files
+            logger.debug(f"图片下载路径: {sub_download_full_path}")
 
             video_urls = video_data.get("video_download_urls")
             image_urls = video_data.get("image_download_urls")
@@ -631,7 +642,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.COMPLETED,
                         "download_path": sub_download_relative_path,  # Use relative path
                     },
-                    user_id=user_id,
                 )
                 result.video_download_status = DownloadStatus.COMPLETED
 
@@ -643,7 +653,11 @@ class DownloaderService:
                         message=f"Image set downloaded: {video_title[:30]}... ({total_downloaded} files)",
                         status="success",
                         aweme_id=platform_id,
-                        details={"media_type": "images", "file_count": total_downloaded, "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "media_type": "images",
+                            "file_count": total_downloaded,
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
             else:
@@ -662,7 +676,6 @@ class DownloaderService:
                         "video_download_status": DownloadStatus.FAILED,
                         "error_message": error_msg,
                     },
-                    user_id=user_id,
                 )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = error_msg
@@ -675,7 +688,10 @@ class DownloaderService:
                         message=f"Image set download failed: {video_title[:30]}...",
                         status="error",
                         aweme_id=platform_id,
-                        details={"error": error_msg[:200], "platform": video_data.get("source_platform", "douyin")},
+                        details={
+                            "error": error_msg[:200],
+                            "platform": video_data.get("source_platform", "douyin"),
+                        },
                     )
 
         except Exception as e:
@@ -704,7 +720,7 @@ class DownloaderService:
         headers = Utils.get_headers()
 
         try:
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video ID
             logger.info(f"准备下载媒体 {platform_id} 的音乐")
@@ -720,36 +736,50 @@ class DownloaderService:
             except ValueError as e:
                 logger.error(f"Failed to retrieve music data: {e}")
                 result.error = str(e)
+                result.music_download_status = DownloadStatus.FAILED
                 return result
 
-            # Get music URL list from dict
-            music_urls = music_data.get("music_download_urls", [])
+            # Get music URL list from dict (guard against None from DB)
+            music_urls = music_data.get("music_download_urls") or []
+            logger.info(
+                f"[Music/Diag] {platform_id}: found {len(music_urls)} music URLs, "
+                f"music_name={music_data.get('music_name', 'N/A')}"
+            )
+            if music_urls:
+                for i, u in enumerate(music_urls):
+                    logger.debug(f"[Music/Diag] {platform_id}: URL[{i}]={u[:120]}...")
 
-            # Create download path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
+            if not music_urls:
+                logger.warning(f"[Music/Diag] {platform_id}: NO music URLs in DB — music download will fail")
 
-            # Get music name from dict
-            music_name = music_data.get("music_name")
-            if not music_name:
-                music_name = f"{platform_id}_music"
+            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            # Note: music_data doesn't have source_platform, default to douyin
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                "douyin", platform_id
+            )
 
-            # Generate music file path (full path and relative path)
-            music_full_path = os.path.join(full_path, f"{music_name}.mp3")
-            music_relative_path = f"{relative_month}/{music_name}.mp3"
+            # Generate music file path
+            music_full_path = os.path.join(full_path, "music.mp3")
+            music_relative_path = f"{relative_prefix}/music.mp3"
 
             # Try to download music
-            for url in music_urls:
+            for idx, url in enumerate(music_urls):
+                logger.info(f"[Music/Diag] {platform_id}: trying URL[{idx}] → {url[:80]}...")
                 if await DownloaderService.download_file(url, music_full_path, headers):
                     try:
-                        await repo.mark_music_as_downloaded(platform_id)
+                        await repo.update(
+                            platform_id,
+                            {
+                                "music_download_status": DownloadStatus.COMPLETED.value,
+                                "music_download_path": music_relative_path,
+                            },
+                        )
                     except Exception as e:
                         logger.error(
-                            f"Marked music {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
+                            f"Music {platform_id} downloaded but failed to update DB: {e}."
                         )
-                        result.error += (
-                            f"Marked music {platform_id} as downloaded successfully, "
-                            f"but failed to update the database: {e}."
+                        result.error = (
+                            f"Music {platform_id} downloaded but failed to update DB: {e}."
                         )
 
                     result.music_path = music_relative_path  # Return relative path
@@ -765,7 +795,7 @@ class DownloaderService:
                     f"All download URLs for the music of video {platform_id} failed."
                 )
                 result.music_download_status = DownloadStatus.FAILED
-                result.error += (
+                result.error = (
                     f"All download URLs for the music of video {platform_id} failed."
                 )
 
@@ -776,7 +806,6 @@ class DownloaderService:
                         "music_download_status": DownloadStatus.FAILED,
                         "error_message": result.error,
                     },
-                    user_id=user_id,
                 )
 
             return result
@@ -784,6 +813,7 @@ class DownloaderService:
         except Exception as e:
             logger.error(f"Music download processing error: {str(e)}")
             result.error = str(e)
+            result.music_download_status = DownloadStatus.FAILED
             return result
 
     @staticmethod
@@ -837,16 +867,23 @@ class DownloaderService:
         headers = Utils.get_headers()
 
         try:
-            repo = VideoRepository()
+            repo = MediaRepository()
 
             # Get video data
-            video_data = await repo.get_by_platform_id(platform_id, user_id=user_id)
-            if not video_data:
-                logger.error(f"找不到视频数据: {platform_id}")
+            try:
+                video_data = await repo.get_by_platform_id(platform_id)
+            except Exception as db_err:
+                logger.error(f"DB query failed for cover {platform_id}: {db_err}", exc_info=True)
                 result.cover_download_status = DownloadStatus.FAILED
-                result.error = f"找不到视频数据: {platform_id}"
+                result.error = f"Database query failed: {db_err}"
+                return result
+            if not video_data:
+                logger.error(f"Record not found for cover: platform_id={platform_id}, user_id={user_id}")
+                result.cover_download_status = DownloadStatus.FAILED
+                result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
+            video_title = video_data.get("title", "undefined")
             logger.info(f"准备下载视频 {platform_id} 的封面")
 
             # Set platform-appropriate Referer for CDN compatibility
@@ -869,14 +906,13 @@ class DownloaderService:
                 result.error = "没有封面 URL"
                 return result
 
-            # Create download path (returns full path and relative path)
-            full_path, relative_month = Utils.create_download_folder()
+            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            full_path, relative_prefix = Utils.create_web_resource_path(
+                source_platform, platform_id
+            )
 
-            # Generate file name
-            video_title = video_data.get("title", "undefined")
-            file_name = Utils.concat_filename_safe_title(video_title, platform_id)
-            cover_full_path = os.path.join(full_path, f"{file_name}_cover.jpg")
-            cover_relative_path = f"{relative_month}/{file_name}_cover.jpg"
+            cover_full_path = os.path.join(full_path, "cover.jpg")
+            cover_relative_path = f"{relative_prefix}/cover.jpg"
 
             # Try to download cover (try multiple URLs)
             for url in cover_urls:
@@ -889,7 +925,6 @@ class DownloaderService:
                                 "cover_download_status": DownloadStatus.COMPLETED.value,
                                 "cover_download_path": cover_relative_path,  # Use relative path
                             },
-                            user_id=user_id,
                         )
                     except Exception as e:
                         logger.error(f"更新封面下载状态失败: {e}")
@@ -906,7 +941,10 @@ class DownloaderService:
                             message=f"Cover downloaded: {video_title[:30]}...",
                             status="success",
                             aweme_id=platform_id,
-                            details={"media_type": "cover", "platform": source_platform},
+                            details={
+                                "media_type": "cover",
+                                "platform": source_platform,
+                            },
                         )
                     return result
 
@@ -921,7 +959,6 @@ class DownloaderService:
                     "cover_download_status": DownloadStatus.FAILED.value,
                     "error_message": result.error,
                 },
-                user_id=user_id,
             )
 
             # Log failure
@@ -938,7 +975,17 @@ class DownloaderService:
             return result
 
         except Exception as e:
-            logger.error(f"下载封面出错: {str(e)}")
+            logger.error(f"下载封面出错 {platform_id}: {str(e)}", exc_info=True)
             result.cover_download_status = DownloadStatus.FAILED
             result.error = str(e)
+            # Persist failure status to DB so it doesn't stay NULL
+            try:
+                repo = MediaRepository()
+                await repo.update(
+                    platform_id,
+                    {"cover_download_status": DownloadStatus.FAILED.value,
+                     "error_message": str(e)[:500]},
+                )
+            except Exception:
+                logger.debug(f"Failed to persist cover failure status for {platform_id}")
             return result

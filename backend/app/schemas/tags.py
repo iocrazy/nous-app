@@ -3,15 +3,17 @@
 """
 Pydantic schemas for Tags API.
 
-Defines validation schemas for tag management operations including
-creating, updating, and associating tags with videos.
+NOTE: tags.id is BIGINT (Snowflake), NOT UUID. Migrated in 051.
+All Snowflake IDs are serialized as strings to avoid JS precision loss.
 """
 
 from datetime import datetime
-from typing import List, Literal, Optional
-from uuid import UUID
+from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+# Snowflake BIGINT IDs: Supabase returns int, JS needs string to avoid precision loss
+SnowflakeId = Annotated[str, BeforeValidator(lambda v: str(v) if v is not None else v)]
 
 
 class TagBase(BaseModel):
@@ -44,11 +46,11 @@ class TagUpdate(BaseModel):
 class TagResponse(TagBase):
     """Schema for tag response."""
 
-    id: UUID
+    id: SnowflakeId
     type: Literal["system", "user", "time"]
-    user_id: Optional[UUID] = None
+    user_id: Optional[str] = None
     created_at: datetime
-    video_count: Optional[int] = Field(0, description="Number of videos using this tag")
+    media_count: Optional[int] = Field(0, description="Number of resources using this tag")
 
     model_config = {"from_attributes": True}
 
@@ -60,10 +62,10 @@ class TagListResponse(BaseModel):
     total: int
 
 
-class VideoTagCreate(BaseModel):
-    """Schema for adding tag to video."""
+class MediaTagCreate(BaseModel):
+    """Schema for adding tag to media/resource."""
 
-    tag_id: UUID
+    tag_id: SnowflakeId
     confidence: Optional[float] = Field(
         None, ge=0, le=1, description="Confidence score for auto/AI tags"
     )
@@ -72,28 +74,28 @@ class VideoTagCreate(BaseModel):
     )
 
 
-class VideoTagResponse(BaseModel):
-    """Schema for video tag association."""
+class MediaTagResponse(BaseModel):
+    """Schema for media tag association."""
 
     tag: TagResponse
     confidence: Optional[float] = Field(None, description="Confidence score")
-    source: str = Field(..., description="Source of the tag assignment")
-    created_at: datetime
+    source: str = Field("manual", description="Source of the tag assignment")
+    created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
 
-class VideoTagsResponse(BaseModel):
-    """Schema for video's tags response."""
+class MediaTagsResponse(BaseModel):
+    """Schema for media's tags response."""
 
-    video_id: str = Field(..., description="Video UUID")
-    tags: List[VideoTagResponse]
+    media_id: str = Field(..., description="Media/Resource ID")
+    tags: List[MediaTagResponse]
 
 
 class TagCountItem(BaseModel):
     """Schema for tag count item."""
 
-    id: str
+    id: SnowflakeId
     name: str
     color: Optional[str] = "#6366f1"
     icon: Optional[str] = None

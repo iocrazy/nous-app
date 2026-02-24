@@ -4,15 +4,15 @@ import Hls from 'hls.js';
 import { Video, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
-  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, AlertTriangle, FolderPlus, Plus,
-  Sparkles, Eye
+  Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, FolderPlus, Plus,
+  Sparkles, Eye, ExternalLink, MoreHorizontal, Star,
 } from 'lucide-react';
-import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
-import { getDownloadUrl } from '../services/dataService';
-import { getSupabaseClient } from '../supabaseClient';
+import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl } from '../utils/awemeType';
+import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
+import { downloadFile, downloadWithAuth } from '../utils/download';
+import { getAuthHeaders, parseShareLink } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
-import { TagSelector } from './TagSelector';
 import { useToast } from './Toast';
 import {
   triggerTranscription, getTranscript,
@@ -34,6 +34,14 @@ interface MediaCardProps {
   downloadPercent?: number;
   downloadSpeed?: string;
   progressStyle?: ProgressStyleType;
+  /** Hide the left-side media preview (used when an external player is already shown) */
+  hidePreview?: boolean;
+  // Resource-level rating & notes (from resources table)
+  resourceRating?: number;
+  resourceNotes?: string;
+  onRatingChange?: (rating: number) => void;
+  onNotesChange?: (notes: string) => void;
+  onNotesBlur?: () => void;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -88,16 +96,23 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   downloadStatus,
   downloadPercent = 0,
   downloadSpeed,
-  progressStyle = 'neon'
+  progressStyle = 'neon',
+  hidePreview = false,
+  resourceRating,
+  resourceNotes,
+  onRatingChange,
+  onNotesChange,
+  onNotesBlur,
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [retrySuccess, setRetrySuccess] = useState(false);
-  const [showRetryMenu, setShowRetryMenu] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
 
   // HLS video ref
@@ -106,7 +121,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deleteWithFiles, setDeleteWithFiles] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // AI Feature States - 从数据中加载已有内容
@@ -114,6 +128,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [analysisText, setAnalysisText] = useState<string | null>(data.ai_analyze_text || null);
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  // Track fetch submissions (optimistic UI: hide menu items after submit)
+  const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false, music: false });
 
   const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
@@ -123,6 +140,18 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const videoUrl = getVideoUrl(data);
   // 封面 URL
   const coverUrl = getCoverUrl(data);
+
+  // 判断内容是否已可用（本地已下载 OR CDN URL 已存在 OR 本次已提交 Fetch）
+  // 注意：skipped ≠ 已可用（skipped 表示当初跳过，用户可重新获取）
+  const videoDownloaded = fetchSubmitted.video || !!data.download_path
+    || data.video_download_status?.toLowerCase() === 'completed'
+    || !!(data.video_download_urls?.[0] && data.video_download_urls[0] !== '#' && isPlayableUrl(data.video_download_urls[0]));
+  const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path
+    || data.cover_download_status?.toLowerCase() === 'completed'
+    || !!(data.cover_urls?.[0] && data.cover_urls[0] !== '#');
+  const musicDownloaded = fetchSubmitted.music
+    || data.music_download_status?.toLowerCase() === 'completed'
+    || !!(data.music_download_urls?.[0] && data.music_download_urls[0] !== '#');
 
   // Setup HLS.js for .m3u8 video playback
   useEffect(() => {
@@ -158,7 +187,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     if (!onDelete || !data.platform_id) return;
     setIsDeleting(true);
     try {
-      await onDelete(data.platform_id, deleteWithFiles);
+      await onDelete(data.platform_id, false);
       setShowDeleteDialog(false);
     } catch (error) {
       console.error('Delete failed:', error);
@@ -197,161 +226,138 @@ export const MediaCard: React.FC<MediaCardProps> = ({
      return `${secondsStr}s`;
   };
 
-  const handleDownload = async (url: string, filename: string) => {
+  const dlCallbacks = {
+    onSuccess: (fname: string) => addToast(`Downloaded: ${fname}`, 'success'),
+    onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
+  };
+  const dlSilent = {
+    onSuccess: (fname: string) => addToast(`Downloaded: ${fname}`, 'success'),
+  };
+
+  const doDownload = async (url: string, filename: string, auth = false, silent = false): Promise<boolean> => {
     setIsDownloading(true);
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const blob = await response.blob();
-        const blobUrl = window.URL.createObjectURL(blob);
-
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-        console.warn('Direct download failed, falling back to new tab:', error);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      const cbs = silent ? dlSilent : dlCallbacks;
+      return auth
+        ? await downloadWithAuth(url, filename, cbs)
+        : await downloadFile(url, filename, cbs);
     } finally {
-        setIsDownloading(false);
+      setIsDownloading(false);
     }
   };
 
   const onDownloadVideo = async () => {
+    setShowDownloadMenu(false);
     if (!data.platform_id) return;
-    setIsDownloading(true);
+    // Try backend API first (silent error), fallback to remote URL
+    if (data.video_download_status?.toLowerCase() === 'completed') {
+      const ok = await doDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`, true, true);
+      if (ok) return;
+    }
+    if (videoUrl) {
+      await doDownload(videoUrl, `${data.platform_id}.mp4`);
+    } else {
+      addToast('No video file available', 'error');
+    }
+  };
 
-    try {
-      // 获取认证 token
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        console.error('No auth token available');
-        // 回退到静态文件下载
-        if (videoUrl) {
-          handleDownload(videoUrl, `${data.platform_id}.mp4`);
-        }
-        return;
-      }
-
-      // 使用 API 下载端点（带认证）
-      const downloadUrl = getDownloadUrl(data.platform_id);
-      const response = await fetch(downloadUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.status}`);
-      }
-
-      // 从 Content-Disposition 获取文件名
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${data.platform_id}.mp4`;
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="(.+)"/);
-        if (match) {
-          filename = match[1];
-        }
-      }
-
-      // 创建 blob 并下载
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-
-    } catch (error) {
-      console.error('Download error:', error);
-      // 回退到静态文件播放（新标签页打开）
-      if (videoUrl) {
-        window.open(videoUrl, '_blank');
-      }
-    } finally {
-      setIsDownloading(false);
+  const onDownloadCoverFile = async () => {
+    setShowDownloadMenu(false);
+    if (!data.platform_id) return;
+    if (data.cover_download_status?.toLowerCase() === 'completed') {
+      const ok = await doDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`, true, true);
+      if (ok) return;
+    }
+    if (coverUrl) {
+      await doDownload(coverUrl, `${data.platform_id}_cover.jpg`);
+    } else {
+      addToast('No cover file available', 'error');
     }
   };
 
   const onDownloadImages = () => {
     if (!data.image_download_urls) return;
     data.image_download_urls.forEach((url, idx) => {
-        // Stagger downloads slightly
-        setTimeout(() => {
-            handleDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
-        }, idx * 500);
+      setTimeout(() => {
+        doDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
+      }, idx * 500);
     });
   };
 
   const onDownloadAudio = () => {
     const url = data.music_download_urls?.[0];
     if (!url || url === '#') return;
-    handleDownload(url, `${data.platform_id || 'music'}.mp3`);
+    doDownload(url, `${data.platform_id || 'music'}.mp3`);
   };
 
-  // 重新获取/下载
+  const onDownloadCover = () => {
+    if (!coverUrl) return;
+    doDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
+  };
+
+  // 重新获取（复用 Parser 页面同一 API: POST /api/v1/videos/fetch）
   const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
-    if (!data.platform_id || !data.original_url) return;
+    const url = data.original_url;
+    if (!url) {
+      addToast('No original URL available for refetch', 'error');
+      return;
+    }
+
+    // Pre-check: what's already available vs what needs fetching
+    const alreadyHave: string[] = [];
+    const needFetch = { video_bool: false, music_bool: false, cover_bool: false };
+
+    if (options.video) {
+      if (videoDownloaded) alreadyHave.push('Video');
+      else needFetch.video_bool = true;
+    }
+    if (options.cover) {
+      if (coverDownloaded) alreadyHave.push('Cover');
+      else needFetch.cover_bool = true;
+    }
+    if (options.music) {
+      if (musicDownloaded) alreadyHave.push('Audio');
+      else needFetch.music_bool = true;
+    }
+
+    // If everything requested is already available, inform user and return
+    if (!needFetch.video_bool && !needFetch.music_bool && !needFetch.cover_bool) {
+      addToast(`Already has: ${alreadyHave.join(', ')}`, 'info');
+      setShowMoreMenu(false);
+      return;
+    }
+
     setIsRetrying(true);
     setRetrySuccess(false);
-    setShowRetryMenu(false);
+    setShowMoreMenu(false);
 
     try {
-      // 获取认证 token
-      const { data: sessionData } = await getSupabaseClient()?.auth.getSession() || {};
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        console.error('No auth token available');
-        return;
-      }
-
-      // 调用后端 fetch API 重新获取
-      const apiUrl = import.meta.env?.VITE_API_URL || 'http://localhost:8080';
-      const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url: data.original_url,
-          video_bool: options.video ?? false,
-          music_bool: options.music ?? false,
-          cover_bool: options.cover ?? false
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Refetch failed: ${response.status}`);
-      }
-
+      await parseShareLink(url, needFetch);
       setRetrySuccess(true);
-      // 3秒后重置成功状态
+      // Optimistic UI: mark submitted items so menu hides them immediately
+      setFetchSubmitted(prev => ({
+        ...prev,
+        ...(needFetch.video_bool ? { video: true } : {}),
+        ...(needFetch.cover_bool ? { cover: true } : {}),
+        ...(needFetch.music_bool ? { music: true } : {}),
+      }));
+      const fetching: string[] = [];
+      if (needFetch.video_bool) fetching.push('Video');
+      if (needFetch.cover_bool) fetching.push('Cover');
+      if (needFetch.music_bool) fetching.push('Audio');
+      let msg = `Fetch submitted: ${fetching.join(', ')}`;
+      if (alreadyHave.length > 0) msg += ` (already has: ${alreadyHave.join(', ')})`;
+      addToast(msg, 'success');
       setTimeout(() => setRetrySuccess(false), 3000);
-
     } catch (error) {
       console.error('Refetch error:', error);
+      addToast(error instanceof Error ? error.message : 'Refetch failed', 'error');
     } finally {
       setIsRetrying(false);
     }
   };
+
+
 
   // 保存 AI 内容到数据库
   const saveAIContent = (field: string, content: string) => {
@@ -446,9 +452,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
-      <div className="flex flex-col md:flex-row min-w-0">
+      <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
         {/* Media Preview Section - Left Side */}
-        <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
+        {!hidePreview && <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
           {/* Show download progress when downloading */}
           {downloadStatus && (downloadStatus === 'downloading' || downloadStatus === 'pending') ? (
             <div className="w-full h-full flex items-center justify-center">
@@ -532,7 +538,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 <span className="font-medium text-sm drop-shadow-md">@{data.author || 'Unknown'}</span>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Info Section - Right Side */}
         <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
@@ -549,7 +555,110 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 </span>
                 )}
             </div>
-            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.platform_id}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.platform_id}</span>
+              {/* More actions (three-dots) — hidden when inside PlayerPage */}
+              {!hidePreview && (
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setShowMoreMenu(!showMoreMenu)}
+                  disabled={isRetrying}
+                  className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+                    isRetrying
+                      ? 'text-zinc-500'
+                      : retrySuccess
+                        ? 'text-emerald-400'
+                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                  } disabled:opacity-70`}
+                  title="More Actions"
+                >
+                  {isRetrying ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : retrySuccess ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <MoreHorizontal className="w-4 h-4" />
+                  )}
+                </button>
+
+                {showMoreMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowMoreMenu(false)}
+                    />
+                    <div className="absolute top-full right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                      <div className="py-1">
+                        {/* Refetch section — only show items NOT yet downloaded */}
+                        {!videoDownloaded && (
+                          <button
+                            onClick={() => onRefetch({ video: true })}
+                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                          >
+                            <VideoIcon size={16} className="text-indigo-400" />
+                            Fetch Video
+                          </button>
+                        )}
+                        {!coverDownloaded && (
+                          <button
+                            onClick={() => onRefetch({ cover: true })}
+                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                          >
+                            <ImageIcon size={16} className="text-emerald-400" />
+                            Fetch Cover
+                          </button>
+                        )}
+                        {!musicDownloaded && (
+                          <button
+                            onClick={() => onRefetch({ music: true })}
+                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                          >
+                            <Music size={16} className="text-amber-400" />
+                            Fetch Audio
+                          </button>
+                        )}
+                        {(videoDownloaded && coverDownloaded && musicDownloaded) ? (
+                          <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
+                            <Check size={16} className="text-emerald-400" />
+                            All Fetched
+                          </div>
+                        ) : (
+                          <>
+                            <div className="border-t border-zinc-700 my-1" />
+                            <button
+                              onClick={() => onRefetch({
+                                video: !videoDownloaded,
+                                cover: !coverDownloaded,
+                                music: !musicDownloaded,
+                              })}
+                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <Download size={16} className="text-sky-400" />
+                              Fetch All
+                            </button>
+                          </>
+                        )}
+
+                        {/* Delete section */}
+                        {onDelete && (
+                          <>
+                            <div className="border-t border-zinc-700 my-1" />
+                            <button
+                              onClick={() => { setShowMoreMenu(false); setShowDeleteDialog(true); }}
+                              className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-950/50 hover:text-red-300 flex items-center gap-3 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              )}
+            </div>
           </div>
 
           {/* Title */}
@@ -607,27 +716,55 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           </div>
 
-          {/* Tags - Editable via TagSelector */}
+          {/* Rating & Notes (from resources table) */}
+          {onRatingChange && (
+            <div className="mb-4 flex items-center gap-4">
+              <span className="text-xs text-zinc-500 uppercase tracking-wider">Rating</span>
+              <div className="flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    className="p-0 transition-colors"
+                    onClick={() => onRatingChange(star === resourceRating ? 0 : star)}
+                  >
+                    <Star
+                      size={16}
+                      className={(resourceRating || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {onNotesChange && (
+            <div className="mb-4">
+              <textarea
+                value={resourceNotes || ''}
+                onChange={(e) => onNotesChange(e.target.value)}
+                onBlur={onNotesBlur}
+                placeholder="Add notes..."
+                rows={2}
+                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              />
+            </div>
+          )}
+
+          {/* Tags - Read-only display (tag editing is in ResourcesView) */}
           <div className="mb-4">
-            {data.id ? (
-              <TagSelector videoId={data.id} initialTagNames={data.tags || []} />
-            ) : (
-              // Fallback for videos without database ID (e.g., just parsed)
-              data.tags && data.tags.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {data.tags.map((tag, i) => (
-                    <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
-                      <Tag size={10} className="opacity-70" />
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )
+            {data.tags && data.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {data.tags.map((tag, i) => (
+                  <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
+                    <Tag size={10} className="opacity-70" />
+                    {tag}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
 
-          {/* AI Status Icons */}
-          <div className="mb-4">
+          {/* AI Status */}
+          <div className="mb-4 flex items-center justify-end">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1" title={`Transcript: ${data.transcript_status || 'pending'}`}>
                 <FileText size={14} className={getAIStatusClass(data.transcript_status)} />
@@ -639,9 +776,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 <Eye size={14} className={getAIStatusClass(data.visual_analysis_status)} />
               </div>
             </div>
-            {data.summary_text && (
-              <p className="text-xs text-zinc-400 italic truncate mt-1">{data.summary_text}</p>
-            )}
           </div>
 
           {/* Action Buttons Row */}
@@ -741,28 +875,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             )}
          </div>
 
-          {/* Downloads Footer */}
+          {/* Actions Footer */}
           <div className="space-y-3 pt-4 border-t border-zinc-800/50 mt-auto">
              <div className="flex gap-2">
-                {isVideo && videoUrl && (
-                  <button
-                    onClick={onDownloadVideo}
-                    disabled={isDownloading}
-                    className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5 disabled:opacity-70"
-                  >
-                    {isDownloading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
-                    {isDownloading ? 'Downloading...' : 'Download'}
-                  </button>
-                )}
-                {data.image_download_urls && data.image_download_urls.length > 0 && (
-                   <button
-                     onClick={onDownloadImages}
-                     className="flex-1 flex items-center justify-center gap-2 bg-zinc-100 hover:bg-white text-black py-2.5 rounded-lg font-semibold transition-colors text-sm shadow-lg shadow-white/5"
-                   >
-                   <Download className="w-4 h-4" />
-                   Images
-                 </button>
-                )}
                 {onSave && (
                    <button
                     onClick={() => onSave(data)}
@@ -772,72 +887,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                      <Bookmark className="w-5 h-5" />
                    </button>
                 )}
-                {/* 重新获取按钮 */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowRetryMenu(!showRetryMenu)}
-                    disabled={isRetrying}
-                    className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
-                      retrySuccess
-                        ? 'bg-emerald-600/20 text-emerald-400 border-emerald-600/50'
-                        : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-white'
-                    } disabled:opacity-70`}
-                    title={retrySuccess ? 'Request submitted!' : 'Refetch Media'}
-                  >
-                    {isRetrying ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : retrySuccess ? (
-                      <Check className="w-5 h-5" />
-                    ) : (
-                      <RefreshCw className="w-5 h-5" />
-                    )}
-                  </button>
-
-                  {/* 下拉菜单 */}
-                  {showRetryMenu && (
-                    <>
-                      {/* 点击外部关闭 */}
-                      <div
-                        className="fixed inset-0 z-40"
-                        onClick={() => setShowRetryMenu(false)}
-                      />
-                      <div className="absolute bottom-full right-0 mb-2 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                        <div className="py-1">
-                          <button
-                            onClick={() => onRefetch({ video: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <VideoIcon size={16} className="text-indigo-400" />
-                            Download Video
-                          </button>
-                          <button
-                            onClick={() => onRefetch({ cover: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <ImageIcon size={16} className="text-emerald-400" />
-                            Download Cover
-                          </button>
-                          <button
-                            onClick={() => onRefetch({ music: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <Music size={16} className="text-amber-400" />
-                            Download Audio
-                          </button>
-                          <div className="border-t border-zinc-700 my-1" />
-                          <button
-                            onClick={() => onRefetch({ video: true, cover: true, music: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <Download size={16} className="text-sky-400" />
-                            Download All
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-
                 {/* Add to Collection button */}
                 {onToggleCollection && (
                   <div className="relative">
@@ -874,19 +923,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   </div>
                 )}
 
-                {/* 删除按钮 */}
-                {onDelete && (
-                  <button
-                    onClick={() => setShowDeleteDialog(true)}
-                    className="w-11 h-11 flex items-center justify-center bg-red-950/50 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/50 hover:border-red-800"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                )}
              </div>
 
-             {data.need_download_music && (
+             {!hidePreview && data.music_download_status && data.music_download_status !== 'skipped' && data.music_download_status !== 'SKIPPED' && (
                <button
                  onClick={onDownloadAudio}
                  className="w-full flex items-between justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
@@ -904,7 +943,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         </div>
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Move to Trash Dialog */}
       {showDeleteDialog && (
         <div
           className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
@@ -918,10 +957,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-red-500/10 rounded-lg">
-                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                <div className="p-2 bg-amber-500/10 rounded-lg">
+                  <Trash2 className="w-5 h-5 text-amber-500" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">Confirm Delete</h3>
+                <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(false)}
@@ -934,7 +973,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Content */}
             <div className="px-5 py-4 space-y-4">
               <p className="text-sm text-zinc-400">
-                Are you sure you want to delete this media? This action cannot be undone.
+                This item will be moved to the Recycle Bin. You can restore it later.
               </p>
 
               {/* Media Preview */}
@@ -952,22 +991,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   <p className="text-xs text-zinc-500">@{data.author}</p>
                 </div>
               </div>
-
-              {/* Delete files option */}
-              <label className="flex items-start gap-3 p-3 bg-zinc-800/30 rounded-lg border border-zinc-700/50 cursor-pointer hover:bg-zinc-800/50 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={deleteWithFiles}
-                  onChange={(e) => setDeleteWithFiles(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
-                />
-                <div>
-                  <p className="text-sm text-zinc-300 font-medium">Also delete local files</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    Delete downloaded videos, images, and cover files from server
-                  </p>
-                </div>
-              </label>
             </div>
 
             {/* Footer */}
@@ -981,17 +1004,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
               >
                 {isDeleting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Deleting...
+                    Moving...
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    Confirm Delete
+                    Move to Trash
                   </>
                 )}
               </button>
