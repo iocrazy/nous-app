@@ -363,7 +363,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     try {
       const children = await fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId);
       setChildFolders(children);
-    } catch {
+    } catch (err) {
+      console.error('[ResourcesView] loadChildFolders failed:', err);
       setChildFolders([]);
     }
   }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
@@ -382,11 +383,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setLibraries([]);
     }
   }, [loadFolders, scopeType, scopeId]);
-
-  // Load child folders when folder/library/view changes
-  useEffect(() => {
-    loadChildFolders();
-  }, [loadChildFolders]);
 
   // Load folder previews when child folders change
   useEffect(() => {
@@ -463,30 +459,42 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return () => { cancelled = true; };
   }, [selectedFolderId, folders]);
 
-  // ─── Load resources on folder change ─────────────────
+  // ─── Load resources + child folders together ──────────
+  // Combined into a single effect so skeleton stays until BOTH complete.
+  // Prevents flash of files-without-folders when folders load slower.
 
   useEffect(() => {
-    if (sidebarView !== 'resources') return;
+    if (sidebarView !== 'resources') {
+      setChildFolders([]);
+      return;
+    }
     let cancelled = false;
+    setLoading(true);
 
-    const loadResources = async () => {
-      setLoading(true);
+    const loadAll = async () => {
       try {
-        let items: ResourceItem[];
-        if (selectedSmartFolderId) {
-          items = await fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId);
-        } else {
-          items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+        const [items, folders] = await Promise.all([
+          selectedSmartFolderId
+            ? fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId)
+            : fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId),
+          fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId),
+        ]);
+        if (!cancelled) {
+          setResources(items);
+          setChildFolders(folders);
         }
-        if (!cancelled) setResources(items);
-      } catch {
-        if (!cancelled) setResources([]);
+      } catch (err) {
+        console.error('[ResourcesView] Failed to load resources/folders:', err);
+        if (!cancelled) {
+          setResources([]);
+          setChildFolders([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    loadResources();
+    loadAll();
     return () => { cancelled = true; };
   }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
 
