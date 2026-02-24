@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api import api_router
+from app.api.frontend_config_router import load_config as load_frontend_config
 from app.core.config import settings
 from app.core.utils import Utils
 from app.services.douyin_analysis import DouyinAnalysis
@@ -22,6 +23,23 @@ Utils.setup_logging()
 async def lifespan(app: FastAPI):
 
     # app.state.redis = await init_redis() # 在启动时初始化redis
+
+    # Load persisted transcode settings from frontend_config.yml
+    try:
+        config = load_frontend_config()
+        transcode = config.get("transcode", {})
+        if transcode.get("encoder"):
+            settings.FFMPEG_ENCODER = transcode["encoder"]
+        if transcode.get("preset"):
+            settings.FFMPEG_PRESET = transcode["preset"]
+        if "parallel_tiers" in transcode:
+            settings.TRANSCODE_PARALLEL_TIERS = transcode["parallel_tiers"]
+        logger.info(
+            f"Transcode config loaded: encoder={settings.FFMPEG_ENCODER}, "
+            f"preset={settings.FFMPEG_PRESET}, parallel={settings.TRANSCODE_PARALLEL_TIERS}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load transcode config from frontend_config.yml: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
