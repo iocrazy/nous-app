@@ -41,6 +41,7 @@ class TaskTracker:
         total_bytes: Optional[int] = None,
         subtitle: Optional[str] = None,
         metadata: Optional[dict] = None,
+        dedup_key: Optional[str] = None,
     ) -> str:
         """Create a unified_tasks row. Returns the task UUID."""
         client = await self._get_client()
@@ -65,6 +66,8 @@ class TaskTracker:
             row["subtitle"] = subtitle
         if metadata:
             row["metadata"] = metadata
+        if dedup_key:
+            row["dedup_key"] = dedup_key
 
         result = await client.table("unified_tasks").insert(row).execute()
         task_id = result.data[0]["id"]
@@ -300,13 +303,15 @@ class TaskTracker:
         if not task or task["status"] not in ("failed", "cancelled"):
             return None
 
-        # Reset status
+        # Reset status and bump updated_at so it sorts to top
+        from datetime import datetime, timezone
         await client.table("unified_tasks").update({
             "status": "pending",
             "progress": 0,
             "error_msg": None,
             "started_at": None,
             "completed_at": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", task_id).execute()
 
         return task

@@ -25,25 +25,32 @@ def _maybe_chain_transcode(platform_id: str, user_id: str):
         repo = ResourcesRepository()
         resource = run_async(repo.get_resource_by_platform_id(platform_id))
         if not resource:
+            logger.info(f"[Transcode/Chain] No resource found for platform_id={platform_id}")
             return
 
         mime = resource.get("mime_type", "")
         if not mime.startswith("video/"):
+            logger.debug(f"[Transcode/Chain] Not a video ({mime}), skip: {platform_id}")
             return
 
         resource_id = str(resource["id"])
         versions = run_async(repo.get_versions(resource_id))
         if not versions:
+            logger.info(f"[Transcode/Chain] No versions for resource {resource_id}, skip (download)")
             return
 
         # Transcode the latest version
         latest = versions[0]
         version_id = str(latest["id"])
+        logger.info(
+            f"[Transcode/Chain] Chaining transcode: resource={resource_id}, "
+            f"version={version_id}, mime={mime}, platform_id={platform_id}"
+        )
 
         from app.tasks.transcode_tasks import maybe_trigger_transcode
         maybe_trigger_transcode(resource_id, version_id, mime, user_id=user_id)
     except Exception as e:
-        logger.warning(f"[Celery] Failed to chain transcode for {platform_id}: {e}")
+        logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
 
 
 def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):

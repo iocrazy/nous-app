@@ -68,11 +68,41 @@ async def cancel_task(task_id: str, auth: AuthDep):
 
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(task_id: str, auth: AuthDep):
-    """Reset a failed/cancelled task for retry."""
+    """Reset a failed/cancelled task for retry and re-dispatch the Celery job."""
     tracker = get_task_tracker()
     task = await tracker.retry_task(task_id, auth.user_id)
     if not task:
         raise HTTPException(404, "Task not found or not in retryable state")
+
+    # Re-dispatch the actual Celery task based on type
+    task_type = task.get("task_type")
+    resource_id = task.get("resource_id")
+    user_id = auth.user_id
+
+    try:
+        if task_type == "transcode" and resource_id:
+            version_id = (task.get("metadata") or {}).get("version_id")
+            if not version_id:
+                # Fallback: look up current version from resource
+                from app.repositories.resources_repository import ResourcesRepository
+                repo = ResourcesRepository()
+                versions = await repo.get_versions(resource_id)
+                if versions:
+                    version_id = str(versions[0]["id"])
+            if version_id:
+                from app.tasks.transcode_tasks import transcode_to_hls
+                transcode_to_hls.delay(resource_id, version_id, user_id, _unified_task_id=str(task_id))
+                logger.info(f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}")
+            else:
+                logger.warning(f"[TaskRetry] No version found for resource={resource_id}, skipping dispatch")
+
+        elif task_type == "download" and resource_id:
+            # Re-dispatch download if needed (future)
+            pass
+
+    except Exception as e:
+        logger.error(f"[TaskRetry] Failed to dispatch {task_type} for task {task_id}: {e}")
+
     return {"success": True, "data": task}
 
 
