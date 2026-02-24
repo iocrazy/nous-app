@@ -93,7 +93,6 @@ import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
-import { SidebarFolderTree } from './SidebarFolderTree';
 import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
@@ -2146,20 +2145,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </button>
               </div>
 
-              {/* Folder tree for personal resources */}
-              <SidebarFolderTree
-                folders={folders}
-                currentFolderId={selectedFolderId}
-                onNavigate={(folderId) => {
-                  if (folderId) {
-                    navigate(resPath(`/resources/folder/${folderId}`));
-                  } else {
-                    navigate(resPath('/resources'));
-                  }
-                }}
-                onDragOver={handleSidebarDragOver}
-                onDrop={handleSidebarDrop}
-              />
 
             </>
           )}
