@@ -20,6 +20,12 @@ export interface FrontendConfig {
   supabase_url: string | null;
   supabase_anon_key: string | null;
   default_download_path: string | null;
+  // Transcode settings
+  transcode_enabled: boolean | null;
+  transcode_tiers: string | null;
+  ffmpeg_encoder: string | null;
+  ffmpeg_preset: string | null;
+  transcode_parallel_tiers: boolean | null;
 }
 
 /**
@@ -46,6 +52,11 @@ export const saveFrontendConfig = async (config: {
   supabase_url?: string;
   supabase_anon_key?: string;
   default_download_path?: string;
+  transcode_enabled?: boolean;
+  transcode_tiers?: string;
+  ffmpeg_encoder?: string;
+  ffmpeg_preset?: string;
+  transcode_parallel_tiers?: boolean;
 }): Promise<FrontendConfig | null> => {
   try {
     const response = await fetch(`${getApiUrl()}/api/v1/config`, {

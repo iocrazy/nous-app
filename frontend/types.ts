@@ -148,6 +148,12 @@ export interface UserSettings {
   apiUrl?: string;
   apiKey?: string;
   progressStyle?: 'neon' | 'wave';
+  // Transcode settings
+  transcodeEnabled?: boolean;
+  transcodeTiers?: string;
+  ffmpegEncoder?: string;
+  ffmpegPreset?: string;
+  transcodeParallelTiers?: boolean;
 }
 
 export interface UserProfile {

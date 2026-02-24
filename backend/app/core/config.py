@@ -90,6 +90,30 @@ class Settings(BaseSettings):
     CELERY_WORKER_CONCURRENCY: int = Field(default=4, description="Worker 并发数")
 
     # ============================================
+    # Transcode 配置
+    # ============================================
+    TRANSCODE_ENABLED: bool = Field(
+        default=True,
+        description="Master switch: enable/disable HLS transcoding",
+    )
+    TRANSCODE_TIERS: str = Field(
+        default="480p,720p,1080p",
+        description="Comma-separated list of enabled tiers: 480p,720p,1080p",
+    )
+    FFMPEG_ENCODER: str = Field(
+        default="auto",
+        description="Video encoder: auto (detect GPU), libx264, h264_nvenc, h264_videotoolbox, h264_qsv",
+    )
+    FFMPEG_PRESET: str = Field(
+        default="medium",
+        description="Encoding preset: ultrafast/fast/medium/slow (CPU) or p1-p7 (NVENC)",
+    )
+    TRANSCODE_PARALLEL_TIERS: bool = Field(
+        default=True,
+        description="Encode tiers (480p/720p/1080p) in parallel",
+    )
+
+    # ============================================
     # OpenAI Configuration (for visual analysis)
     # ============================================
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API Key")
