@@ -91,7 +91,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
       </div>
 
       {/* Preview — 4-grid thumbnails or folder icon fallback */}
-      <div className="mx-4 mt-4 h-44 rounded-xl overflow-hidden flex items-center justify-center bg-zinc-800/50">
+      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden bg-zinc-800/50 ${hasPreview ? '' : 'flex items-center justify-center'}`}>
         {hasPreview ? (
           <div className="w-full h-full grid grid-cols-2 grid-rows-2 gap-px">
             {[0, 1, 2, 3].map((idx) => {

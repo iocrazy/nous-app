@@ -22,6 +22,12 @@ interface VideoDetailPanelProps {
   onCreateCollection?: (name: string, teamId: string | null) => Promise<void>;
   /** Hide video preview in MediaCard (when external player is already shown) */
   hidePreview?: boolean;
+  // Resource-level rating & notes
+  resourceRating?: number;
+  resourceNotes?: string;
+  onRatingChange?: (rating: number) => void;
+  onNotesChange?: (notes: string) => void;
+  onNotesBlur?: () => void;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis';
@@ -70,6 +76,11 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   onToggleCollection,
   onCreateCollection,
   hidePreview = false,
+  resourceRating,
+  resourceNotes,
+  onRatingChange,
+  onNotesChange,
+  onNotesBlur,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -245,6 +256,11 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             onToggleCollection={onToggleCollection}
             onCreateCollection={onCreateCollection}
             hidePreview={hidePreview}
+            resourceRating={resourceRating}
+            resourceNotes={resourceNotes}
+            onRatingChange={onRatingChange}
+            onNotesChange={onNotesChange}
+            onNotesBlur={onNotesBlur}
           />
         )}
 

@@ -153,8 +153,9 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     try {
       await deleteTeam(teamId);
       onTeamDeleted();
-    } catch (err) {
-      setError('Failed to delete team');
+    } catch (err: any) {
+      console.error('[TeamSettings] Delete team failed:', err);
+      setError(err?.message || 'Failed to delete team');
     } finally {
       setIsDeleting(false);
     }

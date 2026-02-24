@@ -130,7 +130,10 @@ export const deleteTeam = async (teamId: string): Promise<void> => {
     target_team_id: teamId,
   });
 
-  if (error) throw error;
+  if (error) {
+    console.error('[teamService] deleteTeam RPC failed:', error);
+    throw error;
+  }
 };
 
 export const fetchTeamMembers = async (teamId: string): Promise<TeamMember[]> => {

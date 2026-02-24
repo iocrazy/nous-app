@@ -11,10 +11,11 @@ import {
   CheckCircle2,
   XCircle,
   X,
+  Upload as UploadIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { useUpload } from '../contexts/UploadContext';
+import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
 import {
   useTaskManager,
   formatSpeed,
@@ -144,19 +145,24 @@ function progressBarColor(status: TaskStatus): string {
 const TaskCenterPanel: React.FC = () => {
   const { t } = useTranslation();
   const { tasks, activeTasks, totalActive, cancelTask, clearCompleted, isLoading } = useTaskManager();
+  const upload = useUpload();
   const completedCount = tasks.filter(
     (tk) => tk.status === 'completed' || tk.status === 'failed' || tk.status === 'cancelled',
   ).length;
-  const hasTasks = tasks.length > 0;
+  const uploadingItems = upload.items.filter(i => i.status === 'uploading');
+  // Exclude active upload tasks from totalActive to avoid double-counting with UploadContext
+  const activeUploadTasks = activeTasks.filter(t => t.task_type === 'upload').length;
+  const hasTasks = tasks.length > 0 || uploadingItems.length > 0;
+  const activeCount = (totalActive - activeUploadTasks) + uploadingItems.length;
 
   return (
     <PanelShell className="w-96">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <span className="text-sm font-semibold text-zinc-200">{t('topbar.taskCenter')}</span>
-        {totalActive > 0 && (
+        {activeCount > 0 && (
           <span className="px-2 py-0.5 text-[10px] font-medium bg-indigo-500/20 text-indigo-400 rounded-full">
-            {totalActive} {t('topbar.active')}
+            {activeCount} {t('topbar.active')}
           </span>
         )}
       </div>
@@ -170,7 +176,50 @@ const TaskCenterPanel: React.FC = () => {
         <>
           {/* Task list */}
           <div className="max-h-80 overflow-y-auto">
-            {tasks.slice(0, 50).map((task) => (
+            {/* Active uploads from UploadContext (client-side progress) */}
+            {uploadingItems.map((item) => (
+              <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
+                    <UploadIcon size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        <span className="text-[10px] text-zinc-500">{item.percent}%</span>
+                        {item.speed > 0 && (
+                          <span className="text-[10px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-zinc-600">Upload</span>
+                      {item.fileSize > 0 && (
+                        <span className="text-[10px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-300 bg-indigo-500"
+                    style={{ width: `${Math.max(item.percent, 2)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+            {/* Unified tasks from backend — hide active uploads (UploadContext already shows them) */}
+            {[...tasks].filter((t) =>
+              !(t.task_type === 'upload' && (t.status === 'pending' || t.status === 'processing'))
+            ).sort((a, b) => {
+              const aActive = a.status === 'pending' || a.status === 'processing' ? 1 : 0;
+              const bActive = b.status === 'pending' || b.status === 'processing' ? 1 : 0;
+              if (aActive !== bActive) return bActive - aActive;
+              const aTime = a.created_at || '';
+              const bTime = b.created_at || '';
+              return bTime.localeCompare(aTime);
+            }).slice(0, 50).map((task) => (
               <div key={task.id} className="px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0">
                 <div className="flex items-center gap-2.5">
                   {/* Task type icon */}
@@ -396,6 +445,8 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();
   const { totalActive } = useTaskManager();
+  const uploadingCount = upload.items.filter(i => i.status === 'uploading').length;
+  const badgeCount = totalActive + uploadingCount;
 
   // Auto-open task center panel when upload starts (instant, browser-side)
   useEffect(() => {
@@ -439,7 +490,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           title={t('topbar.taskCenter')}
           onClick={() => togglePanel('taskCenter')}
           active={openPanel === 'taskCenter'}
-          badge={totalActive > 0 ? totalActive : undefined}
+          badge={badgeCount > 0 ? badgeCount : undefined}
         >
           <ListTodo size={18} />
         </IconButton>

@@ -5,7 +5,7 @@ import { Video, DownloadStatus, Collection } from '../types';
 import {
   Heart, MessageCircle, Share2, Bookmark, Download, Music, Image as ImageIcon, Video as VideoIcon, User, Tag, ChevronLeft, ChevronRight,
   Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, FolderPlus, Plus,
-  Sparkles, Eye, ExternalLink, MoreHorizontal,
+  Sparkles, Eye, ExternalLink, MoreHorizontal, Star,
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl } from '../utils/awemeType';
 import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
@@ -36,6 +36,12 @@ interface MediaCardProps {
   progressStyle?: ProgressStyleType;
   /** Hide the left-side media preview (used when an external player is already shown) */
   hidePreview?: boolean;
+  // Resource-level rating & notes (from resources table)
+  resourceRating?: number;
+  resourceNotes?: string;
+  onRatingChange?: (rating: number) => void;
+  onNotesChange?: (notes: string) => void;
+  onNotesBlur?: () => void;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -92,6 +98,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   downloadSpeed,
   progressStyle = 'neon',
   hidePreview = false,
+  resourceRating,
+  resourceNotes,
+  onRatingChange,
+  onNotesChange,
+  onNotesBlur,
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -704,6 +715,39 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
             </div>
           </div>
+
+          {/* Rating & Notes (from resources table) */}
+          {onRatingChange && (
+            <div className="mb-4 flex items-center gap-4">
+              <span className="text-xs text-zinc-500 uppercase tracking-wider">Rating</span>
+              <div className="flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    className="p-0 transition-colors"
+                    onClick={() => onRatingChange(star === resourceRating ? 0 : star)}
+                  >
+                    <Star
+                      size={16}
+                      className={(resourceRating || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {onNotesChange && (
+            <div className="mb-4">
+              <textarea
+                value={resourceNotes || ''}
+                onChange={(e) => onNotesChange(e.target.value)}
+                onBlur={onNotesBlur}
+                placeholder="Add notes..."
+                rows={2}
+                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              />
+            </div>
+          )}
 
           {/* Tags - Read-only display (tag editing is in ResourcesView) */}
           <div className="mb-4">
