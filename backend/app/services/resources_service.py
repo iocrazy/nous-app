@@ -40,6 +40,7 @@ class ResourcesService:
         scope_type: str,
         scope_id: str,
         folder_id: Optional[str] = None,
+        library_id: Optional[str] = None,
     ) -> dict:
         """
         Upload a file to the resource library.
@@ -113,6 +114,7 @@ class ResourcesService:
             "scope_type": scope_type,
             "scope_id": scope_id,
             "folder_id": folder_id,
+            "library_id": library_id,
             "added_by": user_id,
         }
         await self.repo.create_resource_item(item_data)
@@ -121,7 +123,7 @@ class ResourcesService:
         if file_type == "video":
             versions = await self.repo.get_versions(resource_id)
             if versions:
-                self._trigger_transcode(resource_id, str(versions[0]["id"]), mime, user_id=user_id)
+                await self._trigger_transcode_async(resource_id, str(versions[0]["id"]), mime, user_id=user_id)
 
         return resource
 
@@ -209,7 +211,7 @@ class ResourcesService:
 
         # Trigger HLS transcode for video files
         if file_type == "video":
-            self._trigger_transcode(resource_id, str(version["id"]), mime, user_id=user_id)
+            await self._trigger_transcode_async(resource_id, str(version["id"]), mime, user_id=user_id)
 
         return version
 
@@ -332,6 +334,20 @@ class ResourcesService:
                 )
             return existing
 
+        # Compute file hash for cross-path duplicate detection (upload ↔ parser)
+        file_hash = None
+        if file_path:
+            abs_path = Path(settings.DOWNLOAD_PATH) / file_path
+            if abs_path.exists():
+                try:
+                    h = hashlib.sha256()
+                    with open(abs_path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    file_hash = h.hexdigest()
+                except Exception as e:
+                    logger.warning(f"Failed to compute file hash for {abs_path}: {e}")
+
         # Create new resource
         resource_data = {
             "creator_id": user_id,
@@ -347,6 +363,8 @@ class ResourcesService:
             "thumbnail_path": cover_image_path,
             "cover_image_path": cover_image_path,
         }
+        if file_hash:
+            resource_data["file_hash"] = file_hash
         resource = await self.repo.create_resource(resource_data)
 
         # Create resource_item for user's personal scope
@@ -423,8 +441,7 @@ class ResourcesService:
         # 1. Delete resource DB record first
         result = await self.repo.delete_resource(resource_id)
 
-        # 2. Check if other resources still reference the same parsed_media
-        #    Only delete physical files + parsed_media when this was the last reference
+        # 2. Physical file + media cleanup
         if media_id:
             remaining = await self.repo.count_resources_by_media_id(media_id)
             if remaining == 0:
@@ -435,8 +452,59 @@ class ResourcesService:
                     f"Skipping file/media cleanup for media {media_id}: "
                     f"{remaining} resource(s) still reference it"
                 )
+        else:
+            # No media_id (direct upload) — always delete physical files
+            self._delete_physical_files(resource)
 
         return result
+
+    async def permanent_delete_folder(
+        self, folder_id: str, user_id: str
+    ) -> dict:
+        """Permanently delete a folder, all sub-folders, and their resources."""
+        # 1. Collect all descendant folder IDs
+        all_folder_ids = [folder_id]
+        queue = [folder_id]
+        while queue:
+            parent_id = queue.pop(0)
+            client = await self.repo._get_client()
+            result = await (
+                client.table("folders")
+                .select("id")
+                .eq("parent_id", parent_id)
+                .execute()
+            )
+            for row in result.data or []:
+                cid = str(row["id"])
+                all_folder_ids.append(cid)
+                queue.append(cid)
+
+        # 2. Permanently delete resources in each folder
+        deleted_resources = 0
+        for fid in all_folder_ids:
+            client = await self.repo._get_client()
+            items_result = await (
+                client.table("resource_items")
+                .select("resource_id")
+                .eq("folder_id", fid)
+                .execute()
+            )
+            for item in items_result.data or []:
+                rid = str(item["resource_id"])
+                try:
+                    await self.permanent_delete(rid, user_id)
+                    deleted_resources += 1
+                except (ValueError, PermissionError):
+                    pass  # already deleted or not owned
+
+        # 3. Delete folders (children first)
+        for fid in reversed(all_folder_ids):
+            await self.repo.delete_folder(fid)
+
+        return {
+            "deleted_folders": len(all_folder_ids),
+            "deleted_resources": deleted_resources,
+        }
 
     async def cleanup_expired_trash(self, older_than_days: int = 30) -> int:
         """
@@ -459,6 +527,8 @@ class ResourcesService:
                     if remaining == 0:
                         self._delete_physical_files(resource)
                         await self._delete_media_record(media_id)
+                else:
+                    self._delete_physical_files(resource)
 
                 cleaned += 1
             except Exception as e:
@@ -471,32 +541,43 @@ class ResourcesService:
         return cleaned
 
     def _delete_physical_files(self, resource: dict) -> None:
-        """Delete physical files for a resource from disk."""
+        """Delete physical files for a resource from disk.
+
+        Storage layout examples:
+          uploads:  teams/{scope}/uploads/{resource_id}/v1/{file}
+          downloads: global/resources/web/{platform}/{media_id}/{file}
+
+        Strategy: find the resource-specific directory (identified by a
+        numeric/snowflake-ID segment in the path) and remove it entirely,
+        then prune empty ancestor directories up to DOWNLOAD_PATH.
+        """
         import shutil
 
-        base = Path(settings.DOWNLOAD_PATH)
+        base = Path(settings.DOWNLOAD_PATH).resolve()
         file_path = resource.get("file_path")
 
         if file_path:
             full_path = base / file_path
-            # If file is in a dedicated directory (global/resources/web/{platform}/{id}/),
-            # remove the entire directory
-            parent = full_path.parent
-            if parent != base and parent.exists() and parent.name != base.name:
-                try:
-                    shutil.rmtree(parent)
-                    logger.info(f"Deleted directory: {parent}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to delete directory {parent}: {e}")
+            # Walk up from the file to find the resource-specific directory.
+            # Pattern: .../{resource_id}/v1/{file}  →  want to delete {resource_id}/
+            # Or:      .../{media_id}/{file}        →  want to delete {media_id}/
+            target_dir = self._find_resource_dir(full_path, base)
 
-            # Otherwise delete individual files
-            if full_path.exists():
+            if target_dir and target_dir.exists():
+                try:
+                    shutil.rmtree(target_dir)
+                    logger.info(f"Deleted resource directory: {target_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete directory {target_dir}: {e}")
+            elif full_path.exists():
                 try:
                     full_path.unlink()
                     logger.info(f"Deleted file: {full_path}")
                 except Exception as e:
                     logger.warning(f"Failed to delete file {full_path}: {e}")
+
+            # Prune empty ancestor directories up to base
+            self._prune_empty_parents(target_dir or full_path, base)
 
         cover_path = resource.get("cover_image_path")
         if cover_path:
@@ -507,6 +588,37 @@ class ResourcesService:
                     logger.info(f"Deleted cover: {cover_full}")
                 except Exception as e:
                     logger.warning(f"Failed to delete cover {cover_full}: {e}")
+
+    @staticmethod
+    def _find_resource_dir(file_path: Path, base: Path) -> Optional[Path]:
+        """Walk up from file_path to find the resource/media ID directory.
+
+        Looks for a directory whose name is a numeric ID (Snowflake) and
+        whose parent is still under base.  Returns None if not found.
+        """
+        current = file_path.parent
+        base_resolved = base.resolve()
+        while current.resolve() != base_resolved and current != current.parent:
+            if current.name.isdigit() and len(current.name) >= 6:
+                return current
+            current = current.parent
+        return None
+
+    @staticmethod
+    def _prune_empty_parents(start: Path, base: Path) -> None:
+        """Remove empty ancestor directories between start and base."""
+        base_resolved = base.resolve()
+        current = start.parent if start.is_file() or not start.exists() else start.parent
+        while current.resolve() != base_resolved and current != current.parent:
+            try:
+                if current.exists() and not any(current.iterdir()):
+                    current.rmdir()
+                    logger.info(f"Pruned empty directory: {current}")
+                else:
+                    break
+            except Exception:
+                break
+            current = current.parent
 
     async def _delete_media_record(self, media_id: str) -> None:
         """Delete the parsed_media table record (orphaned after resource deletion)."""
@@ -559,12 +671,99 @@ class ResourcesService:
         return "document"
 
     def _trigger_transcode(self, resource_id: str, version_id: str, mime_type: str, user_id: str = None):
-        """Queue HLS transcoding for a video version."""
+        """Queue HLS transcoding for a video version (sync — for Celery context)."""
         try:
             from app.tasks.transcode_tasks import maybe_trigger_transcode
             maybe_trigger_transcode(resource_id, version_id, mime_type, user_id=user_id)
         except Exception as e:
             logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
+
+    async def _trigger_transcode_async(
+        self, resource_id: str, version_id: str, mime_type: str, user_id: str = None
+    ):
+        """Queue HLS transcoding for a video version (async — for FastAPI context).
+
+        Performs the same gating logic as ``maybe_trigger_transcode`` but uses
+        native async calls so it works inside a running event loop.
+        """
+        if not mime_type or not mime_type.startswith("video/"):
+            return
+
+        MIN_SIZE_MB = 100
+        MIN_DURATION_SEC = 600
+
+        try:
+            version = await self.repo.get_version_by_id(version_id)
+            if not version or not version.get("file_path"):
+                logger.info(f"[Transcode] Skip: no file_path for version {version_id}")
+                return
+
+            file_path = Path(settings.DOWNLOAD_PATH) / version["file_path"]
+            if not file_path.exists():
+                logger.info(f"[Transcode] Skip: file not found {file_path}")
+                return
+
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+
+            # Async duration probe
+            duration_sec = None
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(file_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode == 0 and stdout.strip():
+                    duration_sec = float(stdout.strip())
+            except Exception:
+                pass
+
+            if file_size_mb < MIN_SIZE_MB and (duration_sec or 0) < MIN_DURATION_SEC:
+                logger.info(
+                    f"[Transcode] Skip: too small ({file_size_mb:.0f}MB, "
+                    f"{duration_sec or '?'}s) for version {version_id}"
+                )
+                return
+
+            logger.info(
+                f"[Transcode] Gating passed: {file_size_mb:.0f}MB, "
+                f"{duration_sec or '?'}s — version {version_id}"
+            )
+        except Exception as e:
+            logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
+
+        # Dedup check via orchestrator
+        dedup_key = None
+        try:
+            from app.services.task_orchestrator import get_orchestrator
+            orchestrator = get_orchestrator()
+            result = await orchestrator.acquire_or_subscribe(
+                task_type="transcode",
+                dedup_identifier=version_id,
+                user_id=user_id or "",
+                resource_id=resource_id,
+            )
+            dedup_key = result.get("dedup_key")
+            if result["action"] in ("subscribed", "completed"):
+                logger.info(f"[Transcode] Dedup hit for version {version_id}: {result['action']}")
+                return
+        except Exception as e:
+            logger.warning(f"[Transcode] Dedup check failed, proceeding normally: {e}")
+
+        try:
+            await self.repo.update_version(version_id, {"transcode_status": "pending"})
+
+            from app.tasks.transcode_tasks import transcode_to_hls
+            transcode_to_hls.delay(resource_id, version_id, user_id, _dedup_key=dedup_key)
+            logger.info(
+                f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
+            )
+        except Exception as e:
+            logger.warning(f"[Transcode] Failed to queue transcode for {resource_id}: {e}")
 
     async def _extract_video_metadata(self, filepath: str) -> dict:
         try:

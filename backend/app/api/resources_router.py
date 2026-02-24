@@ -95,6 +95,7 @@ async def link_existing_resource(
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     folder_id: Optional[str] = Query(None),
+    library_id: Optional[str] = Query(None),
 ):
     """Link an existing resource to the current scope/folder (use existing)."""
     try:
@@ -114,6 +115,7 @@ async def link_existing_resource(
             "scope_type": scope_type,
             "scope_id": scope_id,
             "folder_id": folder_id,
+            "library_id": library_id,
             "added_by": auth.user_id,
         }
         await repo.create_resource_item(item_data)
@@ -133,10 +135,10 @@ async def link_existing_resource(
 @router.post("/upload")
 async def upload_resource(
     auth: AuthDep,
-    background_tasks: BackgroundTasks,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     folder_id: Optional[str] = Query(None),
+    library_id: Optional[str] = Query(None),
     file: UploadFile = File(...),
 ):
     """Upload a file to the resource library."""
@@ -170,6 +172,7 @@ async def upload_resource(
             scope_type=scope_type,
             scope_id=scope_id,
             folder_id=folder_id,
+            library_id=library_id,
         )
 
         # Mark upload complete
@@ -181,17 +184,19 @@ async def upload_resource(
             except Exception:
                 pass
 
-        # Trigger thumbnail generation in the background
+        # Generate thumbnail synchronously so it's ready for the frontend
         if result.get("file_path") and result.get("mime_type"):
-            thumbnail_svc = ThumbnailService()
-            background_tasks.add_task(
-                thumbnail_svc.generate_thumbnail,
-                resource_id=str(result["id"]),
-                file_path=result["file_path"],
-                mime_type=result.get("mime_type", ""),
-                scope_type=scope_type,
-                scope_id=scope_id,
-            )
+            try:
+                thumbnail_svc = ThumbnailService()
+                thumb_path = await thumbnail_svc.generate_thumbnail(
+                    resource_id=str(result["id"]),
+                    file_path=result["file_path"],
+                    mime_type=result.get("mime_type", ""),
+                )
+                if thumb_path:
+                    result["thumbnail_path"] = thumb_path
+            except Exception as e:
+                logger.warning(f"Thumbnail generation failed (non-fatal): {e}")
 
         return {"success": True, "data": result}
     except HTTPException:
@@ -390,6 +395,31 @@ async def smart_folder_results(
         raise HTTPException(
             status_code=500, detail="Failed to execute smart folder rules"
         )
+
+
+@router.post("/transcode/batch")
+async def batch_transcode(auth: AuthDep):
+    """Queue HLS transcoding for all video versions with NULL transcode_status."""
+    try:
+        repo = ResourcesRepository()
+        versions = await repo.get_untranscoded_video_versions()
+
+        from app.tasks.transcode_tasks import transcode_to_hls
+        queued = 0
+        for v in versions:
+            try:
+                vid = str(v["id"])
+                await repo.update_version(vid, {"transcode_status": "pending"})
+                transcode_to_hls.delay(str(v["resource_id"]), vid, auth.user_id)
+                queued += 1
+            except Exception as e:
+                logger.warning(f"[Transcode/Batch] Failed to queue version {v['id']}: {e}")
+
+        logger.info(f"[Transcode/Batch] Queued {queued}/{len(versions)} versions")
+        return {"success": True, "queued": queued, "total_found": len(versions)}
+    except Exception as e:
+        logger.error(f"Failed to batch transcode: {e}")
+        raise HTTPException(status_code=500, detail="Failed to batch transcode")
 
 
 @router.get("/{resource_id}")
@@ -894,8 +924,11 @@ async def retry_transcode(
         if not mime.startswith("video/"):
             raise HTTPException(status_code=400, detail="Only video files can be transcoded")
 
-        from app.tasks.transcode_tasks import maybe_trigger_transcode
-        maybe_trigger_transcode(resource_id, version_id, mime, user_id=auth.user_id)
+        # Reset status before retrying
+        await repo.update_version(version_id, {"transcode_status": "pending"})
+
+        from app.tasks.transcode_tasks import transcode_to_hls
+        transcode_to_hls.delay(resource_id, version_id, auth.user_id)
 
         return {"success": True, "message": "Transcoding queued"}
     except HTTPException:
@@ -1153,15 +1186,16 @@ async def restore_folder_cascade(folder_id: str, auth: AuthDep):
 
 @router.delete("/folders/{folder_id}")
 async def delete_folder(folder_id: str, auth: AuthDep):
-    """Permanently delete a folder."""
+    """Permanently delete a folder and all resources inside it (cascade)."""
     try:
         repo = ResourcesRepository()
+        svc = ResourcesService()
         folder = await repo.get_folder_by_id(folder_id)
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
 
-        await repo.delete_folder(folder_id)
-        return {"success": True, "message": "Folder deleted"}
+        result = await svc.permanent_delete_folder(folder_id, auth.user_id)
+        return {"success": True, "message": "Folder permanently deleted", "data": result}
     except HTTPException:
         raise
     except Exception as e:

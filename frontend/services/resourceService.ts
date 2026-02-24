@@ -113,14 +113,16 @@ export async function fetchTrashedFolders(
   scopeType: 'personal' | 'team',
   scopeId: string,
 ): Promise<Folder[]> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(
-    `${apiUrl}/api/v1/resources/trash/folders?scope_type=${scopeType}&scope_id=${scopeId}`,
-    { headers: await getAuthHeaders() },
-  );
-  if (!response.ok) throw new Error('Failed to fetch trashed folders');
-  const json = await response.json();
-  return json.data || [];
+  const { data, error } = await supabase
+    .from('folders')
+    .select('*')
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('is_trashed', true)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
 }
 
 export async function restoreFolder(id: string): Promise<void> {
@@ -275,6 +277,7 @@ export async function linkExistingResource(
   scopeType: 'personal' | 'team',
   scopeId: string,
   folderId?: string | null,
+  libraryId?: string | null,
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({
@@ -283,6 +286,7 @@ export async function linkExistingResource(
     scope_id: scopeId,
   });
   if (folderId) params.set('folder_id', folderId);
+  if (libraryId) params.set('library_id', libraryId);
 
   const response = await fetch(`${apiUrl}/api/v1/resources/link-existing?${params}`, {
     method: 'POST',
@@ -301,6 +305,7 @@ export async function uploadResource(
   scopeId: string,
   folderId?: string | null,
   onProgress?: (progress: number) => void,
+  libraryId?: string | null,
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const formData = new FormData();
@@ -318,6 +323,7 @@ export async function uploadResource(
     scope_id: scopeId,
   });
   if (folderId) params.set('folder_id', folderId);
+  if (libraryId) params.set('library_id', libraryId);
 
   // Use XMLHttpRequest for progress tracking
   if (onProgress) {
@@ -390,20 +396,31 @@ export async function permanentDeleteResource(resourceId: string): Promise<void>
   if (!response.ok) throw new Error('Failed to permanently delete resource');
 }
 
+export async function permanentDeleteFolder(folderId: string): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${folderId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to permanently delete folder');
+}
+
 // ─── Trashed resources ───────────────────────────────────
 
 export async function fetchTrashedResources(
   scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<ResourceItem[]> {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
-  const response = await fetch(`${apiUrl}/api/v1/resources/trash?${params}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch trashed resources');
-  const json = await response.json();
-  return json.data || [];
+  const { data, error } = await supabase
+    .from('resource_items')
+    .select('*, resource:resources!inner(*)')
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('resource.is_trashed', true)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
 }
 
 // ─── Single Resource ────────────────────────────────────
