@@ -813,7 +813,7 @@ export async function copyResourceItem(
   return data;
 }
 
-// 移动文件夹
+// 移动文件夹（级联更新子文件夹和 resource_items 的 library_id）
 export async function moveFolder(
   folderId: string,
   targetParentId: string | null,
@@ -826,6 +826,40 @@ export async function moveFolder(
     .update(update)
     .eq('id', folderId);
   if (error) throw error;
+
+  // Cascade library_id to sub-folders and resource_items
+  if (targetLibraryId !== undefined) {
+    // BFS to collect all descendant folder IDs
+    const allFolderIds = [folderId];
+    let queue = [folderId];
+    while (queue.length > 0) {
+      const { data: children, error: childErr } = await supabase
+        .from('folders')
+        .select('id')
+        .in('parent_id', queue);
+      if (childErr) throw childErr;
+      if (!children || children.length === 0) break;
+      const childIds = children.map((c: any) => String(c.id));
+      allFolderIds.push(...childIds);
+      queue = childIds;
+    }
+
+    // Update sub-folders' library_id
+    if (allFolderIds.length > 1) {
+      const { error: folderErr } = await supabase
+        .from('folders')
+        .update({ library_id: targetLibraryId })
+        .in('id', allFolderIds.slice(1));
+      if (folderErr) throw folderErr;
+    }
+
+    // Update all resource_items in affected folders
+    const { error: itemErr } = await supabase
+      .from('resource_items')
+      .update({ library_id: targetLibraryId })
+      .in('folder_id', allFolderIds);
+    if (itemErr) throw itemErr;
+  }
 }
 
 // ─── Folder Preview ──────────────────────────────────
