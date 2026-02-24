@@ -363,17 +363,20 @@ export async function uploadResource(
 
 export async function trashResource(
   resourceId: string,
-  _scopeType?: 'personal' | 'team',
-  _scopeId?: string,
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+  folderId?: string | null,
 ): Promise<void> {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
-    method: 'PATCH',
-    headers: {
-      ...(await getAuthHeaders()),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ is_trashed: true }),
+  const params = new URLSearchParams({
+    scope_type: scopeType,
+    scope_id: scopeId,
+  });
+  if (folderId) params.set('folder_id', folderId);
+
+  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}?${params}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to trash resource');
 }
@@ -411,16 +414,30 @@ export async function fetchTrashedResources(
   scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<ResourceItem[]> {
+  // After refactor, trashed resources are orphans (no resource_items).
+  // Query resources directly where is_trashed=true and last_scope matches.
   const { data, error } = await supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)')
-    .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId)
-    .eq('resource.is_trashed', true)
-    .order('created_at', { ascending: false });
+    .from('resources')
+    .select('*')
+    .eq('is_trashed', true)
+    .eq('last_scope_type', scopeType)
+    .eq('last_scope_id', scopeId)
+    .order('trashed_at', { ascending: false });
 
   if (error) throw error;
-  return data || [];
+
+  // Wrap each resource in a ResourceItem-like shape for compatibility
+  return (data || []).map((resource): ResourceItem => ({
+    id: resource.id,
+    resource_id: resource.id,
+    scope_type: scopeType,
+    scope_id: scopeId,
+    folder_id: resource.last_folder_id ?? null,
+    library_id: resource.last_library_id ?? null,
+    added_by: resource.created_by ?? null,
+    created_at: resource.created_at,
+    resource,
+  }));
 }
 
 // ─── Single Resource ────────────────────────────────────
@@ -881,14 +898,22 @@ export async function unlinkResourceByPlatformId(
 // 批量删除
 export async function trashResources(
   resourceIds: string[],
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+  folderId?: string | null,
 ): Promise<void> {
   const apiUrl = getApiUrl();
   const headers = await getAuthHeaders();
   await Promise.all(resourceIds.map(async (id) => {
-    const response = await fetch(`${apiUrl}/api/v1/resources/${id}`, {
-      method: 'PATCH',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_trashed: true }),
+    const params = new URLSearchParams({
+      scope_type: scopeType,
+      scope_id: scopeId,
+    });
+    if (folderId) params.set('folder_id', folderId);
+
+    const response = await fetch(`${apiUrl}/api/v1/resources/${id}?${params}`, {
+      method: 'DELETE',
+      headers,
     });
     if (!response.ok) throw new Error('Failed to trash resource');
   }));

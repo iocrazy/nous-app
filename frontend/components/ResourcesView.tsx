@@ -813,14 +813,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     try {
       const rid = String(resourceId);
       const item = resources.find((r) => String(r.resource?.id) === rid);
-      await trashResource(rid, scopeType, scopeId);
+      await trashResource(rid, scopeType, scopeId, selectedFolderId);
       // Optimistic removal
       setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
       if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
-    } catch { /* ignore */ }
-  }, [selectedResource, scopeType, scopeId, resources, addToast, t]);
+    } catch (err) { console.error('Failed to trash resource:', err); }
+  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t]);
 
   const handleRestore = useCallback(async (resourceId: string) => {
     try {
@@ -1840,12 +1840,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
         .map((i) => String(i.resource!.id));
       if (resourceIds.length > 0) {
-        trashResources(resourceIds).then(async () => {
+        trashResources(resourceIds, scopeType, scopeId, selectedFolderId).then(async () => {
           const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
           setResources(items);
           setSelectedIds(new Set());
           addToast(t('resources.trashedNotification', { name: `${resourceIds.length} items` }), 'success');
-        }).catch(() => {});
+        }).catch((err) => { console.error('Failed to trash resources:', err); });
       }
     }, [sortedItems, selectedIds, scopeType, scopeId, selectedFolderId, selectedLibraryId, addToast, t]),
     onRename: useCallback((compositeId: string) => {
@@ -2993,7 +2993,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
                       .map((i) => String(i.resource!.id));
                     if (resourceIds.length > 0) {
-                      await trashResources(resourceIds);
+                      await trashResources(resourceIds, scopeType, scopeId, selectedFolderId);
                     }
 
                     // Trash selected folders (cascade)
@@ -3093,6 +3093,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           scopeId={scopeId}
           currentLibraryId={selectedLibraryId}
           excludeFolderIds={operationTargetFolders.map((f) => f.id)}
+          movingItems={[
+            ...operationTargetItems.map((item) => ({
+              name: item.resource?.filename || 'Untitled',
+              thumbnail: item.resource?.thumbnail_path || null,
+              mediaType: item.resource?.mime_type || undefined,
+            })),
+            ...operationTargetFolders.map((f) => ({
+              name: f.name,
+              mediaType: 'folder',
+            })),
+          ]}
         />
       )}
 

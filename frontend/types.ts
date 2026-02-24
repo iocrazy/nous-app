@@ -322,6 +322,11 @@ export interface Resource {
   visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   is_trashed: boolean;
   trashed_at: string | null;
+  // Last location (for restore after orphan GC)
+  last_folder_id?: string | null;
+  last_library_id?: string | null;
+  last_scope_type?: string | null;
+  last_scope_id?: string | null;
   created_at: string;
   updated_at: string;
   // Joined
