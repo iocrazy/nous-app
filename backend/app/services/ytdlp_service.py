@@ -399,7 +399,7 @@ class YtdlpService:
             return None
 
         for filename in os.listdir(directory):
-            if filename.startswith(prefix):
+            if filename.startswith(f"{prefix}."):
                 return os.path.join(directory, filename)
         return None
 
