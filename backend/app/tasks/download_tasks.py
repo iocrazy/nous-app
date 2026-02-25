@@ -476,8 +476,11 @@ def _do_ytdlp_download(
     results = {"video": None, "music": None, "cover": None}
 
     detected_platform, _ = URLRouter.detect_platform(url)
+    repo = MediaRepository()
+    media = run_async(repo.get_by_platform_id(platform_id))
+    media_id = str(media["id"]) if media else platform_id  # fallback to platform_id
     storage_dir, relative_prefix = Utils.create_web_resource_path(
-        detected_platform, platform_id
+        detected_platform, media_id
     )
 
     if download_video:
@@ -520,8 +523,14 @@ def _do_ytdlp_download(
             YtdlpService.download_audio(url, str(storage_dir), platform_id)
         )
         if result.get("file_path"):
+            import os
+            file_name = os.path.basename(result["file_path"])
+            audio_relative_path = f"{relative_prefix}/{file_name}"
             repo = MediaRepository()
-            run_async(repo.mark_music_as_downloaded(platform_id))
+            run_async(repo.update(platform_id, {
+                "music_download_status": DownloadStatus.COMPLETED.value,
+                "music_download_path": audio_relative_path,
+            }))
             results["music"] = DownloadStatus.COMPLETED.value
             logger.info(f"[Download/Exec] music: completed for {platform_id}")
         else:
