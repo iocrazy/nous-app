@@ -8,7 +8,7 @@ import { useTeamContext } from '../contexts/TeamContext';
  * Uses the current selectedTeamId or personalTeamId as the default.
  */
 export function RedirectToTeam({ view }: { view: string }) {
-  const { selectedTeamId, personalTeamId, teamsLoading } = useTeamContext();
+  const { selectedTeamId, personalTeamId, teams, teamsLoading } = useTeamContext();
   const location = useLocation();
   const params = useParams();
 
@@ -20,9 +20,14 @@ export function RedirectToTeam({ view }: { view: string }) {
     );
   }
 
-  const teamId = selectedTeamId || personalTeamId;
+  const teamId = selectedTeamId || personalTeamId || (teams.length > 0 ? teams[0].id : null);
   if (!teamId) {
-    return <Navigate to="/login" replace />;
+    // No teams at all — show message instead of redirect loop
+    return (
+      <div className="flex items-center justify-center h-screen bg-black text-zinc-400">
+        <p>No workspace available. Please create a team first.</p>
+      </div>
+    );
   }
 
   // Reconstruct the sub-path from params for nested routes like /projects/:projectId
@@ -34,7 +39,7 @@ export function RedirectToTeam({ view }: { view: string }) {
  * Redirect root (/) or unknown paths to the user's default team workspace.
  */
 export function RedirectToDefaultTeam() {
-  const { selectedTeamId, personalTeamId, teamsLoading } = useTeamContext();
+  const { selectedTeamId, personalTeamId, teams, teamsLoading } = useTeamContext();
 
   if (teamsLoading) {
     return (
@@ -44,9 +49,13 @@ export function RedirectToDefaultTeam() {
     );
   }
 
-  const teamId = selectedTeamId || personalTeamId;
+  const teamId = selectedTeamId || personalTeamId || (teams.length > 0 ? teams[0].id : null);
   if (!teamId) {
-    return <Navigate to="/login" replace />;
+    return (
+      <div className="flex items-center justify-center h-screen bg-black text-zinc-400">
+        <p>No workspace available. Please create a team first.</p>
+      </div>
+    );
   }
 
   // Default landing: personal team → parser, shared team → resources
