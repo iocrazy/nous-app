@@ -144,13 +144,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   // 判断内容是否已可用（本地已下载 OR CDN URL 已存在 OR 本次已提交 Fetch）
   // 注意：skipped ≠ 已可用（skipped 表示当初跳过，用户可重新获取）
   const videoDownloaded = fetchSubmitted.video || !!data.download_path
-    || data.video_download_status?.toLowerCase() === 'completed'
     || !!(data.video_download_urls?.[0] && data.video_download_urls[0] !== '#' && isPlayableUrl(data.video_download_urls[0]));
   const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path
-    || data.cover_download_status?.toLowerCase() === 'completed'
     || !!(data.cover_urls?.[0] && data.cover_urls[0] !== '#');
-  const musicDownloaded = fetchSubmitted.music
-    || data.music_download_status?.toLowerCase() === 'completed'
+  const musicDownloaded = fetchSubmitted.music || !!data.music_download_path
     || !!(data.music_download_urls?.[0] && data.music_download_urls[0] !== '#');
 
   // Setup HLS.js for .m3u8 video playback
@@ -250,7 +247,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     setShowDownloadMenu(false);
     if (!data.platform_id) return;
     // Try backend API first (silent error), fallback to remote URL
-    if (data.video_download_status?.toLowerCase() === 'completed') {
+    if (data.download_path && data.video_download_status?.toLowerCase() === 'completed') {
       const ok = await doDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`, true, true);
       if (ok) return;
     }
@@ -264,7 +261,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const onDownloadCoverFile = async () => {
     setShowDownloadMenu(false);
     if (!data.platform_id) return;
-    if (data.cover_download_status?.toLowerCase() === 'completed') {
+    if (data.cover_download_path && data.cover_download_status?.toLowerCase() === 'completed') {
       const ok = await doDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`, true, true);
       if (ok) return;
     }

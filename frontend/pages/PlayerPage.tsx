@@ -353,9 +353,14 @@ export function PlayerPage() {
                       const isPending = (s?: string) => { const l = s?.toLowerCase(); return l === 'pending' || l === 'downloading'; };
                       const isFailed = (s?: string) => s?.toLowerCase() === 'failed';
 
-                      const videoStatus = video.video_download_status;
-                      const coverStatus = video.cover_download_status;
-                      const audioStatus = video.music_download_status;
+                      // Defense: if status says "completed" but no actual file path, treat as unfetched
+                      const hasVideoFile = !!(video.download_path || video.hls_path);
+                      const hasCoverFile = !!video.cover_download_path;
+                      const hasAudioFile = !!video.music_download_path;
+
+                      const videoStatus = isCompleted(video.video_download_status) && !hasVideoFile ? undefined : video.video_download_status;
+                      const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
+                      const audioStatus = isCompleted(video.music_download_status) && !hasAudioFile ? undefined : video.music_download_status;
 
                       const btnClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors";
                       const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-500 flex items-center gap-2 cursor-default";
