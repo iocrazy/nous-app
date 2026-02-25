@@ -476,8 +476,11 @@ def _do_ytdlp_download(
     results = {"video": None, "music": None, "cover": None}
 
     detected_platform, _ = URLRouter.detect_platform(url)
+    repo = MediaRepository()
+    media = run_async(repo.get_by_platform_id(platform_id))
+    media_id = str(media["id"]) if media else platform_id  # fallback to platform_id
     storage_dir, relative_prefix = Utils.create_web_resource_path(
-        detected_platform, platform_id
+        detected_platform, media_id
     )
 
     if download_video:
