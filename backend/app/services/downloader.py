@@ -238,7 +238,8 @@ class DownloaderService:
                     ) as response:
                         if response.status_code != 200:
                             logger.warning(
-                                f"下载失败 {url}, 状态码: {response.status_code}"
+                                f"[Download/File] Stream failed: HTTP {response.status_code} "
+                                f"for {url[:100]}, headers={dict(response.headers)}"
                             )
                             return False
 
@@ -418,11 +419,30 @@ class DownloaderService:
             # todo calculate download time
             download_duration = 10
 
+            # Diagnostic: test URL accessibility before download
+            download_errors = []
+            for i, url in enumerate(video_urls):
+                try:
+                    async with httpx.AsyncClient(http2=True) as _diag:
+                        _r = await _diag.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                        logger.info(
+                            f"[Download/Diag] URL {i+1}/{len(video_urls)} HEAD: "
+                            f"status={_r.status_code}, final_url={str(_r.url)[:80]}"
+                        )
+                except Exception as e:
+                    logger.warning(f"[Download/Diag] URL {i+1} HEAD failed: {type(e).__name__}: {e}")
+
             # download video while one of the urls is successful
-            for url in video_urls:
-                if await DownloaderService.download_file(
+            for idx, url in enumerate(video_urls):
+                logger.info(f"[Download/Video] Trying URL {idx+1}/{len(video_urls)} for {platform_id}: {url[:100]}")
+                success = await DownloaderService.download_file(
                     url, video_full_path, headers, progress_tracker
-                ):
+                )
+                if not success:
+                    download_errors.append(f"URL{idx+1}: download_file returned False")
+                    logger.warning(f"[Download/Video] URL {idx+1} failed for {platform_id}")
+                    continue
+                if success:
                     # Optimize video for streaming (move moov atom to beginning)
                     await DownloaderService.optimize_video_for_streaming(
                         video_full_path
@@ -477,16 +497,19 @@ class DownloaderService:
                     break
 
             if result.video_download_status != DownloadStatus.COMPLETED:
-                logger.error(f"All download URLs for the video {platform_id} failed.")
+                error_detail = "; ".join(download_errors) if download_errors else "unknown"
+                logger.error(
+                    f"All {len(video_urls)} download URLs for video {platform_id} failed: {error_detail}"
+                )
                 result.video_download_status = DownloadStatus.FAILED
-                result.error = f"All download URLs for the video {platform_id} failed."
+                result.error = f"All {len(video_urls)} URLs failed: {error_detail}"
 
-                # Update database status to "failed"
+                # Update database status to "failed" with detailed error
                 await repo.update(
                     platform_id,
                     {
                         "video_download_status": DownloadStatus.FAILED,
-                        "error_message": result.error,
+                        "error_message": result.error[:500],
                     },
                 )
 
