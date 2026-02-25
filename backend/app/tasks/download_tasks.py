@@ -340,6 +340,82 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
     return media
 
 
+# ─── URL validation helpers ───────────────────────────────────────────
+
+
+async def _check_url_accessible(url: str, timeout: float = 10.0) -> tuple[bool, str]:
+    """Quick HEAD request to verify a download URL is reachable (not expired/blocked).
+
+    Returns (accessible, reason) tuple.
+    """
+    import httpx
+
+    headers = Utils.get_headers()
+    try:
+        async with httpx.AsyncClient(http2=True) as client:
+            resp = await client.head(url, headers=headers, follow_redirects=True, timeout=timeout)
+            if resp.status_code == 200:
+                return True, "ok"
+            reason = f"HTTP {resp.status_code}"
+            logger.debug(f"[Download/Validate] HEAD {reason} for {url[:80]}...")
+            return False, reason
+    except Exception as e:
+        reason = str(e)[:100]
+        logger.debug(f"[Download/Validate] HEAD failed for {url[:80]}...: {reason}")
+        return False, reason
+
+
+def _validate_and_refresh_urls(
+    platform_id: str, media: dict, url_field: str, type_key: str
+) -> tuple[dict, bool, str]:
+    """Validate URLs via HEAD, refresh if expired, return (media, urls_valid, reason).
+
+    Flow:
+    1. Check current URLs accessibility via HEAD
+    2. If all inaccessible → clear URLs in DB → re-parse → check new URLs
+    3. Return whether URLs are valid for download
+    """
+    from app.repositories.media_repository import MediaRepository as _MR_val
+
+    urls = media.get(url_field) or []
+    if not urls:
+        return media, False, "no URLs available"
+
+    # Test current URLs
+    fail_reason = ""
+    for url in urls:
+        ok, reason = run_async(_check_url_accessible(url))
+        if ok:
+            return media, True, "ok"
+        fail_reason = reason
+
+    # All URLs inaccessible → clear and re-parse
+    logger.info(
+        f"[Download/Validate] All {len(urls)} {type_key} URLs inaccessible for {platform_id} "
+        f"({fail_reason}), clearing and re-parsing..."
+    )
+    media[url_field] = []
+    run_async(_MR_val().update(platform_id, {url_field: None}))
+    media = _ensure_download_urls(platform_id, media, [type_key])
+
+    # Test fresh URLs
+    fresh_urls = media.get(url_field) or []
+    if not fresh_urls:
+        return media, False, "re-parse returned no URLs"
+
+    for url in fresh_urls:
+        ok, reason = run_async(_check_url_accessible(url))
+        if ok:
+            logger.info(f"[Download/Validate] Fresh {type_key} URLs accessible for {platform_id}")
+            return media, True, "ok"
+        fail_reason = reason
+
+    logger.warning(
+        f"[Download/Validate] Fresh {type_key} URLs also inaccessible for {platform_id}: {fail_reason}"
+    )
+    return media, False, fail_reason
+
+
 # ─── Internal download strategies ─────────────────────────────────────
 
 def _do_douyin_download(
@@ -374,131 +450,81 @@ def _do_douyin_download(
             url_count = len(urls) if urls else 0
             logger.info(f"[Download/Diag] {t}: {url_count} URLs available for {platform_id} (field={url_field})")
 
+    # ── Pre-download: validate URL accessibility, refresh if expired ──
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
-            logger.info(f"[Download/Exec] video: downloading {platform_id}...")
-            video_result = run_async(
-                DownloaderService.download_video_by_platform_id(
-                    platform_id, user_id=user_id, progress_tracker=tracker
+            media, video_ok, reason = _validate_and_refresh_urls(
+                platform_id, media, "video_download_urls", "video"
+            )
+            if not video_ok:
+                logger.warning(f"[Download/Exec] video: URLs unreachable for {platform_id} ({reason}), skipping")
+                results["video"] = "failed"
+            else:
+                logger.info(f"[Download/Exec] video: downloading {platform_id}...")
+                video_result = run_async(
+                    DownloaderService.download_video_by_platform_id(
+                        platform_id, user_id=user_id, progress_tracker=tracker
+                    )
                 )
-            )
-            results["video"] = (
-                video_result.video_download_status.value
-                if hasattr(video_result, "video_download_status")
-                else "unknown"
-            )
-            logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
-            if results["video"] != "completed":
-                error_msg = getattr(video_result, "error", None) or "Download failed"
-                logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
-
-                # Retry once with fresh URLs (expired CDN URLs)
-                logger.info(f"[Download/Retry] Clearing expired video URLs for {platform_id}, re-parsing...")
-                media["video_download_urls"] = []
-                run_async(_MR_urls().update(platform_id, {"video_download_urls": None}))
-                media = _ensure_download_urls(platform_id, media, ["video"])
-                if media.get("video_download_urls"):
-                    logger.info(f"[Download/Retry] Got fresh URLs, retrying video download for {platform_id}")
-                    video_result = run_async(
-                        DownloaderService.download_video_by_platform_id(
-                            platform_id, user_id=user_id, progress_tracker=tracker
-                        )
-                    )
-                    results["video"] = (
-                        video_result.video_download_status.value
-                        if hasattr(video_result, "video_download_status")
-                        else "unknown"
-                    )
-                    if results["video"] == "completed":
-                        logger.info(f"[Download/Retry] Video retry succeeded for {platform_id}")
-                    else:
-                        logger.warning(f"[Download/Retry] Video retry also failed for {platform_id}")
-                else:
-                    logger.warning(f"[Download/Retry] No fresh video URLs obtained for {platform_id}")
+                results["video"] = (
+                    video_result.video_download_status.value
+                    if hasattr(video_result, "video_download_status")
+                    else "unknown"
+                )
+                logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
+                if results["video"] != "completed":
+                    error_msg = getattr(video_result, "error", None) or "Download failed"
+                    logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
 
         if download_music:
-            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
-            result = run_async(
-                DownloaderService.download_music_by_platform_id(
-                    platform_id=platform_id, user_id=user_id
-                )
+            media, music_ok, reason = _validate_and_refresh_urls(
+                platform_id, media, "music_download_urls", "music"
             )
-            results["music"] = (
-                result.music_download_status.value
-                if hasattr(result, "music_download_status")
-                else "unknown"
-            )
-            if results["music"] != "completed":
-                error_msg = getattr(result, "error", None) or "Music download failed"
-                logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
-
-                # Retry once with fresh URLs (expired CDN URLs)
-                logger.info(f"[Download/Retry] Clearing expired music URLs for {platform_id}, re-parsing...")
-                media["music_download_urls"] = []
-                run_async(_MR_urls().update(platform_id, {"music_download_urls": None}))
-                media = _ensure_download_urls(platform_id, media, ["music"])
-                if media.get("music_download_urls"):
-                    logger.info(f"[Download/Retry] Got fresh URLs, retrying music download for {platform_id}")
-                    result = run_async(
-                        DownloaderService.download_music_by_platform_id(
-                            platform_id=platform_id, user_id=user_id
-                        )
-                    )
-                    results["music"] = (
-                        result.music_download_status.value
-                        if hasattr(result, "music_download_status")
-                        else "unknown"
-                    )
-                    if results["music"] == "completed":
-                        logger.info(f"[Download/Retry] Music retry succeeded for {platform_id}")
-                    else:
-                        logger.warning(f"[Download/Retry] Music retry also failed for {platform_id}")
-                else:
-                    logger.warning(f"[Download/Retry] No fresh music URLs obtained for {platform_id}")
+            if not music_ok:
+                logger.warning(f"[Download/Exec] music: URLs unreachable for {platform_id} ({reason}), skipping")
+                results["music"] = "failed"
             else:
-                logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
+                logger.info(f"[Download/Exec] music: downloading {platform_id}...")
+                result = run_async(
+                    DownloaderService.download_music_by_platform_id(
+                        platform_id=platform_id, user_id=user_id
+                    )
+                )
+                results["music"] = (
+                    result.music_download_status.value
+                    if hasattr(result, "music_download_status")
+                    else "unknown"
+                )
+                if results["music"] != "completed":
+                    error_msg = getattr(result, "error", None) or "Music download failed"
+                    logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
+                else:
+                    logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
-            logger.info(f"[Download/Exec] image: downloading {platform_id}...")
-            video_result = run_async(
-                DownloaderService.download_images_by_platform_id(
-                    platform_id, user_id=user_id
+            media, img_ok, reason = _validate_and_refresh_urls(
+                platform_id, media, "image_download_urls", "image"
+            )
+            if not img_ok:
+                logger.warning(f"[Download/Exec] image: URLs unreachable for {platform_id} ({reason}), skipping")
+                results["video"] = "failed"
+            else:
+                logger.info(f"[Download/Exec] image: downloading {platform_id}...")
+                video_result = run_async(
+                    DownloaderService.download_images_by_platform_id(
+                        platform_id, user_id=user_id
+                    )
                 )
-            )
-            results["video"] = (
-                video_result.video_download_status.value
-                if hasattr(video_result, "video_download_status")
-                else "unknown"
-            )
-            logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
-            if results["video"] != "completed":
-                error_msg = getattr(video_result, "error", None) or "Image download failed"
-                logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
-
-                # Retry once with fresh URLs (expired CDN URLs)
-                logger.info(f"[Download/Retry] Clearing expired image URLs for {platform_id}, re-parsing...")
-                media["image_download_urls"] = []
-                run_async(_MR_urls().update(platform_id, {"image_download_urls": None}))
-                media = _ensure_download_urls(platform_id, media, ["image"])
-                if media.get("image_download_urls"):
-                    logger.info(f"[Download/Retry] Got fresh URLs, retrying image download for {platform_id}")
-                    video_result = run_async(
-                        DownloaderService.download_images_by_platform_id(
-                            platform_id, user_id=user_id
-                        )
-                    )
-                    results["video"] = (
-                        video_result.video_download_status.value
-                        if hasattr(video_result, "video_download_status")
-                        else "unknown"
-                    )
-                    if results["video"] == "completed":
-                        logger.info(f"[Download/Retry] Image retry succeeded for {platform_id}")
-                    else:
-                        logger.warning(f"[Download/Retry] Image retry also failed for {platform_id}")
-                else:
-                    logger.warning(f"[Download/Retry] No fresh image URLs obtained for {platform_id}")
+                results["video"] = (
+                    video_result.video_download_status.value
+                    if hasattr(video_result, "video_download_status")
+                    else "unknown"
+                )
+                logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
+                if results["video"] != "completed":
+                    error_msg = getattr(video_result, "error", None) or "Image download failed"
+                    logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
 
         if download_music:
             logger.info(f"[Download/Exec] music: downloading {platform_id}...")
