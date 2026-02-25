@@ -96,7 +96,7 @@ class YtdlpService:
         """
         os.makedirs(output_dir, exist_ok=True)
 
-        output_template = os.path.join(output_dir, f"{platform_id}.%(ext)s")
+        output_template = os.path.join(output_dir, "video.%(ext)s")
 
         cmd = [
             "yt-dlp",
@@ -174,7 +174,7 @@ class YtdlpService:
             raise RuntimeError(f"yt-dlp download failed: {parsed_error}")
 
         # Find the downloaded file
-        file_path = YtdlpService._find_downloaded_file(output_dir, platform_id)
+        file_path = YtdlpService._find_downloaded_file(output_dir, "video")
         if not file_path:
             raise RuntimeError(f"Downloaded file not found for {platform_id}")
 
@@ -201,7 +201,7 @@ class YtdlpService:
         """
         os.makedirs(output_dir, exist_ok=True)
 
-        output_template = os.path.join(output_dir, f"{platform_id}_audio.%(ext)s")
+        output_template = os.path.join(output_dir, "audio.%(ext)s")
 
         cmd = [
             "yt-dlp",
@@ -239,7 +239,7 @@ class YtdlpService:
 
         # Find the downloaded audio file
         file_path = YtdlpService._find_downloaded_file(
-            output_dir, f"{platform_id}_audio"
+            output_dir, "audio"
         )
         if not file_path:
             raise RuntimeError(f"Downloaded audio file not found for {platform_id}")

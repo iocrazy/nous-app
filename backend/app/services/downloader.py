@@ -385,10 +385,11 @@ class DownloaderService:
 
             logger.info(f"准备下载视频: {platform_id}")
 
-            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            # Create structured path: global/resources/web/{platform}/{snowflake_id}/
             source_platform = video_data.get("source_platform", "douyin")
+            media_snowflake_id = str(video_data["id"])
             full_path, relative_prefix = Utils.create_web_resource_path(
-                source_platform, platform_id
+                source_platform, media_snowflake_id
             )
             logger.debug(f"下载路径: {full_path}, 相对前缀: {relative_prefix}")
 
@@ -548,10 +549,11 @@ class DownloaderService:
 
             logger.info(f"准备下载 {platform_id} 的图片集")
 
-            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            # Create structured path: global/resources/web/{platform}/{snowflake_id}/
             source_platform = video_data.get("source_platform", "douyin")
+            media_snowflake_id = str(video_data["id"])
             sub_download_full_path, sub_download_relative_path = (
-                Utils.create_web_resource_path(source_platform, platform_id)
+                Utils.create_web_resource_path(source_platform, media_snowflake_id)
             )
             video_title = video_data.get("title", "undefined")
             file_name = platform_id  # Use platform_id as base name for image files
@@ -752,15 +754,18 @@ class DownloaderService:
             if not music_urls:
                 logger.warning(f"[Music/Diag] {platform_id}: NO music URLs in DB — music download will fail")
 
-            # Create structured path: global/resources/web/{platform}/{platform_id}/
-            # Note: music_data doesn't have source_platform, default to douyin
+            # Create structured path: global/resources/web/{platform}/{snowflake_id}/
+            # Fetch full media record to get source_platform and Snowflake ID
+            full_media = await repo.get_by_platform_id(platform_id)
+            source_platform = full_media.get("source_platform", "douyin") if full_media else "douyin"
+            media_snowflake_id = str(full_media["id"]) if full_media else platform_id
             full_path, relative_prefix = Utils.create_web_resource_path(
-                "douyin", platform_id
+                source_platform, media_snowflake_id
             )
 
-            # Generate music file path
-            music_full_path = os.path.join(full_path, "music.mp3")
-            music_relative_path = f"{relative_prefix}/music.mp3"
+            # Generate audio file path (unified naming: audio.mp3)
+            music_full_path = os.path.join(full_path, "audio.mp3")
+            music_relative_path = f"{relative_prefix}/audio.mp3"
 
             # Try to download music
             for idx, url in enumerate(music_urls):
@@ -906,9 +911,10 @@ class DownloaderService:
                 result.error = "没有封面 URL"
                 return result
 
-            # Create structured path: global/resources/web/{platform}/{platform_id}/
+            # Create structured path: global/resources/web/{platform}/{snowflake_id}/
+            media_snowflake_id = str(video_data["id"])
             full_path, relative_prefix = Utils.create_web_resource_path(
-                source_platform, platform_id
+                source_platform, media_snowflake_id
             )
 
             cover_full_path = os.path.join(full_path, "cover.jpg")
