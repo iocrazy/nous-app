@@ -189,22 +189,22 @@ class Utils:
             raise ValueError(f"创建下载文件夹失败: {e}") from e
 
     @classmethod
-    def create_web_resource_path(cls, platform: str, platform_id: str) -> tuple[Path, str]:
+    def create_web_resource_path(cls, platform: str, identifier: str) -> tuple[Path, str]:
         """
         Create storage path for Parser downloads.
 
-        Path structure: {DOWNLOAD_PATH}/global/resources/web/{platform}/{platform_id}/
+        Path structure: {DOWNLOAD_PATH}/global/resources/web/{platform}/{identifier}/
 
         Args:
             platform: Source platform (e.g. 'douyin', 'bilibili')
-            platform_id: Platform-specific content ID
+            identifier: Content identifier (Snowflake media ID or legacy platform_id)
 
         Returns:
             tuple[Path, str]: (full_path, relative_path_prefix)
             e.g. (/Volumes/.../global/resources/web/douyin/12345/, global/resources/web/douyin/12345)
         """
         base_path = cls.get_download_base_path()
-        relative = f"global/resources/web/{platform}/{platform_id}"
+        relative = f"global/resources/web/{platform}/{identifier}"
         full_path = Path(base_path) / relative
         os.makedirs(full_path, exist_ok=True)
         return full_path, relative
