@@ -45,7 +45,7 @@ export const fetchPersonalTeam = async (): Promise<Team | null> => {
     .in('id', teamIds)
     .eq('is_personal', true)
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (error || !data) return null;
   return normalizeTeam(data);
