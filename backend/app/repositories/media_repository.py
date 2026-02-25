@@ -343,6 +343,8 @@ class MediaRepository:
         if not result:
             raise ValueError(f"找不到视频数据: {platform_id}")
         return {
+            "id": result.get("id"),
+            "source_platform": result.get("source_platform"),
             "music_download_urls": result.get("music_download_urls"),
             "music_name": result.get("music_name"),
         }

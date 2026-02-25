@@ -1725,8 +1725,11 @@ async def _handle_ytdlp_fetch(
                 from app.services.url_router import URLRouter
 
                 detected_plat, _ = URLRouter.detect_platform(url)
+                # Look up media record to get Snowflake ID for NAS path
+                media = await repo.get_by_platform_id(platform_id)
+                media_id = str(media["id"]) if media else platform_id
                 storage_dir, relative_prefix = Utils.create_web_resource_path(
-                    detected_plat, platform_id
+                    detected_plat, media_id
                 )
 
                 try:
