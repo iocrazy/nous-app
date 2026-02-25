@@ -163,7 +163,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
               V{versionA.version_number}
             </span>
             <span className="text-xs text-zinc-400 truncate">{versionA.filename}</span>
-            {versionA.resolution && <span className="text-[10px] text-zinc-600">{versionA.resolution}</span>}
+            {versionA.resolution && <span className="text-[10px] text-zinc-600">{versionA.resolution.replace(/:/g, 'x')}</span>}
             {versionA.file_size_bytes && <span className="text-[10px] text-zinc-600">{formatSize(versionA.file_size_bytes)}</span>}
           </div>
           <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
@@ -191,7 +191,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
               V{versionB.version_number}
             </span>
             <span className="text-xs text-zinc-400 truncate">{versionB.filename}</span>
-            {versionB.resolution && <span className="text-[10px] text-zinc-600">{versionB.resolution}</span>}
+            {versionB.resolution && <span className="text-[10px] text-zinc-600">{versionB.resolution.replace(/:/g, 'x')}</span>}
             {versionB.file_size_bytes && <span className="text-[10px] text-zinc-600">{formatSize(versionB.file_size_bytes)}</span>}
           </div>
           <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">

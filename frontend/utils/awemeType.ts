@@ -59,6 +59,14 @@ export const getMediaTypeLabel = (mediaType?: string | number): string => {
 // Keep old name as alias
 export const getAwemeTypeLabel = getMediaTypeLabel;
 
+/**
+ * Format resolution string: "1080:1920" → "1080x1920"
+ */
+export const formatResolution = (resolution?: string): string => {
+  if (!resolution) return '';
+  return resolution.replace(/:/g, 'x');
+};
+
 // API base URL
 const getApiUrl = (): string => {
   // @ts-ignore

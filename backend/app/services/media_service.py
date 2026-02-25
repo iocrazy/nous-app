@@ -503,17 +503,19 @@ class MediaService:
         )
 
         # Determine per-user statuses
-        # If global file already exists (dedup_hit), user status = completed immediately
+        # Only mark "completed" if global file actually has a valid path
+        has_video_path = bool(existing_media and existing_media.get("download_path"))
+        has_cover_path = bool(existing_media and existing_media.get("cover_download_path"))
         if is_image_type:
             video_status = "skipped"
-            image_status = "completed" if dedup_hit else ("pending" if need_download_video else "skipped")
+            image_status = "completed" if (dedup_hit and has_video_path) else ("pending" if need_download_video else "skipped")
         else:
-            video_status = "completed" if dedup_hit else ("pending" if need_download_video else "skipped")
+            video_status = "completed" if (dedup_hit and has_video_path) else ("pending" if need_download_video else "skipped")
             image_status = "skipped"
         music_status = "pending" if need_download_music else "skipped"
         cover_status = "pending" if need_download_cover else "skipped"
-        # If cover file already exists globally, mark completed
-        if existing_media and existing_media.get("cover_download_status") == "completed":
+        # If cover file already exists globally with a valid path, mark completed
+        if existing_media and existing_media.get("cover_download_status") == "completed" and has_cover_path:
             cover_status = "completed"
 
         if existing_resource:

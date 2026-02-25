@@ -671,29 +671,33 @@ def download_unified_task(
 
             if global_media:
                 cache_updates = {}
-                if download_video and global_media.get("video_download_status") == "completed":
+                # Only mark cached "completed" if both status AND file path exist
+                has_video_path = bool(global_media.get("download_path"))
+                has_cover_path = bool(global_media.get("cover_download_path"))
+                has_music_path = bool(global_media.get("music_download_path"))
+                if download_video and global_media.get("video_download_status") == "completed" and has_video_path:
                     cache_updates["video_download_status"] = "completed"
-                if download_music and global_media.get("music_download_status") == "completed":
+                if download_music and global_media.get("music_download_status") == "completed" and has_music_path:
                     cache_updates["music_download_status"] = "completed"
-                if download_cover and global_media.get("cover_download_status") == "completed":
+                if download_cover and global_media.get("cover_download_status") == "completed" and has_cover_path:
                     cache_updates["cover_download_status"] = "completed"
-                if download_video and int(media_type) in (2, 68) and global_media.get("image_download_status") == "completed":
+                if download_video and int(media_type) in (2, 68) and global_media.get("image_download_status") == "completed" and has_video_path:
                     cache_updates["image_download_status"] = "completed"
 
                 if cache_updates:
                     run_async(_res_repo.update_download_status(resource_id, cache_updates))
 
-                # If ALL requested types are cached, skip download entirely
+                # If ALL requested types are cached (status + path), skip download entirely
                 all_cached = True
                 if download_video:
                     if int(media_type) in (2, 68):
-                        all_cached = all_cached and global_media.get("image_download_status") == "completed"
+                        all_cached = all_cached and global_media.get("image_download_status") == "completed" and has_video_path
                     else:
-                        all_cached = all_cached and global_media.get("video_download_status") == "completed"
+                        all_cached = all_cached and global_media.get("video_download_status") == "completed" and has_video_path
                 if download_music:
-                    all_cached = all_cached and global_media.get("music_download_status") == "completed"
+                    all_cached = all_cached and global_media.get("music_download_status") == "completed" and has_music_path
                 if download_cover:
-                    all_cached = all_cached and global_media.get("cover_download_status") == "completed"
+                    all_cached = all_cached and global_media.get("cover_download_status") == "completed" and has_cover_path
 
                 if all_cached:
                     logger.info(f"[Download/Done] All requested types cached for {platform_id}, skipping download")

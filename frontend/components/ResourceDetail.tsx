@@ -1238,7 +1238,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} />
               <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} />
               {isVideo && resource.resolution && (
-                <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution.replace(':', 'x')} />
+                <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution?.replace(/:/g, 'x')} />
               )}
               {resource.current_version > 1 && (
                 <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} />
