@@ -417,7 +417,7 @@ export const DownloadsView: React.FC = () => {
       onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
     };
     // Try backend API first, fallback to remote URL
-    if (v.video_download_status?.toLowerCase() === 'completed' && v.platform_id) {
+    if (v.download_path && v.video_download_status?.toLowerCase() === 'completed' && v.platform_id) {
       const ok = await downloadWithAuth(getDownloadUrl(v.platform_id), `${v.platform_id}.mp4`, {
         onSuccess: callbacks.onSuccess,
       });
