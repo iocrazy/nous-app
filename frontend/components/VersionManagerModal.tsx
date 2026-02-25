@@ -230,7 +230,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                           {version.resolution && (
                             <>
                               <span className="text-zinc-700">|</span>
-                              <span>{version.resolution}</span>
+                              <span>{version.resolution?.replace(/:/g, 'x')}</span>
                             </>
                           )}
                         </div>

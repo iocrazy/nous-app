@@ -7,7 +7,7 @@ import {
   Clock, Timer, Copy, PenTool, FileText, Wand2, Check, Loader2, Play, RefreshCw, Trash2, X, FolderPlus, Plus,
   Sparkles, Eye, ExternalLink, MoreHorizontal, Star,
 } from 'lucide-react';
-import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl } from '../utils/awemeType';
+import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl, formatResolution } from '../utils/awemeType';
 import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink } from '../services/parserService';
@@ -551,7 +551,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 </span>
                 {data.resolution && (
                 <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
-                {data.resolution}
+                {formatResolution(data.resolution)}
                 </span>
                 )}
             </div>

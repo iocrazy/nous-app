@@ -38,7 +38,7 @@ import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
-import { getCoverUrl, getVideoUrl } from '../utils/awemeType';
+import { getCoverUrl, getVideoUrl, formatResolution } from '../utils/awemeType';
 import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
@@ -829,7 +829,7 @@ export const DownloadsView: React.FC = () => {
                 {selectedVideo.resolution && (
                   <div className="flex justify-between items-center py-1.5">
                     <span className="text-xs text-zinc-500">Resolution</span>
-                    <span className="text-xs text-zinc-300">{selectedVideo.resolution}</span>
+                    <span className="text-xs text-zinc-300">{formatResolution(selectedVideo.resolution)}</span>
                   </div>
                 )}
                 {selectedVideo.datasize && (

@@ -112,7 +112,7 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
           </h4>
           <div className="space-y-0">
             <InfoRow label={t('mediatrack.duration')} value={formatDuration(file.duration_seconds)} />
-            <InfoRow label={t('mediatrack.resolution')} value={file.resolution} />
+            <InfoRow label={t('mediatrack.resolution')} value={file.resolution?.replace(/:/g, 'x')} />
             <InfoRow label={t('mediatrack.fps')} value={file.fps ? `${file.fps} fps` : null} />
             <InfoRow label={t('mediatrack.codec')} value={file.video_codec} />
             <InfoRow label={t('mediatrack.bitrate')} value={formatBitrate(file.video_bitrate_kbps)} />
