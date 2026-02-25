@@ -35,13 +35,21 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
   useEffect(() => {
     if (isAuthenticated) {
       setTeamsLoading(true);
+      let loadedTeams: Team[] = [];
       Promise.all([
-        fetchMyTeams().then(setTeams).catch(console.error),
+        fetchMyTeams().then(t => { loadedTeams = t; setTeams(t); }).catch(console.error),
         fetchPersonalTeam().then(pt => {
           if (pt) setPersonalTeamId(pt.id);
         }).catch(console.error),
         fetchNotifications().then(setNotifications).catch(console.error),
-      ]).finally(() => setTeamsLoading(false));
+      ]).finally(() => {
+        // Fallback: if no selectedTeamId yet and we have teams, pick the first one
+        setSelectedTeamId(prev => {
+          if (prev) return prev;
+          return loadedTeams.length > 0 ? loadedTeams[0].id : null;
+        });
+        setTeamsLoading(false);
+      });
     }
   }, [isAuthenticated]);
 
