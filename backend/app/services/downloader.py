@@ -400,7 +400,25 @@ class DownloaderService:
             logger.debug(f"视频文件: {video_relative_path}")
 
             # Download video
-            video_urls = video_data.get("video_download_urls")
+            video_urls = video_data.get("video_download_urls") or []
+
+            # Ensure a stable play URL fallback exists (no expiry, unlike CDN URLs)
+            play_addr = video_data.get("video", {}).get("play_addr", {}) if isinstance(video_data.get("video"), dict) else {}
+            video_uri = play_addr.get("uri", "")
+            if not video_uri:
+                # Try to extract video_id from existing URLs
+                import re
+                for _u in video_urls:
+                    _m = re.search(r"video_id=([^&]+)", _u)
+                    if _m:
+                        video_uri = _m.group(1)
+                        break
+            if video_uri:
+                stable_url = f"https://aweme.snssdk.com/aweme/v1/play/?video_id={video_uri}&ratio=720p&line=0"
+                if stable_url not in video_urls:
+                    video_urls.append(stable_url)
+                    logger.info(f"[Download/Video] Appended stable play URL fallback for {platform_id}")
+
             if not video_urls:
                 logger.warning(f"视频 {platform_id} 没有可用的下载URL")
                 result.video_download_status = DownloadStatus.FAILED

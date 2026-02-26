@@ -457,49 +457,51 @@ def _do_douyin_download(
                 platform_id, media, "video_download_urls", "video"
             )
             if not video_ok:
-                logger.warning(f"[Download/Exec] video: URLs unreachable for {platform_id} ({reason}), skipping")
-                results["video"] = "failed"
-            else:
-                logger.info(f"[Download/Exec] video: downloading {platform_id}...")
-                video_result = run_async(
-                    DownloaderService.download_video_by_platform_id(
-                        platform_id, user_id=user_id, progress_tracker=tracker
-                    )
+                logger.warning(
+                    f"[Download/Exec] video: HEAD check failed for {platform_id} ({reason}), "
+                    f"attempting GET download anyway (HEAD/GET may differ)"
                 )
-                results["video"] = (
-                    video_result.video_download_status.value
-                    if hasattr(video_result, "video_download_status")
-                    else "unknown"
+            logger.info(f"[Download/Exec] video: downloading {platform_id}...")
+            video_result = run_async(
+                DownloaderService.download_video_by_platform_id(
+                    platform_id, user_id=user_id, progress_tracker=tracker
                 )
-                logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
-                if results["video"] != "completed":
-                    error_msg = getattr(video_result, "error", None) or "Download failed"
-                    logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
+            )
+            results["video"] = (
+                video_result.video_download_status.value
+                if hasattr(video_result, "video_download_status")
+                else "unknown"
+            )
+            logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
+            if results["video"] != "completed":
+                error_msg = getattr(video_result, "error", None) or "Download failed"
+                logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
 
         if download_music:
             media, music_ok, reason = _validate_and_refresh_urls(
                 platform_id, media, "music_download_urls", "music"
             )
             if not music_ok:
-                logger.warning(f"[Download/Exec] music: URLs unreachable for {platform_id} ({reason}), skipping")
-                results["music"] = "failed"
+                logger.warning(
+                    f"[Download/Exec] music: HEAD check failed for {platform_id} ({reason}), "
+                    f"attempting GET download anyway"
+                )
+            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
+            result = run_async(
+                DownloaderService.download_music_by_platform_id(
+                    platform_id=platform_id, user_id=user_id
+                )
+            )
+            results["music"] = (
+                result.music_download_status.value
+                if hasattr(result, "music_download_status")
+                else "unknown"
+            )
+            if results["music"] != "completed":
+                error_msg = getattr(result, "error", None) or "Music download failed"
+                logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
             else:
-                logger.info(f"[Download/Exec] music: downloading {platform_id}...")
-                result = run_async(
-                    DownloaderService.download_music_by_platform_id(
-                        platform_id=platform_id, user_id=user_id
-                    )
-                )
-                results["music"] = (
-                    result.music_download_status.value
-                    if hasattr(result, "music_download_status")
-                    else "unknown"
-                )
-                if results["music"] != "completed":
-                    error_msg = getattr(result, "error", None) or "Music download failed"
-                    logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
-                else:
-                    logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
+                logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
@@ -507,24 +509,25 @@ def _do_douyin_download(
                 platform_id, media, "image_download_urls", "image"
             )
             if not img_ok:
-                logger.warning(f"[Download/Exec] image: URLs unreachable for {platform_id} ({reason}), skipping")
-                results["video"] = "failed"
-            else:
-                logger.info(f"[Download/Exec] image: downloading {platform_id}...")
-                video_result = run_async(
-                    DownloaderService.download_images_by_platform_id(
-                        platform_id, user_id=user_id
-                    )
+                logger.warning(
+                    f"[Download/Exec] image: HEAD check failed for {platform_id} ({reason}), "
+                    f"attempting GET download anyway"
                 )
-                results["video"] = (
-                    video_result.video_download_status.value
-                    if hasattr(video_result, "video_download_status")
-                    else "unknown"
+            logger.info(f"[Download/Exec] image: downloading {platform_id}...")
+            video_result = run_async(
+                DownloaderService.download_images_by_platform_id(
+                    platform_id, user_id=user_id
                 )
-                logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
-                if results["video"] != "completed":
-                    error_msg = getattr(video_result, "error", None) or "Image download failed"
-                    logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
+            )
+            results["video"] = (
+                video_result.video_download_status.value
+                if hasattr(video_result, "video_download_status")
+                else "unknown"
+            )
+            logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
+            if results["video"] != "completed":
+                error_msg = getattr(video_result, "error", None) or "Image download failed"
+                logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
 
         if download_music:
             logger.info(f"[Download/Exec] music: downloading {platform_id}...")

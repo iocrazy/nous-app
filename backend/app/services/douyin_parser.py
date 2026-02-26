@@ -253,6 +253,18 @@ class DouyinParser:
             else 0
         )
 
+        # Build video download URLs with stable play URL fallback
+        video_urls = video_data.get("play_addr", {}).get("url_list", None) or []
+        # Append a stable play URL (no expiry) as fallback using the video's uri
+        video_uri = video_data.get("play_addr", {}).get("uri", "")
+        if video_uri:
+            stable_play_url = (
+                f"https://aweme.snssdk.com/aweme/v1/play/"
+                f"?video_id={video_uri}&ratio=720p&line=0"
+            )
+            if stable_play_url not in video_urls:
+                video_urls.append(stable_play_url)
+
         # Build return data
         return {
             "platform_id": aweme_id,
@@ -274,9 +286,7 @@ class DouyinParser:
             "duration": Utils.format_duration(video_data.get("duration")),
             "resolution": f"{video_data.get('width')}x{video_data.get('height')}",
             "source_platform": "douyin",
-            "video_download_urls": video_data.get("play_addr", {}).get(
-                "url_list", None
-            ),
+            "video_download_urls": video_urls or None,
             "music_download_urls": aweme_detail.get("music", {})
             .get("play_url", {})
             .get("url_list", None),
