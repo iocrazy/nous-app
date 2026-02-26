@@ -7,6 +7,8 @@ Contains async download tasks for video, image sets, music, and covers.
 Integrates with TaskManager for task status tracking and automatic retries.
 """
 
+import asyncio
+
 from celery import shared_task
 from loguru import logger
 
