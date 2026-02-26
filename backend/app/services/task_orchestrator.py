@@ -15,6 +15,7 @@ so that the frontend TaskCenter continues to work without changes.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from enum import Enum
@@ -223,7 +224,7 @@ class TaskOrchestrator:
         redis = self._get_redis()
 
         # Attempt SET NX
-        acquired = redis.set(dedup_key, "locked", nx=True, ex=DEDUP_LOCK_TTL)
+        acquired = await asyncio.to_thread(redis.set, dedup_key, "locked", nx=True, ex=DEDUP_LOCK_TTL)
         if acquired:
             logger.debug(f"[Orchestrator] Acquired dedup lock: {dedup_key}")
             return {"action": "created", "dedup_key": dedup_key}
@@ -279,7 +280,7 @@ class TaskOrchestrator:
             return {"action": "completed"}
 
         # Stale lock — force acquire
-        redis.set(dedup_key, "locked", ex=DEDUP_LOCK_TTL)
+        await asyncio.to_thread(redis.set, dedup_key, "locked", ex=DEDUP_LOCK_TTL)
         logger.warning(f"[Orchestrator] Force-acquired stale dedup lock: {dedup_key}")
         return {"action": "created", "dedup_key": dedup_key}
 

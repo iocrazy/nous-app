@@ -7,6 +7,7 @@ Resource library API endpoints: upload, CRUD, version management,
 folder operations, tagging, and recycle bin.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -410,7 +411,7 @@ async def batch_transcode(auth: AuthDep):
             try:
                 vid = str(v["id"])
                 await repo.update_version(vid, {"transcode_status": "pending"})
-                transcode_to_hls.delay(str(v["resource_id"]), vid, auth.user_id)
+                await asyncio.to_thread(transcode_to_hls.delay, str(v["resource_id"]), vid, auth.user_id)
                 queued += 1
             except Exception as e:
                 logger.warning(f"[Transcode/Batch] Failed to queue version {v['id']}: {e}")
@@ -930,7 +931,7 @@ async def retry_transcode(
         await repo.update_version(version_id, {"transcode_status": "pending"})
 
         from app.tasks.transcode_tasks import transcode_to_hls
-        transcode_to_hls.delay(resource_id, version_id, auth.user_id)
+        await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, auth.user_id)
 
         return {"success": True, "message": "Transcoding queued"}
     except HTTPException:

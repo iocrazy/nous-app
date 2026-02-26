@@ -9,6 +9,8 @@ Endpoints for triggering and retrieving AI analysis results
 Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
@@ -92,7 +94,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
 
-        chain_ai_pipeline(
+        await asyncio.to_thread(chain_ai_pipeline,
             platform_id=platform_id,
             user_id=auth.user_id,
             resource_id=resource_id,
@@ -158,7 +160,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
 
-            generate_summary_task.delay(platform_id, auth.user_id, resource_id)
+            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id, resource_id)
             return {
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
@@ -168,7 +170,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # No transcript, run full pipeline
             from app.tasks.ai_tasks import chain_ai_pipeline
 
-            chain_ai_pipeline(
+            await asyncio.to_thread(chain_ai_pipeline,
                 platform_id=platform_id,
                 user_id=auth.user_id,
                 resource_id=resource_id,
@@ -233,7 +235,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
 
-        chain_ai_pipeline(
+        await asyncio.to_thread(chain_ai_pipeline,
             platform_id=platform_id,
             user_id=auth.user_id,
             resource_id=None,
@@ -297,13 +299,13 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
 
-            generate_summary_task.delay(platform_id, auth.user_id)
+            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id)
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
             # No transcript, run full pipeline
             from app.tasks.ai_tasks import chain_ai_pipeline
 
-            chain_ai_pipeline(
+            await asyncio.to_thread(chain_ai_pipeline,
                 platform_id=platform_id,
                 user_id=auth.user_id,
                 resource_id=None,

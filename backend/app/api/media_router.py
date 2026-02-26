@@ -7,6 +7,7 @@ Parsed media processing API endpoints based on Supabase.
 Requires authentication (JWT or API Key).
 """
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -202,7 +203,7 @@ async def _dedup_and_dispatch(
         dl_cover = "cover" in types_to_download
 
         try:
-            ready, err_msg = check_worker_ready()
+            ready, err_msg = await asyncio.to_thread(check_worker_ready)
             if not ready:
                 raise RuntimeError(err_msg)
 
@@ -210,7 +211,7 @@ async def _dedup_and_dispatch(
                 f"[Download/Init] Celery dispatch: platform_id={platform_id}, "
                 f"types={types_to_download}, user={user_id}"
             )
-            celery_task = download_unified_task.delay(
+            celery_task = await asyncio.to_thread(download_unified_task.delay,
                 platform_id=platform_id,
                 user_id=user_id,
                 url=url,
@@ -330,7 +331,7 @@ async def fetch_video(
         if request.use_celery:
             from app.tasks.parse_tasks import parse_single_link_task
 
-            task = parse_single_link_task.delay(
+            task = await asyncio.to_thread(parse_single_link_task.delay,
                 url=url,
                 user_id=auth.user_id,
                 video_bool=request.video_bool,
@@ -773,7 +774,7 @@ async def fetch_videos_batch(
     if request.use_celery:
         from app.tasks.parse_tasks import parse_batch_links_task
 
-        task = parse_batch_links_task.delay(
+        task = await asyncio.to_thread(parse_batch_links_task.delay,
             urls=request.urls,
             user_id=auth.user_id,
             video_bool=request.video_bool,
@@ -1658,11 +1659,11 @@ async def _handle_ytdlp_fetch(
             from app.tasks.download_tasks import download_unified_task
             from app.services.system_monitor_service import check_worker_ready
 
-            ready, err_msg = check_worker_ready()
+            ready, err_msg = await asyncio.to_thread(check_worker_ready)
             if not ready:
                 raise RuntimeError(err_msg)
 
-            download_task = download_unified_task.delay(
+            download_task = await asyncio.to_thread(download_unified_task.delay,
                 url=url,
                 platform_id=platform_id,
                 user_id=auth.user_id,

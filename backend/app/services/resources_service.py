@@ -805,7 +805,7 @@ class ResourcesService:
             await self.repo.update_version(version_id, {"transcode_status": "pending"})
 
             from app.tasks.transcode_tasks import transcode_to_hls
-            transcode_to_hls.delay(resource_id, version_id, user_id, _dedup_key=dedup_key)
+            await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, user_id, _dedup_key=dedup_key)
             logger.info(
                 f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
             )
