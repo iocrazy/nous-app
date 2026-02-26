@@ -141,14 +141,19 @@ class YtdlpService:
                                 downloaded = int(float(parts[1]))
                                 total = int(float(parts[2]))
                                 speed = parts[3] if len(parts) > 3 else "0 B/s"
-                                progress_callback(downloaded, total, speed)
+                                # Support both sync and async callbacks
+                                result = progress_callback(downloaded, total, speed)
+                                if asyncio.iscoroutine(result):
+                                    await result
                             except (ValueError, IndexError):
                                 # Fallback: parse percent string (e.g. "45.2%")
                                 # Needed for DASH streams where byte totals are N/A
                                 try:
                                     pct = float(parts[0].rstrip("%"))
                                     speed = parts[3] if len(parts) > 3 else "0 B/s"
-                                    progress_callback(int(pct * 100), 10000, speed)
+                                    result = progress_callback(int(pct * 100), 10000, speed)
+                                    if asyncio.iscoroutine(result):
+                                        await result
                                 except (ValueError, IndexError):
                                     pass
 

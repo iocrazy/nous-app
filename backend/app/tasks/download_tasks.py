@@ -120,8 +120,12 @@ class UnifiedProgressTracker:
         self._last_time = 0
         self._speed = 0.0
 
-    def update(self, downloaded: int, total: int):
-        """Update download progress."""
+    async def update(self, downloaded: int, total: int):
+        """Update download progress.
+
+        Writes to Redis (sync, always) and Supabase unified_tasks (async, throttled).
+        Must be awaited from an async context (e.g. inside download_file streaming loop).
+        """
         import json
         import time
 
@@ -153,25 +157,19 @@ class UnifiedProgressTracker:
             f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
-        # Update unified TaskTracker (throttled at 1s internally).
-        # When called from within a running event loop (e.g. inside an async
-        # download function), use create_task() to avoid the overhead of
-        # run_async() which would spawn a thread + new event loop per update.
+        # Directly await Supabase update (throttled at 1s internally by TaskTracker).
+        # Previous create_task() approach was broken: asyncio.run() cancels all
+        # pending tasks when the main coroutine finishes, so progress updates
+        # were silently dropped.
         if self.unified_tracker and self.unified_task_id:
-            coro = self.unified_tracker.update_progress(
-                self.unified_task_id,
-                percent,
-                speed=int(self._speed),
-            )
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(coro)
-            except RuntimeError:
-                # No running event loop — fall back to blocking run_async
-                try:
-                    run_async(coro)
-                except Exception as e:
-                    logger.debug(f"[ProgressTracker] Supabase update failed: {e}")
+                await self.unified_tracker.update_progress(
+                    self.unified_task_id,
+                    percent,
+                    speed=int(self._speed),
+                )
+            except Exception as e:
+                logger.debug(f"[ProgressTracker] Supabase update failed: {e}")
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
@@ -495,8 +493,8 @@ def _do_douyin_download(
                             source_platform, media_id
                         )
 
-                        def on_progress(downloaded: int, total: int, speed: str):
-                            tracker.update(downloaded, total)
+                        async def on_progress(downloaded: int, total: int, speed: str):
+                            await tracker.update(downloaded, total)
 
                         ytdlp_result = run_async(
                             YtdlpService.download_video(
@@ -650,8 +648,8 @@ def _do_ytdlp_download(
     if download_video:
         logger.info(f"[Download/Exec] video: downloading via yt-dlp {platform_id}...")
 
-        def on_progress(downloaded: int, total: int, speed: str):
-            tracker.update(downloaded, total)
+        async def on_progress(downloaded: int, total: int, speed: str):
+            await tracker.update(downloaded, total)
 
         result = run_async(
             YtdlpService.download_video(
