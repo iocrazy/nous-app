@@ -153,7 +153,6 @@ async def _dedup_and_dispatch(
     """
     from app.services.task_orchestrator import get_orchestrator
     from app.tasks.download_tasks import download_unified_task
-    from app.services.system_monitor_service import check_worker_ready
 
     is_image_type = int(media_type) in (2, 68)
 
@@ -203,10 +202,6 @@ async def _dedup_and_dispatch(
         dl_cover = "cover" in types_to_download
 
         try:
-            ready, err_msg = await asyncio.to_thread(check_worker_ready)
-            if not ready:
-                raise RuntimeError(err_msg)
-
             logger.info(
                 f"[Download/Init] Celery dispatch: platform_id={platform_id}, "
                 f"types={types_to_download}, user={user_id}"
@@ -1657,11 +1652,6 @@ async def _handle_ytdlp_fetch(
         # Try Celery first, fallback to FastAPI background tasks
         try:
             from app.tasks.download_tasks import download_unified_task
-            from app.services.system_monitor_service import check_worker_ready
-
-            ready, err_msg = await asyncio.to_thread(check_worker_ready)
-            if not ready:
-                raise RuntimeError(err_msg)
 
             download_task = await asyncio.to_thread(download_unified_task.delay,
                 url=url,
