@@ -7,6 +7,7 @@ Unified task center API: list, cancel, retry, delete, clear completed tasks.
 Covers all task types: download, upload, transcode, ai_pipeline, ai_extract, ai_transcription, ai_summary.
 """
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -91,7 +92,7 @@ async def retry_task(task_id: str, auth: AuthDep):
                     version_id = str(versions[0]["id"])
             if version_id:
                 from app.tasks.transcode_tasks import transcode_to_hls
-                transcode_to_hls.delay(resource_id, version_id, user_id, _unified_task_id=str(task_id))
+                await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, user_id, _unified_task_id=str(task_id))
                 logger.info(f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}")
             else:
                 logger.warning(f"[TaskRetry] No version found for resource={resource_id}, skipping dispatch")

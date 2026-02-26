@@ -1,5 +1,6 @@
 """API routes for Video Analysis."""
 
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -200,7 +201,7 @@ async def trigger_analysis(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
-        task = analyze_video_l1_task.delay(
+        task = await asyncio.to_thread(analyze_video_l1_task.delay,
             media_id=media_id,
             cover_url=cover_url,
             title=media.get("title", ""),
@@ -228,7 +229,7 @@ async def trigger_analysis(
                 detail=f"Download path not configured: {e}",
             )
 
-        task = analyze_video_l2_task.delay(
+        task = await asyncio.to_thread(analyze_video_l2_task.delay,
             media_id=media_id,
             cover_url=cover_url or "",
             video_path=video_path,
@@ -274,7 +275,7 @@ async def trigger_batch_analysis(
             detail="Batch analysis currently only supports L1 level",
         )
 
-    task = batch_analyze_l1_task.delay(
+    task = await asyncio.to_thread(batch_analyze_l1_task.delay,
         media_ids=request.media_ids, batch_size=len(request.media_ids)
     )
 
@@ -294,7 +295,7 @@ async def analyze_pending_videos(
     Analyze all pending videos (videos without analysis).
     Useful for backfilling analysis on existing videos.
     """
-    task = analyze_pending_videos_task.delay(limit=limit)
+    task = await asyncio.to_thread(analyze_pending_videos_task.delay, limit=limit)
 
     return {
         "message": f"Started analyzing pending videos (up to {limit})",
