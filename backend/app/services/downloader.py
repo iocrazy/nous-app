@@ -273,6 +273,16 @@ class DownloaderService:
                                 f"File size mismatch: expected {expected_size}, got {actual_size}"
                             )
 
+                        # Minimum size check: video files should be > 200KB
+                        # CDN error pages or truncated responses are typically < 200KB
+                        if file_path.endswith(".mp4") and actual_size < 200 * 1024:
+                            logger.error(
+                                f"[Download/File] Video too small ({actual_size} bytes), "
+                                f"likely CDN error response: {os.path.basename(file_path)}"
+                            )
+                            os.remove(file_path)
+                            return False
+
                         # Verify video file integrity with ffprobe
                         if file_path.endswith(".mp4"):
                             if not await DownloaderService.verify_video_integrity(
@@ -318,6 +328,15 @@ class DownloaderService:
                             raise Exception(
                                 f"File size mismatch: expected {expected_size}, got {actual_size}"
                             )
+
+                        # Minimum size check: video files should be > 200KB
+                        if file_path.endswith(".mp4") and actual_size < 200 * 1024:
+                            logger.error(
+                                f"[Download/File] Video too small ({actual_size} bytes), "
+                                f"likely CDN error response: {os.path.basename(file_path)}"
+                            )
+                            os.remove(file_path)
+                            return False
 
                         # Verify video file integrity with ffprobe
                         if file_path.endswith(".mp4"):
