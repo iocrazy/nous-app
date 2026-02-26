@@ -477,6 +477,67 @@ def _do_douyin_download(
                 error_msg = getattr(video_result, "error", None) or "Download failed"
                 logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
 
+                # ── yt-dlp fallback: try downloading via yt-dlp if httpx failed ──
+                original_url = media.get("original_url") if media else None
+                if original_url:
+                    logger.info(
+                        f"[Download/Exec] video: httpx failed, trying yt-dlp fallback "
+                        f"with original URL for {platform_id}"
+                    )
+                    try:
+                        from app.services.ytdlp_service import YtdlpService
+
+                        source_platform = media.get("source_platform", "douyin")
+                        media_id = str(media["id"])
+                        storage_dir, relative_prefix = Utils.create_web_resource_path(
+                            source_platform, media_id
+                        )
+
+                        def on_progress(downloaded: int, total: int, speed: str):
+                            tracker.update(downloaded, total)
+
+                        ytdlp_result = run_async(
+                            YtdlpService.download_video(
+                                original_url, str(storage_dir), platform_id,
+                                progress_callback=on_progress,
+                            )
+                        )
+                        if ytdlp_result.get("file_path"):
+                            import os
+                            file_name = os.path.basename(ytdlp_result["file_path"])
+                            relative_path = f"{relative_prefix}/{file_name}"
+                            from app.repositories.media_repository import MediaRepository as _MR_yt
+                            run_async(
+                                _MR_yt().mark_media_as_downloaded(
+                                    platform_id=platform_id,
+                                    download_path=relative_path,
+                                    duration=0,
+                                    storage_size=ytdlp_result.get("file_size", 0),
+                                )
+                            )
+                            run_async(
+                                DownloaderService.optimize_video_for_streaming(
+                                    ytdlp_result["file_path"]
+                                )
+                            )
+                            results["video"] = DownloadStatus.COMPLETED.value
+                            logger.success(
+                                f"[Download/Exec] video: yt-dlp fallback succeeded for {platform_id}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[Download/Exec] video: yt-dlp fallback also failed for {platform_id}"
+                            )
+                    except Exception as ytdlp_err:
+                        logger.warning(
+                            f"[Download/Exec] video: yt-dlp fallback error for {platform_id}: "
+                            f"{type(ytdlp_err).__name__}: {ytdlp_err}"
+                        )
+                else:
+                    logger.warning(
+                        f"[Download/Exec] video: no original_url available for yt-dlp fallback: {platform_id}"
+                    )
+
         if download_music:
             media, music_ok, reason = _validate_and_refresh_urls(
                 platform_id, media, "music_download_urls", "music"
