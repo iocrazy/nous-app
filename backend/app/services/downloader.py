@@ -254,7 +254,7 @@ class DownloaderService:
                             ):  # 64KB chunks
                                 await f.write(chunk)
                                 downloaded += len(chunk)
-                                progress_tracker.update(downloaded, total)
+                                await progress_tracker.update(downloaded, total)
 
                         # Post-download verification
                         actual_size = (
