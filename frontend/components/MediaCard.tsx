@@ -10,7 +10,7 @@ import {
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl, formatResolution } from '../utils/awemeType';
 import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { getAuthHeaders, parseShareLink } from '../services/parserService';
+import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
@@ -292,33 +292,32 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     doDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
   };
 
-  // 重新获取（复用 Parser 页面同一 API: POST /api/v1/videos/fetch）
+  // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)
   const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
-    const url = data.original_url;
-    if (!url) {
-      addToast('No original URL available for refetch', 'error');
+    if (!data.platform_id) {
+      addToast('No platform ID available for refetch', 'error');
       return;
     }
 
     // Pre-check: what's already available vs what needs fetching
     const alreadyHave: string[] = [];
-    const needFetch = { video_bool: false, music_bool: false, cover_bool: false };
+    const types: string[] = [];
 
     if (options.video) {
       if (videoDownloaded) alreadyHave.push('Video');
-      else needFetch.video_bool = true;
+      else types.push('video');
     }
     if (options.cover) {
       if (coverDownloaded) alreadyHave.push('Cover');
-      else needFetch.cover_bool = true;
+      else types.push('cover');
     }
     if (options.music) {
       if (musicDownloaded) alreadyHave.push('Audio');
-      else needFetch.music_bool = true;
+      else types.push('music');
     }
 
     // If everything requested is already available, inform user and return
-    if (!needFetch.video_bool && !needFetch.music_bool && !needFetch.cover_bool) {
+    if (types.length === 0) {
       addToast(`Already has: ${alreadyHave.join(', ')}`, 'info');
       setShowMoreMenu(false);
       return;
@@ -329,21 +328,22 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     setShowMoreMenu(false);
 
     try {
-      await parseShareLink(url, needFetch);
+      const result = await fetchMediaByType(data.platform_id, types);
       setRetrySuccess(true);
       // Optimistic UI: mark submitted items so menu hides them immediately
       setFetchSubmitted(prev => ({
         ...prev,
-        ...(needFetch.video_bool ? { video: true } : {}),
-        ...(needFetch.cover_bool ? { cover: true } : {}),
-        ...(needFetch.music_bool ? { music: true } : {}),
+        ...(types.includes('video') ? { video: true } : {}),
+        ...(types.includes('cover') ? { cover: true } : {}),
+        ...(types.includes('music') ? { music: true } : {}),
       }));
       const fetching: string[] = [];
-      if (needFetch.video_bool) fetching.push('Video');
-      if (needFetch.cover_bool) fetching.push('Cover');
-      if (needFetch.music_bool) fetching.push('Audio');
+      if (types.includes('video')) fetching.push('Video');
+      if (types.includes('cover')) fetching.push('Cover');
+      if (types.includes('music')) fetching.push('Audio');
       let msg = `Fetch submitted: ${fetching.join(', ')}`;
       if (alreadyHave.length > 0) msg += ` (already has: ${alreadyHave.join(', ')})`;
+      if (result.types_skipped?.length) msg += ` (cached: ${result.types_skipped.join(', ')})`;
       addToast(msg, 'success');
       setTimeout(() => setRetrySuccess(false), 3000);
     } catch (error) {
