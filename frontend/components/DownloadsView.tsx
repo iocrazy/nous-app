@@ -41,10 +41,12 @@ import { ToolbarSearch } from './ToolbarSearch';
 import { getCoverUrl, getVideoUrl, formatResolution } from '../utils/awemeType';
 import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
 import { useToast } from './Toast';
-import { trashResourceByPlatformId, updateResource, fetchResourceTags } from '../services/resourceService';
+import { trashResourceByPlatformId, updateResource, fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
+import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
+import { UnifiedTagPicker } from './UnifiedTagPicker';
 
 // ─── AI Status Badge ──────────────────────────────────
 const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
@@ -139,6 +141,12 @@ export const DownloadsView: React.FC = () => {
     }
     return map;
   }, [resourceDataMap]);
+
+  // ─── All available tags (for tag picker) ────────────
+  const [allTags, setAllTags] = useState<import('../types').Tag[]>([]);
+  useEffect(() => {
+    fetchAllTags().then(setAllTags).catch(() => {});
+  }, []);
 
   // ─── Search handlers ──────────────────────────────
   const [isAISearching, setIsAISearching] = useState(false);
@@ -362,6 +370,37 @@ export const DownloadsView: React.FC = () => {
       .then(setSelectedVideoTags)
       .catch(() => setSelectedVideoTags([]));
   }, [selectedResourceData?.id]);
+
+  const handleAddTag = useCallback(async (tagId: string) => {
+    if (!selectedResourceData?.id) return;
+    try {
+      await addResourceTag(selectedResourceData.id, tagId);
+      const updated = await fetchResourceTags(selectedResourceData.id);
+      setSelectedVideoTags(updated);
+    } catch (err) {
+      console.error('Failed to add tag:', err);
+    }
+  }, [selectedResourceData]);
+
+  const handleRemoveTag = useCallback(async (tagId: string) => {
+    if (!selectedResourceData?.id) return;
+    try {
+      await removeResourceTag(selectedResourceData.id, tagId);
+      setSelectedVideoTags(prev => prev.filter(t => t.tag?.id !== tagId));
+    } catch (err) {
+      console.error('Failed to remove tag:', err);
+    }
+  }, [selectedResourceData]);
+
+  const handleCreateTag = useCallback(async (name: string, color: string) => {
+    try {
+      const tag = await createTag({ name, color, type: 'user' });
+      setAllTags(prev => [...prev, tag]);
+      return tag;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const handlePanelRating = async (star: number) => {
     if (!selectedVideo || !selectedResourceData) return;
@@ -724,16 +763,27 @@ export const DownloadsView: React.FC = () => {
               )}
             </div>
 
-            {/* Tags - user tags from resource_tags */}
-            {selectedVideoTags.length > 0 && (
-              <div className="px-4 mt-4">
+            {/* Tags - editable via UnifiedTagPicker */}
+            {selectedResourceData && (
+              <UnifiedTagPicker
+                assignedTags={selectedVideoTags.map(item => item.tag).filter((t): t is import('../types').Tag => !!t)}
+                allTags={allTags}
+                onAdd={handleAddTag}
+                onRemove={handleRemoveTag}
+                onCreate={handleCreateTag}
+              />
+            )}
+
+            {/* Platform hashtags (read-only) */}
+            {selectedVideo?.hashtags && (
+              <div className="px-4 mt-3">
                 <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-                  Tags
+                  Platform Tags
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedVideoTags.map((item) => (
-                    <span key={item.tag.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                      #{item.tag.name}
+                  {selectedVideo.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
+                    <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800/50 text-zinc-500 border border-zinc-700/50">
+                      {ht}
                     </span>
                   ))}
                 </div>
