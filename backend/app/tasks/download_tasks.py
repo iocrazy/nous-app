@@ -979,6 +979,26 @@ def download_unified_task(
                     f"status={status_updates}, paths={list(path_updates.keys())}"
                 )
                 run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
+
+                # Fallback: also ensure parsed_media status is in sync
+                # (mark_media_as_downloaded inside DownloaderService may have silently failed)
+                pm_status_updates = {
+                    k: v for k, v in status_updates.items()
+                    if v == "completed"
+                }
+                if pm_status_updates:
+                    _mr2 = _MR2()
+                    current_pm = fresh_media or run_async(_mr2.get_by_platform_id(platform_id))
+                    if current_pm:
+                        needs_update = {
+                            k: v for k, v in pm_status_updates.items()
+                            if current_pm.get(k) != "completed"
+                        }
+                        if needs_update:
+                            logger.info(
+                                f"[Download/DB] parsed_media fallback update for {platform_id}: {needs_update}"
+                            )
+                            run_async(_mr2.update(platform_id, needs_update))
             except Exception as e:
                 logger.warning(f"[Download/DB] Failed to update resource status for {platform_id}: {e}")
 
