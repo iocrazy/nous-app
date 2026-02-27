@@ -158,9 +158,6 @@ class UnifiedProgressTracker:
         )
 
         # Directly await Supabase update (throttled at 1s internally by TaskTracker).
-        # Previous create_task() approach was broken: asyncio.run() cancels all
-        # pending tasks when the main coroutine finishes, so progress updates
-        # were silently dropped.
         if self.unified_tracker and self.unified_task_id:
             try:
                 await self.unified_tracker.update_progress(
@@ -168,8 +165,12 @@ class UnifiedProgressTracker:
                     percent,
                     speed=int(self._speed),
                 )
+                logger.info(
+                    f"[ProgressTracker] DB update: task={self.unified_task_id}, "
+                    f"percent={percent}%, speed={int(self._speed)} B/s"
+                )
             except Exception as e:
-                logger.debug(f"[ProgressTracker] Supabase update failed: {e}")
+                logger.warning(f"[ProgressTracker] Supabase update FAILED: {e}")
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
