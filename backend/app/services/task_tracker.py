@@ -96,8 +96,10 @@ class TaskTracker:
         now = time.time()
         last = self._last_progress.get(task_id, 0)
         if now - last < self.THROTTLE_INTERVAL:
+            logger.debug(f"[TaskTracker] Throttled: {task_id} ({now - last:.2f}s < {self.THROTTLE_INTERVAL}s)")
             return
         self._last_progress[task_id] = now
+        logger.info(f"[TaskTracker] Writing progress: task={task_id}, progress={progress}%, speed={speed}")
 
         client = await self._get_client()
         updates: dict = {
