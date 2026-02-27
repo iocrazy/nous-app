@@ -16,7 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLibrary } from '../hooks/useLibrary';
 import { useParser } from '../hooks/useParser';
 import { useTeamContext } from '../contexts/TeamContext';
-import { getQueueDisplay, getStorageDisplay } from '../services/systemService';
+import { getStorageDisplay } from '../services/systemService';
 import {
   useTaskManager,
   formatSpeed as tmFormatSpeed,
@@ -306,7 +306,7 @@ export function ParserPage() {
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                 systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
                   ? 'bg-red-900/30 text-red-400' :
-                systemStatus?.queue.active ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
+                activeTasks.length > 0 ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
               }`}>
                 <ListVideo size={16} className="md:hidden" />
                 <ListVideo size={20} className="hidden md:block" />
@@ -315,9 +315,11 @@ export function ParserPage() {
               <p className={`text-xs md:text-sm font-mono ${
                 systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
                   ? 'text-red-400' :
-                systemStatus?.queue.active ? 'text-indigo-400' : 'text-green-400'
+                activeTasks.length > 0 ? 'text-indigo-400' : 'text-green-400'
               }`}>
-                {systemStatus ? getQueueDisplay(systemStatus.queue) : '...'}
+                {systemStatus?.queue.status === 'offline' ? 'Offline' :
+                 systemStatus?.queue.status === 'outdated' ? 'Outdated' :
+                 activeTasks.length > 0 ? `${activeTasks.length} Active` : 'Idle'}
               </p>
               {systemStatus?.queue.status === 'outdated' && (
                 <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Restart worker</p>
@@ -325,9 +327,6 @@ export function ParserPage() {
               {systemStatus?.queue.status === 'offline' && (
                 <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Start worker</p>
               )}
-              {systemStatus?.queue.pending ? (
-                <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">{systemStatus.queue.pending} pending</p>
-              ) : null}
               <div className="mt-1 text-zinc-500">
                 {showActiveTasks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
