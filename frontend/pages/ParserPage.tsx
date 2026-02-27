@@ -3,7 +3,7 @@ import {
   Link as LinkIcon, AlertCircle, Loader2,
   Check, Music, Video as VideoIcon, Image as ImageIcon,
   Layers, Download, CheckCircle2,
-  ListVideo, HardDrive,
+  ListVideo, HardDrive, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Video } from '../types';
@@ -17,6 +17,13 @@ import { useLibrary } from '../hooks/useLibrary';
 import { useParser } from '../hooks/useParser';
 import { useTeamContext } from '../contexts/TeamContext';
 import { getQueueDisplay, getStorageDisplay } from '../services/systemService';
+import {
+  useTaskManager,
+  formatSpeed as tmFormatSpeed,
+  formatFileSize as tmFormatFileSize,
+  taskTypeLabel,
+  taskTypeIcon,
+} from '../contexts/TaskManagerContext';
 
 export function ParserPage() {
   const { t } = useTranslation();
@@ -24,6 +31,8 @@ export function ParserPage() {
   const { selectedTeamId } = useTeamContext();
 
   const [currentResult, setCurrentResult] = useState<Video | null>(null);
+  const [showActiveTasks, setShowActiveTasks] = useState(false);
+  const { activeTasks, cancelTask } = useTaskManager();
 
   const {
     library, setLibrary, sharedVideoIds,
@@ -283,11 +292,17 @@ export function ParserPage() {
       )}
 
       {!currentResult && batchResults.length === 0 && !isParsing && taskProgress === 0 && (
+        <>
         <div className="grid grid-cols-3 gap-3 mt-8">
-           <div className={`p-3 md:p-5 rounded-xl bg-zinc-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 ${
-              systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
-                ? 'border-red-800/60' : 'border-zinc-800/50 hover:border-zinc-700'
-           }`}>
+           <button
+              onClick={() => setShowActiveTasks(prev => !prev)}
+              className={`p-3 md:p-5 rounded-xl bg-zinc-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 cursor-pointer ${
+                showActiveTasks
+                  ? 'border-indigo-500/60 ring-1 ring-indigo-500/20' :
+                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                  ? 'border-red-800/60' : 'border-zinc-800/50 hover:border-zinc-700'
+              }`}
+           >
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                 systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
                   ? 'bg-red-900/30 text-red-400' :
@@ -313,7 +328,10 @@ export function ParserPage() {
               {systemStatus?.queue.pending ? (
                 <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">{systemStatus.queue.pending} pending</p>
               ) : null}
-           </div>
+              <div className="mt-1 text-zinc-500">
+                {showActiveTasks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </div>
+           </button>
            <ParseModeCard />
            <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
@@ -337,6 +355,68 @@ export function ParserPage() {
               ) : null}
            </div>
         </div>
+
+        {/* Active Tasks Panel — shown when Worker card is clicked */}
+        {showActiveTasks && (
+          <div className="mt-3 bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden animate-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+              <span className="text-sm font-semibold text-zinc-200">Active Tasks</span>
+              <span className="text-xs text-zinc-500">{activeTasks.length} running</span>
+            </div>
+            {activeTasks.length > 0 ? (
+              <div className="max-h-60 overflow-y-auto divide-y divide-zinc-800/50">
+                {activeTasks.map((task) => (
+                  <div key={task.id} className="px-4 py-3 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-indigo-500/20 text-indigo-400">
+                      {taskTypeIcon(task.task_type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-300 truncate max-w-[240px]">{task.title}</span>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {task.progress > 0 && (
+                            <span className="text-[10px] text-zinc-500">{task.progress}%</span>
+                          )}
+                          {task.speed != null && task.speed > 0 && (
+                            <span className="text-[10px] text-zinc-600">{tmFormatSpeed(task.speed)}</span>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); cancelTask(task.id); }}
+                            className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
+                            title="Cancel"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-zinc-600">{taskTypeLabel(task.task_type)}</span>
+                        {task.subtitle && (
+                          <span className="text-[10px] text-zinc-600 truncate">{task.subtitle}</span>
+                        )}
+                        {task.total_bytes != null && task.total_bytes > 0 && (
+                          <span className="text-[10px] text-zinc-600">{tmFormatFileSize(task.total_bytes)}</span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300 bg-indigo-500"
+                          style={{ width: `${Math.max(task.progress, task.status === 'processing' ? 2 : 0)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
+                <CheckCircle2 size={20} className="mb-1.5 text-zinc-600" />
+                <span className="text-xs">No active tasks</span>
+              </div>
+            )}
+          </div>
+        )}
+        </>
       )}
 
     </div>

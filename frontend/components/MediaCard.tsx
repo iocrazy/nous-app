@@ -771,9 +771,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {/* Tags - user tags from resource_tags, fallback to platform hashtags */}
+          {/* Tags - user tags from resource_tags */}
           <div className="mb-4">
-            {resourceTags.length > 0 ? (
+            {resourceTags.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {resourceTags.map((item) => (
                   <span key={item.tag.id} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(item.tag.name)}`}>
@@ -782,16 +782,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   </span>
                 ))}
               </div>
-            ) : data.hashtags ? (
-              <div className="flex flex-wrap gap-2">
-                {data.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
-                  <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(ht.slice(1))}`}>
-                    <Tag size={10} className="opacity-70" />
-                    {ht.slice(1)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            )}
           </div>
 
           {/* AI Status */}

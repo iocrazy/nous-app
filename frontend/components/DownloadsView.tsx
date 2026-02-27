@@ -724,25 +724,18 @@ export const DownloadsView: React.FC = () => {
               )}
             </div>
 
-            {/* Tags - user tags from resource_tags, fallback to platform hashtags */}
-            {(selectedVideoTags.length > 0 || selectedVideo?.hashtags) && (
+            {/* Tags - user tags from resource_tags */}
+            {selectedVideoTags.length > 0 && (
               <div className="px-4 mt-4">
                 <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
                   Tags
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedVideoTags.length > 0
-                    ? selectedVideoTags.map((item) => (
-                        <span key={item.tag.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                          #{item.tag.name}
-                        </span>
-                      ))
-                    : selectedVideo?.hashtags?.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                          {ht}
-                        </span>
-                      ))
-                  }
+                  {selectedVideoTags.map((item) => (
+                    <span key={item.tag.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                      #{item.tag.name}
+                    </span>
+                  ))}
                 </div>
               </div>
             )}
