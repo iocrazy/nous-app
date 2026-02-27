@@ -119,6 +119,19 @@ class UnifiedProgressTracker:
         self._last_downloaded = 0
         self._last_time = 0
         self._speed = 0.0
+        # Stage-based progress mapping: maps raw download % to overall task %
+        self._stage_offset = 0    # Start percentage for current stage
+        self._stage_weight = 100  # Weight of current stage (percentage points)
+
+    def set_stage(self, offset: int, weight: int):
+        """Set stage boundaries for overall progress calculation.
+
+        Args:
+            offset: Start percentage for current stage (0-95)
+            weight: Weight of current stage in percentage points
+        """
+        self._stage_offset = offset
+        self._stage_weight = weight
 
     async def update(self, downloaded: int, total: int):
         """Update download progress.
@@ -142,12 +155,12 @@ class UnifiedProgressTracker:
         self._last_downloaded = downloaded
         self._last_time = now
 
-        percent = int((downloaded / total) * 100) if total > 0 else 0
+        raw_percent = int((downloaded / total) * 100) if total > 0 else 0
         speed_str = self._format_speed(self._speed)
 
-        # Write to Redis for real-time frontend polling
+        # Write raw progress to Redis for legacy polling
         progress_data = {
-            "percent": percent,
+            "percent": raw_percent,
             "downloaded": downloaded,
             "total": total,
             "speed": speed_str,
@@ -157,17 +170,21 @@ class UnifiedProgressTracker:
             f"download_progress:{self.task_id}", 3600, json.dumps(progress_data)
         )
 
+        # Map raw download percent to overall task progress using stage boundaries
+        overall_percent = self._stage_offset + int(raw_percent * self._stage_weight / 100)
+        overall_percent = min(max(overall_percent, 0), 99)  # Reserve 100 for explicit completion
+
         # Directly await Supabase update (throttled at 1s internally by TaskTracker).
         if self.unified_tracker and self.unified_task_id:
             try:
                 await self.unified_tracker.update_progress(
                     self.unified_task_id,
-                    percent,
+                    overall_percent,
                     speed=int(self._speed),
                 )
                 logger.info(
                     f"[ProgressTracker] DB update: task={self.unified_task_id}, "
-                    f"percent={percent}%, speed={int(self._speed)} B/s"
+                    f"raw={raw_percent}%, overall={overall_percent}%, speed={int(self._speed)} B/s"
                 )
             except Exception as e:
                 logger.warning(f"[ProgressTracker] Supabase update FAILED: {e}")
@@ -208,6 +225,60 @@ class UnifiedProgressTracker:
         self.redis.setex(
             f"download_progress:{self.task_id}", 300, json.dumps(progress_data)
         )
+
+
+# ─── Stage-based progress helper ──────────────────────────────────────
+
+
+def _force_progress(tracker: UnifiedProgressTracker, progress: int, subtitle: str = None):
+    """Force a progress update to Supabase, bypassing the TaskTracker throttle.
+
+    Used at download stage boundaries (before/after video, music, cover downloads)
+    to ensure the user sees meaningful progress even when fine-grained streaming
+    progress isn't available (e.g. music/cover downloads, or content-length=0).
+    """
+    if tracker.unified_tracker and tracker.unified_task_id:
+        try:
+            # Reset throttle so this write goes through immediately
+            tracker.unified_tracker._last_progress.pop(tracker.unified_task_id, None)
+            run_async(tracker.unified_tracker.update_progress(
+                tracker.unified_task_id,
+                min(max(progress, 0), 99),  # Reserve 100 for explicit completion
+                speed=int(tracker._speed) if tracker._speed > 0 else None,
+                subtitle=subtitle,
+            ))
+            logger.debug(f"[Download/Progress] Stage update: {progress}% subtitle={subtitle}")
+        except Exception as e:
+            logger.warning(f"[Download/Progress] Stage update failed: {e}")
+
+
+def _calc_stage_ranges(download_video: bool, download_music: bool, download_cover: bool) -> dict:
+    """Calculate progress ranges for each download stage.
+
+    Returns dict mapping stage name to (offset, weight) tuple.
+    Ranges span 3% to 95% (2% reserved for init, 5% for finalization).
+    """
+    raw_weights = {'video': 70, 'music': 15, 'cover': 15}
+    parts = []
+    if download_video:
+        parts.append('video')
+    if download_music:
+        parts.append('music')
+    if download_cover:
+        parts.append('cover')
+
+    if not parts:
+        return {}
+
+    total_w = sum(raw_weights[p] for p in parts)
+    ranges = {}
+    offset = 3
+    for p in parts:
+        weight = int(raw_weights[p] * 92 / total_w)  # Scale to 92 points (3% to 95%)
+        ranges[p] = (offset, weight)
+        offset += weight
+
+    return ranges
 
 
 # ─── URL availability helpers ─────────────────────────────────────────
@@ -431,6 +502,9 @@ def _do_douyin_download(
     """Douyin download strategy: reads URLs from DB, downloads via httpx."""
     results = {"video": None, "music": None, "cover": None}
 
+    # Calculate stage progress ranges
+    stages = _calc_stage_ranges(download_video, download_music, download_cover)
+
     # Ensure download URLs are available (re-parse if missing)
     from app.repositories.media_repository import MediaRepository as _MR_urls
     media = run_async(_MR_urls().get_by_platform_id(platform_id))
@@ -454,6 +528,12 @@ def _do_douyin_download(
     # ── Pre-download: validate URL accessibility, refresh if expired ──
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
+            # Set stage boundaries for fine-grained video progress
+            if 'video' in stages:
+                offset, weight = stages['video']
+                tracker.set_stage(offset, weight)
+                _force_progress(tracker, offset, subtitle="Downloading video...")
+
             media, video_ok, reason = _validate_and_refresh_urls(
                 platform_id, media, "video_download_urls", "video"
             )
@@ -539,7 +619,18 @@ def _do_douyin_download(
                         f"[Download/Exec] video: no original_url available for yt-dlp fallback: {platform_id}"
                     )
 
+            # Mark video stage complete
+            if 'video' in stages:
+                video_end = stages['video'][0] + stages['video'][1]
+                _force_progress(tracker, video_end)
+
         if download_music:
+            # Mark music stage start
+            if 'music' in stages:
+                offset, weight = stages['music']
+                tracker.set_stage(offset, weight)
+                _force_progress(tracker, offset, subtitle="Downloading audio...")
+
             media, music_ok, reason = _validate_and_refresh_urls(
                 platform_id, media, "music_download_urls", "music"
             )
@@ -565,8 +656,19 @@ def _do_douyin_download(
             else:
                 logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
+            # Mark music stage complete
+            if 'music' in stages:
+                music_end = stages['music'][0] + stages['music'][1]
+                _force_progress(tracker, music_end)
+
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
+            # Mark image stage start
+            if 'video' in stages:
+                offset, weight = stages['video']
+                tracker.set_stage(offset, weight)
+                _force_progress(tracker, offset, subtitle="Downloading images...")
+
             media, img_ok, reason = _validate_and_refresh_urls(
                 platform_id, media, "image_download_urls", "image"
             )
@@ -591,7 +693,18 @@ def _do_douyin_download(
                 error_msg = getattr(video_result, "error", None) or "Image download failed"
                 logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
 
+            # Mark image stage complete
+            if 'video' in stages:
+                video_end = stages['video'][0] + stages['video'][1]
+                _force_progress(tracker, video_end)
+
         if download_music:
+            # Mark music stage start
+            if 'music' in stages:
+                offset, weight = stages['music']
+                tracker.set_stage(offset, weight)
+                _force_progress(tracker, offset, subtitle="Downloading audio...")
+
             logger.info(f"[Download/Exec] music: downloading {platform_id}...")
             result = run_async(
                 DownloaderService.download_music_by_platform_id(
@@ -605,7 +718,18 @@ def _do_douyin_download(
             )
             logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
 
+            # Mark music stage complete
+            if 'music' in stages:
+                music_end = stages['music'][0] + stages['music'][1]
+                _force_progress(tracker, music_end)
+
     if download_cover:
+        # Mark cover stage start
+        if 'cover' in stages:
+            offset, weight = stages['cover']
+            tracker.set_stage(offset, weight)
+            _force_progress(tracker, offset, subtitle="Downloading cover...")
+
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         result = run_async(
             DownloaderService.download_cover_by_platform_id(
@@ -618,6 +742,11 @@ def _do_douyin_download(
             else "unknown"
         )
         logger.info(f"[Download/Exec] cover: {results['cover']} for {platform_id}")
+
+        # Mark cover stage complete
+        if 'cover' in stages:
+            cover_end = stages['cover'][0] + stages['cover'][1]
+            _force_progress(tracker, cover_end)
 
     return results
 
@@ -638,6 +767,9 @@ def _do_ytdlp_download(
 
     results = {"video": None, "music": None, "cover": None}
 
+    # Calculate stage progress ranges
+    stages = _calc_stage_ranges(download_video, download_music, download_cover)
+
     detected_platform, _ = URLRouter.detect_platform(url)
     repo = MediaRepository()
     media = run_async(repo.get_by_platform_id(platform_id))
@@ -647,6 +779,12 @@ def _do_ytdlp_download(
     )
 
     if download_video:
+        # Mark video stage start
+        if 'video' in stages:
+            offset, weight = stages['video']
+            tracker.set_stage(offset, weight)
+            _force_progress(tracker, offset, subtitle="Downloading video...")
+
         logger.info(f"[Download/Exec] video: downloading via yt-dlp {platform_id}...")
 
         async def on_progress(downloaded: int, total: int, speed: str):
@@ -680,7 +818,18 @@ def _do_ytdlp_download(
             results["video"] = DownloadStatus.FAILED.value
             logger.warning(f"[Download/Exec] video failed via yt-dlp for {platform_id}: no output file")
 
+        # Mark video stage complete
+        if 'video' in stages:
+            video_end = stages['video'][0] + stages['video'][1]
+            _force_progress(tracker, video_end)
+
     if download_music:
+        # Mark music stage start
+        if 'music' in stages:
+            offset, weight = stages['music']
+            tracker.set_stage(offset, weight)
+            _force_progress(tracker, offset, subtitle="Downloading audio...")
+
         logger.info(f"[Download/Exec] music: extracting via yt-dlp {platform_id}...")
         result = run_async(
             YtdlpService.download_audio(url, str(storage_dir), platform_id)
@@ -700,7 +849,18 @@ def _do_ytdlp_download(
             results["music"] = DownloadStatus.FAILED.value
             logger.warning(f"[Download/Exec] music failed via yt-dlp for {platform_id}")
 
+        # Mark music stage complete
+        if 'music' in stages:
+            music_end = stages['music'][0] + stages['music'][1]
+            _force_progress(tracker, music_end)
+
     if download_cover:
+        # Mark cover stage start
+        if 'cover' in stages:
+            offset, weight = stages['cover']
+            tracker.set_stage(offset, weight)
+            _force_progress(tracker, offset, subtitle="Downloading cover...")
+
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         cover_result = run_async(
             DownloaderService.download_cover_by_platform_id(
@@ -714,6 +874,11 @@ def _do_ytdlp_download(
             error = cover_result.error if cover_result else "Unknown error"
             logger.warning(f"[Download/Exec] cover failed for {platform_id}: {error}")
             results["cover"] = DownloadStatus.FAILED.value
+
+        # Mark cover stage complete
+        if 'cover' in stages:
+            cover_end = stages['cover'][0] + stages['cover'][1]
+            _force_progress(tracker, cover_end)
 
     return results
 
