@@ -19,6 +19,8 @@ import {
   triggerSummary, getSummary,
   triggerVisualAnalysis,
 } from '../services/aiService';
+import { fetchResourceTags } from '../services/resourceService';
+import { getSupabaseClient } from '../supabaseClient';
 
 interface MediaCardProps {
   data: Video;
@@ -128,6 +130,29 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const [analysisText, setAnalysisText] = useState<string | null>(data.ai_analyze_text || null);
   const [extractText, setExtractText] = useState<string | null>(data.ai_extract_text || null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  // Resource tags (fetched from resource_tags junction table)
+  const [resourceTags, setResourceTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
+  useEffect(() => {
+    if (!data.id) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+      const { data: resource } = await supabase
+        .from('resources')
+        .select('id')
+        .eq('media_id', data.id)
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || !resource) return;
+      try {
+        const tags = await fetchResourceTags(String(resource.id));
+        if (!cancelled) setResourceTags(tags);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [data.id]);
 
   // Track fetch submissions (optimistic UI: hide menu items after submit)
   const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false, music: false });
@@ -746,18 +771,27 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {/* Tags - Read-only display (tag editing is in ResourcesView) */}
+          {/* Tags - user tags from resource_tags, fallback to platform hashtags */}
           <div className="mb-4">
-            {data.tags && data.tags.length > 0 && (
+            {resourceTags.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {data.tags.map((tag, i) => (
-                  <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(tag)}`}>
+                {resourceTags.map((item) => (
+                  <span key={item.tag.id} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(item.tag.name)}`}>
                     <Tag size={10} className="opacity-70" />
-                    {tag}
+                    {item.tag.name}
                   </span>
                 ))}
               </div>
-            )}
+            ) : data.hashtags ? (
+              <div className="flex flex-wrap gap-2">
+                {data.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
+                  <span key={i} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(ht.slice(1))}`}>
+                    <Tag size={10} className="opacity-70" />
+                    {ht.slice(1)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {/* AI Status */}
