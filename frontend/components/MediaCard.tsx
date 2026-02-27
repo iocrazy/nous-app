@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Hls from 'hls.js';
 import { Video, DownloadStatus, Collection } from '../types';
 import {
@@ -19,8 +19,10 @@ import {
   triggerSummary, getSummary,
   triggerVisualAnalysis,
 } from '../services/aiService';
-import { fetchResourceTags } from '../services/resourceService';
+import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
+import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getSupabaseClient } from '../supabaseClient';
+import { UnifiedTagPicker } from './UnifiedTagPicker';
 
 interface MediaCardProps {
   data: Video;
@@ -133,6 +135,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // Resource tags (fetched from resource_tags junction table)
   const [resourceTags, setResourceTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
+  const [resourceId, setResourceId] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<import('../types').Tag[]>([]);
+
+  useEffect(() => {
+    fetchAllTags().then(setAllTags).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!data.id) return;
     let cancelled = false;
@@ -146,13 +155,46 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         .limit(1)
         .maybeSingle();
       if (cancelled || !resource) return;
+      const resId = String(resource.id);
+      if (!cancelled) setResourceId(resId);
       try {
-        const tags = await fetchResourceTags(String(resource.id));
+        const tags = await fetchResourceTags(resId);
         if (!cancelled) setResourceTags(tags);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
   }, [data.id]);
+
+  const handleAddTag = useCallback(async (tagId: string) => {
+    if (!resourceId) return;
+    try {
+      await addResourceTag(resourceId, tagId);
+      const updated = await fetchResourceTags(resourceId);
+      setResourceTags(updated);
+    } catch (err) {
+      console.error('Failed to add tag:', err);
+    }
+  }, [resourceId]);
+
+  const handleRemoveTag = useCallback(async (tagId: string) => {
+    if (!resourceId) return;
+    try {
+      await removeResourceTag(resourceId, tagId);
+      setResourceTags(prev => prev.filter(t => t.tag?.id !== tagId));
+    } catch (err) {
+      console.error('Failed to remove tag:', err);
+    }
+  }, [resourceId]);
+
+  const handleCreateTag = useCallback(async (name: string, color: string) => {
+    try {
+      const tag = await createTag({ name, color, type: 'user' });
+      setAllTags(prev => [...prev, tag]);
+      return tag;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Track fetch submissions (optimistic UI: hide menu items after submit)
   const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false, music: false });
@@ -771,19 +813,34 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {/* Tags - user tags from resource_tags */}
-          <div className="mb-4">
-            {resourceTags.length > 0 && (
+          {/* Tags - editable via UnifiedTagPicker */}
+          {resourceId && (
+            <div className="mb-4 -mx-4">
+              <UnifiedTagPicker
+                assignedTags={resourceTags.map(item => item.tag).filter((t): t is import('../types').Tag => !!t)}
+                allTags={allTags}
+                onAdd={handleAddTag}
+                onRemove={handleRemoveTag}
+                onCreate={handleCreateTag}
+              />
+            </div>
+          )}
+
+          {/* Platform hashtags (read-only, for analytics) */}
+          {data.hashtags && (
+            <div className="mb-4">
+              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                Platform Tags
+              </h4>
               <div className="flex flex-wrap gap-2">
-                {resourceTags.map((item) => (
-                  <span key={item.tag.id} className={`px-2.5 py-1 rounded-full border flex items-center gap-1.5 text-xs font-medium ${getTagStyle(item.tag.name)}`}>
-                    <Tag size={10} className="opacity-70" />
-                    {item.tag.name}
+                {data.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
+                  <span key={i} className="px-2.5 py-1 rounded-full border text-xs font-medium bg-zinc-800/30 text-zinc-500 border-zinc-700/50">
+                    {ht}
                   </span>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* AI Status */}
           <div className="mb-4 flex items-center justify-end">
