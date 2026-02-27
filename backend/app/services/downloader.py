@@ -244,8 +244,19 @@ class DownloaderService:
                             return False
 
                         total = int(response.headers.get("content-length", 0))
+                        logger.info(
+                            f"[Download/File] Stream started: content-length={total}, "
+                            f"HEAD expected_size={expected_size}, "
+                            f"transfer-encoding={response.headers.get('transfer-encoding', 'none')}"
+                        )
                         if expected_size == 0:
                             expected_size = total
+                        if total == 0 and expected_size > 0:
+                            total = expected_size  # Use HEAD's content-length as fallback
+                            logger.info(
+                                f"[Download/File] Streaming content-length=0, "
+                                f"using HEAD expected_size={expected_size} for progress"
+                            )
                         downloaded = 0
 
                         async with aiofiles.open(file_path, mode="wb") as f:

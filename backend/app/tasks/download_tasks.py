@@ -155,7 +155,14 @@ class UnifiedProgressTracker:
         self._last_downloaded = downloaded
         self._last_time = now
 
-        raw_percent = int((downloaded / total) * 100) if total > 0 else 0
+        if total > 0:
+            raw_percent = int((downloaded / total) * 100)
+        else:
+            # Content-Length unknown: simulate progress using downloaded bytes
+            # Ramp up quickly then slow down (asymptotic approach to 90%)
+            # e.g. 1MB→18%, 5MB→55%, 10MB→72%, 20MB→84%, 50MB→90%
+            mb = downloaded / (1024 * 1024)
+            raw_percent = min(int(90 * mb / (mb + 5)), 90) if mb > 0 else 0
         speed_str = self._format_speed(self._speed)
 
         # Write raw progress to Redis for legacy polling
