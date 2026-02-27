@@ -86,6 +86,9 @@ export const DownloadsView: React.FC = () => {
   const { selectedTeamId } = useTeamContext();
   const { addToast } = useToast();
 
+  // ─── Tag search map (media_id → space-joined tag names) ───
+  const [tagSearchMap, setTagSearchMap] = useState<Record<string, string>>({});
+
   // ─── Library data ──────────────────────────────────
   const {
     library,
@@ -106,7 +109,7 @@ export const DownloadsView: React.FC = () => {
     setLibrary,
     loadLibraryData,
     handleUpdateLibraryItem,
-  } = useLibrary({ isAuthenticated: true, selectedTeamId: null });
+  } = useLibrary({ isAuthenticated: true, selectedTeamId: null, extraSearchMap: tagSearchMap });
 
   // ─── Resource data mapping (notes/rating/id from resources table) ───
   const [resourceDataMap, setResourceDataMap] = useState<Record<string, { id: string; notes: string | null; rating: number }>>({});
@@ -147,6 +150,37 @@ export const DownloadsView: React.FC = () => {
   useEffect(() => {
     fetchAllTags().then(setAllTags).catch(() => {});
   }, []);
+
+  // ─── Bulk load tag names for search ────────────────
+  useEffect(() => {
+    const resourceIds = Object.values(resourceDataMap).map(r => r.id);
+    if (resourceIds.length === 0) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    supabase
+      .from('resource_tags')
+      .select('resource_id, tag:tags(name)')
+      .in('resource_id', resourceIds)
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        const resourceToMediaId: Record<string, string> = {};
+        for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
+          resourceToMediaId[rd.id] = mediaId;
+        }
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          const mediaId = resourceToMediaId[String(row.resource_id)];
+          if (!mediaId) continue;
+          const tag = row.tag as { name: string } | { name: string }[] | null;
+          const tagName = Array.isArray(tag) ? tag[0]?.name : tag?.name;
+          if (tagName) {
+            map[mediaId] = map[mediaId] ? `${map[mediaId]} ${tagName}` : tagName;
+          }
+        }
+        setTagSearchMap(map);
+      });
+  }, [resourceDataMap]);
 
   // ─── Search handlers ──────────────────────────────
   const [isAISearching, setIsAISearching] = useState(false);

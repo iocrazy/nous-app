@@ -11,9 +11,11 @@ interface UseLibraryParams {
   isAuthenticated: boolean;
   selectedTeamId: string | null;
   onVideoRealtimeUpdate?: (video: Video) => void;
+  /** Extra searchable text per item (keyed by item.id), e.g. tag names */
+  extraSearchMap?: Record<string, string>;
 }
 
-export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpdate }: UseLibraryParams) {
+export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpdate, extraSearchMap }: UseLibraryParams) {
   // Core library state
   const [library, setLibrary] = useState<Video[]>([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
@@ -433,7 +435,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           const author = ((item as any).author_nickname || '').toLowerCase();
           const desc = (item.description || '').toLowerCase();
           const tags = ((item as any).video_tag || []).join(' ').toLowerCase();
-          return title.includes(query) || author.includes(query) || desc.includes(query) || tags.includes(query);
+          const extra = (extraSearchMap?.[item.id] || '').toLowerCase();
+          return title.includes(query) || author.includes(query) || desc.includes(query) || tags.includes(query) || extra.includes(query);
         }
         return true;
       })
@@ -442,7 +445,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
         return bTime - aTime;
       });
-  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds, searchQuery]);
+  }, [library, isSearchActive, searchResults, activeCollectionId, collectionVideoIds, isTeamLibraryActive, teamLibraryVideoIds, searchQuery, extraSearchMap]);
 
   return {
     // Core state
