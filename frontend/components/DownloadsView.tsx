@@ -41,7 +41,7 @@ import { ToolbarSearch } from './ToolbarSearch';
 import { getCoverUrl, getVideoUrl, formatResolution } from '../utils/awemeType';
 import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
 import { useToast } from './Toast';
-import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
+import { trashResourceByPlatformId, updateResource, fetchResourceTags } from '../services/resourceService';
 import { getDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
@@ -190,6 +190,7 @@ export const DownloadsView: React.FC = () => {
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [selectedVideoTags, setSelectedVideoTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
 
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
@@ -350,6 +351,17 @@ export const DownloadsView: React.FC = () => {
     setPanelNotes(selectedResourceData?.notes || '');
     setPanelRating(selectedResourceData?.rating || 0);
   }, [selectedVideo?.platform_id, selectedResourceData]);
+
+  // ─── Fetch tags for selected video ──────────────────
+  useEffect(() => {
+    if (!selectedResourceData?.id) {
+      setSelectedVideoTags([]);
+      return;
+    }
+    fetchResourceTags(selectedResourceData.id)
+      .then(setSelectedVideoTags)
+      .catch(() => setSelectedVideoTags([]));
+  }, [selectedResourceData?.id]);
 
   const handlePanelRating = async (star: number) => {
     if (!selectedVideo || !selectedResourceData) return;
@@ -712,18 +724,25 @@ export const DownloadsView: React.FC = () => {
               )}
             </div>
 
-            {/* Tags */}
-            {selectedVideo.tags && selectedVideo.tags.length > 0 && (
+            {/* Tags - user tags from resource_tags, fallback to platform hashtags */}
+            {(selectedVideoTags.length > 0 || selectedVideo?.hashtags) && (
               <div className="px-4 mt-4">
                 <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
                   Tags
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedVideo.tags.map((tag, i) => (
-                    <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                      #{tag}
-                    </span>
-                  ))}
+                  {selectedVideoTags.length > 0
+                    ? selectedVideoTags.map((item) => (
+                        <span key={item.tag.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                          #{item.tag.name}
+                        </span>
+                      ))
+                    : selectedVideo?.hashtags?.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                          {ht}
+                        </span>
+                      ))
+                  }
                 </div>
               </div>
             )}

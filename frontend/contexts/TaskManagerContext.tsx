@@ -137,7 +137,10 @@ async function fetchActiveTasks(): Promise<UnifiedTask[]> {
   const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks/active`, {
     headers: await getAuthHeaders(),
   });
-  if (!resp.ok) return [];
+  if (!resp.ok) {
+    console.error(`[TaskManager] fetchActiveTasks failed: ${resp.status} ${resp.statusText}`);
+    return [];
+  }
   const json = await resp.json();
   return json.data || [];
 }
@@ -146,8 +149,12 @@ async function fetchAllTasks(limit = 200): Promise<UnifiedTask[]> {
   const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks?limit=${limit}`, {
     headers: await getAuthHeaders(),
   });
-  if (!resp.ok) return [];
+  if (!resp.ok) {
+    console.error(`[TaskManager] fetchAllTasks failed: ${resp.status} ${resp.statusText}`);
+    return [];
+  }
   const json = await resp.json();
+  console.debug(`[TaskManager] fetchAllTasks returned ${(json.data || []).length} tasks`);
   return json.data || [];
 }
 
@@ -206,10 +213,18 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   // Supabase Realtime subscription
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      console.warn('[TaskManager] No currentUserId, skipping task fetch & subscription');
+      return;
+    }
 
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) {
+      console.warn('[TaskManager] No Supabase client, skipping subscription');
+      return;
+    }
+
+    console.debug(`[TaskManager] Initializing for user ${currentUserId.slice(0, 8)}...`);
 
     // Fetch initial data
     refreshTasks();
@@ -241,7 +256,8 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }, (payload) => {
         dispatch({ type: 'DELETE', id: (payload.old as { id: string }).id });
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.debug(`[TaskManager] Realtime status: ${status}`, err || '');
         dispatch({ type: 'SET_CONNECTED', connected: status === 'SUBSCRIBED' });
         if (status === 'SUBSCRIBED') {
           // Re-fetch on reconnect to fill any gaps
