@@ -98,6 +98,7 @@ import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
 import { downloadWithAuth } from '../utils/download';
+import { getSupabaseClient } from '../supabaseClient';
 import { getResourceFileUrl } from '../services/resourceService';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
@@ -215,6 +216,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // Tags
   const [allTags, setAllTags] = useState<Tag[]>([]);
+  // Bulk tag names for search: resource_id → space-joined tag names
+  const [resourceTagNamesMap, setResourceTagNamesMap] = useState<Record<string, string>>({});
 
   // Libraries (team mode)
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -496,6 +499,39 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     loadAll();
     return () => { cancelled = true; };
   }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
+
+  // ─── Bulk load tag names for search ──────────────────
+  useEffect(() => {
+    const allItems = [...resources, ...downloadedResources];
+    const resourceIds = allItems
+      .map((item) => item.resource?.id)
+      .filter((id): id is string => !!id)
+      .map(String);
+    if (resourceIds.length === 0) {
+      setResourceTagNamesMap({});
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    supabase
+      .from('resource_tags')
+      .select('resource_id, tag:tags(name)')
+      .in('resource_id', resourceIds)
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          const rid = String(row.resource_id);
+          const tag = row.tag as { name: string } | { name: string }[] | null;
+          const tagName = Array.isArray(tag) ? tag[0]?.name : tag?.name;
+          if (tagName) {
+            map[rid] = map[rid] ? `${map[rid]} ${tagName}` : tagName;
+          }
+        }
+        setResourceTagNamesMap(map);
+      });
+  }, [resources, downloadedResources]);
 
   // ─── Load trashed resources ──────────────────────────
 
@@ -1770,7 +1806,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         const filename = (item.resource?.filename || '').toLowerCase();
         const folderName = (item.resource?.folder_name || '').toLowerCase();
         const notes = (item.resource?.notes || '').toLowerCase();
-        return filename.includes(q) || folderName.includes(q) || notes.includes(q);
+        const tagNames = (resourceTagNamesMap[String(item.resource?.id)] || '').toLowerCase();
+        return filename.includes(q) || folderName.includes(q) || notes.includes(q) || tagNames.includes(q);
       });
     }
 
@@ -1783,7 +1820,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
 
     return items;
-  }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds]);
+  }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds, resourceTagNamesMap]);
 
   // Set of resource IDs currently being transcoded (active transcode tasks)
   const transcodingResourceIds = useMemo(() => {
