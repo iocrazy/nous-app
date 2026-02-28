@@ -272,7 +272,12 @@ export function PlayerPage() {
 
   const handleDelete = async (id: string, _deleteFiles: boolean) => {
     try {
-      await trashResourceByPlatformId(id);
+      // Team context: unlink from team only; Personal: trash globally
+      if (teamId) {
+        await trashResourceByPlatformId(id, 'team', teamId);
+      } else {
+        await trashResourceByPlatformId(id);
+      }
     } catch (err) {
       console.error('Failed to trash resource:', err);
     }
