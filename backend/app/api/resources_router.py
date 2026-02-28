@@ -608,10 +608,8 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 async def trash_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
-    scope_type: str = Query("personal", pattern="^(personal|team)$"),
-    scope_id: Optional[str] = Query(None),
 ):
-    """Soft-delete a downloaded video by removing its resource_item reference."""
+    """Move a resource to trash by setting is_trashed=true. Only checks creator permission."""
     try:
         svc = ResourcesService()
         resource = await svc.repo.get_resource_by_platform_id(platform_id)
@@ -619,12 +617,9 @@ async def trash_resource_by_platform_id(
             raise ValueError("No resource found for this platform_id")
 
         resource_id = str(resource["id"])
-        target_scope_id = scope_id or auth.user_id
-        await svc.remove_from_library(
+        await svc.trash_resource(
             resource_id=resource_id,
             user_id=auth.user_id,
-            scope_type=scope_type,
-            scope_id=target_scope_id,
         )
         return {"success": True, "message": "Resource moved to trash"}
     except ValueError as e:
