@@ -272,14 +272,16 @@ export function PlayerPage() {
 
   const handleDelete = async (id: string, _deleteFiles: boolean) => {
     try {
-      // Use team scope if viewing from team context
-      await trashResourceByPlatformId(id, teamId ? 'team' : 'personal', teamId || undefined);
+      // Try personal scope first (default, matches DownloadsView behavior)
+      await trashResourceByPlatformId(id);
     } catch {
-      try {
-        // Fallback to hard delete if resource trash fails
-        await deleteItem(id, false);
-      } catch {
-        // Ignore — still navigate back
+      if (teamId) {
+        try {
+          // Retry with team scope
+          await trashResourceByPlatformId(id, 'team', teamId);
+        } catch {
+          // Ignore — still navigate back
+        }
       }
     }
     handleBack();
