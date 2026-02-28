@@ -9,7 +9,7 @@ import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
-import { trashResourceByPlatformId } from '../services/resourceService';
+import { trashResourceByMediaId } from '../services/resourceService';
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType } from '../services/parserService';
@@ -275,9 +275,9 @@ export function PlayerPage() {
       // from=downloads means personal library → trash globally (is_trashed=true)
       // Otherwise assume team context → only unlink from team
       if (from === 'downloads' || !teamId) {
-        await trashResourceByPlatformId(id);
+        await trashResourceByMediaId(id);
       } else {
-        await trashResourceByPlatformId(id, 'team', teamId);
+        await trashResourceByMediaId(id, 'team', teamId);
       }
     } catch (err) {
       console.error('Failed to trash resource:', err);
@@ -624,7 +624,7 @@ export function PlayerPage() {
                 onClick={async () => {
                   setIsDeleting(true);
                   try {
-                    await handleDelete(video.platform_id, false);
+                    await handleDelete(video.id, false);
                   } finally {
                     setIsDeleting(false);
                     setShowDeleteDialog(false);
