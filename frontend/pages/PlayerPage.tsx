@@ -9,6 +9,7 @@ import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
+import { trashResourceByPlatformId } from '../services/resourceService';
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType } from '../services/parserService';
@@ -269,8 +270,13 @@ export function PlayerPage() {
     setVideo((prev) => (prev ? { ...prev, ...updated } : prev));
   };
 
-  const handleDelete = async (id: string, deleteFiles: boolean) => {
-    await deleteItem(id, deleteFiles);
+  const handleDelete = async (id: string, _deleteFiles: boolean) => {
+    try {
+      await trashResourceByPlatformId(id);
+    } catch {
+      // Fallback to hard delete if resource trash fails (e.g. no resource record)
+      await deleteItem(id, false);
+    }
     handleBack();
   };
 
