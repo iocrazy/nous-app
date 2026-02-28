@@ -624,7 +624,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 )}
             </div>
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.platform_id}</span>
+              <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
               {/* More actions (three-dots) — hidden when inside PlayerPage */}
               {!hidePreview && (
               <div className="relative shrink-0">
@@ -968,7 +968,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             )}
          </div>
 
-          {/* Actions Footer */}
+          {/* Actions Footer — only show when action handlers are provided */}
+          {(onSave || onToggleCollection) && (
           <div className="space-y-3 pt-4 border-t border-zinc-800/50 mt-auto">
              <div className="flex gap-2">
                 {onSave && (
@@ -1033,6 +1034,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                </button>
              )}
           </div>
+          )}
         </div>
       </div>
 
