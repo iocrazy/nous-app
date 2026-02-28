@@ -210,7 +210,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // 判断内容是否已可用（本地已下载 OR CDN URL 已存在 OR 本次已提交 Fetch）
   // 注意：skipped ≠ 已可用（skipped 表示当初跳过，用户可重新获取）
-  const videoDownloaded = fetchSubmitted.video || !!data.download_path
+  // download_path 存在但 status 非 completed 时（如被重置为 pending），不算已下载
+  const videoStatusCompleted = data.video_download_status?.toLowerCase() === 'completed';
+  const videoDownloaded = fetchSubmitted.video
+    || (!!data.download_path && videoStatusCompleted)
     || !!(data.video_download_urls?.[0] && data.video_download_urls[0] !== '#' && isPlayableUrl(data.video_download_urls[0]));
   const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path
     || !!(data.cover_urls?.[0] && data.cover_urls[0] !== '#');
@@ -360,7 +363,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   };
 
   // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)
-  const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
+  // force=true 时跳过已下载检查，强制重新获取
+  const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean; force?: boolean }) => {
     if (!data.platform_id) {
       addToast('No platform ID available for refetch', 'error');
       return;
@@ -371,15 +375,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     const types: string[] = [];
 
     if (options.video) {
-      if (videoDownloaded) alreadyHave.push('Video');
+      if (!options.force && videoDownloaded) alreadyHave.push('Video');
       else types.push('video');
     }
     if (options.cover) {
-      if (coverDownloaded) alreadyHave.push('Cover');
+      if (!options.force && coverDownloaded) alreadyHave.push('Cover');
       else types.push('cover');
     }
     if (options.music) {
-      if (musicDownloaded) alreadyHave.push('Audio');
+      if (!options.force && musicDownloaded) alreadyHave.push('Audio');
       else types.push('music');
     }
 
@@ -682,10 +686,20 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                           </button>
                         )}
                         {(videoDownloaded && coverDownloaded && musicDownloaded) ? (
-                          <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
-                            <Check size={16} className="text-emerald-400" />
-                            All Fetched
-                          </div>
+                          <>
+                            <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
+                              <Check size={16} className="text-emerald-400" />
+                              All Fetched
+                            </div>
+                            <div className="border-t border-zinc-700 my-1" />
+                            <button
+                              onClick={() => onRefetch({ video: true, cover: true, music: true, force: true })}
+                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                            >
+                              <RefreshCw size={16} className="text-orange-400" />
+                              Re-fetch All
+                            </button>
+                          </>
                         ) : (
                           <>
                             <div className="border-t border-zinc-700 my-1" />
