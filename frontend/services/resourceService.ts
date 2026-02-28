@@ -900,6 +900,32 @@ export async function getFolderPreview(
   }));
 }
 
+// Soft-delete a resource by parsed_media.id (used by PlayerPage which has media id directly).
+// - Personal scope (default): sets is_trashed=true on the resource (global trash).
+// - Team scope: only unlinks from the team library, keeps the resource in personal library.
+export async function trashResourceByMediaId(
+  mediaId: string,
+  scopeType?: 'personal' | 'team',
+  scopeId?: string,
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams();
+  if (scopeType) params.set('scope_type', scopeType);
+  if (scopeId) params.set('scope_id', scopeId);
+  const query = params.toString() ? `?${params}` : '';
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/by-media-id/${mediaId}/trash${query}`,
+    {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+    },
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Trash failed' }));
+    throw new Error(err.detail || 'Failed to trash resource');
+  }
+}
+
 // Soft-delete a downloaded video by moving it to the recycle bin (by platform_id).
 // - Personal scope (default): sets is_trashed=true on the resource (global trash).
 // - Team scope: only unlinks from the team library, keeps the resource in personal library.

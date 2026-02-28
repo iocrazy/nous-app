@@ -650,6 +650,49 @@ async def trash_resource_by_platform_id(
         raise HTTPException(status_code=500, detail="Failed to trash resource")
 
 
+@router.post("/by-media-id/{media_id}/trash")
+async def trash_resource_by_media_id(
+    media_id: str,
+    auth: AuthDep,
+    scope_type: str = Query("personal", pattern="^(personal|team)$"),
+    scope_id: Optional[str] = Query(None),
+):
+    """Move a resource to trash or unlink from team, looked up by parsed_media.id.
+
+    - Personal scope: sets is_trashed=true on the resource (global trash).
+    - Team scope: removes the resource_item link from the team only.
+    """
+    try:
+        svc = ResourcesService()
+        resource = await svc.repo.get_resource_by_media_id(media_id)
+        if not resource:
+            raise ValueError("No resource found for this media_id")
+
+        resource_id = str(resource["id"])
+
+        if scope_type == "team" and scope_id:
+            await svc.remove_from_library(
+                resource_id=resource_id,
+                user_id=auth.user_id,
+                scope_type="team",
+                scope_id=scope_id,
+            )
+            return {"success": True, "message": "Resource removed from team library"}
+        else:
+            await svc.trash_resource(
+                resource_id=resource_id,
+                user_id=auth.user_id,
+            )
+            return {"success": True, "message": "Resource moved to trash"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to trash resource by media_id {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trash resource")
+
+
 @router.delete("/by-platform-id/{platform_id}")
 async def unlink_resource_by_platform_id(
     platform_id: str,
