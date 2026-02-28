@@ -340,7 +340,7 @@ async def fetch_video(
                 user_id=auth.user_id,
                 action="fetch",
                 message=f"Submitted Celery task: {url[:30]}...",
-                status="pending",
+                status="info",
             )
 
             return {
@@ -783,7 +783,7 @@ async def fetch_videos_batch(
             user_id=auth.user_id,
             action="fetch_batch",
             message=f"Submitted batch Celery task: {len(request.urls)} links",
-            status="pending",
+            status="info",
             details={"url_count": len(request.urls)},
         )
 
@@ -1339,7 +1339,7 @@ async def retry_download(
             user_id=auth.user_id,
             action="retry",
             message=f"Retry download: {video_title}...",
-            status="pending",
+            status="info",
             aweme_id=platform_id,
         )
 
