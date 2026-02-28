@@ -107,14 +107,21 @@ def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
 
 
 class UnifiedProgressTracker:
-    """Progress tracker that writes to Redis (real-time) + TaskTracker (Supabase lifecycle)."""
+    """Progress tracker that writes to Redis (real-time) + TaskTracker (Supabase lifecycle).
+
+    Real-time progress is published via Redis pub/sub to channel
+    ``task_progress:{user_id}`` so the WebSocket endpoint can push it
+    to connected clients without polling.
+    """
 
     def __init__(self, task_id: str, redis_client,
-                 unified_tracker=None, unified_task_id=None):
+                 unified_tracker=None, unified_task_id=None,
+                 user_id: str | None = None):
         self.task_id = task_id
         self.redis = redis_client
         self.unified_tracker = unified_tracker
         self.unified_task_id = unified_task_id
+        self.user_id = user_id
         self.last_update = 0
         self._last_downloaded = 0
         self._last_time = 0
@@ -132,6 +139,18 @@ class UnifiedProgressTracker:
         """
         self._stage_offset = offset
         self._stage_weight = weight
+
+    def _publish(self, payload: dict):
+        """Publish a progress message to Redis pub/sub for WebSocket delivery."""
+        if not self.user_id:
+            return
+        import json
+
+        channel = f"task_progress:{self.user_id}"
+        try:
+            self.redis.publish(channel, json.dumps(payload))
+        except Exception as e:
+            logger.debug(f"[ProgressTracker] Redis publish failed: {e}")
 
     async def update(self, downloaded: int, total: int):
         """Update download progress.
@@ -181,20 +200,19 @@ class UnifiedProgressTracker:
         overall_percent = self._stage_offset + int(raw_percent * self._stage_weight / 100)
         overall_percent = min(max(overall_percent, 0), 99)  # Reserve 100 for explicit completion
 
-        # Directly await Supabase update (throttled at 1s internally by TaskTracker).
-        if self.unified_tracker and self.unified_task_id:
-            try:
-                await self.unified_tracker.update_progress(
-                    self.unified_task_id,
-                    overall_percent,
-                    speed=int(self._speed),
-                )
-                logger.info(
-                    f"[ProgressTracker] DB update: task={self.unified_task_id}, "
-                    f"raw={raw_percent}%, overall={overall_percent}%, speed={int(self._speed)} B/s"
-                )
-            except Exception as e:
-                logger.warning(f"[ProgressTracker] Supabase update FAILED: {e}")
+        # Publish real-time progress via Redis pub/sub → WebSocket
+        self._publish({
+            "unified_task_id": self.unified_task_id,
+            "celery_task_id": self.task_id,
+            "status": "downloading",
+            "percent": overall_percent,
+            "speed": speed_str,
+            "downloaded": downloaded,
+            "total": total,
+        })
+
+        # Supabase update is now skipped here — progress goes via WebSocket.
+        # Stage transitions still write to Supabase via _force_progress().
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
@@ -206,7 +224,7 @@ class UnifiedProgressTracker:
             return f"{bytes_per_sec / (1024 * 1024):.1f} MB/s"
 
     def complete(self):
-        """Mark download as complete in Redis."""
+        """Mark download as complete in Redis and publish via pub/sub."""
         import json
 
         progress_data = {
@@ -219,19 +237,39 @@ class UnifiedProgressTracker:
         self.redis.setex(
             f"download_progress:{self.task_id}", 60, json.dumps(progress_data)
         )
+        self._publish({
+            "unified_task_id": self.unified_task_id,
+            "celery_task_id": self.task_id,
+            "status": "completed",
+            "percent": 100,
+            "speed": "0 B/s",
+            "downloaded": 0,
+            "total": 0,
+        })
 
     def failed(self, error: str):
-        """Mark download as failed in Redis."""
+        """Mark download as failed in Redis and publish via pub/sub."""
         import json
 
+        error_msg = error[:200] if error else "Unknown error"
         progress_data = {
             "percent": 0,
             "status": "failed",
-            "error": error[:200] if error else "Unknown error",
+            "error": error_msg,
         }
         self.redis.setex(
             f"download_progress:{self.task_id}", 300, json.dumps(progress_data)
         )
+        self._publish({
+            "unified_task_id": self.unified_task_id,
+            "celery_task_id": self.task_id,
+            "status": "failed",
+            "percent": 0,
+            "speed": "0 B/s",
+            "downloaded": 0,
+            "total": 0,
+            "error": error_msg,
+        })
 
 
 # ─── Stage-based progress helper ──────────────────────────────────────
@@ -994,6 +1032,7 @@ def download_unified_task(
             redis_client=redis_client,
             unified_tracker=tracker_unified,
             unified_task_id=unified_task_id,
+            user_id=user_id,
         )
 
         # ── Check global cache: skip download if file already on server ──

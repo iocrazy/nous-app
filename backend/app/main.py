@@ -11,7 +11,9 @@ from loguru import logger
 
 from app.api import api_router
 from app.api.frontend_config_router import load_config as load_frontend_config
+from app.api.ws_router import router as ws_router
 from app.core.config import settings
+from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.services.douyin_analysis import DouyinAnalysis
 
@@ -59,6 +61,12 @@ async def lifespan(app: FastAPI):
         logger.info("抖音分析浏览器已关闭")
     except Exception as e:
         logger.error(f"关闭抖音解析下载服务时出错: {str(e)}")
+
+    try:
+        await close_async_redis()
+        logger.info("Async Redis connection closed")
+    except Exception as e:
+        logger.warning(f"Failed to close async Redis: {e}")
 
     logger.info(f"{settings.APP_NAME}关闭成功")
 
@@ -185,6 +193,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(ws_router)
 
 # 媒体文件服务 - 用于访问下载的视频和封面
 # 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
