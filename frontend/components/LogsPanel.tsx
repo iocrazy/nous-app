@@ -15,6 +15,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Info,
+  Clock,
   Bug,
   Filter,
   Calendar,
@@ -61,6 +62,7 @@ const LEVEL_OPTIONS = [
   { value: 'success', label: 'SUCCESS' },
   { value: 'warning', label: 'WARN' },
   { value: 'error', label: 'ERROR' },
+  { value: 'pending', label: 'PENDING' },
   { value: 'debug', label: 'DEBUG' },
 ];
 
@@ -86,6 +88,8 @@ const getStatusDisplay = (status: string): { label: string; color: string; icon:
       return { label: 'WARN', color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20', icon: AlertTriangle };
     case 'error':
       return { label: 'ERROR', color: 'text-red-400 bg-red-500/10 border-red-500/20', icon: AlertCircle };
+    case 'pending':
+      return { label: 'PENDING', color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20', icon: Clock };
     case 'debug':
       return { label: 'DEBUG', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20', icon: Bug };
     default:
