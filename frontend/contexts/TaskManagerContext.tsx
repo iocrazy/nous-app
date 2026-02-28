@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef } from 'react';
-import { getSupabaseClient } from '../supabaseClient';
+import { getSupabaseClient, getSupabaseAccessToken } from '../supabaseClient';
 import { useAuth } from './AuthContext';
 import { getAuthHeaders } from '../services/parserService';
 
@@ -90,10 +90,23 @@ interface TaskManagerContextType extends TaskManagerState {
 
 // ─── Reducer ────────────────────────────────────────────
 
+/** Progress update from Redis WebSocket */
+export interface WsProgressPayload {
+  unified_task_id?: string;
+  celery_task_id?: string;
+  status: string;
+  percent: number;
+  speed?: string;
+  downloaded?: number;
+  total?: number;
+  error?: string;
+}
+
 type Action =
   | { type: 'SET_TASKS'; tasks: UnifiedTask[] }
   | { type: 'INSERT'; task: UnifiedTask }
   | { type: 'UPDATE'; task: UnifiedTask }
+  | { type: 'UPDATE_PROGRESS'; payload: WsProgressPayload }
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
@@ -116,6 +129,24 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
         ...state,
         tasks: state.tasks.map(t => t.id === action.task.id ? action.task : t),
       };
+    case 'UPDATE_PROGRESS': {
+      const p = action.payload;
+      return {
+        ...state,
+        tasks: state.tasks.map(t => {
+          const match =
+            (p.unified_task_id && t.id === p.unified_task_id) ||
+            (p.celery_task_id && t.celery_task_id === p.celery_task_id);
+          if (!match) return t;
+          return {
+            ...t,
+            progress: p.percent,
+            speed: p.speed ? parseSpeedToBytes(p.speed) : t.speed,
+            total_bytes: p.total || t.total_bytes,
+          };
+        }),
+      };
+    }
     case 'DELETE':
       return { ...state, tasks: state.tasks.filter(t => t.id !== action.id) };
     case 'SET_LOADING':
@@ -132,6 +163,25 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
 const API_BASE = 'VITE_API_URL' in import.meta.env
   ? (import.meta.env.VITE_API_URL || '')
   : 'http://localhost:8080';
+
+/** Parse a human-readable speed string (e.g. "2.5 MB/s") into bytes/sec. */
+function parseSpeedToBytes(speed: string): number {
+  const m = speed.match(/([\d.]+)\s*(B|KB|MB|GB)\/s/i);
+  if (!m) return 0;
+  const val = parseFloat(m[1]);
+  switch (m[2].toUpperCase()) {
+    case 'GB': return val * 1073741824;
+    case 'MB': return val * 1048576;
+    case 'KB': return val * 1024;
+    default: return val;
+  }
+}
+
+/** Derive the WebSocket URL from the API base URL. */
+function getWsBaseUrl(): string {
+  const base = API_BASE || window.location.origin;
+  return base.replace(/^http/, 'ws');
+}
 
 async function fetchActiveTasks(): Promise<UnifiedTask[]> {
   const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks/active`, {
@@ -274,6 +324,66 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     };
   }, [currentUserId, refreshTasks]);
+
+  // ─── Redis WebSocket for real-time progress ────────────
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsReconnectDelay = useRef(1000);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    let unmounted = false;
+
+    const connect = async () => {
+      const token = await getSupabaseAccessToken();
+      if (!token || unmounted) return;
+
+      const wsUrl = `${getWsBaseUrl()}/ws/task-progress?token=${encodeURIComponent(token)}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.debug('[TaskManager/WS] Connected');
+        wsReconnectDelay.current = 1000; // reset backoff
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload: WsProgressPayload = JSON.parse(event.data);
+          dispatch({ type: 'UPDATE_PROGRESS', payload });
+        } catch (e) {
+          console.warn('[TaskManager/WS] Bad message:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        if (unmounted) return;
+        console.debug(`[TaskManager/WS] Disconnected, reconnecting in ${wsReconnectDelay.current}ms`);
+        wsReconnectTimer.current = setTimeout(() => {
+          if (!unmounted) connect();
+        }, wsReconnectDelay.current);
+        wsReconnectDelay.current = Math.min(wsReconnectDelay.current * 2, 30000);
+      };
+
+      ws.onerror = (err) => {
+        console.debug('[TaskManager/WS] Error:', err);
+        ws.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      unmounted = true;
+      if (wsReconnectTimer.current) clearTimeout(wsReconnectTimer.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // prevent reconnect on intentional close
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [currentUserId]);
 
   // Derived state
   const activeTasks = state.tasks.filter(

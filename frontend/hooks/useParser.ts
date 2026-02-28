@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Video } from '../types';
 import { isSupabaseConfigured } from '../supabaseClient';
 import { parseShareLink, parseBatchLinks } from '../services/parserService';
 import { fetchVideoByPlatformId, saveItem } from '../services/dataService';
-import { useDownloadProgress } from './useDownloadProgress';
 import { getSystemStatus, SystemStatus } from '../services/systemService';
 import { LogEntry } from '../components/TaskMonitor';
+import { useTaskManager, formatSpeed } from '../contexts/TaskManagerContext';
 
 interface UseParserParams {
   loadLibraryData: () => Promise<void>;
@@ -35,8 +35,48 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   const [batchResults, setBatchResults] = useState<Video[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Download tracking
-  const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
+  // Download tracking via TaskManagerContext (no more HTTP polling)
+  const [downloadCeleryId, setDownloadCeleryId] = useState<string | null>(null);
+  const { tasks } = useTaskManager();
+
+  const currentDownloadTask = useMemo(
+    () => downloadCeleryId ? tasks.find(t => t.celery_task_id === downloadCeleryId) : undefined,
+    [downloadCeleryId, tasks],
+  );
+  const downloadPercent = currentDownloadTask?.progress ?? 0;
+  const downloadSpeed = currentDownloadTask?.speed ? formatSpeed(currentDownloadTask.speed) : undefined;
+  const downloadStatus: 'pending' | 'downloading' | 'completed' | 'failed' = (() => {
+    if (!currentDownloadTask) return 'pending';
+    switch (currentDownloadTask.status) {
+      case 'processing': return 'downloading';
+      case 'completed': return 'completed';
+      case 'failed': return 'failed';
+      default: return 'pending';
+    }
+  })();
+
+  // React to download completion/failure from TaskManager
+  const prevDownloadStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentDownloadTask) return;
+    const status = currentDownloadTask.status;
+    if (status === prevDownloadStatusRef.current) return;
+    prevDownloadStatusRef.current = status;
+
+    if (status === 'completed') {
+      addLog('Download completed successfully!', 'success');
+      setTaskProgress(100);
+      setTaskStatus('Completed');
+      loadLibraryData();
+      if (currentResult?.platform_id) {
+        fetchVideoByPlatformId(currentResult.platform_id).then(updated => {
+          if (updated) setCurrentResult(updated);
+        });
+      }
+    } else if (status === 'failed') {
+      addLog(`Download failed: ${currentDownloadTask.error_msg || 'Unknown error'}`, 'error');
+    }
+  }, [currentDownloadTask?.status]);
 
   // Poll system status
   useEffect(() => {
@@ -65,29 +105,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     }]);
   };
 
-  // Download progress hook
-  const {
-    status: downloadStatus,
-    percent: downloadPercent,
-    speed: downloadSpeed,
-  } = useDownloadProgress(downloadTaskId, {
-    onComplete: async () => {
-      addLog('Download completed successfully!', 'success');
-      setTaskProgress(100);
-      setTaskStatus('Completed');
-      loadLibraryData();
-      if (currentResult?.platform_id) {
-        const updatedVideo = await fetchVideoByPlatformId(currentResult.platform_id);
-        if (updatedVideo) {
-          setCurrentResult(updatedVideo);
-        }
-      }
-    },
-    onError: (error) => {
-      addLog(`Download failed: ${error}`, 'error');
-    },
-  });
-
   const handleParse = () => {
     if (parserMode === 'batch') {
       const links = batchInput.split(/\r?\n/).filter(line => line.trim().length > 0);
@@ -107,7 +124,8 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     setSocketLogs([]);
     setTaskProgress(0);
     setTaskStatus('Initializing');
-    setDownloadTaskId(null);
+    setDownloadCeleryId(null);
+    prevDownloadStatusRef.current = null;
 
     try {
       addLog('Connecting to backend API...');
@@ -163,7 +181,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
           addLog(`Tracking download progress: ${response.download_task_id}`, 'info');
           setTaskStatus('Downloading');
           setTaskProgress(60);
-          setDownloadTaskId(response.download_task_id);
+          setDownloadCeleryId(response.download_task_id);
         } else {
           setTaskProgress(100);
           setTaskStatus('Completed');
@@ -281,7 +299,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     batchResults, error,
 
     // Download
-    downloadTaskId, downloadStatus, downloadPercent, downloadSpeed,
+    downloadTaskId: downloadCeleryId, downloadStatus, downloadPercent, downloadSpeed,
 
     // Handlers
     handleParse, handleSaveToLibrary, handleBatchSave,
