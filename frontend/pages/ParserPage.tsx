@@ -249,7 +249,6 @@ export function ParserPage() {
 
            <MediaCard
              data={currentResult}
-             onSave={(item) => handleSaveToLibrary(item)}
              onUpdate={handleUpdateLibraryItem}
              downloadStatus={downloadTaskId ? downloadStatus : undefined}
              downloadPercent={downloadPercent}
