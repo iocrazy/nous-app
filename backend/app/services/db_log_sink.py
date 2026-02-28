@@ -67,17 +67,14 @@ class DatabaseLogSink:
                 exception_text = str(record["exception"])
 
         extra = dict(record.get("extra", {}))
-        # Remove internal loguru keys
-        for key in ("_depth", "_name"):
+        # Remove internal keys (loguru internals + InterceptHandler marker)
+        for key in ("_depth", "_name", "_from_stdlib"):
             extra.pop(key, None)
-
-        # For stdlib-intercepted logs, use the original logger name (e.g. "uvicorn.access")
-        stdlib_logger = extra.pop("_stdlib_logger", None)
 
         return {
             "level": record["level"].name,
             "message": str(record["message"])[:4000],  # truncate very long messages
-            "module": stdlib_logger or record.get("name", ""),
+            "module": record.get("name", ""),
             "function": record.get("function", ""),
             "line": record.get("line"),
             "file_path": str(record.get("file", {}).path) if record.get("file") else None,

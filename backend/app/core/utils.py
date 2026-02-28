@@ -21,6 +21,10 @@ class InterceptHandler(logging.Handler):
     Captures logs from uvicorn, httpx, celery internals, etc.
     and routes them through loguru so they share the same sinks
     (console, file, database).
+
+    Uses _from_stdlib flag so console handler can skip these
+    (the libraries already write to stderr, avoiding duplicates
+    from Celery's stderr capture).
     """
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -30,11 +34,13 @@ class InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelno
 
-        # Preserve the stdlib logger name (e.g. "uvicorn.access", "celery.beat")
-        # so db_log_sink can use it as the module field
-        logger.bind(_stdlib_logger=record.name).opt(exception=record.exc_info).log(
-            level, record.getMessage()
-        )
+        # Use logger.patch() to override loguru's frame-detected "name" field
+        # with the actual stdlib logger name (e.g. "uvicorn.access", "celery.beat").
+        # Bind _from_stdlib so console handler can filter these out.
+        stdlib_name = record.name
+        logger.patch(lambda r: r.update(name=stdlib_name)).bind(
+            _from_stdlib=True
+        ).opt(exception=record.exc_info).log(level, record.getMessage())
 
 
 class SingletonMeta(type):
@@ -88,10 +94,16 @@ class Utils:
         # Remove default handlers
         logger.remove()
 
+        # Filter: skip stdlib-intercepted logs on console (they already write to stderr,
+        # so emitting them again causes Celery's stderr redirect to create duplicates)
+        def _not_from_stdlib(record):
+            return not record["extra"].get("_from_stdlib")
+
         # Console handler
         logger.add(
             sys.stderr,
             level="INFO",
+            filter=_not_from_stdlib,
             format=(
                 "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
                 "<level>{level: <8}</level> | "
