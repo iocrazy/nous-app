@@ -272,10 +272,15 @@ export function PlayerPage() {
 
   const handleDelete = async (id: string, _deleteFiles: boolean) => {
     try {
-      await trashResourceByPlatformId(id);
+      // Use team scope if viewing from team context
+      await trashResourceByPlatformId(id, teamId ? 'team' : 'personal', teamId || undefined);
     } catch {
-      // Fallback to hard delete if resource trash fails (e.g. no resource record)
-      await deleteItem(id, false);
+      try {
+        // Fallback to hard delete if resource trash fails
+        await deleteItem(id, false);
+      } catch {
+        // Ignore — still navigate back
+      }
     }
     handleBack();
   };
