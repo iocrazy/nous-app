@@ -125,6 +125,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [coverLoadError, setCoverLoadError] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // AI Feature States - 从数据中加载已有内容
@@ -1073,13 +1074,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
               {/* Media Preview */}
               <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-                <img
-                  src={coverUrl || ""}
-                  alt=""
-                  className="w-12 h-12 rounded-lg object-cover bg-zinc-700"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
+                <div className="w-12 h-12 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {coverUrl && !coverLoadError ? (
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={() => setCoverLoadError(true)}
+                    />
+                  ) : (
+                    <VideoIcon size={20} className="text-zinc-500" />
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white font-medium truncate">
                     {data.title || 'Untitled'}
