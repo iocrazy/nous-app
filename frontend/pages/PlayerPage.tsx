@@ -624,7 +624,7 @@ export function PlayerPage() {
                 onClick={async () => {
                   setIsDeleting(true);
                   try {
-                    await handleDelete(video.id, false);
+                    await handleDelete(video.platform_id, false);
                   } finally {
                     setIsDeleting(false);
                     setShowDeleteDialog(false);
