@@ -59,7 +59,7 @@ class AsyncSupabaseClient:
                 options=_get_client_options(),
             )
             cls._instance_loop_id = current_loop_id
-            logger.info("Supabase async client initialized")
+            logger.debug("Supabase async client initialized")
 
         return cls._instance
 
@@ -80,7 +80,7 @@ class AsyncSupabaseClient:
                 options=_get_client_options(),
             )
             cls._admin_instance_loop_id = current_loop_id
-            logger.info("Supabase async admin client initialized")
+            logger.debug("Supabase async admin client initialized")
 
         return cls._admin_instance
 
