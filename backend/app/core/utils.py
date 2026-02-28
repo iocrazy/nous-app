@@ -88,6 +88,13 @@ class Utils:
             encoding="utf-8",
         )
 
+        # Database handler (async batch-insert to application_logs table)
+        try:
+            from app.services.db_log_sink import db_log_sink
+            logger.add(db_log_sink, level="DEBUG", format="{message}", catch=True)
+        except Exception:
+            pass  # Skip if Supabase not configured
+
         logger.info(f"Logging initialized: {log_file}")
 
     """文件处理工具类"""
