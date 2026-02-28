@@ -25,12 +25,12 @@ import { PaymentModal } from './PaymentModal';
 
 // ---------------------------------------------------------------------------
 // Map URL pathname → ViewState
-// Supports both /t/:teamId/:view and legacy /:view patterns
+// Supports both /team/:teamId/:view and legacy /:view patterns
 // ---------------------------------------------------------------------------
 
 export function pathnameToView(pathname: string): ViewState {
-  // Strip /t/:teamId/ prefix if present
-  const stripped = pathname.replace(/^\/t\/[^/]+/, '');
+  // Strip /team/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
   if (stripped.startsWith('/library')) return 'library';
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
@@ -135,7 +135,7 @@ export function AppLayout() {
   // Helper: build team-scoped path
   const teamPath = (path: string) => {
     const tid = urlTeamId || selectedTeamId || personalTeamId;
-    return tid ? `/t/${tid}${path}` : path;
+    return tid ? `/team/${tid}${path}` : path;
   };
 
   // Mobile nav handlers

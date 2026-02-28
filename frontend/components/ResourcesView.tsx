@@ -173,7 +173,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const { tasks: allUnifiedTasks } = useTaskManager();
   const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
-  const resPath = (path: string) => teamId ? `/t/${teamId}${path}` : path;
+  const resPath = (path: string) => teamId ? `/team/${teamId}${path}` : path;
 
   // URL-driven state
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId

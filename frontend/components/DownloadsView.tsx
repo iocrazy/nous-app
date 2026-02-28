@@ -237,7 +237,7 @@ export const DownloadsView: React.FC = () => {
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
     if (!item.id) return;
-    const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
     navigate(`${teamPath}/player/${item.id}?from=downloads`);
   }, [selectedTeamId, navigate]);
 
@@ -488,7 +488,7 @@ export const DownloadsView: React.FC = () => {
   const handleCtxOpenNewTab = useCallback(() => {
     if (!contextMenu) return;
     const v = contextMenu.video;
-    const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
     window.open(`${teamPath}/player/${v.id}?from=downloads`, '_blank');
     setContextMenu(null);
   }, [contextMenu, selectedTeamId]);
@@ -1000,7 +1000,7 @@ export const DownloadsView: React.FC = () => {
             onClick={() => {
               if (!contextMenu) return;
               const v = contextMenu.video;
-              const teamPath = selectedTeamId ? `/t/${selectedTeamId}` : '';
+              const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
               navigate(`${teamPath}/player/${v.id}?from=downloads`);
               setContextMenu(null);
             }}

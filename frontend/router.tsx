@@ -37,7 +37,7 @@ export const router = createBrowserRouter([
       // Root → redirect to default team
       { index: true, element: <RedirectToDefaultTeam /> },
 
-      // Legacy flat URLs → redirect to /t/:teamId/:view
+      // Legacy flat URLs → redirect to /team/:teamId/:view
       { path: 'parser', element: <RedirectToTeam view="parser" /> },
       { path: 'library', element: <RedirectToTeam view="library" /> },
       { path: 'library/:itemId', element: <RedirectToTeam view="library" /> },
@@ -64,7 +64,7 @@ export const router = createBrowserRouter([
 
       // Team-scoped routes
       {
-        path: 't/:teamId',
+        path: 'team/:teamId',
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="parser" replace /> },

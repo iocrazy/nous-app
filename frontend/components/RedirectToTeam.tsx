@@ -3,7 +3,7 @@ import { useTeamContext } from '../contexts/TeamContext';
 
 /**
  * Redirect legacy flat URLs (e.g. /parser, /resources) to team-scoped URLs
- * (e.g. /t/:teamId/parser, /t/:teamId/resources).
+ * (e.g. /team/:teamId/parser, /team/:teamId/resources).
  *
  * Uses the current selectedTeamId or personalTeamId as the default.
  */
@@ -32,7 +32,7 @@ export function RedirectToTeam({ view }: { view: string }) {
 
   // Reconstruct the sub-path from params for nested routes like /projects/:projectId
   const subPath = location.pathname.replace(/^\//, '');
-  return <Navigate to={`/t/${teamId}/${subPath}`} replace />;
+  return <Navigate to={`/team/${teamId}/${subPath}`} replace />;
 }
 
 /**
@@ -60,5 +60,5 @@ export function RedirectToDefaultTeam() {
 
   // Default landing: personal team → parser, shared team → resources
   const defaultView = teamId === personalTeamId ? 'parser' : 'resources';
-  return <Navigate to={`/t/${teamId}/${defaultView}`} replace />;
+  return <Navigate to={`/team/${teamId}/${defaultView}`} replace />;
 }

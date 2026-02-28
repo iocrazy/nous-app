@@ -259,7 +259,7 @@ export function PlayerPage() {
 
   const handleBack = () => {
     if (from === 'downloads' && teamId) {
-      navigate(`/t/${teamId}/resources/downloads`);
+      navigate(`/team/${teamId}/resources/downloads`);
     } else {
       navigate(-1);
     }

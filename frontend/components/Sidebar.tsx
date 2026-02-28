@@ -196,8 +196,8 @@ const VIEW_PATH_MAP: Record<string, string> = {
 };
 
 function viewFromPathname(pathname: string): ViewState {
-  // Strip /t/:teamId/ prefix if present
-  const stripped = pathname.replace(/^\/t\/[^/]+/, '');
+  // Strip /team/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
   if (stripped.startsWith('/library')) return 'library';
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
@@ -252,7 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Navigate via URL and notify parent for side effects
   const handleNav = (viewKey: string) => {
     const basePath = VIEW_PATH_MAP[viewKey] || '/parser';
-    const path = activeTeamId ? `/t/${activeTeamId}${basePath}` : basePath;
+    const path = activeTeamId ? `/team/${activeTeamId}${basePath}` : basePath;
     navigate(path);
     onViewChange?.(viewKey);
   };
