@@ -71,10 +71,13 @@ class DatabaseLogSink:
         for key in ("_depth", "_name"):
             extra.pop(key, None)
 
+        # For stdlib-intercepted logs, use the original logger name (e.g. "uvicorn.access")
+        stdlib_logger = extra.pop("_stdlib_logger", None)
+
         return {
             "level": record["level"].name,
             "message": str(record["message"])[:4000],  # truncate very long messages
-            "module": record.get("name", ""),
+            "module": stdlib_logger or record.get("name", ""),
             "function": record.get("function", ""),
             "line": record.get("line"),
             "file_path": str(record.get("file", {}).path) if record.get("file") else None,

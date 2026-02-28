@@ -58,6 +58,8 @@ celery_app.conf.update(
     # Worker 配置
     worker_prefetch_multiplier=1,  # 公平调度，每次只取一个任务
     worker_concurrency=settings.CELERY_WORKER_CONCURRENCY,
+    worker_hijack_root_logger=False,  # Don't override loguru setup
+    worker_redirect_stdouts=False,  # Don't redirect stderr (prevents duplicate logs)
     # 结果配置
     result_expires=3600,  # 结果保留 1 小时
     # AI task queue routing
