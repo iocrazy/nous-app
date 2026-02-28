@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import random
 import re
@@ -12,6 +13,30 @@ from app.core.config import settings
 
 # 服务器配置文件路径
 SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"
+
+
+class InterceptHandler(logging.Handler):
+    """Bridge stdlib logging → loguru.
+
+    Captures logs from uvicorn, httpx, celery internals, etc.
+    and routes them through loguru so they share the same sinks
+    (console, file, database).
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Map stdlib level to loguru level
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller frame (skip logging internals)
+        frame, depth = logging.currentframe(), 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 class SingletonMeta(type):
@@ -94,6 +119,16 @@ class Utils:
             logger.add(db_log_sink, level="INFO", format="{message}", catch=True)
         except Exception:
             pass  # Skip if Supabase not configured
+
+        # Bridge stdlib logging → loguru (captures uvicorn, httpx, celery, etc.)
+        intercept = InterceptHandler()
+        for name in ("uvicorn", "uvicorn.access", "uvicorn.error",
+                      "celery", "celery.worker", "celery.beat",
+                      "httpx", "httpcore"):
+            lib_logger = logging.getLogger(name)
+            lib_logger.handlers = [intercept]
+            lib_logger.setLevel(logging.INFO)
+            lib_logger.propagate = False
 
         logger.info(f"Logging initialized: {log_file}")
 
