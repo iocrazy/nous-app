@@ -30,13 +30,11 @@ class InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelno
 
-        # Find caller frame (skip logging internals)
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        # Preserve the stdlib logger name (e.g. "uvicorn.access", "celery.beat")
+        # so db_log_sink can use it as the module field
+        logger.bind(_stdlib_logger=record.name).opt(exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 
 class SingletonMeta(type):
