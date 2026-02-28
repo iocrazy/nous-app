@@ -431,15 +431,21 @@ export async function fetchTrashedResources(
   scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<ResourceItem[]> {
-  // After refactor, trashed resources are orphans (no resource_items).
-  // Query resources directly where is_trashed=true and last_scope matches.
-  const { data, error } = await supabase
+  // Query resources where is_trashed=true.
+  // For personal scope: filter by creator_id (most reliable, works even if last_scope is null).
+  // For team scope: filter by last_scope fields.
+  let query = supabase
     .from('resources')
     .select('*')
-    .eq('is_trashed', true)
-    .eq('last_scope_type', scopeType)
-    .eq('last_scope_id', scopeId)
-    .order('trashed_at', { ascending: false });
+    .eq('is_trashed', true);
+
+  if (scopeType === 'personal') {
+    query = query.eq('creator_id', scopeId);
+  } else {
+    query = query.eq('last_scope_type', scopeType).eq('last_scope_id', scopeId);
+  }
+
+  const { data, error } = await query.order('trashed_at', { ascending: false });
 
   if (error) throw error;
 

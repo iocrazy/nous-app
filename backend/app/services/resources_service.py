@@ -428,6 +428,8 @@ class ResourcesService:
             {
                 "is_trashed": True,
                 "trashed_at": datetime.now(timezone.utc).isoformat(),
+                "last_scope_type": "personal",
+                "last_scope_id": user_id,
             },
         )
 
