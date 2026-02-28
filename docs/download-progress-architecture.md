@@ -247,9 +247,10 @@ T+10.4s [Log]     SUCCESS  Download completed (douyin): 和Vera Blue...
 | Level | DB status 值 | 用途 | 颜色 |
 |-------|-------------|------|------|
 | SUCCESS | `success` | 操作成功完成 | 绿色 |
-| INFO | `info` | 任务已提交/一般信息 | 蓝色 |
+| INFO | `info` | 一般信息性日志 | 蓝色 |
 | WARN | `warning` | 警告（部分失败等） | 黄色 |
 | ERROR | `error` | 操作失败 | 红色 |
+| PENDING | `pending` | 任务已提交，等待处理 | 灰色 |
 | DEBUG | `debug` | 调试信息（详细诊断） | 紫色 |
 
 ### 日志写入点

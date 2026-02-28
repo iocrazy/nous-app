@@ -568,7 +568,7 @@ def chain_ai_pipeline(
                 user_id=user_id,
                 action="ai",
                 message=f"AI pipeline started: {platform_id} ({len(tasks)} tasks)",
-                status="info",
+                status="pending",
                 aweme_id=platform_id,
             )
         )

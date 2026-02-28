@@ -65,6 +65,7 @@ def parse_levels(level_str: Optional[str]) -> Optional[List[str]]:
         "warn": ["warning"],
         "warning": ["warning"],
         "error": ["error"],
+        "pending": ["pending"],
         "debug": ["debug"],
     }
     result = []
@@ -104,7 +105,7 @@ def parse_date_range(
 async def get_logs(
     current_user: dict = Depends(get_current_user),
     level: Optional[str] = Query(
-        None, description="Filter by levels (comma-separated: info,success,warn,error,debug)"
+        None, description="Filter by levels (comma-separated: info,success,warn,error,pending,debug)"
     ),
     date_range: Optional[str] = Query(
         None, description="Date range: today, 7days, 30days"
@@ -121,7 +122,7 @@ async def get_logs(
     Get user activity logs with filtering and pagination.
 
     Supports filtering by:
-    - Level: info, success, warn, error, debug (comma-separated)
+    - Level: info, success, warn, error, pending, debug (comma-separated)
     - Date range: today, 7days, 30days, or custom start/end dates
     - Search: keyword search in log messages
 
