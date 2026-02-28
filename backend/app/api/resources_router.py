@@ -608,8 +608,15 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 async def trash_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
+    scope_type: str = Query("personal", pattern="^(personal|team)$"),
+    scope_id: Optional[str] = Query(None),
 ):
-    """Move a resource to trash by setting is_trashed=true. Only checks creator permission."""
+    """Move a resource to trash or unlink from team.
+
+    - Personal scope: sets is_trashed=true on the resource (global trash).
+    - Team scope: removes the resource_item link from the team only,
+      leaving the resource intact in the creator's personal library.
+    """
     try:
         svc = ResourcesService()
         resource = await svc.repo.get_resource_by_platform_id(platform_id)
@@ -617,11 +624,23 @@ async def trash_resource_by_platform_id(
             raise ValueError("No resource found for this platform_id")
 
         resource_id = str(resource["id"])
-        await svc.trash_resource(
-            resource_id=resource_id,
-            user_id=auth.user_id,
-        )
-        return {"success": True, "message": "Resource moved to trash"}
+
+        if scope_type == "team" and scope_id:
+            # Team context: just unlink from team, don't trash the resource
+            await svc.remove_from_library(
+                resource_id=resource_id,
+                user_id=auth.user_id,
+                scope_type="team",
+                scope_id=scope_id,
+            )
+            return {"success": True, "message": "Resource removed from team library"}
+        else:
+            # Personal context: trash the resource globally
+            await svc.trash_resource(
+                resource_id=resource_id,
+                user_id=auth.user_id,
+            )
+            return {"success": True, "message": "Resource moved to trash"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except PermissionError as e:

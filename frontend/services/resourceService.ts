@@ -901,13 +901,20 @@ export async function getFolderPreview(
 }
 
 // Soft-delete a downloaded video by moving it to the recycle bin (by platform_id).
-// Sets is_trashed=true on the resource. Only checks creator permission, no scope needed.
+// - Personal scope (default): sets is_trashed=true on the resource (global trash).
+// - Team scope: only unlinks from the team library, keeps the resource in personal library.
 export async function trashResourceByPlatformId(
   platformId: string,
+  scopeType?: 'personal' | 'team',
+  scopeId?: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
+  const params = new URLSearchParams();
+  if (scopeType) params.set('scope_type', scopeType);
+  if (scopeId) params.set('scope_id', scopeId);
+  const query = params.toString() ? `?${params}` : '';
   const response = await fetch(
-    `${apiUrl}/api/v1/resources/by-platform-id/${platformId}/trash`,
+    `${apiUrl}/api/v1/resources/by-platform-id/${platformId}/trash${query}`,
     {
       method: 'POST',
       headers: await getAuthHeaders(),
