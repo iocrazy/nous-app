@@ -144,7 +144,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
           {insufficient ? (
             <button
               type="button"
-              onClick={() => { onClose(); navigate(teamId ? `/t/${teamId}/points` : '/points'); }}
+              onClick={() => { onClose(); navigate(teamId ? `/team/${teamId}/points` : '/points'); }}
               className="flex-1 px-4 py-3 text-white bg-amber-500 hover:bg-amber-400 rounded-xl font-medium transition-colors"
             >
               {t('points.buyPoints', 'Buy Points')}

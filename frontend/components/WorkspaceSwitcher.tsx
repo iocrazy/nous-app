@@ -68,7 +68,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     if (teamId) {
       const isPersonal = teamId === personalTeamId;
       const defaultView = isPersonal ? 'parser' : 'resources';
-      navigate(`/t/${teamId}/${defaultView}`);
+      navigate(`/team/${teamId}/${defaultView}`);
     } else {
       navigate('/parser');
     }

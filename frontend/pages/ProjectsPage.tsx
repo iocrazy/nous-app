@@ -63,7 +63,7 @@ export function ProjectsPage() {
 
   const handleProjectSelect = (project: Project) => {
     setSelectedProject(project);
-    navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
+    navigate(teamId ? `/team/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
   };
 
   const refreshProjects = async () => {
@@ -83,7 +83,7 @@ export function ProjectsPage() {
         file={reviewFile}
         onBack={() => {
           setReviewFile(null);
-          navigate(teamId ? `/t/${teamId}/projects/${selectedProject.id}` : `/projects/${selectedProject.id}`);
+          navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}` : `/projects/${selectedProject.id}`);
         }}
         currentUserId={currentUserId || ''}
       />
@@ -127,11 +127,11 @@ export function ProjectsPage() {
             project={selectedProject}
             onBack={() => {
               setSelectedProject(null);
-              navigate(teamId ? `/t/${teamId}/projects` : '/projects');
+              navigate(teamId ? `/team/${teamId}/projects` : '/projects');
             }}
             onFileReview={(file) => {
               setReviewFile(file);
-              navigate(teamId ? `/t/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
+              navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
             }}
           />
         )}
@@ -186,7 +186,7 @@ export function ProjectsPage() {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);
           refreshProjects();
-          navigate(teamId ? `/t/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
+          navigate(teamId ? `/team/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
         }}
       />
     </>

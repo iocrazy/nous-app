@@ -382,7 +382,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
     if (newIdx < 0 || newIdx >= siblingFiles.length) return;
     const target = siblingFiles[newIdx];
     if (target.resource?.id) {
-      navigate(`${teamId ? `/t/${teamId}` : ''}/resources/file/${target.resource.id}`);
+      navigate(`${teamId ? `/team/${teamId}` : ''}/resources/file/${target.resource.id}`);
     }
   }, [siblingFiles, currentIndex, teamId, navigate]);
 
@@ -1013,7 +1013,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                     key={item.id}
                     onClick={() => {
                       if (item.resource?.id && item.resource.id !== resourceId) {
-                        const basePath = teamId ? `/t/${teamId}` : '';
+                        const basePath = teamId ? `/team/${teamId}` : '';
                         navigate(`${basePath}/resources/file/${item.resource.id}`);
                       }
                     }}
