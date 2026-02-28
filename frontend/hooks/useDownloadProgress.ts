@@ -1,6 +1,6 @@
 // frontend/hooks/useDownloadProgress.ts
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DownloadProgressResponse,
   pollDownloadProgress
@@ -39,13 +39,22 @@ export const useDownloadProgress = (
   const [percent, setPercent] = useState(0);
   const [speed, setSpeed] = useState<string | undefined>();
   const [isPolling, setIsPolling] = useState(false);
-  const [stopFn, setStopFn] = useState<(() => void) | null>(null);
 
+  // Use refs for callbacks and stop function to avoid stale closures
+  const onCompleteRef = useRef(onComplete);
+  const onErrorRef = useRef(onError);
+  const stopFnRef = useRef<(() => void) | null>(null);
+  const isPollingRef = useRef(false);
+
+  // Keep callback refs in sync
+  onCompleteRef.current = onComplete;
+  onErrorRef.current = onError;
+
+  // Stable callback — uses refs so it never goes stale inside the polling loop
   const handleProgressUpdate = useCallback((progress: DownloadProgressResponse) => {
     setPercent(progress.percent);
     setSpeed(progress.speed);
 
-    // Map backend status to frontend status
     switch (progress.status) {
       case 'downloading':
         setStatus('downloading');
@@ -53,63 +62,69 @@ export const useDownloadProgress = (
       case 'completed':
         setStatus('completed');
         setIsPolling(false);
-        onComplete?.();
+        isPollingRef.current = false;
+        onCompleteRef.current?.();
         break;
       case 'failed':
         setStatus('failed');
         setIsPolling(false);
-        onError?.(progress.error || 'Download failed');
+        isPollingRef.current = false;
+        onErrorRef.current?.(progress.error || 'Download failed');
         break;
       default:
         setStatus('pending');
     }
-  }, [onComplete, onError]);
+  }, []);
 
   const startPolling = useCallback(() => {
-    if (!taskId || isPolling) return;
+    if (!taskId || isPollingRef.current) return;
 
     setIsPolling(true);
+    isPollingRef.current = true;
     setStatus('downloading');
 
     const stop = pollDownloadProgress(taskId, handleProgressUpdate, interval);
-    setStopFn(() => stop);
-  }, [taskId, isPolling, interval, handleProgressUpdate]);
+    stopFnRef.current = stop;
+  }, [taskId, interval, handleProgressUpdate]);
 
   const stopPolling = useCallback(() => {
-    if (stopFn) {
-      stopFn();
-      setStopFn(null);
+    if (stopFnRef.current) {
+      stopFnRef.current();
+      stopFnRef.current = null;
     }
     setIsPolling(false);
-  }, [stopFn]);
+    isPollingRef.current = false;
+  }, []);
 
   const retry = useCallback(() => {
     setStatus('retrying');
     setPercent(0);
-    // The actual retry logic would trigger a new download task
-    // This is handled by the parent component
   }, []);
 
-  // Auto-start polling
+  // Auto-start polling when taskId changes
   useEffect(() => {
-    if (taskId && autoStart && !isPolling && status !== 'completed' && status !== 'failed') {
+    if (taskId && autoStart) {
       startPolling();
     }
 
     return () => {
-      if (stopFn) {
-        stopFn();
+      // Cleanup uses ref — always has the latest stop function
+      if (stopFnRef.current) {
+        stopFnRef.current();
+        stopFnRef.current = null;
       }
+      isPollingRef.current = false;
     };
-  }, [taskId, autoStart]); // eslint-disable-line
+  }, [taskId, autoStart, startPolling]);
 
-  // Reset on taskId change
+  // Reset on taskId becoming null
   useEffect(() => {
     if (!taskId) {
       setStatus('pending');
       setPercent(0);
       setSpeed(undefined);
       setIsPolling(false);
+      isPollingRef.current = false;
     }
   }, [taskId]);
 
