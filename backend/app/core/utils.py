@@ -91,7 +91,7 @@ class Utils:
         # Database handler (async batch-insert to application_logs table)
         try:
             from app.services.db_log_sink import db_log_sink
-            logger.add(db_log_sink, level="DEBUG", format="{message}", catch=True)
+            logger.add(db_log_sink, level="INFO", format="{message}", catch=True)
         except Exception:
             pass  # Skip if Supabase not configured
 

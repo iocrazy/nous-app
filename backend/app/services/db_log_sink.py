@@ -10,6 +10,9 @@ import threading
 from datetime import timezone
 from typing import Any
 
+# Thread-local flag to prevent recursive logging during flush
+_flushing = threading.local()
+
 
 class DatabaseLogSink:
     """
@@ -34,6 +37,11 @@ class DatabaseLogSink:
     # ------------------------------------------------------------------
 
     def __call__(self, message: Any) -> None:
+        # Skip logs generated during flush to prevent recursion
+        # (e.g. Supabase client init logs from _insert_entries)
+        if getattr(_flushing, "active", False):
+            return
+
         record = message.record
         entry = self._serialize(record)
         try:
@@ -111,11 +119,15 @@ class DatabaseLogSink:
         if not entries:
             return
 
+        # Suppress all logs generated during DB insertion (prevents recursion)
+        _flushing.active = True
         try:
             asyncio.run(self._insert_entries(entries))
         except Exception:
             # Silently drop — we can't log here without recursion
             pass
+        finally:
+            _flushing.active = False
 
     @staticmethod
     async def _insert_entries(entries: list[dict[str, Any]]) -> None:
