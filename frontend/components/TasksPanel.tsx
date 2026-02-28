@@ -438,7 +438,7 @@ const TaskRow: React.FC<{
         <div className="flex items-center gap-1.5">
           {getStatusIcon(task.status)}
           <span className={`text-xs capitalize ${getStatusColor(task.status)}`}>
-            {task.phase ? taskPhaseLabel(task.phase) : task.status}
+            {task.phase === 'dedup_check' ? taskPhaseLabel(task.phase) : task.status}
           </span>
           {task.phase === 'dedup_check' && (
             <span className="text-[10px] text-blue-400 animate-pulse">●</span>
