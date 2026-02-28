@@ -1074,10 +1074,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               {/* Media Preview */}
               <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
                 <img
-                  src={coverUrl || "https://picsum.photos/80/80"}
-                  alt="Preview"
-                  className="w-12 h-12 rounded-lg object-cover"
+                  src={coverUrl || ""}
+                  alt=""
+                  className="w-12 h-12 rounded-lg object-cover bg-zinc-700"
                   referrerPolicy="no-referrer"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white font-medium truncate">
