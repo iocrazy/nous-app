@@ -31,7 +31,7 @@ def _maybe_chain_transcode(platform_id: str, user_id: str):
             logger.info(f"[Transcode/Chain] No resource found for platform_id={platform_id}")
             return
 
-        mime = resource.get("mime_type", "")
+        mime = resource.get("mime_type") or ""
         if not mime.startswith("video/"):
             logger.debug(f"[Transcode/Chain] Not a video ({mime}), skip: {platform_id}")
             return
@@ -212,8 +212,19 @@ class UnifiedProgressTracker:
             "total": total,
         })
 
-        # Supabase update is now skipped here — progress goes via WebSocket.
-        # Stage transitions still write to Supabase via _force_progress().
+        # Fallback: throttled Supabase writes (~every 3s) for when WebSocket is
+        # unavailable (e.g. reverse proxy doesn't support WS upgrades).
+        if self.unified_tracker and self.unified_task_id:
+            if now - getattr(self, '_last_sb_write', 0) >= 3.0:
+                self._last_sb_write = now
+                try:
+                    run_async(self.unified_tracker.update_progress(
+                        self.unified_task_id,
+                        overall_percent,
+                        speed=int(self._speed) if self._speed > 0 else None,
+                    ))
+                except Exception as e:
+                    logger.debug(f"[ProgressTracker] Supabase fallback write failed: {e}")
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
