@@ -21,7 +21,6 @@ export const MOCK_PARSED_DATA: ParsedMedia = {
   // Using the first provided test URL
   video_download_urls: ["https://pichome.heygo.cn:88/index.php?mod=io&op=getStream&path=ejRPRDVoMU5EM1lXRWVHMF8yUjVVVV95aFJxb0Q3LVdVQ2xqYk5NVklBajZ5YjNqeERpOWY4RExXRDJIZVdZRkRLeVFBNklYRFUzd3FweUQ"],
   image_download_urls: [],
-  music_download_urls: ["#"],
   music_name: "Original Sound - TechHunter",
   video_download_status: DownloadStatus.COMPLETED,
   music_download_status: DownloadStatus.PENDING,

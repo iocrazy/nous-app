@@ -2,6 +2,10 @@
 
 本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
+## 沟通语言
+
+**必须使用中文**与用户沟通。所有问题、解释、确认、讨论都用中文。代码和 UI 文本仍使用英文（见下方 UI 语言规范）。
+
 ## Worktree 端口隔离
 
 **重要**：本项目使用 git worktree 多分支并行开发，每个 worktree 有独立端口。
@@ -158,6 +162,9 @@ supabase db push
 | `projects` | 项目 | BIGINT Snowflake |
 | `unified_tasks` | 异步任务追踪（Celery/后台） | UUID |
 | `folders` | 文件夹 | BIGINT Snowflake |
+| `application_logs` | 后端应用日志（全量） | — |
+| `frontend_error_logs` | 前端错误日志 | — |
+| `api_request_logs` | API 请求日志 | — |
 
 **重要关系**：
 - `resources.media_id` → `parsed_media.id`（一个 resource 对应一个 parsed_media）

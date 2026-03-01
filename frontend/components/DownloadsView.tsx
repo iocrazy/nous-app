@@ -43,7 +43,7 @@ import { semanticSearch, hybridSearch, localSearch } from '../services/searchSer
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource, fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
-import { getDownloadUrl } from '../services/dataService';
+import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { UnifiedTagPicker } from './UnifiedTagPicker';
@@ -519,10 +519,13 @@ export const DownloadsView: React.FC = () => {
   const handleCtxDownloadAudio = useCallback(async () => {
     if (!contextMenu) return;
     const v = contextMenu.video;
-    const url = v.music_download_urls?.[0];
     setContextMenu(null);
-    if (!url || url === '#') return;
-    await downloadFile(url, `${v.platform_id || 'audio'}.mp3`, {
+    if (!v.music_download_path || !v.platform_id) {
+      addToast('No audio file available. Use player page to extract audio.', 'info');
+      return;
+    }
+    const url = getMusicDownloadUrl(v.platform_id);
+    await downloadFile(url, `${v.platform_id || 'audio'}.m4a`, {
       onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
       onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
     });
@@ -1024,7 +1027,7 @@ export const DownloadsView: React.FC = () => {
             <Download size={14} className="text-zinc-500" />
             Download Original
           </button>
-          {contextMenu.video.music_download_urls?.[0] && contextMenu.video.music_download_urls[0] !== '#' && (
+          {contextMenu.video.music_download_path && (
             <button
               onClick={handleCtxDownloadAudio}
               className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"

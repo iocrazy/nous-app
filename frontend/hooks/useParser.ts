@@ -22,7 +22,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   const [batchInput, setBatchInput] = useState('');
   const [downloadOptions, setDownloadOptions] = useState({
     video: true,
-    audio: false,
   });
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
 
@@ -138,7 +137,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
       const response = await parseShareLink(urlInput, {
         video_bool: downloadOptions.video,
-        music_bool: downloadOptions.audio,
       });
 
       addLog('Backend received the request', 'success');
@@ -221,7 +219,6 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
       const response = await parseBatchLinks(links, {
         video_bool: downloadOptions.video,
-        music_bool: downloadOptions.audio,
       });
 
       setTaskProgress(50);

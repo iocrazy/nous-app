@@ -26,7 +26,7 @@ def _extract_url(url: str) -> str:
     return valid_urls[0]
 
 
-def _fetch_and_parse(valid_url: str, video_bool: bool, music_bool: bool,
+def _fetch_and_parse(valid_url: str, video_bool: bool,
                      cover_bool: bool, categories: str = None) -> tuple:
     """Fetch video data from platform and parse metadata.
     Returns (aweme_detail, parsed_data) tuple.
@@ -44,7 +44,7 @@ def _fetch_and_parse(valid_url: str, video_bool: bool, music_bool: bool,
             aweme_detail=aweme_detail,
             valid_url=valid_url,
             download_video=video_bool,
-            download_music=music_bool,
+            download_music=False,
             download_cover=cover_bool,
             categories=categories,
         )
@@ -56,7 +56,7 @@ def _fetch_and_parse(valid_url: str, video_bool: bool, music_bool: bool,
 
 
 def _save_media_to_db(parsed_data: dict, platform_id: str,
-                      video_bool: bool, music_bool: bool) -> dict | None:
+                      video_bool: bool) -> dict | None:
     """Save or update parsed media in database. Returns saved record."""
     from app.core.enums import DownloadStatus
     from app.repositories.media_repository import MediaRepository
@@ -75,9 +75,7 @@ def _save_media_to_db(parsed_data: dict, platform_id: str,
     data_dict["video_download_status"] = (
         DownloadStatus.PENDING.value if video_bool else DownloadStatus.SKIPPED.value
     )
-    data_dict["music_download_status"] = (
-        DownloadStatus.PENDING.value if music_bool else DownloadStatus.SKIPPED.value
-    )
+    data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
 
     if existing:
         saved = run_async(repo.update(platform_id, data_dict))
@@ -116,7 +114,7 @@ def _auto_tag_media(video_db_id, platform_id: str, aweme_detail: dict,
 
 
 def _dispatch_download(platform_id: str, user_id: str,
-                       video_bool: bool, music_bool: bool, cover_bool: bool,
+                       video_bool: bool, cover_bool: bool,
                        media_type: int, video_title: str) -> str | None:
     """Dispatch download task. Returns download_task_id or None."""
     from app.services.system_monitor_service import check_worker_ready
@@ -131,7 +129,6 @@ def _dispatch_download(platform_id: str, user_id: str,
         platform_id=platform_id,
         user_id=user_id,
         download_video=video_bool,
-        download_music=music_bool,
         download_cover=cover_bool,
         media_type=media_type,
         video_title=video_title,
@@ -173,7 +170,6 @@ def parse_single_link_task(
     url: str,
     user_id: str,
     video_bool: bool = True,
-    music_bool: bool = False,
     cover_bool: bool = True,
     categories: str = None,
 ):
@@ -190,7 +186,7 @@ def parse_single_link_task(
         # 2. Fetch + parse
         try:
             aweme_detail, parsed_data = _fetch_and_parse(
-                valid_url, video_bool, music_bool, cover_bool, categories
+                valid_url, video_bool, cover_bool, categories
             )
         except RuntimeError as e:
             raise self.retry(
@@ -203,7 +199,7 @@ def parse_single_link_task(
         parsed_data["user_id"] = user_id
 
         # 3. Save to database
-        saved_video = _save_media_to_db(parsed_data, platform_id, video_bool, music_bool)
+        saved_video = _save_media_to_db(parsed_data, platform_id, video_bool)
         if not saved_video:
             return {"status": "failed", "url": valid_url, "error": "Data validation failed"}
 
@@ -216,9 +212,9 @@ def parse_single_link_task(
 
         # 5. Dispatch download
         download_task_id = None
-        if video_bool or music_bool or cover_bool:
+        if video_bool or cover_bool:
             download_task_id = _dispatch_download(
-                platform_id, user_id, video_bool, music_bool, cover_bool,
+                platform_id, user_id, video_bool, cover_bool,
                 media_type, video_title,
             )
 
@@ -276,7 +272,6 @@ def parse_batch_links_task(
     urls: list,
     user_id: str,
     video_bool: bool = True,
-    music_bool: bool = False,
     cover_bool: bool = True,
     categories: str = None,
 ):
@@ -289,7 +284,6 @@ def parse_batch_links_task(
         urls: List of video links
         user_id: User ID
         video_bool: Whether to download video
-        music_bool: Whether to download music
         cover_bool: Whether to download cover
         categories: Video categories
 
@@ -304,7 +298,6 @@ def parse_batch_links_task(
             url=url,
             user_id=user_id,
             video_bool=video_bool,
-            music_bool=music_bool,
             cover_bool=cover_bool,
             categories=categories,
         )

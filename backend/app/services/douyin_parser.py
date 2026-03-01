@@ -191,12 +191,8 @@ class DouyinParser:
             "source_platform": "douyin",
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
-            "music_download_urls": aweme_detail.get("music", {})
-            .get("play_url", {})
-            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
-            "need_download_music": download_music,
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
@@ -287,12 +283,8 @@ class DouyinParser:
             "resolution": f"{video_data.get('width')}x{video_data.get('height')}",
             "source_platform": "douyin",
             "video_download_urls": video_urls or None,
-            "music_download_urls": aweme_detail.get("music", {})
-            .get("play_url", {})
-            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
-            "need_download_music": download_music,
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
@@ -358,12 +350,8 @@ class DouyinParser:
             "datasize_bytes": 0,  # Image collections don't have video file size
             "source_platform": "douyin",
             "image_download_urls": image_download_urls,
-            "music_download_urls": aweme_detail.get("music", {})
-            .get("play_url", {})
-            .get("url_list", None),
             "music_name": music_name,
             "need_download_video": download_video,
-            "need_download_music": download_music,
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
             "dynamic_cover_url": cover_data["dynamic_cover_url"],
