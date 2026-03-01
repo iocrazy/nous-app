@@ -739,20 +739,44 @@ async def extract_audio(
                 detail="No video file found. Download the video first.",
             )
 
+        video_title = media.get("title", platform_id)[:30]
+
+        # Create unified_tasks record for Task Center visibility
+        from app.services.task_tracker import get_task_tracker
+        tracker = get_task_tracker()
+        unified_task_id = None
+        try:
+            unified_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="download",
+                title=video_title,
+                subtitle="Audio Extract",
+                media_id=platform_id,
+            )
+            await tracker.start(unified_task_id)
+        except Exception as e:
+            logger.warning(f"[ExtractAudio] Failed to create unified task: {e}")
+
         # Dispatch extraction in background
-        async def _do_extract(pid: str):
+        async def _do_extract(pid: str, task_id: str | None):
             from app.tasks.download_tasks import _extract_audio_from_video
+            _tracker = get_task_tracker()
             try:
                 _extract_audio_from_video(pid)
+                if task_id:
+                    await _tracker.complete(task_id)
             except Exception as e:
                 logger.error(f"[ExtractAudio] Failed for {pid}: {e}")
+                if task_id:
+                    await _tracker.fail(task_id, str(e)[:500])
 
-        background_tasks.add_task(_do_extract, platform_id)
+        background_tasks.add_task(_do_extract, platform_id, unified_task_id)
 
         return {
             "success": True,
             "message": "Audio extraction started",
             "platform_id": platform_id,
+            "task_id": unified_task_id,
         }
 
     except HTTPException:
