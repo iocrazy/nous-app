@@ -35,6 +35,7 @@ services:
       - ${COOKIES_HOST_PATH:-./config/cookies}:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
+      - COOKIES_DIR=/app/cookies
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -64,6 +65,7 @@ services:
       - ${COOKIES_HOST_PATH:-./config/cookies}:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
+      - COOKIES_DIR=/app/cookies
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
