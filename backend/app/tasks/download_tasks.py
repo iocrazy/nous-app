@@ -299,7 +299,7 @@ def _calc_stage_ranges(download_video: bool, download_cover: bool) -> dict:
     """Calculate progress ranges for each download stage.
 
     Returns dict mapping stage name to (offset, weight) tuple.
-    Ranges span 3% to 95% (2% reserved for init, 5% for finalization).
+    Ranges span 0% to 95% (5% reserved for finalization).
     """
     raw_weights = {'video': 85, 'cover': 15}
     parts = []
@@ -313,9 +313,9 @@ def _calc_stage_ranges(download_video: bool, download_cover: bool) -> dict:
 
     total_w = sum(raw_weights[p] for p in parts)
     ranges = {}
-    offset = 3
+    offset = 0
     for p in parts:
-        weight = int(raw_weights[p] * 92 / total_w)  # Scale to 92 points (3% to 95%)
+        weight = int(raw_weights[p] * 95 / total_w)  # Scale to 95 points (0% to 95%)
         ranges[p] = (offset, weight)
         offset += weight
 
