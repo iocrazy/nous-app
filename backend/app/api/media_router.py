@@ -758,13 +758,20 @@ async def extract_audio(
             logger.warning(f"[ExtractAudio] Failed to create unified task: {e}")
 
         # Dispatch extraction in background
+        # Note: _extract_audio_from_video is sync (uses asyncio.run internally
+        # for DB calls), so we must run it in a thread to avoid
+        # "cannot call asyncio.run() from a running event loop".
         async def _do_extract(pid: str, task_id: str | None):
+            import asyncio
             from app.tasks.download_tasks import _extract_audio_from_video
             _tracker = get_task_tracker()
             try:
-                _extract_audio_from_video(pid)
+                success = await asyncio.to_thread(_extract_audio_from_video, pid)
                 if task_id:
-                    await _tracker.complete(task_id)
+                    if success:
+                        await _tracker.complete(task_id)
+                    else:
+                        await _tracker.fail(task_id, "Audio extraction failed")
             except Exception as e:
                 logger.error(f"[ExtractAudio] Failed for {pid}: {e}")
                 if task_id:
