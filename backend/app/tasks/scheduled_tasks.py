@@ -412,11 +412,11 @@ def recover_stale_orchestrator_locks():
     try:
         from datetime import timezone
 
-        from app.services.task_orchestrator import TaskPhase, get_orchestrator
+        from app.services.unified_task_manager import get_task_manager
 
         async def _recover():
-            orchestrator = get_orchestrator()
-            client = await orchestrator._get_client()
+            mgr = get_task_manager()
+            client = await mgr._get_client()
 
             cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
@@ -431,11 +431,9 @@ def recover_stale_orchestrator_locks():
             recovered = 0
             for task in (stale.data or []):
                 try:
-                    await orchestrator.transition(
-                        task["id"], TaskPhase.FAILED, error_code="NETWORK_TIMEOUT"
-                    )
+                    await mgr.fail(task["id"], "Stale task timeout", error_code="NETWORK_TIMEOUT")
                     if task.get("dedup_key"):
-                        orchestrator.release_lock(task["dedup_key"])
+                        mgr.release_lock(task["dedup_key"])
                     recovered += 1
                     logger.info(f"[Recovery] Marked stale task {task['id']} as failed")
                 except Exception as e:

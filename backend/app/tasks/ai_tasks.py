@@ -62,8 +62,8 @@ def _start_unified(task_id: str):
     if not task_id:
         return
     try:
-        from app.services.task_tracker import get_task_tracker
-        run_async(get_task_tracker().start(task_id))
+        from app.services.unified_task_manager import get_task_manager
+        run_async(get_task_manager().start(task_id))
     except Exception:
         pass
 
@@ -73,8 +73,8 @@ def _update_unified_progress(unified_task_id: str, progress: int, subtitle: str 
     if not unified_task_id:
         return
     try:
-        from app.services.task_tracker import get_task_tracker
-        tracker = get_task_tracker()
+        from app.services.unified_task_manager import get_task_manager
+        tracker = get_task_manager()
         run_async(tracker.update_progress(
             unified_task_id, progress=progress, subtitle=subtitle,
         ))
@@ -86,8 +86,8 @@ def _complete_unified(unified_task_id: str):
     if not unified_task_id:
         return
     try:
-        from app.services.task_tracker import get_task_tracker
-        run_async(get_task_tracker().complete(unified_task_id))
+        from app.services.unified_task_manager import get_task_manager
+        run_async(get_task_manager().complete(unified_task_id))
     except Exception:
         pass
 
@@ -96,8 +96,8 @@ def _fail_unified(unified_task_id: str, error_msg: str):
     if not unified_task_id:
         return
     try:
-        from app.services.task_tracker import get_task_tracker
-        run_async(get_task_tracker().fail(unified_task_id, error_msg[:500]))
+        from app.services.unified_task_manager import get_task_manager
+        run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
     except Exception:
         pass
 
@@ -469,31 +469,31 @@ def chain_ai_pipeline(
     group_id = str(uuid.uuid4())
     task_ids: dict[str, str] = {}
 
-    # ── Orchestrator dedup check for AI pipeline ──
+    # ── Dedup check for AI pipeline ──
     dedup_key = None
     try:
-        from app.services.task_orchestrator import get_orchestrator
-        orchestrator = get_orchestrator()
-        orchestrator_result = run_async(orchestrator.acquire_or_subscribe(
+        from app.services.unified_task_manager import get_task_manager
+        mgr = get_task_manager()
+        dedup_result = run_async(mgr.acquire_or_subscribe(
             task_type="ai_extract",
             dedup_identifier=platform_id,
             user_id=user_id,
             resource_id=resource_id or "",
         ))
-        dedup_key = orchestrator_result.get("dedup_key")
+        dedup_key = dedup_result.get("dedup_key")
 
-        if orchestrator_result["action"] == "subscribed":
+        if dedup_result["action"] == "subscribed":
             logger.info(f"[AI] Already processing {platform_id}, subscribed to existing pipeline")
             return
-        if orchestrator_result["action"] == "completed":
+        if dedup_result["action"] == "completed":
             logger.info(f"[AI] AI pipeline already completed for {platform_id}")
             return
     except Exception as e:
         logger.warning(f"[AI] Dedup check failed, proceeding normally: {e}")
 
     try:
-        from app.services.task_tracker import get_task_tracker
-        tracker = get_task_tracker()
+        from app.services.unified_task_manager import get_task_manager
+        tracker = get_task_manager()
 
         if transcript_bool:
             task_ids['extract'] = run_async(tracker.create(

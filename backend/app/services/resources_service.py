@@ -788,8 +788,8 @@ class ResourcesService:
         # Dedup check via orchestrator
         dedup_key = None
         try:
-            from app.services.task_orchestrator import get_orchestrator
-            orchestrator = get_orchestrator()
+            from app.services.unified_task_manager import get_task_manager
+            orchestrator = get_task_manager()
             result = await orchestrator.acquire_or_subscribe(
                 task_type="transcode",
                 dedup_identifier=version_id,
