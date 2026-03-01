@@ -32,6 +32,7 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
+      - ./cookies:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -60,6 +61,7 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config.yml:/app/config.yml
+      - ./cookies:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
       - CELERY_BROKER_URL=redis://redis:6379/0
