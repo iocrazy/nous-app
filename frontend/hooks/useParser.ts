@@ -36,6 +36,8 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
   // Download tracking via TaskManagerContext (no more HTTP polling)
   const [downloadCeleryId, setDownloadCeleryId] = useState<string | null>(null);
+  // Parse task tracking (async parse flow)
+  const [parseUnifiedTaskId, setParseUnifiedTaskId] = useState<string | null>(null);
   const { tasks } = useTaskManager();
 
   const currentDownloadTask = useMemo(
@@ -53,6 +55,52 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       default: return 'pending';
     }
   })();
+
+  // Track parse task via unified_task_id
+  const currentParseTask = useMemo(
+    () => parseUnifiedTaskId ? tasks.find(t => t.id === parseUnifiedTaskId) : undefined,
+    [parseUnifiedTaskId, tasks],
+  );
+
+  // React to parse completion/failure
+  const prevParseStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentParseTask) return;
+    const status = currentParseTask.status;
+    if (status === prevParseStatusRef.current) return;
+    prevParseStatusRef.current = status;
+
+    if (status === 'completed') {
+      addLog('Parse completed! Starting download...', 'success');
+      setTaskProgress(50);
+      setTaskStatus('Downloading');
+      setParseUnifiedTaskId(null);
+      setIsParsing(false);
+
+      // Parse complete → download task auto-created by backend
+      // Find the download task via media_id
+      const mediaId = currentParseTask.media_id;
+      if (mediaId) {
+        const dlTask = tasks.find(t =>
+          t.task_type === 'download' && t.media_id === mediaId
+        );
+        if (dlTask?.celery_task_id) {
+          setDownloadCeleryId(dlTask.celery_task_id);
+        }
+        // Refresh library to show parsed metadata
+        fetchVideoByPlatformId(mediaId).then(updated => {
+          if (updated) setCurrentResult(updated);
+        });
+      }
+      loadLibraryData();
+    } else if (status === 'failed') {
+      addLog(`Parse failed: ${currentParseTask.error_msg || 'Unknown error'}`, 'error');
+      setTaskStatus('Failed');
+      setTaskProgress(0);
+      setParseUnifiedTaskId(null);
+      setIsParsing(false);
+    }
+  }, [currentParseTask?.status]);
 
   // React to download completion/failure from TaskManager
   const prevDownloadStatusRef = useRef<string | null>(null);
@@ -124,7 +172,9 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     setTaskProgress(0);
     setTaskStatus('Initializing');
     setDownloadCeleryId(null);
+    setParseUnifiedTaskId(null);
     prevDownloadStatusRef.current = null;
+    prevParseStatusRef.current = null;
 
     try {
       addLog('Connecting to backend API...');
@@ -143,9 +193,26 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       setTaskProgress(50);
 
       if (response.success) {
+        if ((response as any).async) {
+          // Async mode: parse dispatched to background queue
+          addLog('Parse task submitted to background queue', 'info');
+          setTaskStatus('Parsing');
+          setTaskProgress(30);
+
+          const unifiedTaskId = (response as any).unified_task_id;
+          if (unifiedTaskId) {
+            setParseUnifiedTaskId(unifiedTaskId);
+            addLog(`Tracking parse progress: ${unifiedTaskId}`, 'info');
+          }
+          // Don't set isParsing=false — wait for parse completion via effect
+          return;
+        }
+
+        // Synchronous response (legacy / fallback)
         addLog(`Video parsed: ${response.title || response.platform_id}`, 'success');
         if ((response as any).fallback_used) {
-          addLog(`LightHTTP failed, used fallback: ${(response as any).parse_method_name}`, 'warning');
+          const reason = (response as any).fallback_reason || 'primary parser failed';
+          addLog(`${reason}, used fallback: ${(response as any).parse_method_name}`, 'warning');
         } else {
           addLog(`Parse method: ${(response as any).parse_method_name || 'Unknown'}`, 'info');
         }

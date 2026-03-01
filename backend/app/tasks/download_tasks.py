@@ -108,7 +108,7 @@ def _maybe_chain_ai_pipeline(platform_id: str, user_id: str):
 
 
 class UnifiedProgressTracker:
-    """Progress tracker that writes to Redis (real-time) + TaskTracker (Supabase lifecycle).
+    """Progress tracker that writes to Redis (real-time) + UnifiedTaskManager (Supabase lifecycle).
 
     Real-time progress is published via Redis pub/sub to channel
     ``task_progress:{user_id}`` so the WebSocket endpoint can push it
@@ -1067,27 +1067,34 @@ def download_unified_task(
     # ── UnifiedTaskManager setup (Supabase lifecycle) ──
     from app.services.unified_task_manager import get_task_manager
     manager = get_task_manager()
-    unified_task_id = None
-    dl_parts = []
-    if download_video:
-        dl_parts.append("Video")
-    if download_cover:
-        dl_parts.append("Cover")
-    dl_subtitle = " + ".join(dl_parts) if dl_parts else None
+    unified_task_id = _unified_task_id  # Use pre-created task from HTTP handler
 
-    try:
-        unified_task_id = run_async(manager.create(
-            user_id=user_id,
-            task_type="download",
-            title=video_title or platform_id,
-            subtitle=dl_subtitle,
-            media_id=platform_id,
-            celery_task_id=task_id,
-            dedup_key=_dedup_key,
-        ))
-        run_async(manager.start(unified_task_id))
-    except Exception as e:
-        logger.warning(f"[TaskManager] Failed to create unified task: {e}")
+    if not unified_task_id:
+        # Fallback: no pre-created task (retry / legacy callers) → create one
+        dl_parts = []
+        if download_video:
+            dl_parts.append("Video")
+        if download_cover:
+            dl_parts.append("Cover")
+        dl_subtitle = " + ".join(dl_parts) if dl_parts else None
+        try:
+            unified_task_id = run_async(manager.create(
+                user_id=user_id,
+                task_type="download",
+                title=video_title or platform_id,
+                subtitle=dl_subtitle,
+                media_id=platform_id,
+                celery_task_id=task_id,
+                dedup_key=_dedup_key,
+            ))
+        except Exception as e:
+            logger.warning(f"[TaskManager] Failed to create unified task: {e}")
+
+    if unified_task_id:
+        try:
+            run_async(manager.start(unified_task_id))
+        except Exception as e:
+            logger.warning(f"[TaskManager] Failed to start unified task: {e}")
 
     # Make unified_task_id available to signals via kwargs
     if unified_task_id:
