@@ -502,15 +502,19 @@ export const DownloadsView: React.FC = () => {
       onError: (msg: string) => addToast(`Download failed (${msg})`, 'error'),
     };
     // Try backend API first, fallback to remote URL
+    const baseName = (v.title || v.platform_id || 'media')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .trim()
+      .slice(0, 100);
     if (v.download_path && v.video_download_status?.toLowerCase() === 'completed' && v.platform_id) {
-      const ok = await downloadWithAuth(getDownloadUrl(v.platform_id), `${v.platform_id}.mp4`, {
+      const ok = await downloadWithAuth(getDownloadUrl(v.platform_id), `${baseName}.mp4`, {
         onSuccess: callbacks.onSuccess,
       });
       if (ok) return;
     }
     const videoUrl = getVideoUrl(v);
     if (videoUrl) {
-      await downloadFile(videoUrl, `${v.platform_id || 'video'}.mp4`, callbacks);
+      await downloadFile(videoUrl, `${baseName}.mp4`, callbacks);
     } else {
       addToast('No video file available', 'error');
     }
@@ -525,7 +529,11 @@ export const DownloadsView: React.FC = () => {
       return;
     }
     const url = getMusicDownloadUrl(v.platform_id);
-    await downloadFile(url, `${v.platform_id || 'audio'}.m4a`, {
+    const audioBaseName = (v.title || v.platform_id || 'media')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .trim()
+      .slice(0, 100);
+    await downloadFile(url, `${audioBaseName}_audio.m4a`, {
       onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
       onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
     });

@@ -313,16 +313,21 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   };
 
+  const baseName = (data.title || data.platform_id || 'media')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .trim()
+    .slice(0, 100);
+
   const onDownloadVideo = async () => {
     setShowDownloadMenu(false);
     if (!data.platform_id) return;
     // Try backend API first (silent error), fallback to remote URL
     if (data.download_path && data.video_download_status?.toLowerCase() === 'completed') {
-      const ok = await doDownload(getDownloadUrl(data.platform_id), `${data.platform_id}.mp4`, true, true);
+      const ok = await doDownload(getDownloadUrl(data.platform_id), `${baseName}.mp4`, true, true);
       if (ok) return;
     }
     if (videoUrl) {
-      await doDownload(videoUrl, `${data.platform_id}.mp4`);
+      await doDownload(videoUrl, `${baseName}.mp4`);
     } else {
       addToast('No video file available', 'error');
     }
@@ -332,11 +337,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     setShowDownloadMenu(false);
     if (!data.platform_id) return;
     if (data.cover_download_path && data.cover_download_status?.toLowerCase() === 'completed') {
-      const ok = await doDownload(getCoverDownloadUrl(data.platform_id), `${data.platform_id}_cover.jpg`, true, true);
+      const ok = await doDownload(getCoverDownloadUrl(data.platform_id), `${baseName}_cover.jpg`, true, true);
       if (ok) return;
     }
     if (coverUrl) {
-      await doDownload(coverUrl, `${data.platform_id}_cover.jpg`);
+      await doDownload(coverUrl, `${baseName}_cover.jpg`);
     } else {
       addToast('No cover file available', 'error');
     }
@@ -346,7 +351,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     if (!data.image_download_urls) return;
     data.image_download_urls.forEach((url, idx) => {
       setTimeout(() => {
-        doDownload(url, `${data.platform_id || 'image'}_${idx + 1}.jpg`);
+        doDownload(url, `${baseName}_${idx + 1}.jpg`);
       }, idx * 500);
     });
   };
@@ -359,7 +364,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const onDownloadCover = () => {
     if (!coverUrl) return;
-    doDownload(coverUrl, `${data.platform_id || 'cover'}_cover.jpg`);
+    doDownload(coverUrl, `${baseName}_cover.jpg`);
   };
 
   // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)

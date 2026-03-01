@@ -201,22 +201,27 @@ export function PlayerPage() {
     setShowDownloadMenu(false);
     setIsDownloading(true);
     const onSuccess = (f: string) => addToast(`Downloaded: ${f}`, 'success');
+    // Use title as filename base, fallback to platform_id
+    const baseName = (video.title || video.platform_id || 'media')
+      .replace(/[\\/:*?"<>|]/g, '_')  // Remove filesystem-unsafe characters
+      .trim()
+      .slice(0, 100);  // Limit length
     try {
       let ok = false;
       if (type === 'video') {
-        ok = await downloadWithAuth(getDownloadUrl(video.platform_id), `${video.platform_id}.mp4`, { onSuccess });
+        ok = await downloadWithAuth(getDownloadUrl(video.platform_id), `${baseName}.mp4`, { onSuccess });
         if (!ok) addToast('Video file not available for download', 'error');
       } else if (type === 'cover') {
-        ok = await downloadWithAuth(getCoverDownloadUrl(video.platform_id), `${video.platform_id}_cover.jpg`, { onSuccess });
+        ok = await downloadWithAuth(getCoverDownloadUrl(video.platform_id), `${baseName}_cover.jpg`, { onSuccess });
         if (!ok) addToast('Cover file not available for download', 'error');
       } else if (type === 'audio') {
-        ok = await downloadWithAuth(getMusicDownloadUrl(video.platform_id), `${video.platform_id}_audio.mp3`, { onSuccess });
+        ok = await downloadWithAuth(getMusicDownloadUrl(video.platform_id), `${baseName}_audio.mp3`, { onSuccess });
         if (!ok) addToast('Audio file not available for download', 'error');
       } else if (type === 'images') {
         const urls = video.image_download_urls?.filter(u => u && u !== '#');
         if (urls?.length) {
           urls.forEach((url, idx) => {
-            setTimeout(() => downloadFile(url, `${video.platform_id || 'image'}_${idx + 1}.jpg`, { onSuccess }), idx * 500);
+            setTimeout(() => downloadFile(url, `${baseName}_${idx + 1}.jpg`, { onSuccess }), idx * 500);
           });
         } else {
           addToast('No images available for download', 'error');
