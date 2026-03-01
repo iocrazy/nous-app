@@ -43,7 +43,7 @@ class TaskPhase(str, Enum):
 # ─── Valid Transitions ────────────────────────────────────────────────
 
 VALID_TRANSITIONS: Dict[TaskPhase, set[TaskPhase]] = {
-    TaskPhase.QUEUED:      {TaskPhase.DEDUP_CHECK, TaskPhase.PROCESSING, TaskPhase.FAILED, TaskPhase.CANCELLED},
+    TaskPhase.QUEUED:      {TaskPhase.DEDUP_CHECK, TaskPhase.PROCESSING, TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
     TaskPhase.DEDUP_CHECK: {TaskPhase.PROCESSING, TaskPhase.COMPLETED, TaskPhase.FAILED},
     TaskPhase.PROCESSING:  {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
     TaskPhase.COMPLETED:   set(),  # terminal
@@ -57,6 +57,7 @@ _TERMINAL_PHASES = {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED}
 # ─── Dedup Key Fields ────────────────────────────────────────────────
 
 DEDUP_KEY_FIELDS: Dict[str, str] = {
+    "parse":             "url",
     "download":          "platform_id",
     "transcode":         "version_id",
     "ai_extract":        "platform_id",
@@ -431,7 +432,7 @@ class UnifiedTaskManager:
         )
 
         stats = {
-            "by_type": {"download": 0, "upload": 0, "transcode": 0, "ai_pipeline": 0, "ai_extract": 0, "ai_transcription": 0, "ai_summary": 0},
+            "by_type": {"parse": 0, "download": 0, "upload": 0, "transcode": 0, "ai_pipeline": 0, "ai_extract": 0, "ai_transcription": 0, "ai_summary": 0},
             "by_status": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0},
             "active_total": 0,
         }

@@ -190,10 +190,26 @@ async def _dedup_and_dispatch(
             types_to_download.append(dtype)
 
     task_id = None
+    unified_task_id = None
     if types_to_download:
         # Map back to download_* bools
         dl_video = ("video" in types_to_download) or ("image" in types_to_download)
         dl_cover = "cover" in types_to_download
+
+        # Pre-create unified_task in HTTP handler (eliminates race window)
+        try:
+            dl_parts = [t.capitalize() for t in types_to_download]
+            dl_subtitle = " + ".join(dl_parts)
+            unified_task_id = await orchestrator.create(
+                user_id=user_id,
+                task_type="download",
+                title=video_title[:50] if video_title else platform_id,
+                subtitle=dl_subtitle,
+                media_id=platform_id,
+                resource_id=resource_id,
+            )
+        except Exception as e:
+            logger.warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
 
         try:
             logger.info(
@@ -209,8 +225,15 @@ async def _dedup_and_dispatch(
                 media_type=media_type,
                 video_title=video_title[:50] if video_title else "undefined",
                 resource_id=resource_id,
+                _unified_task_id=unified_task_id,
             )
             task_id = celery_task.id
+            # Write celery_task_id back to pre-created unified_task
+            if unified_task_id:
+                try:
+                    await orchestrator._atomic_update(unified_task_id, {"celery_task_id": task_id})
+                except Exception:
+                    pass
         except Exception as celery_err:
             logger.warning(f"[Download/Init] Celery unavailable: {celery_err}")
             if background_tasks:
@@ -226,6 +249,7 @@ async def _dedup_and_dispatch(
 
     return {
         "task_id": task_id,
+        "unified_task_id": unified_task_id,
         "types_submitted": types_to_download,
         "types_skipped": types_skipped,
         "types_subscribed": types_subscribed,
@@ -1539,144 +1563,85 @@ async def _handle_ytdlp_fetch(
     """
     Unified video fetch handler for ALL platforms via yt-dlp.
 
-    Flow:
-        1. Try yt-dlp metadata fetch
-        2. On failure for Douyin: fall back to LightHTTP → DrissionPage
-        3. Save metadata to database
-        4. Dispatch download via _dedup_and_dispatch():
-           - yt-dlp parsed → url passed → yt-dlp download
-           - Fallback parsed → url=None → httpx download (CDN direct links)
+    Async flow: dispatches parse_media_task to Celery and returns immediately.
+    The Celery task handles: yt-dlp metadata fetch → save DB → dispatch download.
+    Progress is visible in Task Center via unified_tasks.
     """
-    fallback_used = False
-    parse_method = "ytdlp"
-    parse_method_name = f"yt-dlp ({platform})"
-    fallback_reason = None
+    from app.services.unified_task_manager import get_task_manager
+    from app.tasks.parse_tasks import parse_media_task
 
-    # Step 1: Try yt-dlp metadata fetch (all platforms)
+    mgr = get_task_manager()
+
+    # Dedup check for parse (URL as dedup identifier)
+    dedup_key = None
     try:
-        ytdlp_info = await YtdlpService.fetch_metadata(url)
-        parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
-    except (RuntimeError, Exception) as e:
-        # Non-Douyin platforms: yt-dlp failure is fatal
-        if platform != "douyin":
-            raise HTTPException(status_code=400, detail=str(e))
-
-        # Douyin: fall back to LightHTTP → DrissionPage
-        logger.warning(f"[yt-dlp] Douyin parse failed, falling back: {e}")
-        fallback_reason = f"yt-dlp error: {str(e)[:100]}"
-        parsed_data, parse_method, parse_method_name = await _douyin_parse_fallback(
-            url, auth.user_id
-        )
-        fallback_used = True
-
-    # Step 2: Enrich Bilibili stats
-    if platform == "bilibili":
-        raw_video_id = parsed_data["platform_id"].split("_", 1)[1] if "_" in parsed_data["platform_id"] else parsed_data["platform_id"]
-        if raw_video_id:
-            extra_stats = await YtdlpService._fetch_bilibili_stats(raw_video_id)
-            if extra_stats:
-                parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
-                parsed_data["share_count"] = extra_stats.get("share", 0)
-                logger.info(
-                    "[yt-dlp] Bilibili stats enriched: "
-                    f"fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
-                )
-
-    platform_id = parsed_data["platform_id"]
-    video_title = parsed_data.get("title", "")
-    media_type = int(parsed_data.get("media_type", 0))
-
-    # Add user-specific fields
-    parsed_data["user_id"] = auth.user_id
-    parsed_data["need_download_video"] = request.video_bool
-    parsed_data["need_download_cover"] = True  # cover always downloaded
-
-    # Step 3: Save metadata to database
-    save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
-    if not save_result.get("success"):
-        logger.error(f"Failed to save metadata: {save_result.get('message')}")
-        raise HTTPException(
-            status_code=500,
-            detail=save_result.get("message", "Failed to save metadata"),
-        )
-
-    resource_id = save_result.get("resource_id")
-    dedup_hit = save_result.get("dedup_hit", False)
-
-    # Step 4: Dispatch download via _dedup_and_dispatch()
-    # Parse method determines download strategy:
-    #   - yt-dlp parsed → dispatch_url=url → Celery _do_ytdlp_download()
-    #   - Douyin fallback parsed → dispatch_url=None → Celery _do_douyin_download() (httpx)
-    #   - Image posts → dispatch_url=None → Celery image download path
-    if fallback_used or media_type in (2, 68):
-        dispatch_url = None   # httpx download (CDN direct links already in DB)
-    else:
-        dispatch_url = url    # yt-dlp download (needs original URL)
-
-    need_download_video = request.video_bool and not dedup_hit
-    dispatch_result = {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
-    if need_download_video or request.cover_bool:
-        dispatch_result = await _dedup_and_dispatch(
-            platform_id=platform_id,
+        result = await mgr.acquire_or_subscribe(
+            task_type="parse",
+            dedup_identifier=url,
             user_id=auth.user_id,
-            resource_id=resource_id,
-            media_type=media_type,
-            video_title=video_title,
-            download_video=need_download_video,
-            download_cover=request.cover_bool,
-            url=dispatch_url,
-            background_tasks=background_tasks,
+            resource_id="",
         )
+        if result["action"] in ("subscribed", "completed"):
+            return {
+                "success": True,
+                "async": True,
+                "message": f"Parse already {result['action']}",
+                "dedup_action": result["action"],
+            }
+        dedup_key = result.get("dedup_key")
+    except Exception as e:
+        logger.warning(f"[Parse/Dedup] check failed, proceeding: {e}")
 
-    download_task_id = dispatch_result["task_id"]
+    # Pre-create parse unified_task
+    unified_task_id = None
+    try:
+        unified_task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="parse",
+            title=f"Parsing {url[:40]}...",
+            subtitle="Initializing...",
+            dedup_key=dedup_key,
+        )
+    except Exception as e:
+        logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
+
+    # Dispatch Celery parse task
+    celery_task = await asyncio.to_thread(
+        parse_media_task.delay,
+        url=url,
+        platform=platform,
+        user_id=auth.user_id,
+        video_bool=request.video_bool,
+        cover_bool=True,
+        tags=tags,
+        tag_ids=tag_ids,
+        _unified_task_id=unified_task_id,
+        _dedup_key=dedup_key,
+    )
+
+    # Write celery_task_id back to pre-created unified_task
+    if unified_task_id:
+        try:
+            await mgr._atomic_update(unified_task_id, {"celery_task_id": celery_task.id})
+        except Exception:
+            pass
 
     # Log action
     background_tasks.add_task(
         log_user_action,
         user_id=auth.user_id,
         action="fetch",
-        message=f"Video parsed ({parse_method_name}): {video_title[:30]}...",
+        message=f"Parse submitted: {url[:40]}...",
         status="success",
-        aweme_id=platform_id,
-        details={"platform": platform, "parse_method": parse_method},
+        details={"platform": platform, "async": True},
     )
-
-    # Handle datetime objects to string
-    published_at = parsed_data.get("published_at")
-    if published_at and hasattr(published_at, "isoformat"):
-        published_at = published_at.isoformat()
 
     return {
         "success": True,
-        "message": "Video processing task submitted",
-        "parse_method": parse_method,
-        "parse_method_name": parse_method_name,
-        "fallback_used": fallback_used,
-        "fallback_reason": fallback_reason,
-        "id": save_result.get("id"),
-        "platform_id": platform_id,
-        "title": parsed_data.get("title"),
-        "author": parsed_data.get("author"),
-        "media_type": parsed_data.get("media_type"),
-        "video_download_urls": parsed_data.get("video_download_urls", []),
-        "cover_urls": parsed_data.get("cover_urls", []),
-        "image_download_urls": parsed_data.get("image_download_urls", []),
-        "like_count": parsed_data.get("like_count", 0),
-        "comment_count": parsed_data.get("comment_count", 0),
-        "share_count": parsed_data.get("share_count", 0),
-        "favorite_count": parsed_data.get("favorite_count", 0),
-        "duration": parsed_data.get("duration", "0"),
-        "published_at": published_at,
-        "description": parsed_data.get("description"),
-        "original_url": parsed_data.get("original_url"),
-        "resolution": parsed_data.get("resolution"),
-        "video_download_status": (
-            "COMPLETED" if dedup_hit else parsed_data.get(
-                "video_download_status", "PENDING"
-            )
-        ),
-        "dedup_hit": dedup_hit,
-        "download_task_id": download_task_id,
+        "async": True,
+        "message": "Parse task submitted",
+        "parse_task_id": celery_task.id,
+        "unified_task_id": unified_task_id,
     }
 
 

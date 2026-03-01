@@ -22,7 +22,7 @@ router = APIRouter(prefix="/task-manager")
 @router.get("/tasks")
 async def list_tasks(
     auth: AuthDep,
-    task_type: Optional[str] = Query(None, pattern="^(download|upload|transcode|ai_pipeline|ai_extract|ai_transcription|ai_summary)$"),
+    task_type: Optional[str] = Query(None, pattern="^(parse|download|upload|transcode|ai_pipeline|ai_extract|ai_transcription|ai_summary)$"),
     status: Optional[str] = Query(None, pattern="^(pending|processing|completed|failed|cancelled)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),

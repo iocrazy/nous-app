@@ -6,6 +6,7 @@ import { getAuthHeaders } from '../services/parserService';
 // ─── Types ──────────────────────────────────────────────
 
 export type TaskType =
+  | 'parse'
   | 'download'
   | 'upload'
   | 'transcode'
@@ -51,6 +52,7 @@ export interface UnifiedTask {
 /** Map task_type to its high-level category */
 export function getTaskCategory(type: TaskType): TaskCategory {
   switch (type) {
+    case 'parse':
     case 'download':
     case 'upload':
       return 'transfer';
@@ -391,6 +393,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   );
   const totalActive = activeTasks.length;
   const activeCounts: Record<TaskType, number> = {
+    parse: 0,
     download: 0,
     upload: 0,
     transcode: 0,
@@ -474,6 +477,7 @@ export function formatFileSize(bytes: number): string {
 
 export function taskTypeIcon(type: TaskType): string {
   switch (type) {
+    case 'parse': return '\uD83D\uDD0D';         // 🔍
     case 'upload': return '\u2191';              // ↑
     case 'download': return '\u2193';            // ↓
     case 'transcode': return '\u27F3';           // ⟳
@@ -487,6 +491,7 @@ export function taskTypeIcon(type: TaskType): string {
 
 export function taskTypeLabel(type: TaskType): string {
   switch (type) {
+    case 'parse': return 'Parse';
     case 'upload': return 'Upload';
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
