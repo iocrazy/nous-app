@@ -4,7 +4,8 @@
 URL Router Service
 
 Detects source platform from URL and dispatches to the appropriate handler.
-Douyin URLs use the existing Douyin parser; all others use yt-dlp.
+All platforms use yt-dlp as the primary parser. Douyin falls back to
+LightHTTP / DrissionPage when yt-dlp fails (handled in media_router).
 """
 
 import re
@@ -33,7 +34,7 @@ class URLRouter:
 
         Returns:
             tuple[str, str]: (platform_name, handler_type)
-                handler_type is 'douyin' for Douyin URLs, 'ytdlp' for everything else.
+                handler_type is always 'ytdlp' (all platforms use yt-dlp as primary parser).
         """
         try:
             parsed = urlparse(url)
@@ -46,7 +47,7 @@ class URLRouter:
         for platform, domains in URLRouter.PLATFORM_PATTERNS.items():
             for domain in domains:
                 if hostname == domain or hostname.endswith(f".{domain}"):
-                    handler_type = "douyin" if platform == "douyin" else "ytdlp"
+                    handler_type = "ytdlp"
                     logger.info(
                         f"[URLRouter] Detected platform: {platform}, handler: {handler_type} for {url}"
                     )

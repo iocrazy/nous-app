@@ -269,11 +269,16 @@ class YtdlpService:
         """
         platform, handler_type = URLRouter.detect_platform(url)
 
-        # Build platform_id: {platform}_{yt-dlp id}
+        # Build platform_id
+        # Douyin: use raw aweme_id (backward-compatible with existing DB records)
+        # Others: {platform}_{yt-dlp id}
         video_id = ytdlp_info.get("id", "")
-        platform_id = (
-            f"{platform}_{video_id}" if video_id else f"{platform}_{hash(url)}"
-        )
+        if platform == "douyin":
+            platform_id = video_id if video_id else str(hash(url))
+        else:
+            platform_id = (
+                f"{platform}_{video_id}" if video_id else f"{platform}_{hash(url)}"
+            )
 
         # Resolution
         width = ytdlp_info.get("width")

@@ -295,228 +295,17 @@ async def fetch_video(
         logger.info(f"[URLRouter] Platform: {platform}, Handler: {handler_type}")
 
         # ==========================================
-        # Non-Douyin path: use yt-dlp
+        # Unified path: all platforms use yt-dlp (with Douyin fallback)
         # ==========================================
-        if handler_type == "ytdlp":
-            return await _handle_ytdlp_fetch(
-                url=url,
-                platform=platform,
-                request=request,
-                background_tasks=background_tasks,
-                auth=auth,
-                tags=request.tags,
-                tag_ids=request.tag_ids,
-            )
-
-        # ==========================================
-        # Douyin path: existing flow
-        # ==========================================
-
-        # If using Celery async tasks
-        if request.use_celery:
-            from app.tasks.parse_tasks import parse_single_link_task
-
-            task = await asyncio.to_thread(parse_single_link_task.delay,
-                url=url,
-                user_id=auth.user_id,
-                video_bool=request.video_bool,
-                cover_bool=request.cover_bool,
-            )
-
-            # Log action
-            background_tasks.add_task(
-                log_user_action,
-                user_id=auth.user_id,
-                action="fetch",
-                message=f"Submitted Celery task: {url[:30]}...",
-                status="pending",
-            )
-
-            return {
-                "success": True,
-                "message": "Task submitted to Celery queue",
-                "task_id": task.id,
-                "url": url,
-                "use_celery": True,
-            }
-
-        # Default flow: parse metadata + Celery download task
-        # Choose parse mode based on user settings
-        aweme_detail = None
-        parse_method = "unknown"
-        parse_method_name = "Unknown"
-        fallback_used = False
-        fallback_reason = None
-
-        # Read user's parse mode setting
-        user_parse_mode = "lighthttp"  # Default
-        try:
-            settings_repo = UserSettingsRepository()
-            user_settings = await settings_repo.get_by_user_id(auth.user_id)
-            if user_settings and user_settings.get("settings_json"):
-                user_parse_mode = user_settings["settings_json"].get(
-                    "parse_mode", "lighthttp"
-                )
-            logger.info(f"[Parse Mode] User {auth.user_id} setting: {user_parse_mode}")
-        except Exception as e:
-            logger.warning(f"Failed to read user parse mode, using default: {e}")
-
-        # Choose parser based on user setting
-        if user_parse_mode == "drissionpage":
-            # User selected DrissionPage, use browser parsing directly
-            try:
-                logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
-                aweme_detail = await DouyinAnalysis.fetch_one_video(url)
-                if aweme_detail:
-                    parse_method = "browser_auto"
-                    parse_method_name = "BrowserAuto"
-                    logger.success("[BrowserAuto] Parse successful")
-            except Exception as e:
-                logger.error(f"[BrowserAuto] Parse failed: {e}")
-                fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
-        else:
-            # Default mode (lighthttp): try LightHTTP first, fallback to browser automation
-            # Option 1: LightHTTP (lightweight HTTP parsing, no browser required)
-            try:
-                logger.info(f"[LightHTTP] Attempting parse: {url}")
-                aweme_detail = await LightweightParser.parse(url)
-                if aweme_detail:
-                    parse_method = "light_http"
-                    parse_method_name = "LightHTTP"
-                    logger.success("[LightHTTP] Parse successful")
-                else:
-                    fallback_reason = "LightHTTP returned empty result"
-            except Exception as e:
-                fallback_reason = f"LightHTTP error: {str(e)[:50]}"
-                logger.warning(f"[LightHTTP] Parse failed: {e}")
-
-            # Option 2: BrowserAuto (browser automation, fallback)
-            if not aweme_detail:
-                fallback_used = True
-                try:
-                    logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
-                    aweme_detail = await DouyinAnalysis.fetch_one_video(url)
-                    if aweme_detail:
-                        parse_method = "browser_auto"
-                        parse_method_name = "BrowserAuto"
-                        logger.success("[BrowserAuto] Parse successful")
-                except Exception as e:
-                    logger.error(f"[BrowserAuto] Parse failed: {e}")
-
-        if not aweme_detail:
-            raise HTTPException(
-                status_code=404,
-                detail="Cannot fetch video info (both LightHTTP and BrowserAuto failed)",
-            )
-
-        logger.info(f"[Fetch/Parse] Complete, method={parse_method_name}, url={url}")
-
-        # Parse video data (without downloading)
-        parsed_data = await DouyinParser.parse_aweme_detail(
-            aweme_detail=aweme_detail,
-            valid_url=url,
-            download_video=request.video_bool,
-            download_music=False,
-            download_cover=request.cover_bool,
+        return await _handle_ytdlp_fetch(
+            url=url,
+            platform=platform,
+            request=request,
+            background_tasks=background_tasks,
+            auth=auth,
+            tags=request.tags,
+            tag_ids=request.tag_ids,
         )
-
-        if not parsed_data:
-            raise HTTPException(status_code=500, detail="Video parsing failed")
-
-        platform_id = parsed_data.get("platform_id")
-        media_type = parsed_data.get("media_type", 0)
-        video_title = parsed_data.get("title", "")
-
-        # Add user ID
-        parsed_data["user_id"] = auth.user_id
-
-        # Save metadata to database first (must wait for completion, otherwise Celery task can't find data)
-        save_result = await MediaService.save_metadata_only(platform_id, parsed_data)
-        if not save_result.get("success"):
-            logger.error(f"[Fetch/Save] Failed to save metadata: {save_result.get('message')}")
-            raise HTTPException(
-                status_code=500,
-                detail=save_result.get("message", "Failed to save metadata"),
-            )
-
-        # Download media files via shared helper
-        resource_id = save_result.get("resource_id")
-        dedup_hit = save_result.get("dedup_hit", False)
-        logger.info(
-            f"[Fetch/Save] platform_id={platform_id}, is_new={not dedup_hit}, "
-            f"resource_id={resource_id}"
-        )
-        need_download_video = request.video_bool and not dedup_hit
-
-        dispatch_result = {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
-        if need_download_video or request.cover_bool:
-            dispatch_result = await _dedup_and_dispatch(
-                platform_id=platform_id,
-                user_id=auth.user_id,
-                resource_id=resource_id,
-                media_type=int(media_type) if str(media_type).isdigit() else 0,
-                video_title=video_title,
-                download_video=need_download_video,
-                download_cover=request.cover_bool,
-                background_tasks=background_tasks,
-            )
-
-        download_task_id = dispatch_result["task_id"]
-
-        # Log action
-        background_tasks.add_task(
-            log_user_action,
-            user_id=auth.user_id,
-            action="fetch",
-            message=f"Video parsed successfully: {video_title[:30]}...",
-            status="success",
-            aweme_id=platform_id,
-            details={"platform": "douyin", "parse_method": parse_method},
-        )
-
-        # Handle datetime objects to string
-        published_at = parsed_data.get("published_at")
-        if published_at and hasattr(published_at, "isoformat"):
-            published_at = published_at.isoformat()
-
-        # Return complete parsed data for frontend display
-        return {
-            "success": True,
-            "message": "Video processing task submitted",
-            "parse_method": parse_method,
-            "parse_method_name": parse_method_name,
-            "fallback_used": fallback_used,
-            "fallback_reason": fallback_reason,
-            "id": save_result.get("id"),  # Database ID for tag operations
-            "platform_id": platform_id,
-            "title": parsed_data.get("title"),
-            "author": parsed_data.get("author"),
-            "media_type": parsed_data.get("media_type"),
-            # Video/cover URLs
-            "video_download_urls": parsed_data.get("video_download_urls", []),
-            "cover_urls": parsed_data.get("cover_urls", []),
-            "image_download_urls": parsed_data.get("image_download_urls", []),
-            # Statistics
-            "like_count": parsed_data.get("like_count", 0),
-            "comment_count": parsed_data.get("comment_count", 0),
-            "share_count": parsed_data.get("share_count", 0),
-            "favorite_count": parsed_data.get("favorite_count", 0),
-            # Video info
-            "duration": parsed_data.get("duration", "0"),
-            "published_at": published_at,
-            "description": parsed_data.get("description"),
-            "original_url": parsed_data.get("original_url"),
-            "resolution": parsed_data.get("resolution"),
-            # Download status
-            "video_download_status": (
-                "COMPLETED" if dedup_hit else parsed_data.get(
-                    "video_download_status", "PENDING"
-                )
-            ),
-            "dedup_hit": dedup_hit,
-            # Download task ID (for frontend progress polling)
-            "download_task_id": download_task_id,
-        }
 
     except HTTPException as he:
         # Refund points on failure (skip 402 which means insufficient balance)
@@ -1650,6 +1439,94 @@ async def get_user_logs(
         raise HTTPException(status_code=500, detail="Failed to get user logs")
 
 
+async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]:
+    """Douyin parse fallback: LightHTTP → DrissionPage.
+
+    Called when yt-dlp fails for a Douyin URL.
+
+    Returns:
+        tuple of (parsed_data, parse_method, parse_method_name)
+
+    Raises:
+        HTTPException(404) if all parsers fail
+    """
+    aweme_detail = None
+    parse_method = "unknown"
+    parse_method_name = "Unknown"
+    fallback_reason = None
+
+    # Read user's parse mode setting
+    user_parse_mode = "lighthttp"  # Default
+    try:
+        settings_repo = UserSettingsRepository()
+        user_settings = await settings_repo.get_by_user_id(user_id)
+        if user_settings and user_settings.get("settings_json"):
+            user_parse_mode = user_settings["settings_json"].get(
+                "parse_mode", "lighthttp"
+            )
+        logger.info(f"[Douyin Fallback] User {user_id} parse_mode: {user_parse_mode}")
+    except Exception as e:
+        logger.warning(f"Failed to read user parse mode, using default: {e}")
+
+    if user_parse_mode == "drissionpage":
+        # User selected DrissionPage — use browser parsing directly
+        try:
+            logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
+            aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+            if aweme_detail:
+                parse_method = "browser_auto"
+                parse_method_name = "BrowserAuto"
+                logger.success("[BrowserAuto] Parse successful")
+        except Exception as e:
+            logger.error(f"[BrowserAuto] Parse failed: {e}")
+            fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
+    else:
+        # Default (lighthttp): LightHTTP first, then DrissionPage fallback
+        try:
+            logger.info(f"[LightHTTP] Attempting parse: {url}")
+            aweme_detail = await LightweightParser.parse(url)
+            if aweme_detail:
+                parse_method = "light_http"
+                parse_method_name = "LightHTTP"
+                logger.success("[LightHTTP] Parse successful")
+            else:
+                fallback_reason = "LightHTTP returned empty result"
+        except Exception as e:
+            fallback_reason = f"LightHTTP error: {str(e)[:50]}"
+            logger.warning(f"[LightHTTP] Parse failed: {e}")
+
+        # DrissionPage fallback
+        if not aweme_detail:
+            try:
+                logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
+                aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                if aweme_detail:
+                    parse_method = "browser_auto"
+                    parse_method_name = "BrowserAuto"
+                    logger.success("[BrowserAuto] Parse successful")
+            except Exception as e:
+                logger.error(f"[BrowserAuto] Parse failed: {e}")
+
+    if not aweme_detail:
+        raise HTTPException(
+            status_code=404,
+            detail="Cannot fetch video info (yt-dlp, LightHTTP and BrowserAuto all failed)",
+        )
+
+    # Convert raw aweme_detail to our parsed_data format
+    parsed_data = await DouyinParser.parse_aweme_detail(
+        aweme_detail=aweme_detail,
+        valid_url=url,
+        download_video=True,
+        download_music=False,
+        download_cover=True,
+    )
+    if not parsed_data:
+        raise HTTPException(status_code=500, detail="Douyin video parsing failed")
+
+    return parsed_data, parse_method, parse_method_name
+
+
 async def _handle_ytdlp_fetch(
     url: str,
     platform: str,
@@ -1660,35 +1537,54 @@ async def _handle_ytdlp_fetch(
     tag_ids: Optional[list[str]] = None,
 ) -> dict:
     """
-    Handle video fetch for non-Douyin platforms via yt-dlp.
+    Unified video fetch handler for ALL platforms via yt-dlp.
 
-    Fetches metadata, saves to database, and dispatches download tasks.
+    Flow:
+        1. Try yt-dlp metadata fetch
+        2. On failure for Douyin: fall back to LightHTTP → DrissionPage
+        3. Save metadata to database
+        4. Dispatch download via _dedup_and_dispatch():
+           - yt-dlp parsed → url passed → yt-dlp download
+           - Fallback parsed → url=None → httpx download (CDN direct links)
     """
-    # Step 1: Fetch metadata via yt-dlp
+    fallback_used = False
+    parse_method = "ytdlp"
+    parse_method_name = f"yt-dlp ({platform})"
+    fallback_reason = None
+
+    # Step 1: Try yt-dlp metadata fetch (all platforms)
     try:
         ytdlp_info = await YtdlpService.fetch_metadata(url)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
+    except (RuntimeError, Exception) as e:
+        # Non-Douyin platforms: yt-dlp failure is fatal
+        if platform != "douyin":
+            raise HTTPException(status_code=400, detail=str(e))
 
-    # Step 2: Map yt-dlp metadata to our Video schema
-    parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
+        # Douyin: fall back to LightHTTP → DrissionPage
+        logger.warning(f"[yt-dlp] Douyin parse failed, falling back: {e}")
+        fallback_reason = f"yt-dlp error: {str(e)[:100]}"
+        parsed_data, parse_method, parse_method_name = await _douyin_parse_fallback(
+            url, auth.user_id
+        )
+        fallback_used = True
 
-    # Step 2.5: Enrich Bilibili stats (favorite_count, share_count)
-    # Extract raw video ID from platform_id (format: "{platform}_{id}")
-    raw_video_id = parsed_data["platform_id"].split("_", 1)[1] if "_" in parsed_data["platform_id"] else parsed_data["platform_id"]
-    if platform == "bilibili" and raw_video_id:
-        bvid = raw_video_id
-        extra_stats = await YtdlpService._fetch_bilibili_stats(bvid)
-        if extra_stats:
-            parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
-            parsed_data["share_count"] = extra_stats.get("share", 0)
-            logger.info(
-                "[yt-dlp] Bilibili stats enriched: "
-                f"fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
-            )
+    # Step 2: Enrich Bilibili stats
+    if platform == "bilibili":
+        raw_video_id = parsed_data["platform_id"].split("_", 1)[1] if "_" in parsed_data["platform_id"] else parsed_data["platform_id"]
+        if raw_video_id:
+            extra_stats = await YtdlpService._fetch_bilibili_stats(raw_video_id)
+            if extra_stats:
+                parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
+                parsed_data["share_count"] = extra_stats.get("share", 0)
+                logger.info(
+                    "[yt-dlp] Bilibili stats enriched: "
+                    f"fav={parsed_data['favorite_count']}, share={parsed_data['share_count']}"
+                )
 
     platform_id = parsed_data["platform_id"]
     video_title = parsed_data.get("title", "")
+    media_type = int(parsed_data.get("media_type", 0))
 
     # Add user-specific fields
     parsed_data["user_id"] = auth.user_id
@@ -1705,153 +1601,44 @@ async def _handle_ytdlp_fetch(
         )
 
     resource_id = save_result.get("resource_id")
+    dedup_hit = save_result.get("dedup_hit", False)
 
-    # Step 4: Dispatch download tasks
-    download_task_id = None
-    need_download = request.video_bool or True  # cover always
+    # Step 4: Dispatch download via _dedup_and_dispatch()
+    # Parse method determines download strategy:
+    #   - yt-dlp parsed → dispatch_url=url → Celery _do_ytdlp_download()
+    #   - Douyin fallback parsed → dispatch_url=None → Celery _do_douyin_download() (httpx)
+    #   - Image posts → dispatch_url=None → Celery image download path
+    if fallback_used or media_type in (2, 68):
+        dispatch_url = None   # httpx download (CDN direct links already in DB)
+    else:
+        dispatch_url = url    # yt-dlp download (needs original URL)
 
-    if need_download:
-        # Try Celery first, fallback to FastAPI background tasks
-        try:
-            from app.tasks.download_tasks import download_unified_task
+    need_download_video = request.video_bool and not dedup_hit
+    dispatch_result = {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
+    if need_download_video or request.cover_bool:
+        dispatch_result = await _dedup_and_dispatch(
+            platform_id=platform_id,
+            user_id=auth.user_id,
+            resource_id=resource_id,
+            media_type=media_type,
+            video_title=video_title,
+            download_video=need_download_video,
+            download_cover=request.cover_bool,
+            url=dispatch_url,
+            background_tasks=background_tasks,
+        )
 
-            download_task = await asyncio.to_thread(download_unified_task.delay,
-                url=url,
-                platform_id=platform_id,
-                user_id=auth.user_id,
-                download_video=request.video_bool,
-                download_cover=True,
-                video_title=video_title[:50] if video_title else "undefined",
-                resource_id=resource_id,
-            )
-            download_task_id = download_task.id
-            logger.info(f"[yt-dlp] Celery download task submitted: {download_task_id}")
-
-        except Exception as celery_err:
-            logger.warning(
-                f"Celery unavailable for yt-dlp download, using background tasks: {celery_err}"
-            )
-
-            async def _ytdlp_background_download(
-                url: str,
-                platform_id: str,
-                user_id: str,
-                download_video: bool,
-                download_cover: bool,
-                video_title: str = "undefined",
-            ):
-                """Background task for yt-dlp download"""
-                from app.core.enums import DownloadStatus
-                from app.core.utils import Utils
-                from app.repositories.media_repository import MediaRepository
-                from app.services.downloader import DownloaderService
-                from app.services.task_tracker import get_task_tracker
-
-                repo = MediaRepository()
-
-                # Create unified_tasks record for Task Center visibility
-                tracker = get_task_tracker()
-                unified_task_id = None
-                dl_parts = []
-                if download_video:
-                    dl_parts.append("Video")
-                if download_cover:
-                    dl_parts.append("Cover")
-                dl_subtitle = " + ".join(dl_parts) if dl_parts else None
-                try:
-                    unified_task_id = await tracker.create(
-                        user_id=user_id,
-                        task_type="download",
-                        title=video_title or platform_id,
-                        subtitle=dl_subtitle,
-                        media_id=platform_id,
-                    )
-                    await tracker.start(unified_task_id)
-                except Exception as e:
-                    logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
-
-                # Use structured path
-                from app.services.url_router import URLRouter
-
-                detected_plat, _ = URLRouter.detect_platform(url)
-                # Look up media record to get Snowflake ID for NAS path
-                media = await repo.get_by_platform_id(platform_id)
-                media_id = str(media["id"]) if media else platform_id
-                storage_dir, relative_prefix = Utils.create_web_resource_path(
-                    detected_plat, media_id
-                )
-
-                try:
-                    if download_video:
-                        result = await YtdlpService.download_video(
-                            url, str(storage_dir), platform_id
-                        )
-                        if result.get("file_path"):
-                            file_name = os.path.basename(result["file_path"])
-                            relative_path = f"{relative_prefix}/{file_name}"
-                            await repo.mark_media_as_downloaded(
-                                platform_id=platform_id,
-                                download_path=relative_path,
-                                duration=0,
-                                storage_size=result.get("file_size", 0),
-                            )
-                            # Optimize for streaming
-                            await DownloaderService.optimize_video_for_streaming(
-                                result["file_path"]
-                            )
-
-                    if download_cover:
-                        await DownloaderService.download_cover_by_platform_id(
-                            platform_id, user_id=user_id
-                        )
-
-                    # Mark task completed
-                    if unified_task_id:
-                        try:
-                            await tracker.complete(unified_task_id)
-                        except Exception as e:
-                            logger.warning(f"[TaskTracker] Failed to complete task: {e}")
-
-                except Exception as e:
-                    logger.error(f"[yt-dlp] Background download failed: {e}")
-                    await repo.update(
-                        platform_id,
-                        {
-                            "video_download_status": DownloadStatus.FAILED.value,
-                            "error_message": str(e)[:500],
-                        },
-                    )
-                    # Mark task failed
-                    if unified_task_id:
-                        try:
-                            await tracker.fail(unified_task_id, str(e)[:500])
-                        except Exception as te:
-                            logger.warning(f"[TaskTracker] Failed to mark task failed: {te}")
-
-            import os
-
-            background_tasks.add_task(
-                _ytdlp_background_download,
-                url,
-                platform_id,
-                auth.user_id,
-                request.video_bool,
-                request.cover_bool,
-                video_title[:50] if video_title else "undefined",
-            )
-            logger.info(
-                f"[yt-dlp] FastAPI background download tasks added: {platform_id}"
-            )
+    download_task_id = dispatch_result["task_id"]
 
     # Log action
     background_tasks.add_task(
         log_user_action,
         user_id=auth.user_id,
         action="fetch",
-        message=f"Video parsed via yt-dlp ({platform}): {video_title[:30]}...",
+        message=f"Video parsed ({parse_method_name}): {video_title[:30]}...",
         status="success",
         aweme_id=platform_id,
-        details={"platform": platform, "parse_method": "ytdlp"},
+        details={"platform": platform, "parse_method": parse_method},
     )
 
     # Handle datetime objects to string
@@ -1862,10 +1649,10 @@ async def _handle_ytdlp_fetch(
     return {
         "success": True,
         "message": "Video processing task submitted",
-        "parse_method": "ytdlp",
-        "parse_method_name": f"yt-dlp ({platform})",
-        "fallback_used": False,
-        "fallback_reason": None,
+        "parse_method": parse_method,
+        "parse_method_name": parse_method_name,
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
         "id": save_result.get("id"),
         "platform_id": platform_id,
         "title": parsed_data.get("title"),
@@ -1873,7 +1660,7 @@ async def _handle_ytdlp_fetch(
         "media_type": parsed_data.get("media_type"),
         "video_download_urls": parsed_data.get("video_download_urls", []),
         "cover_urls": parsed_data.get("cover_urls", []),
-        "image_download_urls": [],
+        "image_download_urls": parsed_data.get("image_download_urls", []),
         "like_count": parsed_data.get("like_count", 0),
         "comment_count": parsed_data.get("comment_count", 0),
         "share_count": parsed_data.get("share_count", 0),
@@ -1883,7 +1670,12 @@ async def _handle_ytdlp_fetch(
         "description": parsed_data.get("description"),
         "original_url": parsed_data.get("original_url"),
         "resolution": parsed_data.get("resolution"),
-        "video_download_status": "PENDING",
+        "video_download_status": (
+            "COMPLETED" if dedup_hit else parsed_data.get(
+                "video_download_status", "PENDING"
+            )
+        ),
+        "dedup_hit": dedup_hit,
         "download_task_id": download_task_id,
     }
 
