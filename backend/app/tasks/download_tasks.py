@@ -763,6 +763,86 @@ def _do_douyin_download(
                         f"[Download/Exec] video: no original_url available for yt-dlp fallback: {platform_id}"
                     )
 
+                # ── BrowserAuto fallback: re-parse via DrissionPage when httpx+yt-dlp both fail ──
+                if results["video"] != "completed" and original_url:
+                    logger.info(
+                        f"[Download/Exec] video: httpx+yt-dlp both failed, trying BrowserAuto "
+                        f"(DrissionPage) to get fresh URLs for {platform_id}"
+                    )
+                    try:
+                        from app.services.douyin_analysis import DouyinAnalysis
+                        from app.services.douyin_parser import DouyinParser
+                        from app.repositories.media_repository import (
+                            MediaRepository as _MR_browser,
+                        )
+
+                        browser_detail = run_async(
+                            DouyinAnalysis.fetch_one_video(original_url)
+                        )
+                        if browser_detail:
+                            browser_parsed = run_async(
+                                DouyinParser.parse_aweme_detail(
+                                    aweme_detail=browser_detail,
+                                    valid_url=original_url,
+                                    download_video=True,
+                                    download_music=False,
+                                    download_cover=False,
+                                )
+                            )
+                            fresh_urls = (
+                                browser_parsed.get("video_download_urls")
+                                if browser_parsed
+                                else None
+                            )
+                            if fresh_urls:
+                                run_async(
+                                    _MR_browser().update(
+                                        platform_id,
+                                        {"video_download_urls": fresh_urls},
+                                    )
+                                )
+                                logger.info(
+                                    f"[Download/Exec] video: BrowserAuto got {len(fresh_urls)} "
+                                    f"fresh URLs, retrying httpx for {platform_id}"
+                                )
+                                video_result = run_async(
+                                    DownloaderService.download_video_by_platform_id(
+                                        platform_id,
+                                        user_id=user_id,
+                                        progress_tracker=tracker,
+                                    )
+                                )
+                                results["video"] = (
+                                    video_result.video_download_status.value
+                                    if hasattr(video_result, "video_download_status")
+                                    else "unknown"
+                                )
+                                if results["video"] == "completed":
+                                    logger.success(
+                                        f"[Download/Exec] video: BrowserAuto fallback "
+                                        f"succeeded for {platform_id}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"[Download/Exec] video: BrowserAuto fallback "
+                                        f"download also failed for {platform_id}"
+                                    )
+                            else:
+                                logger.warning(
+                                    f"[Download/Exec] video: BrowserAuto parse yielded no "
+                                    f"video URLs for {platform_id}"
+                                )
+                        else:
+                            logger.warning(
+                                f"[Download/Exec] video: BrowserAuto returned empty "
+                                f"for {platform_id}"
+                            )
+                    except Exception as browser_err:
+                        logger.warning(
+                            f"[Download/Exec] video: BrowserAuto fallback error for "
+                            f"{platform_id}: {type(browser_err).__name__}: {browser_err}"
+                        )
+
             # Mark video stage complete
             if 'video' in stages:
                 video_end = stages['video'][0] + stages['video'][1]
