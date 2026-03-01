@@ -148,7 +148,7 @@ async def _dedup_and_dispatch(
             "types_subscribed": [...],
         }
     """
-    from app.services.task_orchestrator import get_orchestrator
+    from app.services.unified_task_manager import get_task_manager
     from app.tasks.download_tasks import download_unified_task
 
     is_image_type = int(media_type) in (2, 68)
@@ -168,7 +168,7 @@ async def _dedup_and_dispatch(
     types_subscribed = []
     types_skipped = []
 
-    orchestrator = get_orchestrator()
+    orchestrator = get_task_manager()
     for dtype in requested:
         try:
             result = await orchestrator.acquire_or_subscribe(
@@ -531,8 +531,8 @@ async def extract_audio(
         video_title = media.get("title", platform_id)[:30]
 
         # Create unified_tasks record for Task Center visibility
-        from app.services.task_tracker import get_task_tracker
-        tracker = get_task_tracker()
+        from app.services.unified_task_manager import get_task_manager
+        tracker = get_task_manager()
         unified_task_id = None
         try:
             unified_task_id = await tracker.create(
@@ -553,7 +553,7 @@ async def extract_audio(
         async def _do_extract(pid: str, task_id: str | None):
             import asyncio
             from app.tasks.download_tasks import _extract_audio_from_video
-            _tracker = get_task_tracker()
+            _tracker = get_task_manager()
             try:
                 success = await asyncio.to_thread(_extract_audio_from_video, pid)
                 if task_id:

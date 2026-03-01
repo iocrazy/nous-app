@@ -75,8 +75,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
     unified_task_id = _unified_task_id
     if user_id:
         try:
-            from app.services.task_tracker import get_task_tracker
-            tracker = get_task_tracker()
+            from app.services.unified_task_manager import get_task_manager
+            tracker = get_task_manager()
             if unified_task_id:
                 # Retry: reuse existing task, just mark as started
                 run_async(tracker.start(unified_task_id))
@@ -106,8 +106,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         if unified_task_id:
             async def _report_progress(progress: int, subtitle: str = ""):
                 try:
-                    from app.services.task_tracker import get_task_tracker
-                    await get_task_tracker().update_progress(
+                    from app.services.unified_task_manager import get_task_manager
+                    await get_task_manager().update_progress(
                         unified_task_id, progress, subtitle=subtitle,
                     )
                 except Exception:
@@ -121,8 +121,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
             logger.success(f"[Transcode] Completed: {resource_id} → {hls_path}")
             if unified_task_id:
                 try:
-                    from app.services.task_tracker import get_task_tracker
-                    run_async(get_task_tracker().complete(unified_task_id))
+                    from app.services.unified_task_manager import get_task_manager
+                    run_async(get_task_manager().complete(unified_task_id))
                 except Exception:
                     pass
             # Log success
@@ -144,8 +144,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
             logger.warning(f"[Transcode] Failed for resource={resource_id}, version={version_id}")
             if unified_task_id:
                 try:
-                    from app.services.task_tracker import get_task_tracker
-                    run_async(get_task_tracker().fail(unified_task_id, "Transcode returned no output"))
+                    from app.services.unified_task_manager import get_task_manager
+                    run_async(get_task_manager().fail(unified_task_id, "Transcode returned no output"))
                 except Exception:
                     pass
             # Log failure
@@ -187,8 +187,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         # Mark as failed after max retries
         if unified_task_id:
             try:
-                from app.services.task_tracker import get_task_tracker
-                run_async(get_task_tracker().fail(unified_task_id, error_msg[:500]))
+                from app.services.unified_task_manager import get_task_manager
+                run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
             except Exception:
                 pass
 
@@ -269,8 +269,8 @@ def maybe_trigger_transcode(
     dedup_key = None
     if not force:
         try:
-            from app.services.task_orchestrator import get_orchestrator
-            orchestrator = get_orchestrator()
+            from app.services.unified_task_manager import get_task_manager
+            orchestrator = get_task_manager()
             result = run_async(orchestrator.acquire_or_subscribe(
                 task_type="transcode",
                 dedup_identifier=version_id,

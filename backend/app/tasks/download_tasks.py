@@ -212,19 +212,6 @@ class UnifiedProgressTracker:
             "total": total,
         })
 
-        # Fallback: throttled Supabase writes (~every 3s) for when WebSocket is
-        # unavailable (e.g. reverse proxy doesn't support WS upgrades).
-        if self.unified_tracker and self.unified_task_id:
-            if now - getattr(self, '_last_sb_write', 0) >= 3.0:
-                self._last_sb_write = now
-                try:
-                    run_async(self.unified_tracker.update_progress(
-                        self.unified_task_id,
-                        overall_percent,
-                        speed=int(self._speed) if self._speed > 0 else None,
-                    ))
-                except Exception as e:
-                    logger.debug(f"[ProgressTracker] Supabase fallback write failed: {e}")
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
@@ -288,25 +275,24 @@ class UnifiedProgressTracker:
 
 
 def _force_progress(tracker: UnifiedProgressTracker, progress: int, subtitle: str = None):
-    """Force a progress update to Supabase, bypassing the TaskTracker throttle.
+    """Force a progress update via Redis pub/sub at download stage boundaries.
 
-    Used at download stage boundaries (before/after video, music, cover downloads)
-    to ensure the user sees meaningful progress even when fine-grained streaming
-    progress isn't available (e.g. music/cover downloads, or content-length=0).
+    Used before/after video, music, cover downloads to ensure the user sees
+    meaningful progress even when fine-grained streaming progress isn't
+    available (e.g. music/cover downloads, or content-length=0).
     """
-    if tracker.unified_tracker and tracker.unified_task_id:
-        try:
-            # Reset throttle so this write goes through immediately
-            tracker.unified_tracker._last_progress.pop(tracker.unified_task_id, None)
-            run_async(tracker.unified_tracker.update_progress(
-                tracker.unified_task_id,
-                min(max(progress, 0), 99),  # Reserve 100 for explicit completion
-                speed=int(tracker._speed) if tracker._speed > 0 else None,
-                subtitle=subtitle,
-            ))
-            logger.debug(f"[Download/Progress] Stage update: {progress}% subtitle={subtitle}")
-        except Exception as e:
-            logger.warning(f"[Download/Progress] Stage update failed: {e}")
+    clamped = min(max(progress, 0), 99)
+    speed_str = tracker._format_speed(tracker._speed)
+    tracker._publish({
+        "unified_task_id": tracker.unified_task_id,
+        "celery_task_id": tracker.task_id,
+        "status": "downloading",
+        "percent": clamped,
+        "speed": speed_str,
+        "downloaded": 0,
+        "total": 0,
+    })
+    logger.debug(f"[Download/Progress] Stage update: {progress}% subtitle={subtitle}")
 
 
 def _calc_stage_ranges(download_video: bool, download_cover: bool) -> dict:
@@ -1078,9 +1064,9 @@ def download_unified_task(
         f"types=[{','.join(requested_types)}], task_id={task_id}"
     )
 
-    # ── TaskTracker setup (Supabase lifecycle) ──
-    from app.services.task_tracker import get_task_tracker
-    tracker_unified = get_task_tracker()
+    # ── UnifiedTaskManager setup (Supabase lifecycle) ──
+    from app.services.unified_task_manager import get_task_manager
+    manager = get_task_manager()
     unified_task_id = None
     dl_parts = []
     if download_video:
@@ -1090,33 +1076,18 @@ def download_unified_task(
     dl_subtitle = " + ".join(dl_parts) if dl_parts else None
 
     try:
-        unified_task_id = run_async(tracker_unified.create(
+        unified_task_id = run_async(manager.create(
             user_id=user_id,
             task_type="download",
             title=video_title or platform_id,
             subtitle=dl_subtitle,
             media_id=platform_id,
             celery_task_id=task_id,
+            dedup_key=_dedup_key,
         ))
-        run_async(tracker_unified.start(unified_task_id))
+        run_async(manager.start(unified_task_id))
     except Exception as e:
-        logger.warning(f"[TaskTracker] Failed to create unified task: {e}")
-
-    # Store orchestrator metadata for Celery signals
-    if unified_task_id and _dedup_key:
-        try:
-            from app.services.task_orchestrator import get_orchestrator, TaskPhase
-            orchestrator = get_orchestrator()
-            # Update the unified_task row with dedup_key and phase
-            client = run_async(orchestrator._get_client())
-            run_async(
-                client.table("unified_tasks").update({
-                    "dedup_key": _dedup_key,
-                    "phase": TaskPhase.DEDUP_CHECK.value,
-                }).eq("id", unified_task_id).execute()
-            )
-        except Exception as e:
-            logger.warning(f"[Orchestrator] Failed to set dedup_key: {e}")
+        logger.warning(f"[TaskManager] Failed to create unified task: {e}")
 
     # Make unified_task_id available to signals via kwargs
     if unified_task_id:
@@ -1133,7 +1104,7 @@ def download_unified_task(
         tracker = UnifiedProgressTracker(
             task_id=task_id,
             redis_client=redis_client,
-            unified_tracker=tracker_unified,
+            unified_tracker=manager,
             unified_task_id=unified_task_id,
             user_id=user_id,
         )
@@ -1176,7 +1147,7 @@ def download_unified_task(
                     tracker.complete()
                     if unified_task_id:
                         try:
-                            run_async(tracker_unified.complete(unified_task_id))
+                            run_async(manager.complete(unified_task_id))
                         except Exception:
                             pass
                     # Update resource file paths from global media
@@ -1227,14 +1198,14 @@ def download_unified_task(
             tracker.complete()
             if unified_task_id:
                 try:
-                    run_async(tracker_unified.fail(unified_task_id, warn_msg))
+                    run_async(manager.fail(unified_task_id, warn_msg))
                 except Exception:
                     pass
         else:
             tracker.complete()
             if unified_task_id:
                 try:
-                    run_async(tracker_unified.complete(unified_task_id))
+                    run_async(manager.complete(unified_task_id))
                 except Exception:
                     pass
             logger.success(f"[Download/Done] All types completed: {platform_id}")
@@ -1356,7 +1327,7 @@ def download_unified_task(
             # Update unified task subtitle to show retry status (not failed)
             if unified_task_id:
                 try:
-                    run_async(tracker_unified.update_progress(
+                    run_async(manager.update_progress(
                         unified_task_id,
                         progress=0,
                         subtitle=f"Retrying ({retry_num}/{self.max_retries})...",
@@ -1372,7 +1343,7 @@ def download_unified_task(
             pass
         if unified_task_id:
             try:
-                run_async(tracker_unified.fail(unified_task_id, error_msg))
+                run_async(manager.fail(unified_task_id, error_msg))
             except Exception:
                 pass
 

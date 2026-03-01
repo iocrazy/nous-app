@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.task_tracker import get_task_tracker
+from app.services.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/task-manager")
 
@@ -28,7 +28,7 @@ async def list_tasks(
     offset: int = Query(0, ge=0),
 ):
     """Get paginated tasks for the current user."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     tasks = await tracker.get_tasks(
         auth.user_id,
         task_type=task_type,
@@ -42,7 +42,7 @@ async def list_tasks(
 @router.get("/tasks/active")
 async def get_active_tasks(auth: AuthDep):
     """Get active (pending/processing) tasks — used by TopBar panel on init."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     tasks = await tracker.get_active_tasks(auth.user_id)
     return {"success": True, "data": tasks}
 
@@ -50,7 +50,7 @@ async def get_active_tasks(auth: AuthDep):
 @router.get("/tasks/stats")
 async def get_task_stats(auth: AuthDep):
     """Get task counts grouped by type and status."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     stats = await tracker.get_stats(auth.user_id)
     return {"success": True, "data": stats}
 
@@ -58,7 +58,7 @@ async def get_task_stats(auth: AuthDep):
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str, auth: AuthDep):
     """Cancel a pending/processing task and revoke its Celery job."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     try:
         await tracker.cancel(task_id, auth.user_id)
         return {"success": True}
@@ -70,7 +70,7 @@ async def cancel_task(task_id: str, auth: AuthDep):
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(task_id: str, auth: AuthDep):
     """Reset a failed/cancelled task for retry and re-dispatch the Celery job."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     task = await tracker.retry_task(task_id, auth.user_id)
     if not task:
         raise HTTPException(404, "Task not found or not in retryable state")
@@ -110,7 +110,7 @@ async def retry_task(task_id: str, auth: AuthDep):
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str, auth: AuthDep):
     """Delete a task record."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     deleted = await tracker.delete_task(task_id, auth.user_id)
     if not deleted:
         raise HTTPException(404, "Task not found")
@@ -120,7 +120,7 @@ async def delete_task(task_id: str, auth: AuthDep):
 @router.post("/tasks/clear-completed")
 async def clear_completed(auth: AuthDep):
     """Delete old completed/failed/cancelled tasks, keeping the 50 most recent."""
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     count = await tracker.clear_completed(auth.user_id)
     return {"success": True, "cleared": count}
 
@@ -135,7 +135,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     """
     import json
 
-    tracker = get_task_tracker()
+    tracker = get_task_manager()
     client = await tracker._get_client()
 
     # Look up the unified task to get celery_task_id
