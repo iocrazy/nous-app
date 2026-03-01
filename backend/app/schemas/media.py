@@ -65,11 +65,7 @@ class MediaBase(BaseModel):
     image_download_urls: Optional[list] = Field(None, description="Image download URLs")
 
     # Audio info
-    music_download_urls: Optional[list] = Field(None, description="Audio download URLs")
     music_name: Optional[str] = Field(None, description="Audio name")
-    need_download_music: Optional[bool] = Field(
-        None, description="Whether to download audio"
-    )
 
     # Cover info
     cover_urls: Optional[list] = Field(None, description="Cover URL list")
@@ -254,7 +250,6 @@ class MediaFetchRequest(BaseModel):
 
     url: str = Field(..., description="Text containing a media URL")
     video_bool: bool = Field(default=True, description="Whether to download video")
-    music_bool: bool = Field(default=False, description="Whether to download audio")
     cover_bool: bool = Field(default=True, description="Whether to download cover")
 
     @model_validator(mode="after")
@@ -272,7 +267,6 @@ class MediaFetchRequest(BaseModel):
                 {
                     "url": "Video description https://v.douyin.com/example/ copy this link...",
                     "video_bool": True,
-                    "music_bool": True,
                     "transcript_bool": True,
                     "summary_bool": True,
                 }
@@ -286,13 +280,13 @@ class MediaTypeFetchRequest(BaseModel):
 
     types: list[str] = Field(
         ...,
-        description="Media types to fetch: 'video', 'music', 'cover', 'image'",
+        description="Media types to fetch: 'video', 'cover', 'image'",
         min_length=1,
     )
 
     @model_validator(mode="after")
     def validate_types(self):
-        valid = {"video", "music", "cover", "image"}
+        valid = {"video", "cover", "image"}
         invalid = set(self.types) - valid
         if invalid:
             raise ValueError(f"Invalid types: {invalid}. Must be one of {valid}")

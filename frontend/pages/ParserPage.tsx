@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Link as LinkIcon, AlertCircle, Loader2,
-  Check, Music, Video as VideoIcon, Image as ImageIcon,
+  Check, Video as VideoIcon, Image as ImageIcon,
   Layers, Download, CheckCircle2,
   ListVideo, HardDrive, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
@@ -163,25 +163,6 @@ export function ParserPage() {
           <div className="flex items-center gap-2">
             <VideoIcon size={16} />
             <span className="text-sm font-medium">{t('parser.downloadVideo')}</span>
-          </div>
-        </button>
-
-        <button
-          onClick={() => setDownloadOptions(prev => ({ ...prev, audio: !prev.audio }))}
-          className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all text-left ${
-            downloadOptions.audio
-              ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-300'
-              : 'bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700'
-          }`}
-        >
-          <div className={`w-5 h-5 rounded flex items-center justify-center border flex-shrink-0 transition-colors ${
-            downloadOptions.audio ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600 bg-zinc-900'
-          }`}>
-            {downloadOptions.audio && <Check size={14} className="text-white" />}
-          </div>
-          <div className="flex items-center gap-2">
-            <Music size={16} />
-            <span className="text-sm font-medium">{t('parser.downloadAudio')}</span>
           </div>
         </button>
 

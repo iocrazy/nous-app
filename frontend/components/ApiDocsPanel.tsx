@@ -108,7 +108,6 @@ const endpoints: EndpointDef[] = [
     params: [
       { name: 'url', type: 'string', required: true, description: 'Share link or video URL' },
       { name: 'video_bool', type: 'boolean', required: false, default: 'true', description: 'Download video file' },
-      { name: 'music_bool', type: 'boolean', required: false, default: 'false', description: 'Download music/audio' },
       { name: 'cover_bool', type: 'boolean', required: false, default: 'true', description: 'Download cover image' },
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously via task queue' },
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach' },
@@ -141,7 +140,6 @@ const endpoints: EndpointDef[] = [
     params: [
       { name: 'urls', type: 'string[]', required: true, description: 'Array of share links' },
       { name: 'video_bool', type: 'boolean', required: false, default: 'true', description: 'Download video files' },
-      { name: 'music_bool', type: 'boolean', required: false, default: 'false', description: 'Download music/audio' },
       { name: 'cover_bool', type: 'boolean', required: false, default: 'true', description: 'Download cover images' },
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously' },
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach to all videos' },

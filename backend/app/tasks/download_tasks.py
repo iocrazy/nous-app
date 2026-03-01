@@ -8,6 +8,7 @@ Integrates with TaskManager for task status tracking and automatic retries.
 """
 
 import asyncio
+import os
 
 from celery import shared_task
 from loguru import logger
@@ -297,18 +298,16 @@ def _force_progress(tracker: UnifiedProgressTracker, progress: int, subtitle: st
             logger.warning(f"[Download/Progress] Stage update failed: {e}")
 
 
-def _calc_stage_ranges(download_video: bool, download_music: bool, download_cover: bool) -> dict:
+def _calc_stage_ranges(download_video: bool, download_cover: bool) -> dict:
     """Calculate progress ranges for each download stage.
 
     Returns dict mapping stage name to (offset, weight) tuple.
     Ranges span 3% to 95% (2% reserved for init, 5% for finalization).
     """
-    raw_weights = {'video': 70, 'music': 15, 'cover': 15}
+    raw_weights = {'video': 85, 'cover': 15}
     parts = []
     if download_video:
         parts.append('video')
-    if download_music:
-        parts.append('music')
     if download_cover:
         parts.append('cover')
 
@@ -336,7 +335,6 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
     """
     url_fields = {
         "video": "video_download_urls",
-        "music": "music_download_urls",
         "cover": "cover_urls",
         "image": "image_download_urls",
     }
@@ -533,13 +531,106 @@ def _validate_and_refresh_urls(
     return media, False, fail_reason
 
 
+# ─── Audio extraction helper ─────────────────────────────────────────
+
+
+def _extract_audio_from_video(platform_id: str) -> bool:
+    """Extract audio from downloaded video using ffmpeg stream copy (zero-transcode).
+
+    Looks up the video file path from DB, extracts audio to audio.m4a
+    in the same directory, and updates music_download_path in DB.
+
+    This is ~100x faster than downloading music separately via URL
+    because it's a pure I/O operation with no network or re-encoding.
+
+    Returns True on success, False on failure.
+    """
+    import subprocess
+
+    from app.repositories.media_repository import MediaRepository as _MR_extract
+
+    repo = _MR_extract()
+    media = run_async(repo.get_by_platform_id(platform_id))
+    if not media:
+        logger.warning(f"[Audio/Extract] No media record for {platform_id}")
+        return False
+
+    video_rel_path = media.get("download_path")
+    if not video_rel_path:
+        logger.warning(f"[Audio/Extract] No download_path for {platform_id}")
+        return False
+
+    base_path = Utils.get_download_base_path()
+    video_full_path = os.path.join(base_path, video_rel_path)
+
+    if not os.path.exists(video_full_path):
+        logger.warning(f"[Audio/Extract] Video file not found: {video_full_path}")
+        return False
+
+    output_dir = os.path.dirname(video_full_path)
+    audio_full_path = os.path.join(output_dir, "audio.m4a")
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", video_full_path,
+                "-vn",            # No video
+                "-c:a", "copy",   # Copy audio codec (no re-encoding)
+                audio_full_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,  # Should be < 1s for stream copy
+        )
+
+        if result.returncode != 0:
+            logger.warning(
+                f"[Audio/Extract] ffmpeg failed (rc={result.returncode}): "
+                f"{result.stderr[:300]}"
+            )
+            return False
+
+        if not os.path.exists(audio_full_path) or os.path.getsize(audio_full_path) == 0:
+            logger.warning(f"[Audio/Extract] Output file missing or empty: {audio_full_path}")
+            if os.path.exists(audio_full_path):
+                os.remove(audio_full_path)
+            return False
+
+        file_size = os.path.getsize(audio_full_path)
+        logger.info(
+            f"[Audio/Extract] Success for {platform_id}: "
+            f"{Utils.format_file_size(file_size)}"
+        )
+
+        # Calculate relative path for DB
+        audio_rel_path = os.path.relpath(audio_full_path, base_path)
+
+        # Update DB
+        run_async(repo.update(platform_id, {
+            "music_download_status": DownloadStatus.COMPLETED.value,
+            "music_download_path": audio_rel_path,
+        }))
+
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[Audio/Extract] ffmpeg timed out for {platform_id}")
+        return False
+    except FileNotFoundError:
+        logger.warning("[Audio/Extract] ffmpeg not found in PATH")
+        return False
+    except Exception as e:
+        logger.warning(f"[Audio/Extract] Error for {platform_id}: {e}")
+        return False
+
+
 # ─── Internal download strategies ─────────────────────────────────────
 
 def _do_douyin_download(
     platform_id: str,
     user_id: str,
     download_video: bool,
-    download_music: bool,
     download_cover: bool,
     media_type: int,
     tracker: UnifiedProgressTracker,
@@ -548,7 +639,7 @@ def _do_douyin_download(
     results = {"video": None, "music": None, "cover": None}
 
     # Calculate stage progress ranges
-    stages = _calc_stage_ranges(download_video, download_music, download_cover)
+    stages = _calc_stage_ranges(download_video, download_cover)
 
     # Ensure download URLs are available (re-parse if missing)
     from app.repositories.media_repository import MediaRepository as _MR_urls
@@ -557,14 +648,12 @@ def _do_douyin_download(
         needed = []
         if download_video:
             needed.append("image" if int(media_type) in (2, 68) else "video")
-        if download_music:
-            needed.append("music")
         if download_cover:
             needed.append("cover")
         media = _ensure_download_urls(platform_id, media, needed)
         # Diagnostic: log URL availability after ensure
         for t in needed:
-            url_field = {"video": "video_download_urls", "music": "music_download_urls",
+            url_field = {"video": "video_download_urls",
                          "cover": "cover_urls", "image": "image_download_urls"}.get(t)
             urls = media.get(url_field) if url_field else None
             url_count = len(urls) if urls else 0
@@ -629,7 +718,6 @@ def _do_douyin_download(
                             )
                         )
                         if ytdlp_result.get("file_path"):
-                            import os
                             file_name = os.path.basename(ytdlp_result["file_path"])
                             relative_path = f"{relative_prefix}/{file_name}"
                             from app.repositories.media_repository import MediaRepository as _MR_yt
@@ -669,42 +757,15 @@ def _do_douyin_download(
                 video_end = stages['video'][0] + stages['video'][1]
                 _force_progress(tracker, video_end)
 
-        if download_music:
-            # Mark music stage start
-            if 'music' in stages:
-                offset, weight = stages['music']
-                tracker.set_stage(offset, weight)
-                _force_progress(tracker, offset, subtitle="Downloading audio...")
-
-            media, music_ok, reason = _validate_and_refresh_urls(
-                platform_id, media, "music_download_urls", "music"
-            )
-            if not music_ok:
-                logger.warning(
-                    f"[Download/Exec] music: HEAD check failed for {platform_id} ({reason}), "
-                    f"attempting GET download anyway"
-                )
-            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
-            result = run_async(
-                DownloaderService.download_music_by_platform_id(
-                    platform_id=platform_id, user_id=user_id
-                )
-            )
-            results["music"] = (
-                result.music_download_status.value
-                if hasattr(result, "music_download_status")
-                else "unknown"
-            )
-            if results["music"] != "completed":
-                error_msg = getattr(result, "error", None) or "Music download failed"
-                logger.warning(f"[Download/Exec] music failed for {platform_id}: {error_msg}")
-            else:
-                logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
-
-            # Mark music stage complete
-            if 'music' in stages:
-                music_end = stages['music'][0] + stages['music'][1]
-                _force_progress(tracker, music_end)
+            # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
+            if results.get("video") == "completed":
+                logger.info(f"[Download/Exec] music: extracting from video for {platform_id}...")
+                if _extract_audio_from_video(platform_id):
+                    results["music"] = DownloadStatus.COMPLETED.value
+                    logger.info(f"[Download/Exec] music: extracted successfully for {platform_id}")
+                else:
+                    logger.warning(f"[Download/Exec] music: extraction failed for {platform_id}")
+                    results["music"] = DownloadStatus.FAILED.value
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
@@ -743,31 +804,6 @@ def _do_douyin_download(
                 video_end = stages['video'][0] + stages['video'][1]
                 _force_progress(tracker, video_end)
 
-        if download_music:
-            # Mark music stage start
-            if 'music' in stages:
-                offset, weight = stages['music']
-                tracker.set_stage(offset, weight)
-                _force_progress(tracker, offset, subtitle="Downloading audio...")
-
-            logger.info(f"[Download/Exec] music: downloading {platform_id}...")
-            result = run_async(
-                DownloaderService.download_music_by_platform_id(
-                    platform_id=platform_id, user_id=user_id
-                )
-            )
-            results["music"] = (
-                result.music_download_status.value
-                if hasattr(result, "music_download_status")
-                else "unknown"
-            )
-            logger.info(f"[Download/Exec] music: {results['music']} for {platform_id}")
-
-            # Mark music stage complete
-            if 'music' in stages:
-                music_end = stages['music'][0] + stages['music'][1]
-                _force_progress(tracker, music_end)
-
     if download_cover:
         # Mark cover stage start
         if 'cover' in stages:
@@ -801,7 +837,6 @@ def _do_ytdlp_download(
     platform_id: str,
     user_id: str,
     download_video: bool,
-    download_music: bool,
     download_cover: bool,
     tracker: UnifiedProgressTracker,
 ) -> dict:
@@ -813,7 +848,7 @@ def _do_ytdlp_download(
     results = {"video": None, "music": None, "cover": None}
 
     # Calculate stage progress ranges
-    stages = _calc_stage_ranges(download_video, download_music, download_cover)
+    stages = _calc_stage_ranges(download_video, download_cover)
 
     detected_platform, _ = URLRouter.detect_platform(url)
     repo = MediaRepository()
@@ -841,8 +876,6 @@ def _do_ytdlp_download(
             )
         )
         if result.get("file_path"):
-            import os
-
             file_name = os.path.basename(result["file_path"])
             relative_path = f"{relative_prefix}/{file_name}"
             repo = MediaRepository()
@@ -868,36 +901,15 @@ def _do_ytdlp_download(
             video_end = stages['video'][0] + stages['video'][1]
             _force_progress(tracker, video_end)
 
-    if download_music:
-        # Mark music stage start
-        if 'music' in stages:
-            offset, weight = stages['music']
-            tracker.set_stage(offset, weight)
-            _force_progress(tracker, offset, subtitle="Downloading audio...")
-
-        logger.info(f"[Download/Exec] music: extracting via yt-dlp {platform_id}...")
-        result = run_async(
-            YtdlpService.download_audio(url, str(storage_dir), platform_id)
-        )
-        if result.get("file_path"):
-            import os
-            file_name = os.path.basename(result["file_path"])
-            audio_relative_path = f"{relative_prefix}/{file_name}"
-            repo = MediaRepository()
-            run_async(repo.update(platform_id, {
-                "music_download_status": DownloadStatus.COMPLETED.value,
-                "music_download_path": audio_relative_path,
-            }))
-            results["music"] = DownloadStatus.COMPLETED.value
-            logger.info(f"[Download/Exec] music: completed for {platform_id}")
-        else:
-            results["music"] = DownloadStatus.FAILED.value
-            logger.warning(f"[Download/Exec] music failed via yt-dlp for {platform_id}")
-
-        # Mark music stage complete
-        if 'music' in stages:
-            music_end = stages['music'][0] + stages['music'][1]
-            _force_progress(tracker, music_end)
+        # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
+        if results.get("video") == DownloadStatus.COMPLETED.value:
+            logger.info(f"[Download/Exec] music: extracting from video for {platform_id}...")
+            if _extract_audio_from_video(platform_id):
+                results["music"] = DownloadStatus.COMPLETED.value
+                logger.info(f"[Download/Exec] music: extracted successfully for {platform_id}")
+            else:
+                logger.warning(f"[Download/Exec] music: extraction failed for {platform_id}")
+                results["music"] = DownloadStatus.FAILED.value
 
     if download_cover:
         # Mark cover stage start
@@ -937,13 +949,13 @@ def download_unified_task(
     user_id: str,
     url: str = None,
     download_video: bool = True,
-    download_music: bool = False,
     download_cover: bool = True,
     media_type: int = 0,
     video_title: str = "undefined",
     resource_id: str = None,
     _dedup_key: str = None,       # Orchestrator dedup key
     _unified_task_id: str = None,  # Orchestrator task ID (for signals)
+    download_music: bool = False,  # Deprecated, kept for backward compat with queued tasks
 ):
     """
     Unified download task for all platforms.
@@ -952,22 +964,24 @@ def download_unified_task(
       - url=None  → Douyin path (reads download URLs from DB, downloads via httpx)
       - url given → yt-dlp path (downloads directly from URL)
 
+    Audio is automatically extracted from video after download (ffmpeg -c:a copy).
+
     Args:
         platform_id: Media platform ID
         user_id: User ID
         url: Original URL (only for yt-dlp platforms; None for Douyin)
         download_video: Whether to download video
-        download_music: Whether to download audio
         download_cover: Whether to download cover/thumbnail
         media_type: Media type (0=video, 2/68=images). Only used in Douyin path.
         video_title: Title for logging and task tracker display
         resource_id: User's resource record ID (for per-user status updates)
         _dedup_key: Orchestrator dedup key (for Redis lock management)
         _unified_task_id: Orchestrator task ID (for Celery signal hooks)
+        download_music: Deprecated, ignored. Audio is auto-extracted from video.
     """
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
-    requested_types = [t for t, f in [("video", download_video), ("music", download_music), ("cover", download_cover)] if f]
+    requested_types = [t for t, f in [("video", download_video), ("cover", download_cover)] if f]
     logger.info(
         f"[Download/Init] {platform_id}: strategy={strategy}, "
         f"types=[{','.join(requested_types)}], task_id={task_id}"
@@ -980,8 +994,6 @@ def download_unified_task(
     dl_parts = []
     if download_video:
         dl_parts.append("Video")
-    if download_music:
-        dl_parts.append("Audio")
     if download_cover:
         dl_parts.append("Cover")
     dl_subtitle = " + ".join(dl_parts) if dl_parts else None
@@ -1048,11 +1060,8 @@ def download_unified_task(
                 # Only mark cached "completed" if both status AND file path exist
                 has_video_path = bool(global_media.get("download_path"))
                 has_cover_path = bool(global_media.get("cover_download_path"))
-                has_music_path = bool(global_media.get("music_download_path"))
                 if download_video and global_media.get("video_download_status") == "completed" and has_video_path:
                     cache_updates["video_download_status"] = "completed"
-                if download_music and global_media.get("music_download_status") == "completed" and has_music_path:
-                    cache_updates["music_download_status"] = "completed"
                 if download_cover and global_media.get("cover_download_status") == "completed" and has_cover_path:
                     cache_updates["cover_download_status"] = "completed"
                 if download_video and int(media_type) in (2, 68) and global_media.get("image_download_status") == "completed" and has_video_path:
@@ -1068,8 +1077,6 @@ def download_unified_task(
                         all_cached = all_cached and global_media.get("image_download_status") == "completed" and has_video_path
                     else:
                         all_cached = all_cached and global_media.get("video_download_status") == "completed" and has_video_path
-                if download_music:
-                    all_cached = all_cached and global_media.get("music_download_status") == "completed" and has_music_path
                 if download_cover:
                     all_cached = all_cached and global_media.get("cover_download_status") == "completed" and has_cover_path
 
@@ -1098,7 +1105,6 @@ def download_unified_task(
                 platform_id=platform_id,
                 user_id=user_id,
                 download_video=download_video,
-                download_music=download_music,
                 download_cover=download_cover,
                 tracker=tracker,
             )
@@ -1107,7 +1113,6 @@ def download_unified_task(
                 platform_id=platform_id,
                 user_id=user_id,
                 download_video=download_video,
-                download_music=download_music,
                 download_cover=download_cover,
                 media_type=media_type,
                 tracker=tracker,
@@ -1170,9 +1175,10 @@ def download_unified_task(
                         status_updates["image_download_status"] = video_result if video_result == "completed" else "failed"
                     else:
                         status_updates["video_download_status"] = video_result if video_result == "completed" else "failed"
-                if download_music:
+                    # Audio extraction result (auto-extracted from video)
                     music_result = results.get("music")
-                    status_updates["music_download_status"] = music_result if music_result == "completed" else "failed"
+                    if music_result:
+                        status_updates["music_download_status"] = music_result
                 if download_cover:
                     cover_result = results.get("cover")
                     status_updates["cover_download_status"] = cover_result if cover_result == "completed" else "failed"
@@ -1242,8 +1248,6 @@ def download_unified_task(
                         fail_updates["image_download_status"] = "failed"
                     else:
                         fail_updates["video_download_status"] = "failed"
-                if download_music:
-                    fail_updates["music_download_status"] = "failed"
                 if download_cover:
                     fail_updates["cover_download_status"] = "failed"
                 run_async(_res_repo3.update_download_status(resource_id, fail_updates))

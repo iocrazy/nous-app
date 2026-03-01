@@ -198,7 +198,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   }, []);
 
   // Track fetch submissions (optimistic UI: hide menu items after submit)
-  const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false, music: false });
+  const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false });
 
   const isVideo = isVideoType(data.media_type);
   const images = data.image_download_urls || [];
@@ -218,8 +218,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     || !!(data.video_download_urls?.[0] && data.video_download_urls[0] !== '#' && isPlayableUrl(data.video_download_urls[0]));
   const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path
     || !!(data.cover_urls?.[0] && data.cover_urls[0] !== '#');
-  const musicDownloaded = fetchSubmitted.music || !!data.music_download_path
-    || !!(data.music_download_urls?.[0] && data.music_download_urls[0] !== '#');
+  const musicDownloaded = !!data.music_download_path;
 
   // Setup HLS.js for .m3u8 video playback
   useEffect(() => {
@@ -353,9 +352,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   };
 
   const onDownloadAudio = () => {
-    const url = data.music_download_urls?.[0];
-    if (!url || url === '#') return;
-    doDownload(url, `${data.platform_id || 'music'}.mp3`);
+    if (!data.music_download_path || !data.platform_id) return;
+    // Audio is downloaded from server via getMusicDownloadUrl (handled by parent/PlayerPage)
+    addToast('Use player page to download audio', 'info');
   };
 
   const onDownloadCover = () => {
@@ -365,7 +364,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)
   // force=true 时跳过已下载检查，强制重新获取
-  const onRefetch = async (options: { video?: boolean; music?: boolean; cover?: boolean; force?: boolean }) => {
+  const onRefetch = async (options: { video?: boolean; cover?: boolean; force?: boolean }) => {
     if (!data.platform_id) {
       addToast('No platform ID available for refetch', 'error');
       return;
@@ -383,11 +382,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       if (!options.force && coverDownloaded) alreadyHave.push('Cover');
       else types.push('cover');
     }
-    if (options.music) {
-      if (!options.force && musicDownloaded) alreadyHave.push('Audio');
-      else types.push('music');
-    }
-
     // If everything requested is already available, inform user and return
     if (types.length === 0) {
       addToast(`Already has: ${alreadyHave.join(', ')}`, 'info');
@@ -407,12 +401,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         ...prev,
         ...(types.includes('video') ? { video: true } : {}),
         ...(types.includes('cover') ? { cover: true } : {}),
-        ...(types.includes('music') ? { music: true } : {}),
       }));
       const fetching: string[] = [];
       if (types.includes('video')) fetching.push('Video');
       if (types.includes('cover')) fetching.push('Cover');
-      if (types.includes('music')) fetching.push('Audio');
       let msg = `Fetch submitted: ${fetching.join(', ')}`;
       if (alreadyHave.length > 0) msg += ` (already has: ${alreadyHave.join(', ')})`;
       if (result.types_skipped?.length) msg += ` (cached: ${result.types_skipped.join(', ')})`;
@@ -677,16 +669,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                             Fetch Cover
                           </button>
                         )}
-                        {!musicDownloaded && (
-                          <button
-                            onClick={() => onRefetch({ music: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <Music size={16} className="text-amber-400" />
-                            Fetch Audio
-                          </button>
-                        )}
-                        {(videoDownloaded && coverDownloaded && musicDownloaded) ? (
+                        {(videoDownloaded && coverDownloaded) ? (
                           <>
                             <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
                               <Check size={16} className="text-emerald-400" />
@@ -694,7 +677,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                             </div>
                             <div className="border-t border-zinc-700 my-1" />
                             <button
-                              onClick={() => onRefetch({ video: true, cover: true, music: true, force: true })}
+                              onClick={() => onRefetch({ video: true, cover: true, force: true })}
                               className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                             >
                               <RefreshCw size={16} className="text-orange-400" />
@@ -708,7 +691,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                               onClick={() => onRefetch({
                                 video: !videoDownloaded,
                                 cover: !coverDownloaded,
-                                music: !musicDownloaded,
                               })}
                               className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                             >

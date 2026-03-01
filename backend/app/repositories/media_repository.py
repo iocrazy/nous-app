@@ -345,7 +345,6 @@ class MediaRepository:
         return {
             "id": result.get("id"),
             "source_platform": result.get("source_platform"),
-            "music_download_urls": result.get("music_download_urls"),
             "music_name": result.get("music_name"),
         }
 

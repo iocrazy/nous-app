@@ -60,7 +60,6 @@ class MediaFetchRequest(BaseModel):
 
     url: str
     video_bool: bool = True
-    music_bool: bool = False
     cover_bool: bool = True
     use_celery: bool = False  # Whether to use Celery async tasks
     tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
@@ -89,7 +88,6 @@ class BatchFetchRequest(BaseModel):
 
     urls: list[str]
     video_bool: bool = True
-    music_bool: bool = False
     cover_bool: bool = True
     use_celery: bool = False  # Whether to use Celery async tasks
     tags: Optional[list[str]] = None  # Tag names (auto-create if missing)
@@ -136,7 +134,6 @@ async def _dedup_and_dispatch(
     media_type: int,
     video_title: str,
     download_video: bool,
-    download_music: bool,
     download_cover: bool,
     url: str | None = None,
     background_tasks: BackgroundTasks | None = None,
@@ -160,8 +157,6 @@ async def _dedup_and_dispatch(
     requested = {}
     if download_video:
         requested["image" if is_image_type else "video"] = True
-    if download_music:
-        requested["music"] = True
     if download_cover:
         requested["cover"] = True
 
@@ -198,7 +193,6 @@ async def _dedup_and_dispatch(
     if types_to_download:
         # Map back to download_* bools
         dl_video = ("video" in types_to_download) or ("image" in types_to_download)
-        dl_music = "music" in types_to_download
         dl_cover = "cover" in types_to_download
 
         try:
@@ -211,7 +205,6 @@ async def _dedup_and_dispatch(
                 user_id=user_id,
                 url=url,
                 download_video=dl_video,
-                download_music=dl_music,
                 download_cover=dl_cover,
                 media_type=media_type,
                 video_title=video_title[:50] if video_title else "undefined",
@@ -227,8 +220,6 @@ async def _dedup_and_dispatch(
                         background_tasks.add_task(DownloaderService.download_images_by_platform_id, platform_id, user_id=user_id)
                     else:
                         background_tasks.add_task(DownloaderService.download_video_by_platform_id, platform_id, user_id=user_id)
-                if dl_music:
-                    background_tasks.add_task(DownloaderService.download_music_by_platform_id, platform_id=platform_id, user_id=user_id)
                 if dl_cover:
                     background_tasks.add_task(DownloaderService.download_cover_by_platform_id, platform_id, user_id=user_id)
                 task_id = "background"
@@ -257,7 +248,6 @@ async def fetch_video(
 
     - **url**: Video link (supports share links)
     - **video_bool**: Whether to download video file
-    - **music_bool**: Whether to download background music
     - **use_celery**: Whether to use Celery async tasks (default False)
 
     Authentication: Bearer Token or API Key (requires `videos:fetch` scope)
@@ -330,7 +320,6 @@ async def fetch_video(
                 url=url,
                 user_id=auth.user_id,
                 video_bool=request.video_bool,
-                music_bool=request.music_bool,
                 cover_bool=request.cover_bool,
             )
 
@@ -427,7 +416,7 @@ async def fetch_video(
             aweme_detail=aweme_detail,
             valid_url=url,
             download_video=request.video_bool,
-            download_music=request.music_bool,
+            download_music=False,
             download_cover=request.cover_bool,
         )
 
@@ -460,7 +449,7 @@ async def fetch_video(
         need_download_video = request.video_bool and not dedup_hit
 
         dispatch_result = {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
-        if need_download_video or request.music_bool or request.cover_bool:
+        if need_download_video or request.cover_bool:
             dispatch_result = await _dedup_and_dispatch(
                 platform_id=platform_id,
                 user_id=auth.user_id,
@@ -468,7 +457,6 @@ async def fetch_video(
                 media_type=int(media_type) if str(media_type).isdigit() else 0,
                 video_title=video_title,
                 download_video=need_download_video,
-                download_music=request.music_bool,
                 download_cover=request.cover_bool,
                 background_tasks=background_tasks,
             )
@@ -596,7 +584,7 @@ async def fetch_media_by_type(
     the requested types.
 
     - **platform_id**: The media's platform identifier
-    - **types**: List of types to fetch: "video", "music", "cover", "image"
+    - **types**: List of types to fetch: "video", "cover", "image"
 
     Authentication: Bearer Token or API Key
     """
@@ -657,7 +645,7 @@ async def fetch_media_by_type(
                 user_id=auth.user_id,
                 parsed_data=media,
                 need_download_video="video" in request.types or "image" in request.types,
-                need_download_music="music" in request.types,
+                need_download_music=False,
                 need_download_cover="cover" in request.types,
                 is_image_type=int(media_type) in (2, 68),
                 dedup_hit=False,
@@ -689,7 +677,6 @@ async def fetch_media_by_type(
             media_type=int(media_type) if str(media_type).isdigit() else 0,
             video_title=video_title,
             download_video="video" in request.types or "image" in request.types,
-            download_music="music" in request.types,
             download_cover="cover" in request.types,
             url=dispatch_url,
             background_tasks=background_tasks,
@@ -722,6 +709,59 @@ async def fetch_media_by_type(
         raise HTTPException(status_code=500, detail=f"Fetch failed: {str(e)}")
 
 
+@router.post("/{platform_id}/extract-audio", tags=TAGS_FETCH)
+async def extract_audio(
+    platform_id: str,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
+):
+    """
+    Re-extract audio from a downloaded video file (ffmpeg -c:a copy).
+
+    Use this when audio extraction failed or audio file is missing but
+    the video file exists on disk.
+
+    - **platform_id**: The media's platform identifier
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        repo = MediaRepository()
+        media = await repo.get_by_platform_id(platform_id)
+        if not media:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        # Check that a video file exists
+        download_path = media.get("download_path")
+        if not download_path:
+            raise HTTPException(
+                status_code=400,
+                detail="No video file found. Download the video first.",
+            )
+
+        # Dispatch extraction in background
+        async def _do_extract(pid: str):
+            from app.tasks.download_tasks import _extract_audio_from_video
+            try:
+                _extract_audio_from_video(pid)
+            except Exception as e:
+                logger.error(f"[ExtractAudio] Failed for {pid}: {e}")
+
+        background_tasks.add_task(_do_extract, platform_id)
+
+        return {
+            "success": True,
+            "message": "Audio extraction started",
+            "platform_id": platform_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ExtractAudio] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Extract audio failed: {str(e)}")
+
+
 @router.post("/fetch/batch", tags=TAGS_FETCH)
 async def fetch_videos_batch(
     request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
@@ -733,7 +773,6 @@ async def fetch_videos_batch(
 
     - **urls**: List of video links
     - **video_bool**: Whether to download video files
-    - **music_bool**: Whether to download background music
     - **use_celery**: Whether to use Celery async tasks (default False)
 
     Authentication: Bearer Token or API Key (requires `videos:fetch:batch` scope)
@@ -773,7 +812,6 @@ async def fetch_videos_batch(
             urls=request.urls,
             user_id=auth.user_id,
             video_bool=request.video_bool,
-            music_bool=request.music_bool,
             cover_bool=request.cover_bool,
         )
 
@@ -850,7 +888,7 @@ async def fetch_videos_batch(
                     aweme_detail=aweme_detail,
                     valid_url=url,
                     download_video=request.video_bool,
-                    download_music=request.music_bool,
+                    download_music=False,
                     download_cover=request.cover_bool,
                 )
 
@@ -1254,7 +1292,6 @@ class RetryDownloadRequest(BaseModel):
     """Retry download request — select which media to re-download."""
 
     video_bool: bool = True
-    music_bool: bool = False
     cover_bool: bool = False
 
 
@@ -1272,7 +1309,6 @@ async def retry_download(
 
     - **platform_id**: Video unique identifier
     - **video_bool**: Re-download video (default True)
-    - **music_bool**: Re-download music (default False)
     - **cover_bool**: Re-download cover (default False)
 
     Authentication: Bearer Token or API Key (requires `videos:retry` scope)
@@ -1292,8 +1328,6 @@ async def retry_download(
         status_updates: dict = {"error_message": None}
         if request.video_bool:
             status_updates["video_download_status"] = DownloadStatus.PENDING.value
-        if request.music_bool:
-            status_updates["music_download_status"] = DownloadStatus.PENDING.value
         if request.cover_bool:
             status_updates["cover_download_status"] = DownloadStatus.PENDING.value
 
@@ -1312,8 +1346,6 @@ async def retry_download(
                 res_status_updates = {}
                 if request.video_bool:
                     res_status_updates["video_download_status"] = "pending"
-                if request.music_bool:
-                    res_status_updates["music_download_status"] = "pending"
                 if request.cover_bool:
                     res_status_updates["cover_download_status"] = "pending"
                 if res_status_updates:
@@ -1327,7 +1359,7 @@ async def retry_download(
             media_type=int(media_type) if str(media_type).isdigit() else 0,
             video_title=video_title,
             download_video=request.video_bool,
-            download_music=request.music_bool,
+            download_music=False,
             download_cover=request.cover_bool,
             background_tasks=background_tasks,
         )
@@ -1630,7 +1662,6 @@ async def _handle_ytdlp_fetch(
     # Add user-specific fields
     parsed_data["user_id"] = auth.user_id
     parsed_data["need_download_video"] = request.video_bool
-    parsed_data["need_download_music"] = request.music_bool
     parsed_data["need_download_cover"] = True  # cover always downloaded
 
     # Step 3: Save metadata to database
@@ -1646,7 +1677,7 @@ async def _handle_ytdlp_fetch(
 
     # Step 4: Dispatch download tasks
     download_task_id = None
-    need_download = request.video_bool or request.music_bool or True  # cover always
+    need_download = request.video_bool or True  # cover always
 
     if need_download:
         # Try Celery first, fallback to FastAPI background tasks
@@ -1658,7 +1689,6 @@ async def _handle_ytdlp_fetch(
                 platform_id=platform_id,
                 user_id=auth.user_id,
                 download_video=request.video_bool,
-                download_music=request.music_bool,
                 download_cover=True,
                 video_title=video_title[:50] if video_title else "undefined",
                 resource_id=resource_id,
@@ -1676,7 +1706,6 @@ async def _handle_ytdlp_fetch(
                 platform_id: str,
                 user_id: str,
                 download_video: bool,
-                download_music: bool,
                 download_cover: bool,
                 video_title: str = "undefined",
             ):
@@ -1695,8 +1724,6 @@ async def _handle_ytdlp_fetch(
                 dl_parts = []
                 if download_video:
                     dl_parts.append("Video")
-                if download_music:
-                    dl_parts.append("Audio")
                 if download_cover:
                     dl_parts.append("Cover")
                 dl_subtitle = " + ".join(dl_parts) if dl_parts else None
@@ -1742,13 +1769,6 @@ async def _handle_ytdlp_fetch(
                                 result["file_path"]
                             )
 
-                    if download_music:
-                        result = await YtdlpService.download_audio(
-                            url, str(storage_dir), platform_id
-                        )
-                        if result.get("file_path"):
-                            await repo.mark_music_as_downloaded(platform_id)
-
                     if download_cover:
                         await DownloaderService.download_cover_by_platform_id(
                             platform_id, user_id=user_id
@@ -1785,7 +1805,6 @@ async def _handle_ytdlp_fetch(
                 platform_id,
                 auth.user_id,
                 request.video_bool,
-                request.music_bool,
                 request.cover_bool,
                 video_title[:50] if video_title else "undefined",
             )

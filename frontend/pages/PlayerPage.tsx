@@ -12,7 +12,7 @@ import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCover
 import { trashResourceByMediaId } from '../services/resourceService';
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { fetchMediaByType } from '../services/parserService';
+import { fetchMediaByType, extractAudio } from '../services/parserService';
 import { updateResource, getVersionHlsUrl } from '../services/resourceService';
 import { useToast } from '../components/Toast';
 import { getSupabaseClient, isSupabaseConfigured, getSupabaseAccessToken } from '../supabaseClient';
@@ -227,7 +227,7 @@ export function PlayerPage() {
     }
   };
 
-  const handleFetchMedia = async (options: { video?: boolean; music?: boolean; cover?: boolean }) => {
+  const handleFetchMedia = async (options: { video?: boolean; cover?: boolean }) => {
     if (!video?.platform_id) {
       addToast('No platform ID available for fetch', 'error');
       return;
@@ -237,13 +237,11 @@ export function PlayerPage() {
     try {
       const types: string[] = [];
       if (options.video) types.push('video');
-      if (options.music) types.push('music');
       if (options.cover) types.push('cover');
       const result = await fetchMediaByType(video.platform_id, types);
       const items = [
         options.video && 'Video',
         options.cover && 'Cover',
-        options.music && 'Audio',
       ].filter(Boolean);
       const detail = result.types_skipped?.length
         ? ` (cached: ${result.types_skipped.join(', ')})`
@@ -252,6 +250,21 @@ export function PlayerPage() {
     } catch (error) {
       console.error('Fetch error:', error);
       addToast(error instanceof Error ? error.message : 'Fetch failed', 'error');
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  const handleExtractAudio = async () => {
+    if (!video?.platform_id) return;
+    setShowDownloadMenu(false);
+    setIsFetching(true);
+    try {
+      await extractAudio(video.platform_id);
+      addToast('Audio extraction started. Will update automatically.', 'success');
+    } catch (error) {
+      console.error('Extract audio error:', error);
+      addToast(error instanceof Error ? error.message : 'Audio extraction failed', 'error');
     } finally {
       setIsFetching(false);
     }
@@ -421,22 +434,18 @@ export function PlayerPage() {
                               <CloudDownload size={13} className="text-emerald-400" /> Fetch Cover
                             </button>
                           ) : null}
-                          {/* Audio */}
+                          {/* Audio — auto-extracted from video, re-extract if missing */}
                           {isCompleted(audioStatus) ? (
                             <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
                               <Music size={13} className="text-amber-400" /> Audio
                             </button>
                           ) : isPending(audioStatus) ? (
                             <button disabled className={disabledClass}>
-                              <Loader2 size={13} className="text-amber-400 animate-spin" /> Audio Downloading...
+                              <Loader2 size={13} className="text-amber-400 animate-spin" /> Extracting Audio...
                             </button>
-                          ) : isFailed(audioStatus) ? (
-                            <button onClick={() => handleFetchMedia({ music: true })} className={btnClass}>
-                              <CloudDownload size={13} className="text-red-400" /> Retry Audio
-                            </button>
-                          ) : video.original_url ? (
-                            <button onClick={() => handleFetchMedia({ music: true })} className={btnClass}>
-                              <CloudDownload size={13} className="text-amber-400" /> Fetch Audio
+                          ) : hasVideoFile ? (
+                            <button onClick={() => handleExtractAudio()} className={btnClass}>
+                              <Music size={13} className="text-amber-400" /> Extract Audio
                             </button>
                           ) : null}
                         </div>

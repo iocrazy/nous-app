@@ -53,7 +53,6 @@ export const getAuthHeaders = buildHeaders;
 
 export interface FetchOptions {
   video_bool?: boolean;
-  music_bool?: boolean;
   cover_bool?: boolean;
   tag_ids?: string[];
 }
@@ -99,7 +98,6 @@ export const parseShareLink = async (
   const body: Record<string, unknown> = {
     url,
     video_bool: options.video_bool ?? true,
-    music_bool: options.music_bool ?? false,
     cover_bool: options.cover_bool ?? true,
   };
   if (options.tag_ids?.length) {
@@ -109,12 +107,7 @@ export const parseShareLink = async (
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
     method: 'POST',
     headers: await buildHeaders(),
-    body: JSON.stringify({
-      url,
-      video_bool: options.video_bool ?? true,
-      music_bool: options.music_bool ?? false,
-      cover_bool: options.cover_bool ?? true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -144,7 +137,6 @@ export const parseBatchLinks = async (
   const batchBody: Record<string, unknown> = {
     urls,
     video_bool: options.video_bool ?? true,
-    music_bool: options.music_bool ?? false,
     cover_bool: options.cover_bool ?? true,
   };
   if (options.tag_ids?.length) {
@@ -154,12 +146,7 @@ export const parseBatchLinks = async (
   const response = await fetch(`${apiUrl}/api/v1/videos/fetch/batch`, {
     method: 'POST',
     headers: await buildHeaders(),
-    body: JSON.stringify({
-      urls,
-      video_bool: options.video_bool ?? true,
-      music_bool: options.music_bool ?? false,
-      cover_bool: options.cover_bool ?? true,
-    }),
+    body: JSON.stringify(batchBody),
   });
 
   if (!response.ok) {
@@ -256,6 +243,25 @@ export const fetchMediaByType = async (
       ? error.detail.map((e: { msg?: string }) => e.msg).join('; ')
       : error.detail;
     throw new Error(detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+};
+
+/**
+ * Re-extract audio from downloaded video file (ffmpeg -c:a copy).
+ */
+export const extractAudio = async (platformId: string): Promise<{
+  success: boolean;
+  message: string;
+}> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/videos/${platformId}/extract-audio`, {
+    method: 'POST',
+    headers: await buildHeaders(),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
   return response.json();
 };
