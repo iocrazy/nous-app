@@ -29,6 +29,7 @@ CORS_ORIGINS:
   - "https://mediahubserver.heygo.cn"
   - "http://mediahubserver.heygo.cn:88"
   - "http://mediahubserver.heygo.cn"
+  - "http://localhost:3097"
 CORS_CREDENTIALS: true
 
 # 应用程序固定配置
