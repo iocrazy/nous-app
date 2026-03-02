@@ -1232,7 +1232,7 @@ wheels = [
 
 [[package]]
 name = "mediahub-backend"
-version = "0.3.0"
+version = "0.7.5"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
