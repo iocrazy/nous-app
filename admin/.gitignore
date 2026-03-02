@@ -1,0 +1,2 @@
+# Unignore lib directory for admin frontend (overrides root .gitignore)
+!src/lib/
