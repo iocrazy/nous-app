@@ -1,0 +1,7 @@
+@import '@arco-design/web-react/dist/css/arco.css';
+
+body {
+  margin: 0;
+  background-color: var(--color-bg-1);
+  color: var(--color-text-1);
+}

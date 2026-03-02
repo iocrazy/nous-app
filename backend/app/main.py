@@ -11,6 +11,7 @@ from loguru import logger
 
 from app.api import api_router
 from app.api.frontend_config_router import load_config as load_frontend_config
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.redis import close_async_redis
@@ -191,6 +192,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(ws_router)
