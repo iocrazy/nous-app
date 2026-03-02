@@ -785,12 +785,12 @@ class ResourcesService:
         except Exception as e:
             logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
 
-        # Dedup check via orchestrator
+        # Dedup check via task manager
         dedup_key = None
         try:
             from app.services.unified_task_manager import get_task_manager
-            orchestrator = get_task_manager()
-            result = await orchestrator.acquire_or_subscribe(
+            mgr = get_task_manager()
+            result = await mgr.acquire_or_subscribe(
                 task_type="transcode",
                 dedup_identifier=version_id,
                 user_id=user_id or "",
