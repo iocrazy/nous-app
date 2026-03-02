@@ -32,6 +32,13 @@ from app.api.task_router import router as task_router
 from app.api.user_settings_router import router as settings_router
 from app.api.media_router import legacy_router as legacy_douyin_router
 from app.api.media_router import router as media_router
+from app.api.teams_router import router as teams_router
+from app.api.invites_router import router as invites_router
+from app.api.video_collections_router import router as video_collections_router
+from app.api.notifications_router import router as notifications_router
+from app.api.realtime_router import router as realtime_router
+from app.api.error_report_router import router as error_report_router
+from app.api.admin import admin_router
 
 api_router = APIRouter()
 
@@ -83,3 +90,17 @@ api_router.include_router(router=libraries_router, tags=["Libraries"])
 api_router.include_router(router=reviews_router, tags=["Reviews"])
 
 api_router.include_router(router=task_manager_router, tags=["Task Manager"])
+
+api_router.include_router(router=teams_router, tags=["Teams"])
+
+api_router.include_router(router=invites_router, tags=["Invites"])
+
+api_router.include_router(router=video_collections_router, tags=["Video Collections"])
+
+api_router.include_router(router=notifications_router, tags=["Notifications"])
+
+api_router.include_router(router=realtime_router, tags=["Realtime"])
+
+api_router.include_router(router=error_report_router, tags=["Error Reporting"])
+
+api_router.include_router(router=admin_router, tags=["Admin"])

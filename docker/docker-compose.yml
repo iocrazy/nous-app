@@ -128,5 +128,18 @@ services:
       redis:
         condition: service_healthy
 
+  # MediaHub Admin Panel
+  mediahub-admin:
+    image: imheygo/mediahub-admin:latest
+    container_name: mediahub-admin
+    restart: unless-stopped
+    ports:
+      - "3097:80"
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      mediahub:
+        condition: service_healthy
+
 volumes:
   redis_data:
