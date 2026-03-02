@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Coroutine, List, Optional, Tuple
 
@@ -173,6 +174,105 @@ class TranscodeService:
 
             total_duration = await self._probe_duration(str(source))
 
+            # Detect source codecs for fast-path decision
+            video_codec, audio_codec = await self._probe_codecs(str(source))
+            is_h264 = video_codec in ("h264",)
+
+            # Clean up old HLS if exists
+            if hls_dir.exists():
+                shutil.rmtree(hls_dir)
+            hls_dir.mkdir(parents=True, exist_ok=True)
+
+            if is_h264:
+                # ============================================================
+                # H.264 Fast Path: two-phase strategy
+                # Phase 1: copy-only segmentation (seconds) → immediate playback
+                # Phase 2: enhancement tiers (background) → rewrite playlist
+                # ============================================================
+                logger.info(
+                    f"[Transcode] H.264 fast path: {video_codec}/{audio_codec} "
+                    f"for version {version_id}"
+                )
+
+                # Phase 1: Fast copy-only segmentation
+                if on_progress:
+                    await on_progress(10, "Fast segmenting (copy)...")
+                source_bitrate = await self._probe_bitrate(str(source))
+                passthrough_ok = await self._transcode_passthrough(
+                    str(source), hls_dir, audio_codec,
+                )
+
+                if not passthrough_ok:
+                    logger.warning(
+                        f"[Transcode] H.264 passthrough failed, falling back to full encode"
+                    )
+                    # Fall through to standard encoding path below
+                else:
+                    # Write initial master.m3u8 with source-only tier
+                    self._write_master_playlist(
+                        hls_dir, [],
+                        passthrough=True,
+                        source_width=width, source_height=height,
+                        source_bitrate=source_bitrate,
+                    )
+
+                    # Build relative path
+                    master_path = hls_dir / "master.m3u8"
+                    relative_hls = str(master_path.relative_to(base))
+
+                    # Mark as completed — user can play HLS immediately
+                    await self.repo.update_version(version_id, {
+                        "hls_path": relative_hls,
+                        "transcode_status": "completed",
+                        "transcode_at": datetime.now(timezone.utc).isoformat(),
+                    })
+
+                    if on_progress:
+                        await on_progress(50, "HLS ready, encoding quality tiers...")
+
+                    logger.success(
+                        f"[Transcode] H.264 fast path completed in seconds: "
+                        f"resource={resource_id}, version={version_id}"
+                    )
+
+                    # Phase 2: Enhancement tiers (non-blocking for user)
+                    applicable = self._select_tiers(width, height)
+                    if applicable:
+                        try:
+                            for tier in applicable:
+                                (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
+
+                            encoded_tiers = await self._encode_tiers(
+                                str(source), applicable, hls_dir,
+                                total_duration, on_progress, version_id,
+                                progress_base=50, progress_cap=95,
+                            )
+
+                            if encoded_tiers:
+                                # Rewrite master.m3u8 with all tiers
+                                self._write_master_playlist(
+                                    hls_dir, encoded_tiers,
+                                    passthrough=True,
+                                    source_width=width, source_height=height,
+                                    source_bitrate=source_bitrate,
+                                )
+                                logger.info(
+                                    f"[Transcode] Enhancement tiers added: "
+                                    f"{[t.name for t in encoded_tiers]}"
+                                )
+                        except Exception as e:
+                            # Enhancement failure does NOT affect completed HLS
+                            logger.warning(
+                                f"[Transcode] Enhancement tiers failed (non-fatal): {e}"
+                            )
+
+                    if on_progress:
+                        await on_progress(100, "Done")
+                    return relative_hls
+
+            # ============================================================
+            # Standard Path: full encoding (non-H.264 or passthrough failed)
+            # ============================================================
             # Select applicable tiers
             applicable = self._select_tiers(width, height)
             if not applicable:
@@ -180,101 +280,34 @@ class TranscodeService:
                 await self.repo.update_version(version_id, {"transcode_status": "failed"})
                 return None
 
-            # Clean up old HLS if exists
-            if hls_dir.exists():
-                shutil.rmtree(hls_dir)
-            hls_dir.mkdir(parents=True, exist_ok=True)
-
             # Ensure tier directories exist
             for tier in applicable:
                 (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
 
-            num_tiers = len(applicable)
+            encoded_tiers = await self._encode_tiers(
+                str(source), applicable, hls_dir,
+                total_duration, on_progress, version_id,
+                progress_base=0, progress_cap=95,
+            )
 
-            if settings.TRANSCODE_PARALLEL_TIERS and num_tiers > 1:
-                # ── Parallel tier encoding ──
-                tier_progress_map: dict[str, float] = {}
-
-                def _make_tier_progress(tier: TranscodeTier):
-                    async def _progress(pct: float):
-                        tier_progress_map[tier.name] = pct
-                        avg = sum(tier_progress_map.values()) / num_tiers
-                        overall = int(avg * 95 / 100)
-                        active = ", ".join(
-                            f"{k} {int(v)}%" for k, v in sorted(tier_progress_map.items())
-                        )
-                        if on_progress:
-                            await on_progress(min(overall, 95), f"Encoding {active}")
-                    return _progress
-
-                results = await asyncio.gather(
-                    *[
-                        self._transcode_tier(
-                            str(source), tier, str(hls_dir / tier.name),
-                            total_duration=total_duration,
-                            on_progress=_make_tier_progress(tier),
-                        )
-                        for tier in applicable
-                    ],
-                    return_exceptions=True,
-                )
-
-                # Check results — any failure is logged but doesn't block others
-                all_ok = True
-                for tier, result in zip(applicable, results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Tier {tier.name} raised exception: {result}")
-                        all_ok = False
-                    elif result is False:
-                        logger.error(f"Tier {tier.name} failed")
-                        all_ok = False
-
-                if not all_ok:
-                    # If ALL tiers failed, mark as failed
-                    success_count = sum(
-                        1 for r in results if r is True
-                    )
-                    if success_count == 0:
-                        logger.error(f"All tiers failed for version {version_id}")
-                        await self.repo.update_version(version_id, {"transcode_status": "failed"})
-                        return None
-                    # Partial success: filter applicable to only successful tiers
-                    applicable = [
-                        tier for tier, r in zip(applicable, results) if r is True
-                    ]
-            else:
-                # ── Serial tier encoding (fallback / single tier) ──
-                encode_weight = 95 / num_tiers
-                for i, tier in enumerate(applicable):
-                    base_progress = int(i * encode_weight)
-
-                    async def tier_progress(pct: float, _ew=encode_weight, _bp=base_progress, _tier=tier):
-                        overall = _bp + int(pct * _ew / 100)
-                        if on_progress:
-                            await on_progress(min(overall, 95), f"Encoding {_tier.name}")
-
-                    success = await self._transcode_tier(
-                        str(source), tier, str(hls_dir / tier.name),
-                        total_duration=total_duration,
-                        on_progress=tier_progress,
-                    )
-                    if not success:
-                        logger.error(f"Failed to transcode tier {tier.name} for version {version_id}")
-                        await self.repo.update_version(version_id, {"transcode_status": "failed"})
-                        return None
+            if not encoded_tiers:
+                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                return None
 
             # Add passthrough "Original" tier (copy codec, no re-encoding)
             if on_progress:
                 await on_progress(95, "Remuxing original...")
             source_bitrate = await self._probe_bitrate(str(source))
-            passthrough_ok = await self._transcode_passthrough(str(source), hls_dir)
+            passthrough_ok = await self._transcode_passthrough(
+                str(source), hls_dir, audio_codec,
+            )
 
             # Generate master playlist
             if on_progress:
                 await on_progress(98, "Writing playlist...")
             self._write_master_playlist(
                 hls_dir,
-                applicable,
+                encoded_tiers,
                 passthrough=passthrough_ok,
                 source_width=width,
                 source_height=height,
@@ -286,7 +319,6 @@ class TranscodeService:
             relative_hls = str(master_path.relative_to(base))
 
             # Update DB
-            from datetime import datetime, timezone
             await self.repo.update_version(version_id, {
                 "hls_path": relative_hls,
                 "transcode_status": "completed",
@@ -298,7 +330,7 @@ class TranscodeService:
 
             logger.success(
                 f"Transcode completed: resource={resource_id}, version={version_id}, "
-                f"tiers={[t.name for t in applicable]}"
+                f"tiers={[t.name for t in encoded_tiers]}"
             )
             return relative_hls
 
@@ -306,6 +338,87 @@ class TranscodeService:
             logger.error(f"Transcode failed for version {version_id}: {e}")
             await self.repo.update_version(version_id, {"transcode_status": "failed"})
             return None
+
+    # ------------------------------------------------------------------ #
+    # Tier encoding (shared by both fast-path and standard-path)
+    # ------------------------------------------------------------------ #
+
+    async def _encode_tiers(
+        self,
+        source: str,
+        applicable: List[TranscodeTier],
+        hls_dir: Path,
+        total_duration: Optional[float],
+        on_progress: Optional["TranscodeService.ProgressCallback"],
+        version_id: str,
+        progress_base: int = 0,
+        progress_cap: int = 95,
+    ) -> Optional[List[TranscodeTier]]:
+        """Encode applicable tiers (parallel or serial). Returns list of successful tiers, or None if all failed."""
+        num_tiers = len(applicable)
+        progress_range = progress_cap - progress_base
+
+        if settings.TRANSCODE_PARALLEL_TIERS and num_tiers > 1:
+            # ── Parallel tier encoding ──
+            tier_progress_map: dict[str, float] = {}
+
+            def _make_tier_progress(tier: TranscodeTier):
+                async def _progress(pct: float):
+                    tier_progress_map[tier.name] = pct
+                    avg = sum(tier_progress_map.values()) / num_tiers
+                    overall = progress_base + int(avg * progress_range / 100)
+                    active = ", ".join(
+                        f"{k} {int(v)}%" for k, v in sorted(tier_progress_map.items())
+                    )
+                    if on_progress:
+                        await on_progress(min(overall, progress_cap), f"Encoding {active}")
+                return _progress
+
+            results = await asyncio.gather(
+                *[
+                    self._transcode_tier(
+                        source, tier, str(hls_dir / tier.name),
+                        total_duration=total_duration,
+                        on_progress=_make_tier_progress(tier),
+                    )
+                    for tier in applicable
+                ],
+                return_exceptions=True,
+            )
+
+            for tier, result in zip(applicable, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Tier {tier.name} raised exception: {result}")
+                elif result is False:
+                    logger.error(f"Tier {tier.name} failed")
+
+            successful = [
+                tier for tier, r in zip(applicable, results) if r is True
+            ]
+            if not successful:
+                logger.error(f"All tiers failed for version {version_id}")
+                return None
+            return successful
+        else:
+            # ── Serial tier encoding ──
+            encode_weight = progress_range / num_tiers
+            for i, tier in enumerate(applicable):
+                bp = progress_base + int(i * encode_weight)
+
+                async def tier_progress(pct: float, _ew=encode_weight, _bp=bp, _tier=tier):
+                    overall = _bp + int(pct * _ew / 100)
+                    if on_progress:
+                        await on_progress(min(overall, progress_cap), f"Encoding {_tier.name}")
+
+                success = await self._transcode_tier(
+                    source, tier, str(hls_dir / tier.name),
+                    total_duration=total_duration,
+                    on_progress=tier_progress,
+                )
+                if not success:
+                    logger.error(f"Failed to transcode tier {tier.name} for version {version_id}")
+                    return None
+            return applicable
 
     # ------------------------------------------------------------------ #
     # ffprobe
@@ -360,6 +473,30 @@ class TranscodeService:
         except Exception as e:
             logger.warning(f"ffprobe duration failed for {filepath}: {e}")
             return None
+
+    async def _probe_codecs(self, filepath: str) -> tuple[Optional[str], Optional[str]]:
+        """Probe video and audio codec names. Returns (video_codec, audio_codec)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_streams", filepath,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None, None
+            info = json.loads(stdout)
+            video_codec, audio_codec = None, None
+            for stream in info.get("streams", []):
+                ct = stream.get("codec_type")
+                if ct == "video" and not video_codec:
+                    video_codec = stream.get("codec_name")
+                elif ct == "audio" and not audio_codec:
+                    audio_codec = stream.get("codec_name")
+            return video_codec, audio_codec
+        except Exception as e:
+            logger.warning(f"ffprobe codec detection failed for {filepath}: {e}")
+            return None, None
 
     async def _probe_bitrate(self, filepath: str) -> Optional[int]:
         """Probe video file for overall bitrate (bps)."""
@@ -525,20 +662,30 @@ class TranscodeService:
     # Passthrough (original quality, no re-encoding)
     # ------------------------------------------------------------------ #
 
-    async def _transcode_passthrough(self, source: str, hls_dir: Path) -> bool:
-        """Remux source into HLS segments without re-encoding (preserves original quality)."""
+    async def _transcode_passthrough(
+        self, source: str, hls_dir: Path, audio_codec: Optional[str] = None,
+    ) -> bool:
+        """Remux source into HLS segments without re-encoding (preserves original quality).
+
+        If source audio is AAC, copy it directly (zero encoding). Otherwise transcode to AAC.
+        """
         out_dir = hls_dir / "source"
         out_dir.mkdir(parents=True, exist_ok=True)
         segment_path = f"{out_dir}/segment_%03d.ts"
         playlist_path = f"{out_dir}/stream.m3u8"
+
+        audio_args = (
+            ["-c:a", "copy"]
+            if audio_codec == "aac"
+            else ["-c:a", "aac", "-b:a", "192k"]
+        )
 
         cmd = [
             "ffmpeg",
             "-y",
             "-i", source,
             "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
+            *audio_args,
             "-f", "hls",
             "-hls_time", "6",
             "-hls_list_size", "0",
@@ -607,5 +754,8 @@ class TranscodeService:
             lines.append("source/stream.m3u8")
 
         master = hls_dir / "master.m3u8"
-        master.write_text("\n".join(lines) + "\n")
+        # Atomic write: write to temp file then rename to prevent race with active readers
+        tmp = master.with_suffix(".m3u8.tmp")
+        tmp.write_text("\n".join(lines) + "\n")
+        tmp.rename(master)
         logger.info(f"Master playlist written: {master}")

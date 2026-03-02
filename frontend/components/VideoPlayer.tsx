@@ -22,6 +22,8 @@ interface VideoPlayerProps {
   commentMarkers?: Array<{ time: number; color?: string }>;
 }
 
+const QUALITY_PREF_KEY = 'mediahub_quality_pref';
+
 const formatTime = (seconds: number): string => {
   if (!isFinite(seconds) || isNaN(seconds)) return '00:00';
   const m = Math.floor(seconds / 60);
@@ -147,6 +149,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsAutoQuality(levelIndex === -1);
     setShowQualityMenu(false);
 
+    // Persist quality preference by height (stable across playlist rewrites)
+    if (levelIndex === -1) {
+      localStorage.setItem(QUALITY_PREF_KEY, 'auto');
+    } else if (levelIndex >= 0 && hlsLevels[levelIndex]) {
+      localStorage.setItem(QUALITY_PREF_KEY, `${hlsLevels[levelIndex].height}p`);
+    }
+
     // Force reload current position when paused to make switch visible
     if (video.paused && levelIndex >= 0) {
       const pos = video.currentTime;
@@ -156,7 +165,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }, 100);
     }
-  }, [isOriginalMode, isHls, authToken, src, playerRef]);
+  }, [isOriginalMode, isHls, authToken, src, playerRef, hlsLevels]);
 
   // Switch to original (non-HLS) direct file playback
   const switchToOriginal = useCallback(() => {
@@ -179,6 +188,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsOriginalMode(true);
     setIsAutoQuality(false);
     setShowQualityMenu(false);
+
+    // Persist quality preference
+    localStorage.setItem(QUALITY_PREF_KEY, 'original');
   }, [originalSrc, playerRef]);
 
   // Attach or detach HLS / native source
@@ -208,16 +220,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         setIsLoading(false);
-        setHlsLevels(
-          data.levels.map((l) => ({
-            height: l.height,
-            width: l.width,
-            bitrate: l.bitrate,
-            name: (l as unknown as Record<string, unknown>).attrs
-              ? ((l as unknown as Record<string, Record<string, string>>).attrs?.NAME || undefined)
-              : undefined,
-          })),
-        );
+        const levels = data.levels.map((l) => ({
+          height: l.height,
+          width: l.width,
+          bitrate: l.bitrate,
+          name: (l as unknown as Record<string, unknown>).attrs
+            ? ((l as unknown as Record<string, Record<string, string>>).attrs?.NAME || undefined)
+            : undefined,
+        }));
+        setHlsLevels(levels);
+
+        // Restore quality preference from localStorage (stored as height, e.g. "720p")
+        const pref = localStorage.getItem(QUALITY_PREF_KEY);
+        if (pref === 'original' && originalSrc) {
+          // Will switch to original after HLS init completes
+          setTimeout(() => switchToOriginal(), 0);
+        } else if (pref && pref !== 'auto') {
+          const matchIdx = levels.findIndex(l => `${l.height}p` === pref);
+          if (matchIdx >= 0) {
+            hls.currentLevel = matchIdx;
+            setIsAutoQuality(false);
+          }
+        }
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         setCurrentHlsLevel(data.level);
@@ -240,7 +264,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [src, isHls, authToken, playerRef]);
+  }, [src, isHls, authToken, playerRef, originalSrc, switchToOriginal]);
 
   // Video event listeners
   useEffect(() => {
@@ -658,7 +682,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 {isOriginalMode
                   ? 'Original'
                   : isAutoQuality
-                    ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel] ? ` (${hlsLevels[currentHlsLevel].height}p)` : ''}`
+                    ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
+                        ? ` (${hlsLevels[currentHlsLevel].height}p · ${Math.round(hlsLevels[currentHlsLevel].bitrate / 1000)}k)`
+                        : ''}`
                     : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
                       ? `${hlsLevels[currentHlsLevel].height}p`
                       : 'Auto'}

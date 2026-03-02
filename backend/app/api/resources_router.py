@@ -164,7 +164,7 @@ async def upload_resource(
             )
             await tracker.start(unified_task_id)
         except Exception as e:
-            logger.warning(f"[TaskTracker] Failed to track upload: {e}")
+            logger.warning(f"[TaskManager] Failed to track upload: {e}")
 
         svc = ResourcesService()
         result = await svc.upload_resource(
@@ -956,10 +956,26 @@ async def serve_hls_file(
         content_types = {
             ".m3u8": "application/vnd.apple.mpegurl",
             ".ts": "video/mp2t",
+            ".m4s": "video/iso.segment",   # fMP4 segments
+            ".mp4": "video/mp4",            # fMP4 init segments
         }
         media_type = content_types.get(suffix, "application/octet-stream")
 
-        return FileResponse(path=str(target), media_type=media_type)
+        # Cache strategy: playlists short-lived, segments immutable
+        cache_control = (
+            "public, max-age=2"
+            if suffix == ".m3u8"
+            else "public, max-age=31536000, immutable"
+        )
+
+        headers = {
+            "Cache-Control": cache_control,
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Origin, Accept, Authorization",
+        }
+
+        return FileResponse(path=str(target), media_type=media_type, headers=headers)
     except HTTPException:
         raise
     except Exception as e:

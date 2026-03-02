@@ -25,6 +25,23 @@ MIN_SIZE_MB = 100       # Only auto-transcode files > 100 MB
 MIN_DURATION_SEC = 600  # ... or > 10 minutes
 
 
+def _probe_codec_sync(filepath: str) -> Optional[str]:
+    """Quick ffprobe for video codec name (sync, for gating context)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_streams", "-select_streams", "v:0", filepath],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            info = json.loads(result.stdout)
+            for stream in info.get("streams", []):
+                return stream.get("codec_name")
+    except Exception as e:
+        logger.debug(f"[Transcode] ffprobe codec failed for {filepath}: {e}")
+    return None
+
+
 def _probe_duration_sync(filepath: str) -> Optional[float]:
     """Quick ffprobe to get duration in seconds (sync, for Celery context)."""
     try:
@@ -50,7 +67,7 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         resource_id: Resource UUID
         version_id: ResourceVersion UUID
         user_id: Optional user ID for unified task tracking
-        _dedup_key: Optional dedup key for orchestrator signal handlers.
+        _dedup_key: Optional dedup key for task manager signal handlers.
         _unified_task_id: Optional existing unified_task ID (for retry, skip creating new).
 
     Returns:
@@ -249,19 +266,30 @@ def maybe_trigger_transcode(
                 return
 
             file_size_mb = file_path.stat().st_size / (1024 * 1024)
-            duration_sec = _probe_duration_sync(str(file_path))
 
-            if file_size_mb < MIN_SIZE_MB and (duration_sec or 0) < MIN_DURATION_SEC:
+            # H.264 fast path: copy-only segmentation has no CPU cost, bypass gating
+            video_codec = _probe_codec_sync(str(file_path))
+            is_h264 = video_codec in ("h264",)
+
+            if is_h264:
                 logger.info(
-                    f"[Transcode] Skip: too small ({file_size_mb:.0f}MB, "
-                    f"{duration_sec or '?'}s) for version {version_id}"
+                    f"[Transcode] H.264 detected — fast segment mode, "
+                    f"bypass gating ({file_size_mb:.0f}MB) for version {version_id}"
                 )
-                return
+            else:
+                duration_sec = _probe_duration_sync(str(file_path))
+                if file_size_mb < MIN_SIZE_MB and (duration_sec or 0) < MIN_DURATION_SEC:
+                    logger.info(
+                        f"[Transcode] Skip: non-H.264 ({video_codec}) too small "
+                        f"({file_size_mb:.0f}MB, {duration_sec or '?'}s) "
+                        f"for version {version_id}"
+                    )
+                    return
 
-            logger.info(
-                f"[Transcode] Gating passed: {file_size_mb:.0f}MB, "
-                f"{duration_sec or '?'}s — version {version_id}"
-            )
+                logger.info(
+                    f"[Transcode] Gating passed: {file_size_mb:.0f}MB, "
+                    f"{duration_sec or '?'}s — version {version_id}"
+                )
         except Exception as e:
             logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
 
@@ -270,8 +298,8 @@ def maybe_trigger_transcode(
     if not force:
         try:
             from app.services.unified_task_manager import get_task_manager
-            orchestrator = get_task_manager()
-            result = run_async(orchestrator.acquire_or_subscribe(
+            mgr = get_task_manager()
+            result = run_async(mgr.acquire_or_subscribe(
                 task_type="transcode",
                 dedup_identifier=version_id,
                 user_id=user_id or "",
