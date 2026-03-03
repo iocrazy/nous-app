@@ -44,10 +44,14 @@ jobs:
             ls admin/package.json
 
             echo "🔨 Building Admin Panel..."
-            sudo docker compose -f docker/docker-compose.yml build --no-cache mediahub-admin
+            export $(grep -E '^SUPABASE_URL=|^SUPABASE_ANON_KEY=' docker/.env | xargs)
+            echo "  SUPABASE_URL=${SUPABASE_URL:0:30}..."
+            sudo SUPABASE_URL="$SUPABASE_URL" SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+              docker compose -f docker/docker-compose.yml build --no-cache mediahub-admin
 
             echo "🚀 Restarting Admin Panel..."
-            sudo docker compose -f docker/docker-compose.yml up -d --force-recreate mediahub-admin
+            sudo SUPABASE_URL="$SUPABASE_URL" SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+              docker compose -f docker/docker-compose.yml up -d --force-recreate mediahub-admin
 
             echo "🧹 Cleaning up..."
             sudo docker image prune -f
