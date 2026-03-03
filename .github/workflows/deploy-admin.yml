@@ -29,12 +29,18 @@ jobs:
           port: ${{ secrets.NAS_PORT }}
           username: ${{ secrets.NAS_USER }}
           key: ${{ secrets.NAS_SSH_KEY }}
+          command_timeout: 30m
           script: |
-            export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+            set -e
+            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
             cd ${{ secrets.NAS_PROJECT_PATH }}
 
             echo "📥 Pulling latest code..."
-            git pull origin master
+            git fetch origin master
+            git reset --hard origin/master
+
+            echo "📂 Verifying admin directory..."
+            ls admin/package.json
 
             echo "🔨 Building Admin Panel..."
             sudo docker compose -f docker/docker-compose.yml build --no-cache mediahub-admin
