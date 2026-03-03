@@ -128,9 +128,14 @@ services:
       redis:
         condition: service_healthy
 
-  # MediaHub Admin Panel
+  # MediaHub Admin Panel (local build on NAS)
   mediahub-admin:
-    image: imheygo/mediahub-admin:latest
+    build:
+      context: ../admin
+      args:
+        VITE_SUPABASE_URL: ${SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+    image: mediahub-admin:local
     container_name: mediahub-admin
     restart: unless-stopped
     ports:
