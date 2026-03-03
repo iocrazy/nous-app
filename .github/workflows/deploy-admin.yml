@@ -37,11 +37,10 @@ jobs:
             git pull origin master
 
             echo "🔨 Building Admin Panel..."
-            cd docker
-            sudo docker compose build --no-cache mediahub-admin
+            sudo docker compose -f docker/docker-compose.yml build --no-cache mediahub-admin
 
             echo "🚀 Restarting Admin Panel..."
-            sudo docker compose up -d --force-recreate mediahub-admin
+            sudo docker compose -f docker/docker-compose.yml up -d --force-recreate mediahub-admin
 
             echo "🧹 Cleaning up..."
             sudo docker image prune -f
