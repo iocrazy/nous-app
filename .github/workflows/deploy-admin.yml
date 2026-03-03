@@ -39,6 +39,11 @@ jobs:
             git fetch origin master
             git reset --hard origin/master
 
+            echo "📂 Checking repo state..."
+            pwd
+            ls -la
+            git log --oneline -1
+            git sparse-checkout list 2>/dev/null || echo "No sparse checkout"
             echo "📂 Verifying admin directory..."
             ls admin/package.json
 
