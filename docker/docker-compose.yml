@@ -76,11 +76,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping --timeout 10 2>/dev/null | grep -q OK"]
+      test: ["CMD-SHELL", "uv run celery -A app.celery_app inspect ping --timeout 10 2>/dev/null | grep -q OK"]
       interval: 30s
-      timeout: 15s
+      timeout: 30s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     # ── GPU Transcode Support (uncomment as needed) ──
     # NVIDIA GPU:
     #   runtime: nvidia
@@ -106,7 +106,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping --timeout 10 2>/dev/null | grep -q OK"]
+      test: ["CMD-SHELL", "uv run python -c \"import redis; redis.Redis.from_url('redis://redis:6379/0').ping()\""]
       interval: 60s
       timeout: 15s
       retries: 3
