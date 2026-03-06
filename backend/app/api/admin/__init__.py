@@ -16,6 +16,61 @@ from .transcode_router import router as transcode_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
+
+@admin_router.get("/health")
+async def admin_health():
+    """Unauthenticated health check for admin API diagnostics."""
+    from loguru import logger
+
+    checks: dict = {"status": "ok"}
+
+    # Check Supabase admin client
+    try:
+        from app.db import get_async_supabase_admin
+        supabase = await get_async_supabase_admin()
+        checks["supabase_admin"] = "ok"
+    except Exception as e:
+        checks["supabase_admin"] = f"error: {type(e).__name__}: {e}"
+        checks["status"] = "degraded"
+
+    # Check user_profiles table access
+    try:
+        result = (
+            await supabase.table("user_profiles")
+            .select("id", count="exact")
+            .limit(1)
+            .execute()
+        )
+        checks["user_profiles"] = f"ok (count={result.count})"
+    except Exception as e:
+        checks["user_profiles"] = f"error: {type(e).__name__}: {e}"
+        checks["status"] = "degraded"
+
+    # Check resource_versions table access
+    try:
+        result = (
+            await supabase.table("resource_versions")
+            .select("id", count="exact")
+            .limit(1)
+            .execute()
+        )
+        checks["resource_versions"] = f"ok (count={result.count})"
+    except Exception as e:
+        checks["resource_versions"] = f"error: {type(e).__name__}: {e}"
+        checks["status"] = "degraded"
+
+    # Check JWT validation capability
+    try:
+        from app.db import get_async_supabase
+        anon_client = await get_async_supabase()
+        checks["supabase_anon"] = "ok"
+    except Exception as e:
+        checks["supabase_anon"] = f"error: {type(e).__name__}: {e}"
+        checks["status"] = "degraded"
+
+    logger.info(f"[Admin Health] {checks}")
+    return checks
+
 admin_router.include_router(users_router, prefix="/users", tags=["Admin - Users"])
 admin_router.include_router(teams_router, prefix="/teams", tags=["Admin - Teams"])
 admin_router.include_router(videos_router, prefix="/videos", tags=["Admin - Videos"])

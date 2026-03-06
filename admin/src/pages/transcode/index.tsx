@@ -215,6 +215,30 @@ export function TranscodeList() {
       render: (value: string | null) => <TranscodeStatusTag status={value} />,
     },
     {
+      title: 'HLS Tiers',
+      dataIndex: 'hls_tiers',
+      width: 180,
+      render: (_: unknown, record: TranscodeVersionData) => {
+        if (!record.hls_tiers) {
+          return <span style={{ color: 'var(--color-text-3)' }}>-</span>
+        }
+        return (
+          <Space size="mini" wrap>
+            {Object.entries(record.hls_tiers).map(([tier, exists]) => (
+              <Tag
+                key={tier}
+                size="small"
+                color={exists ? 'green' : 'gray'}
+                style={{ margin: 0 }}
+              >
+                {tier}
+              </Tag>
+            ))}
+          </Space>
+        )
+      },
+    },
+    {
       title: 'HLS Path',
       dataIndex: 'hls_path',
       width: 200,
