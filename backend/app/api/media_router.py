@@ -100,9 +100,9 @@ class BatchFetchRequest(BaseModel):
 
 
 async def _resolve_and_attach_tags(
-    video_id: str, tag_names: list[str], user_id: str
+    resource_id: str, tag_names: list[str], user_id: str
 ) -> list[str]:
-    """Resolve tag names to IDs (auto-create if missing) and attach to video.
+    """Resolve tag names to IDs (auto-create if missing) and attach to resource.
 
     Returns list of attached tag IDs.
     """
@@ -117,7 +117,7 @@ async def _resolve_and_attach_tags(
             tag = await repo.create_tag(name=name, user_id=user_id)
         tag_ids.append(str(tag["id"]))
     if tag_ids:
-        await repo.bulk_add_tags_to_video(video_id, tag_ids, source="manual")
+        await repo.bulk_add_tags_to_resource(resource_id, tag_ids, source="manual")
     return tag_ids
 
 
@@ -744,7 +744,7 @@ async def fetch_videos_batch(
                         MediaService.process_video, platform_id, parsed_data
                     )
 
-                    # Attach tags after video is saved
+                    # Attach tags after resource is created
                     if request.tag_ids or request.tags:
                         async def _attach_tags_after_save(
                             pid: str,
@@ -752,21 +752,22 @@ async def fetch_videos_batch(
                             t_names: list[str] | None,
                             uid: str,
                         ):
-                            """Wait for video to be saved, then attach tags."""
+                            """Wait for resource to be created, then attach tags."""
                             import asyncio
-                            repo = VideoRepository()
+                            from app.repositories.resources_repository import ResourcesRepository
+                            res_repo = ResourcesRepository()
                             for _ in range(10):
-                                video = await repo.get_by_platform_id(pid, user_id=uid)
-                                if video:
+                                resource = await res_repo.get_resource_by_platform_id(pid)
+                                if resource:
+                                    rid = str(resource["id"])
                                     if t_ids:
                                         tags_repo = TagsRepository()
-                                        await tags_repo.bulk_add_tags_to_video(
-                                            video["id"], t_ids, source="manual"
+                                        await tags_repo.bulk_add_tags_to_resource(
+                                            rid, t_ids, source="manual"
                                         )
                                     if t_names:
-                                        await _resolve_and_attach_tags(
-                                            video["id"], t_names, uid
-                                        )
+                                        await _resolve_and_attach_tags(rid, t_names, uid)
+                                    logger.info(f"Tags attached to resource {rid} for {pid}")
                                     return
                                 await asyncio.sleep(1)
                             logger.warning(f"Timeout attaching tags for {pid}")
