@@ -286,3 +286,21 @@ class AdminTranscodeStatsResponse(BaseModel):
     failed: int = 0
     pending: int = 0
     not_transcoded: int = 0
+
+
+class AdminTranscodeSettingsResponse(BaseModel):
+    """Current HLS transcode settings."""
+    transcode_enabled: bool = True
+    transcode_tiers: str = "480p,720p,1080p"
+    ffmpeg_encoder: str = "auto"
+    ffmpeg_preset: str = "medium"
+    transcode_parallel_tiers: bool = True
+
+
+class AdminTranscodeSettingsUpdate(BaseModel):
+    """Request to update HLS transcode settings."""
+    transcode_enabled: Optional[bool] = None
+    transcode_tiers: Optional[str] = None
+    ffmpeg_encoder: Optional[str] = None
+    ffmpeg_preset: Optional[str] = None
+    transcode_parallel_tiers: Optional[bool] = None

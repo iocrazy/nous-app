@@ -36,7 +36,7 @@ const MenuItemGroup = Menu.ItemGroup
 const allMenuKeys = [
   '/', '/users', '/teams', '/videos', '/transcode', '/tags', '/credits',
   '/monitoring', '/search', '/audit-logs', '/request-logs', '/alerts',
-  '/api-keys', '/settings',
+  '/api-keys', '/settings', '/transcode-config',
 ]
 
 export function AdminLayout() {
@@ -111,6 +111,7 @@ export function AdminLayout() {
           <MenuItemGroup key="system" title="System">
             <MenuItem key="/api-keys"><IconLock />API Keys</MenuItem>
             <MenuItem key="/settings"><IconSettings />Settings</MenuItem>
+            <MenuItem key="/transcode-config"><IconThunderbolt />Transcode</MenuItem>
           </MenuItemGroup>
         </Menu>
       </Sider>

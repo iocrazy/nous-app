@@ -101,3 +101,41 @@ export function useBatchTranscode() {
     },
   })
 }
+
+// ============================================
+// Transcode Settings
+// ============================================
+
+export interface TranscodeSettings {
+  transcode_enabled: boolean
+  transcode_tiers: string
+  ffmpeg_encoder: string
+  ffmpeg_preset: string
+  transcode_parallel_tiers: boolean
+}
+
+export function useTranscodeSettings() {
+  return useQuery({
+    queryKey: ['transcode', 'settings'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TranscodeSettings>('/api/v1/admin/transcode/settings')
+      return data
+    },
+  })
+}
+
+export function useUpdateTranscodeSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (data: Partial<TranscodeSettings>) => {
+      const { data: res } = await apiClient.put<TranscodeSettings>(
+        '/api/v1/admin/transcode/settings',
+        data,
+      )
+      return res
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transcode', 'settings'] })
+    },
+  })
+}
