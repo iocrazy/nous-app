@@ -10,6 +10,7 @@ export interface TranscodeVersionData {
   mime_type: string | null
   transcode_status: string | null
   hls_path: string | null
+  hls_tiers: Record<string, boolean> | null
   transcode_at: string | null
   created_at: string | null
   video_title: string | null

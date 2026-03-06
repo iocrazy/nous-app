@@ -263,6 +263,7 @@ class AdminTranscodeVersionResponse(BaseModel):
     mime_type: Optional[str] = None
     transcode_status: Optional[str] = None
     hls_path: Optional[str] = None
+    hls_tiers: Optional[dict[str, bool]] = None
     transcode_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     video_title: Optional[str] = None

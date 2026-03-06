@@ -1,11 +1,13 @@
 """Admin API routes for HLS Transcode management."""
 
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.config import settings
 from app.db import get_async_supabase_admin
 from app.schemas.admin import (
     AdminTranscodeVersionResponse,
@@ -21,6 +23,29 @@ router = APIRouter()
 
 # Valid transcode status values (None = not transcoded)
 VALID_STATUSES = {"pending", "processing", "completed", "failed", "null"}
+
+# Tiers to check for HLS status
+HLS_TIER_NAMES = ["480p", "720p", "1080p", "source"]
+
+
+def _scan_hls_tiers(hls_path: str) -> dict[str, bool]:
+    """Scan HLS directory to check which tier subdirectories exist.
+
+    Args:
+        hls_path: Relative path to master.m3u8 (e.g. "teams/.../hls/master.m3u8")
+
+    Returns:
+        Dict mapping tier name to whether its stream.m3u8 exists.
+    """
+    base = Path(settings.DOWNLOAD_PATH)
+    # hls_path points to master.m3u8; parent is the hls/ dir
+    hls_dir = base / hls_path.replace("/master.m3u8", "").replace("\\master.m3u8", "")
+
+    result = {}
+    for tier in HLS_TIER_NAMES:
+        tier_playlist = hls_dir / tier / "stream.m3u8"
+        result[tier] = tier_playlist.exists()
+    return result
 
 
 @router.get("/stats", response_model=AdminTranscodeStatsResponse)
@@ -165,6 +190,8 @@ async def list_transcode_versions(
     for row in rows:
         rid = str(row["resource_id"])
         media = media_info_map.get(rid, {})
+        hls_path = row.get("hls_path")
+        hls_tiers = _scan_hls_tiers(hls_path) if hls_path else None
         items.append(
             AdminTranscodeVersionResponse(
                 id=str(row["id"]),
@@ -174,7 +201,8 @@ async def list_transcode_versions(
                 file_size_bytes=row.get("file_size_bytes") or 0,
                 mime_type=row.get("mime_type"),
                 transcode_status=row.get("transcode_status"),
-                hls_path=row.get("hls_path"),
+                hls_path=hls_path,
+                hls_tiers=hls_tiers,
                 transcode_at=row.get("transcode_at"),
                 created_at=row.get("created_at"),
                 video_title=media.get("video_title"),
@@ -321,7 +349,6 @@ VALID_PRESETS = {"ultrafast", "veryfast", "fast", "medium", "slow", "veryslow", 
 async def get_transcode_settings(auth: AdminAuthDep):
     """Get current HLS transcode settings."""
     from app.api.frontend_config_router import load_config
-    from app.core.config import settings
 
     config = load_config()
     transcode = config.get("transcode", {})
@@ -345,7 +372,6 @@ async def update_transcode_settings(
 ):
     """Update HLS transcode settings with validation and audit logging."""
     from app.api.frontend_config_router import load_config, save_config
-    from app.core.config import settings
 
     # Validate tiers
     if body.transcode_tiers is not None:
