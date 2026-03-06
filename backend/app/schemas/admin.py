@@ -246,3 +246,43 @@ class AdminVideoStatsResponse(BaseModel):
     downloading: int = 0
     skipped: int = 0
     total_storage_bytes: int = 0
+
+
+# ============================================
+# Transcode Management Schemas
+# ============================================
+
+
+class AdminTranscodeVersionResponse(BaseModel):
+    """A resource version with transcode status info."""
+    id: str
+    resource_id: str
+    version_number: int
+    filename: Optional[str] = None
+    file_size_bytes: int = 0
+    mime_type: Optional[str] = None
+    transcode_status: Optional[str] = None
+    hls_path: Optional[str] = None
+    transcode_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    video_title: Optional[str] = None
+    cover_url: Optional[str] = None
+    author: Optional[str] = None
+
+
+class AdminTranscodeListResponse(BaseModel):
+    """Paginated list of transcode versions."""
+    items: List[AdminTranscodeVersionResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminTranscodeStatsResponse(BaseModel):
+    """Transcode status distribution stats."""
+    total_video_versions: int = 0
+    completed: int = 0
+    processing: int = 0
+    failed: int = 0
+    pending: int = 0
+    not_transcoded: int = 0

@@ -14,6 +14,7 @@ import { RequestLogs } from './pages/request-logs'
 import { MonitoringDashboard } from './pages/monitoring'
 import { GlobalSearch } from './pages/search'
 import { Alerts } from './pages/alerts'
+import { TranscodeList } from './pages/transcode'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="/users" element={<UserList />} />
               <Route path="/teams" element={<TeamList />} />
               <Route path="/videos" element={<VideoList />} />
+              <Route path="/transcode" element={<TranscodeList />} />
               <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
               <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
               <Route path="/monitoring" element={<MonitoringDashboard />} />
