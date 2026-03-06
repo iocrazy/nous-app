@@ -69,14 +69,18 @@ class TagsRepository:
     async def get_tag_by_name(
         self, name: str, user_id: Optional[str] = None
     ) -> Optional[dict]:
-        """Get a tag by name (checks system tags first, then user tags)."""
+        """Get a tag by name or name_zh (checks system tags first, then user tags).
+
+        For system/time tags, matches both 'name' (English) and 'name_zh' (Chinese).
+        This prevents duplicate tags when Chinese names are passed for existing English system tags.
+        """
         table = await self._get_table()
 
         try:
-            # Check system tags
+            # Check system tags — match by English name OR Chinese alias
             result = (
                 await table.select("*")
-                .eq("name", name)
+                .or_(f"name.eq.{name},name_zh.eq.{name}")
                 .eq("type", "system")
                 .limit(1)
                 .execute()
@@ -84,10 +88,10 @@ class TagsRepository:
             if result and result.data and len(result.data) > 0:
                 return result.data[0]
 
-            # Check time tags
+            # Check time tags — match by English name OR Chinese alias
             result = (
                 await table.select("*")
-                .eq("name", name)
+                .or_(f"name.eq.{name},name_zh.eq.{name}")
                 .eq("type", "time")
                 .limit(1)
                 .execute()
@@ -95,7 +99,7 @@ class TagsRepository:
             if result and result.data and len(result.data) > 0:
                 return result.data[0]
 
-            # Check user tags
+            # Check user tags (by exact name only)
             if user_id:
                 result = (
                     await table.select("*")

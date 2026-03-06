@@ -11,6 +11,8 @@ from app.schemas.admin import (
     AdminTranscodeVersionResponse,
     AdminTranscodeListResponse,
     AdminTranscodeStatsResponse,
+    AdminTranscodeSettingsResponse,
+    AdminTranscodeSettingsUpdate,
 )
 from app.utils.admin_helpers import create_audit_log
 
@@ -307,3 +309,129 @@ async def batch_transcode(
         "total_found": len(versions),
         "queued": queued,
     }
+
+
+# Valid values for settings validation
+VALID_TIERS = {"480p", "720p", "1080p"}
+VALID_ENCODERS = {"auto", "libx264", "h264_nvenc", "h264_videotoolbox", "h264_qsv"}
+VALID_PRESETS = {"ultrafast", "veryfast", "fast", "medium", "slow", "veryslow", "p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+
+
+@router.get("/settings", response_model=AdminTranscodeSettingsResponse)
+async def get_transcode_settings(auth: AdminAuthDep):
+    """Get current HLS transcode settings."""
+    from app.api.frontend_config_router import load_config
+    from app.core.config import settings
+
+    config = load_config()
+    transcode = config.get("transcode", {})
+
+    return AdminTranscodeSettingsResponse(
+        transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
+        transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
+        ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
+        ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
+        transcode_parallel_tiers=transcode.get(
+            "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+        ),
+    )
+
+
+@router.put("/settings", response_model=AdminTranscodeSettingsResponse)
+async def update_transcode_settings(
+    body: AdminTranscodeSettingsUpdate,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """Update HLS transcode settings with validation and audit logging."""
+    from app.api.frontend_config_router import load_config, save_config
+    from app.core.config import settings
+
+    # Validate tiers
+    if body.transcode_tiers is not None:
+        tiers = {t.strip() for t in body.transcode_tiers.split(",") if t.strip()}
+        if not tiers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one tier must be specified",
+            )
+        invalid = tiers - VALID_TIERS
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid tiers: {invalid}. Valid: {VALID_TIERS}",
+            )
+
+    # Validate encoder
+    if body.ffmpeg_encoder is not None and body.ffmpeg_encoder not in VALID_ENCODERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid encoder: {body.ffmpeg_encoder}. Valid: {VALID_ENCODERS}",
+        )
+
+    # Validate preset
+    if body.ffmpeg_preset is not None and body.ffmpeg_preset not in VALID_PRESETS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid preset: {body.ffmpeg_preset}. Valid: {VALID_PRESETS}",
+        )
+
+    # Load, update, save config
+    config = load_config()
+    if "transcode" not in config:
+        config["transcode"] = {}
+
+    changes = {}
+    if body.transcode_enabled is not None:
+        config["transcode"]["enabled"] = body.transcode_enabled
+        settings.TRANSCODE_ENABLED = body.transcode_enabled
+        changes["enabled"] = body.transcode_enabled
+
+    if body.transcode_tiers is not None:
+        config["transcode"]["tiers"] = body.transcode_tiers
+        settings.TRANSCODE_TIERS = body.transcode_tiers
+        changes["tiers"] = body.transcode_tiers
+
+    if body.ffmpeg_encoder is not None:
+        config["transcode"]["encoder"] = body.ffmpeg_encoder
+        settings.FFMPEG_ENCODER = body.ffmpeg_encoder
+        changes["encoder"] = body.ffmpeg_encoder
+
+    if body.ffmpeg_preset is not None:
+        config["transcode"]["preset"] = body.ffmpeg_preset
+        settings.FFMPEG_PRESET = body.ffmpeg_preset
+        changes["preset"] = body.ffmpeg_preset
+
+    if body.transcode_parallel_tiers is not None:
+        config["transcode"]["parallel_tiers"] = body.transcode_parallel_tiers
+        settings.TRANSCODE_PARALLEL_TIERS = body.transcode_parallel_tiers
+        changes["parallel_tiers"] = body.transcode_parallel_tiers
+
+    if not save_config(config):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save config",
+        )
+
+    # Audit log
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="transcode_settings_update",
+        target_type="settings",
+        target_id="transcode",
+        details=changes,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    logger.info(f"[Admin] Transcode settings updated: {changes} by admin={auth.user_id}")
+
+    transcode = config.get("transcode", {})
+    return AdminTranscodeSettingsResponse(
+        transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
+        transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
+        ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
+        ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
+        transcode_parallel_tiers=transcode.get(
+            "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+        ),
+    )

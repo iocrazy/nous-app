@@ -15,6 +15,7 @@ import { MonitoringDashboard } from './pages/monitoring'
 import { GlobalSearch } from './pages/search'
 import { Alerts } from './pages/alerts'
 import { TranscodeList } from './pages/transcode'
+import { TranscodeConfig } from './pages/transcode-config'
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/transcode-config" element={<TranscodeConfig />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
