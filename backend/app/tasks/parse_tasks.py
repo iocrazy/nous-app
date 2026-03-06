@@ -571,6 +571,32 @@ def parse_media_task(
         resource_id = save_result.get("resource_id")
         dedup_hit = save_result.get("dedup_hit", False)
 
+        # 4b. Attach tags to resource if provided
+        if resource_id and (tags or tag_ids):
+            try:
+                from app.repositories.tags_repository import TagsRepository
+                tags_repo = TagsRepository()
+
+                # Resolve tag names to IDs (auto-create if missing)
+                resolved_ids = list(tag_ids or [])
+                if tags:
+                    for name in tags:
+                        name = name.strip()
+                        if not name:
+                            continue
+                        tag = run_async(tags_repo.get_tag_by_name(name, user_id))
+                        if not tag:
+                            tag = run_async(tags_repo.create_tag(name=name, user_id=user_id))
+                        resolved_ids.append(str(tag["id"]))
+
+                if resolved_ids:
+                    run_async(tags_repo.bulk_add_tags_to_resource(
+                        resource_id, resolved_ids, source="manual"
+                    ))
+                    logger.info(f"[Parse/Task] Attached {len(resolved_ids)} tags to resource {resource_id}")
+            except Exception as e:
+                logger.warning(f"[Parse/Task] Failed to attach tags: {e}")
+
         # 5. Update unified_task with media_id for frontend tracking
         if unified_task_id and platform_id:
             try:
