@@ -79,6 +79,22 @@ class SignInRequest(BaseModel):
     password: str
 
 
+class PhoneSignUpRequest(BaseModel):
+    """手机号注册请求"""
+
+    phone: str
+    password: str
+    country_code: str = "86"
+
+
+class PhoneSignInRequest(BaseModel):
+    """手机号登录请求"""
+
+    phone: str
+    password: str
+    country_code: str = "86"
+
+
 class RefreshTokenRequest(BaseModel):
     """刷新令牌请求"""
 
@@ -305,6 +321,110 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
     except Exception as e:
         logger.error(f"更新用户失败: {e}")
         raise HTTPException(status_code=500, detail="更新失败")
+
+
+# ============================================
+# Phone auth helpers
+# ============================================
+
+import re
+
+_PHONE_PATTERN = re.compile(r"^1[3-9]\d{9}$")
+
+
+def _phone_to_email(phone: str, country_code: str = "86") -> str:
+    """Convert phone number to a deterministic email for Supabase email auth."""
+    cleaned = re.sub(r"\D", "", phone)
+    return f"{country_code}_{cleaned}@phone.mediahub.internal"
+
+
+def _validate_phone(phone: str) -> str:
+    """Validate and return cleaned phone number, or raise HTTPException."""
+    cleaned = re.sub(r"\D", "", phone)
+    if not _PHONE_PATTERN.match(cleaned):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid phone number. Must be an 11-digit China mobile number.",
+        )
+    return cleaned
+
+
+# ============================================
+# Phone auth endpoints
+# ============================================
+
+
+@router.post("/signup-phone")
+async def sign_up_phone(request: PhoneSignUpRequest, background_tasks: BackgroundTasks):
+    """
+    手机号注册
+
+    - **phone**: 手机号（11位中国手机号）
+    - **password**: 密码（至少6位）
+    - **country_code**: 国际区号（默认86）
+    """
+    cleaned_phone = _validate_phone(request.phone)
+    email = _phone_to_email(cleaned_phone, request.country_code)
+
+    auth_service = SupabaseAuthService()
+    result = await auth_service.sign_up(
+        email=email,
+        password=request.password,
+        metadata={
+            "phone": f"+{request.country_code}{cleaned_phone}",
+            "login_type": "phone",
+        },
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "注册失败"))
+
+    user_id = result.get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User registered via phone",
+            status="success",
+        )
+        background_tasks.add_task(
+            _create_team_quota_for_new_user,
+            user_id,
+        )
+
+    return result
+
+
+@router.post("/signin-phone")
+async def sign_in_phone(request: PhoneSignInRequest, background_tasks: BackgroundTasks):
+    """
+    手机号登录
+
+    - **phone**: 手机号
+    - **password**: 密码
+    - **country_code**: 国际区号（默认86）
+    """
+    cleaned_phone = _validate_phone(request.phone)
+    email = _phone_to_email(cleaned_phone, request.country_code)
+
+    auth_service = SupabaseAuthService()
+    result = await auth_service.sign_in(email=email, password=request.password)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("message", "登录失败"))
+
+    user_id = result.get("session", {}).get("user", {}).get("id")
+    if user_id:
+        background_tasks.add_task(
+            log_user_action,
+            user_id=user_id,
+            action="auth",
+            message="User logged in via phone",
+            status="success",
+        )
+
+    return result
 
 
 # ============================================

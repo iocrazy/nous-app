@@ -41,12 +41,11 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
 
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginMode, setLoginMode] = useState<'phone' | 'email'>('email');
-  const [phoneTab, setPhoneTab] = useState<'sms' | 'password'>('password');
+  const [loading, setLoading] = useState(false);
 
   // Input states
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -55,47 +54,114 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
   // Style object to enforce visibility
   const inputStyle = { backgroundColor: 'white', color: 'black' };
 
+  // Convert phone number to deterministic email for Supabase auth
+  const phoneToEmail = (phoneNumber: string): string => {
+    const cleaned = phoneNumber.replace(/\D/g, '');
+    return `86_${cleaned}@phone.mediahub.internal`;
+  };
+
+  const isValidPhone = (phoneNumber: string): boolean => {
+    const cleaned = phoneNumber.replace(/\D/g, '');
+    return /^1[3-9]\d{9}$/.test(cleaned);
+  };
+
   const handleLogin = async () => {
     setError(null);
-    if (loginMode === 'email' && email && password) {
-      const supabase = getSupabaseClient();
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-          if (error) {
-            setError(error.message);
-            return;
-          }
-          if (data.user) {
-            onLogin({ email: data.user.email || email, id: data.user.id });
-          }
-        } catch (err: any) {
-          setError(err.message || 'Login failed');
-        }
-      } else {
-        // Demo mode
-        onLogin({ email: email || 'demo@example.com', id: 'demo-user' });
+
+    if (loginMode === 'phone') {
+      if (!phone || !password) {
+        setError('Please enter phone number and password');
+        return;
+      }
+      if (!isValidPhone(phone)) {
+        setError('Please enter a valid 11-digit mobile number');
+        return;
       }
     } else {
-      // Demo mode for phone login
-      onLogin({ email: phone ? `${phone}@phone.local` : 'demo@example.com', id: 'demo-user' });
+      if (!email || !password) {
+        setError('Please enter email and password');
+        return;
+      }
+    }
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      setLoading(true);
+      try {
+        const loginEmail = loginMode === 'phone' ? phoneToEmail(phone) : email;
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: loginEmail,
+          password,
+        });
+        if (error) {
+          setError(loginMode === 'phone' && error.message === 'Invalid login credentials'
+            ? 'Phone number or password is incorrect'
+            : error.message);
+          return;
+        }
+        if (data.user) {
+          const displayEmail = loginMode === 'phone'
+            ? (data.user.user_metadata?.phone || phone)
+            : (data.user.email || email);
+          onLogin({ email: displayEmail, id: data.user.id });
+        }
+      } catch (err: any) {
+        setError(err.message || 'Login failed');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Demo mode
+      const demoEmail = loginMode === 'phone'
+        ? (phone || 'demo@example.com')
+        : (email || 'demo@example.com');
+      onLogin({ email: demoEmail, id: 'demo-user' });
     }
   };
 
   const handleRegister = async () => {
     setError(null);
+
+    if (loginMode === 'phone') {
+      if (!phone || !password) {
+        setError('Please enter phone number and password');
+        return;
+      }
+      if (!isValidPhone(phone)) {
+        setError('Please enter a valid 11-digit mobile number');
+        return;
+      }
+    } else {
+      if (!email || !password) {
+        setError('Please enter email and password');
+        return;
+      }
+    }
+
     if (password !== confirmPassword) {
       setError(t('auth.passwordMismatch'));
       return;
     }
 
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
+      setLoading(true);
       try {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const signUpEmail = loginMode === 'phone' ? phoneToEmail(phone) : email;
+        const metadata = loginMode === 'phone'
+          ? { phone: `+86${phone.replace(/\D/g, '')}`, login_type: 'phone' }
+          : undefined;
+
+        const { data, error } = await supabase.auth.signUp({
+          email: signUpEmail,
+          password,
+          options: metadata ? { data: metadata } : undefined,
+        });
         if (error) {
           setError(error.message);
           return;
@@ -106,9 +172,11 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         setConfirmPassword('');
       } catch (err: any) {
         setError(err.message || 'Registration failed');
+      } finally {
+        setLoading(false);
       }
     } else {
-      // Demo mode - simulate successful registration
+      // Demo mode
       alert(t('auth.registerSuccess'));
       setAuthMode('login');
       setPassword('');
@@ -176,62 +244,41 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         {/* Right Side: Form */}
         <div className="flex-1 p-8 md:p-12 bg-white flex flex-col justify-center">
 
-           {/* Header: Login/Register Toggle for Email mode, or Phone tabs */}
+           {/* Header: Login/Register Toggle (shared for both phone and email) */}
            <div className="flex items-center justify-center gap-8 mb-8 border-b border-zinc-100 min-h-[40px]">
-              {loginMode === 'phone' ? (
-                <>
-                  <button
-                    onClick={() => setPhoneTab('password')}
-                    className={`pb-3 text-sm font-bold transition-all relative ${
-                      phoneTab === 'password' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
-                    }`}
-                  >
-                    Password
-                    {phoneTab === 'password' && (
-                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setPhoneTab('sms')}
-                    className={`pb-3 text-sm font-bold transition-all relative ${
-                      phoneTab === 'sms' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
-                    }`}
-                  >
-                    SMS Login
-                    {phoneTab === 'sms' && (
-                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
-                    )}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => { setAuthMode('login'); setError(null); }}
-                    className={`pb-3 text-sm font-bold transition-all relative ${
-                      authMode === 'login' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
-                    }`}
-                  >
-                    {t('auth.login')}
-                    {authMode === 'login' && (
-                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => { setAuthMode('register'); setError(null); }}
-                    className={`pb-3 text-sm font-bold transition-all relative ${
-                      authMode === 'register' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
-                    }`}
-                  >
-                    {t('auth.register')}
-                    {authMode === 'register' && (
-                      <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
-                    )}
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => { setAuthMode('login'); setError(null); }}
+                className={`pb-3 text-sm font-bold transition-all relative ${
+                  authMode === 'login' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                }`}
+              >
+                {t('auth.login')}
+                {authMode === 'login' && (
+                  <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
+                )}
+              </button>
+              <button
+                onClick={() => { setAuthMode('register'); setError(null); }}
+                className={`pb-3 text-sm font-bold transition-all relative ${
+                  authMode === 'register' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                }`}
+              >
+                {t('auth.register')}
+                {authMode === 'register' && (
+                  <div className="absolute bottom-0 left-0 w-full h-0.5 bg-red-500 rounded-full" />
+                )}
+              </button>
            </div>
 
            <div className="space-y-4">
+
+              {/* Error Message */}
+              {error && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                  <AlertCircle size={16} />
+                  <span>{error}</span>
+                </div>
+              )}
 
               {/* --- PHONE MODE INPUTS --- */}
               {loginMode === 'phone' && (
@@ -250,44 +297,42 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                     />
                   </div>
 
-                  <div className="flex gap-3 h-11">
-                    <div className="flex-1 bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors flex relative">
-                        <input
-                          type={phoneTab === 'password' ? (showPassword ? "text" : "password") : "text"}
-                          placeholder={phoneTab === 'sms' ? "Verification Code" : "Password"}
-                          value={code}
-                          onChange={(e) => setCode(e.target.value)}
-                          className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400 w-full"
-                          style={inputStyle}
-                        />
-                        {phoneTab === 'password' && (
-                          <button
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="px-3 text-zinc-400 hover:text-zinc-600"
-                          >
-                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        )}
-                    </div>
-                    {phoneTab === 'sms' && (
-                      <button className="px-4 bg-zinc-50 border border-zinc-200 text-zinc-600 text-xs font-medium rounded-md hover:bg-zinc-100 hover:text-zinc-900 transition-colors whitespace-nowrap">
-                          Get Code
-                      </button>
-                    )}
+                  <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                      style={inputStyle}
+                    />
+                    <button
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="px-3 text-zinc-400 hover:text-zinc-600"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
+
+                  {/* Confirm Password - only shown in register mode */}
+                  {authMode === 'register' && (
+                    <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Confirm Password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
                 </>
               )}
 
               {/* --- EMAIL MODE INPUTS --- */}
               {loginMode === 'email' && (
                 <>
-                   {/* Error Message */}
-                   {error && (
-                     <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
-                       <AlertCircle size={16} />
-                       <span>{error}</span>
-                     </div>
-                   )}
 
                    <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11">
                      <input
@@ -335,14 +380,14 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               {/* Login/Register Button */}
               <button
                 onClick={authMode === 'register' ? handleRegister : handleLogin}
-                className="w-full bg-[#E53E3E] hover:bg-[#C53030] text-white font-bold py-2.5 rounded-md transition-all shadow-md shadow-red-500/20 active:scale-[0.99] mt-2"
+                disabled={loading}
+                className="w-full bg-[#E53E3E] hover:bg-[#C53030] disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-md transition-all shadow-md shadow-red-500/20 active:scale-[0.99] mt-2"
               >
-                {authMode === 'register' ? t('auth.register') : t('auth.login')}
+                {loading ? 'Loading...' : (authMode === 'register' ? t('auth.register') : t('auth.login'))}
               </button>
 
               {/* Toggle between Login and Register */}
-              {loginMode === 'email' && (
-                <p className="text-center text-sm text-zinc-500 mt-2">
+              <p className="text-center text-sm text-zinc-500 mt-2">
                   {authMode === 'login' ? (
                     <button
                       onClick={() => { setAuthMode('register'); setError(null); }}
@@ -358,8 +403,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                       {t('auth.hasAccount')}
                     </button>
                   )}
-                </p>
-              )}
+              </p>
 
               {/* Social Login */}
               <div className="flex justify-center gap-6 mt-8 pt-6 border-t border-zinc-100">
