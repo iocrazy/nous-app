@@ -19,6 +19,7 @@ async def list_settings(auth: AdminAuthDep):
 
     result = await supabase.table("system_settings").select("*").order("key").execute()
 
+    # Exclude transcode_* keys — managed by dedicated Transcode Config page
     return [
         SystemSettingResponse(
             key=s["key"],
@@ -28,6 +29,7 @@ async def list_settings(auth: AdminAuthDep):
             updated_by=s.get("updated_by"),
         )
         for s in (result.data or [])
+        if not s["key"].startswith("transcode_")
     ]
 
 
