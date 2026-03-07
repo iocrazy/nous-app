@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Table,
   Input,
@@ -14,7 +15,6 @@ import {
   Grid,
   Button,
   Tooltip,
-  Switch,
 } from '@arco-design/web-react'
 import {
   IconRefresh,
@@ -34,6 +34,7 @@ import {
 } from '../../api/endpoints/transcode'
 import type { TranscodeVersionData } from '../../api/endpoints/transcode'
 import { formatDate, formatBytes } from '../../utils/format'
+import { supabase } from '../../auth/supabase'
 
 const PAGE_SIZE = 20
 
@@ -93,7 +94,7 @@ export function TranscodeList() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [sizeFilter, setSizeFilter] = useState<string | undefined>(undefined)
   const [retryingId, setRetryingId] = useState<string | null>(null)
-  const [autoRefresh, setAutoRefresh] = useState(true)
+  const queryClient = useQueryClient()
 
   const { data, isLoading } = useTranscodeList({
     page,
@@ -103,8 +104,25 @@ export function TranscodeList() {
     minSizeMb: sizeFilter ? parseInt(sizeFilter) : undefined,
     sortBy: 'resource_id',
     sortOrder: 'desc',
-  }, autoRefresh)
-  const { data: stats } = useTranscodeStats(autoRefresh)
+  })
+  const { data: stats } = useTranscodeStats()
+
+  // Supabase Realtime: auto-refresh on resource_versions changes
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-transcode')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'resource_versions' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['transcode'] })
+        },
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [queryClient])
   const retryTranscode = useRetryTranscode()
   const batchTranscode = useBatchTranscode()
 
@@ -438,12 +456,6 @@ export function TranscodeList() {
           >
             Transcode New
           </Button>
-          <Space size="mini">
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              Auto Refresh
-            </Typography.Text>
-            <Switch checked={autoRefresh} onChange={setAutoRefresh} size="small" />
-          </Space>
         </Space>
       </Card>
 
