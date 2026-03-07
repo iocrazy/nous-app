@@ -1271,17 +1271,37 @@ def download_unified_task(
                 )
                 run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
 
-                # Backfill file_size_bytes on resource_versions too
-                if actual_size > 0:
-                    try:
-                        versions = run_async(_res_repo2.get_versions(resource_id))
-                        for ver in (versions or []):
+                # Ensure resource_version v1 exists (downloads don't create it)
+                try:
+                    existing_versions = run_async(_res_repo2.get_versions(resource_id))
+                    if not existing_versions and path_updates.get("file_path"):
+                        file_path = path_updates["file_path"]
+                        filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+                        mime_type = "video/mp4"
+                        if filename.endswith(".webm"):
+                            mime_type = "video/webm"
+                        elif filename.endswith(".mkv"):
+                            mime_type = "video/x-matroska"
+                        version_data = {
+                            "resource_id": resource_id,
+                            "version_number": 1,
+                            "filename": filename,
+                            "file_path": file_path,
+                            "file_size_bytes": actual_size if actual_size > 0 else None,
+                            "mime_type": mime_type,
+                            "uploaded_by": user_id,
+                        }
+                        run_async(_res_repo2.create_version(version_data))
+                        logger.info(f"[Download/DB] Created resource_version v1 for resource={resource_id}")
+                    elif existing_versions and actual_size > 0:
+                        # Backfill file_size_bytes on existing versions
+                        for ver in existing_versions:
                             if not ver.get("file_size_bytes"):
                                 run_async(_res_repo2.update_version(
                                     ver["id"], {"file_size_bytes": actual_size}
                                 ))
-                    except Exception as ve:
-                        logger.warning(f"[Download/DB] Failed to backfill version file_size for {resource_id}: {ve}")
+                except Exception as ve:
+                    logger.warning(f"[Download/DB] Failed to ensure resource_version for {resource_id}: {ve}")
 
                 # Fallback: also ensure parsed_media status is in sync
                 # (mark_media_as_downloaded inside DownloaderService may have silently failed)
