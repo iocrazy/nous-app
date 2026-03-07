@@ -12,6 +12,8 @@ export interface VideoData {
   aweme_type: string | null
   video_download_status: string
   cover_url: string | null
+  cover_download_path: string | null
+  source_platform: string | null
   video_duration: string | null
   video_datasize: string | null
   video_datasize_bytes: number
