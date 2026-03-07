@@ -1252,19 +1252,36 @@ def download_unified_task(
                     cover_result = results.get("cover")
                     status_updates["cover_download_status"] = cover_result if cover_result == "completed" else "failed"
 
-                # Also update file paths on resource
+                # Also update file paths and file size on resource
+                actual_size = 0
                 fresh_media = run_async(_MR2().get_by_platform_id(platform_id))
                 if fresh_media:
                     if fresh_media.get("download_path"):
                         path_updates["file_path"] = fresh_media["download_path"]
                     if fresh_media.get("cover_download_path"):
                         path_updates["cover_image_path"] = fresh_media["cover_download_path"]
+                    # Backfill file_size_bytes from actual downloaded size
+                    actual_size = fresh_media.get("storage_size") or fresh_media.get("datasize_bytes") or 0
+                    if actual_size > 0:
+                        path_updates["file_size_bytes"] = actual_size
 
                 logger.info(
                     f"[Download/DB] resource={resource_id}: "
                     f"status={status_updates}, paths={list(path_updates.keys())}"
                 )
                 run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
+
+                # Backfill file_size_bytes on resource_versions too
+                if actual_size > 0:
+                    try:
+                        versions = run_async(_res_repo2.get_versions(resource_id))
+                        for ver in (versions or []):
+                            if not ver.get("file_size_bytes"):
+                                run_async(_res_repo2.update_version(
+                                    ver["id"], {"file_size_bytes": actual_size}
+                                ))
+                    except Exception as ve:
+                        logger.warning(f"[Download/DB] Failed to backfill version file_size for {resource_id}: {ve}")
 
                 # Fallback: also ensure parsed_media status is in sync
                 # (mark_media_as_downloaded inside DownloaderService may have silently failed)

@@ -302,6 +302,7 @@ class MediaRepository:
         }
         if storage_size > 0:
             data["storage_size"] = storage_size
+            data["datasize_bytes"] = storage_size
         return await self.update(platform_id, data)
 
     async def mark_music_as_downloaded(
