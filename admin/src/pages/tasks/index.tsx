@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Table,
   Input,
@@ -14,7 +15,6 @@ import {
   Progress,
   Message,
   Modal,
-  Switch,
 } from '@arco-design/web-react'
 import {
   IconCheckCircle,
@@ -34,6 +34,7 @@ import {
 } from '../../api/endpoints/tasks'
 import type { AdminTaskData } from '../../api/endpoints/tasks'
 import { formatDateTime } from '../../utils/format'
+import { supabase } from '../../auth/supabase'
 
 const PAGE_SIZE = 20
 
@@ -87,20 +88,34 @@ export function TaskCenter() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
-  const [autoRefresh, setAutoRefresh] = useState(true)
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
-  const { data, isLoading } = useAdminTasks(
-    {
-      page,
-      pageSize: PAGE_SIZE,
-      search,
-      status: statusFilter,
-      taskType: typeFilter,
-    },
-    autoRefresh,
-  )
+  const { data, isLoading } = useAdminTasks({
+    page,
+    pageSize: PAGE_SIZE,
+    search,
+    status: statusFilter,
+    taskType: typeFilter,
+  })
   const { data: stats } = useAdminTaskStats()
+
+  // Supabase Realtime: auto-refresh on unified_tasks changes
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-tasks')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'unified_tasks' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['admin-tasks'] })
+        },
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [queryClient])
   const cancelTask = useCancelTask()
   const retryTask = useRetryTask()
 
@@ -369,12 +384,6 @@ export function TaskCenter() {
               </Select.Option>
             ))}
           </Select>
-          <Space size="mini" align="center">
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              Auto Refresh
-            </Typography.Text>
-            <Switch checked={autoRefresh} onChange={setAutoRefresh} size="small" />
-          </Space>
         </Space>
       </Card>
 

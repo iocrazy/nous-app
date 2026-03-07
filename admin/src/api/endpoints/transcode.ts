@@ -46,18 +46,17 @@ export interface TranscodeStatsData {
   not_transcoded: number
 }
 
-export function useTranscodeStats(autoRefresh = false) {
+export function useTranscodeStats() {
   return useQuery({
     queryKey: ['transcode', 'stats'],
     queryFn: async () => {
       const { data } = await apiClient.get<TranscodeStatsData>('/api/v1/admin/transcode/stats')
       return data
     },
-    refetchInterval: autoRefresh ? 5000 : false,
   })
 }
 
-export function useTranscodeList(params: TranscodeListParams = {}, autoRefresh = false) {
+export function useTranscodeList(params: TranscodeListParams = {}) {
   const { page = 1, pageSize = 20, status, minSizeMb, search, sortBy, sortOrder } = params
   return useQuery({
     queryKey: ['transcode', { page, pageSize, status, minSizeMb, search, sortBy, sortOrder }],
@@ -75,7 +74,6 @@ export function useTranscodeList(params: TranscodeListParams = {}, autoRefresh =
       })
       return data
     },
-    refetchInterval: autoRefresh ? 5000 : false,
   })
 }
 

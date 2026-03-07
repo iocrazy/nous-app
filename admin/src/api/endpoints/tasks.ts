@@ -59,7 +59,7 @@ export function useAdminTaskStats() {
   })
 }
 
-export function useAdminTasks(params: TaskListParams = {}, autoRefresh = false) {
+export function useAdminTasks(params: TaskListParams = {}) {
   const { page = 1, pageSize = 20, status, taskType, search, sortBy, sortOrder } = params
   return useQuery({
     queryKey: ['admin-tasks', { page, pageSize, status, taskType, search, sortBy, sortOrder }],
@@ -77,7 +77,6 @@ export function useAdminTasks(params: TaskListParams = {}, autoRefresh = false) 
       })
       return data
     },
-    refetchInterval: autoRefresh ? 5000 : false,
   })
 }
 
