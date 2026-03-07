@@ -514,7 +514,6 @@ def parse_media_task(
     if unified_task_id:
         try:
             run_async(manager.start(unified_task_id))
-            run_async(manager.update_progress(unified_task_id, 10, subtitle="Parsing metadata..."))
         except Exception as e:
             logger.warning(f"[Parse/Task] Failed to start unified task: {e}")
 
@@ -527,8 +526,19 @@ def parse_media_task(
         parse_method = "ytdlp"
         dispatch_url = url
 
+        if unified_task_id:
+            try:
+                run_async(manager.update_progress(unified_task_id, 5, subtitle="Fetching metadata..."))
+            except Exception:
+                pass
+
         try:
             ytdlp_info = run_async(YtdlpService.fetch_metadata(url))
+            if unified_task_id:
+                try:
+                    run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
+                except Exception:
+                    pass
             parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
         except Exception as e:
             if platform != "douyin":
@@ -541,7 +551,7 @@ def parse_media_task(
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 40, subtitle="Saving metadata..."))
+                run_async(manager.update_progress(unified_task_id, 30, subtitle="Enriching data..."))
             except Exception:
                 pass
 
@@ -556,6 +566,12 @@ def parse_media_task(
                         parsed_data["share_count"] = extra_stats.get("share", 0)
                 except Exception as e:
                     logger.warning(f"[Parse/Task] Bilibili stats enrichment failed: {e}")
+
+        if unified_task_id:
+            try:
+                run_async(manager.update_progress(unified_task_id, 40, subtitle="Saving metadata..."))
+            except Exception:
+                pass
 
         # 4. Save metadata to database
         platform_id = parsed_data["platform_id"]
