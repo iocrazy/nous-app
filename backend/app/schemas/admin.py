@@ -268,6 +268,8 @@ class AdminTranscodeVersionResponse(BaseModel):
     created_at: Optional[datetime] = None
     video_title: Optional[str] = None
     cover_url: Optional[str] = None
+    cover_download_path: Optional[str] = None
+    source_platform: Optional[str] = None
     author: Optional[str] = None
 
 

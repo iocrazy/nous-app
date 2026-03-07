@@ -15,6 +15,8 @@ export interface TranscodeVersionData {
   created_at: string | null
   video_title: string | null
   cover_url: string | null
+  cover_download_path: string | null
+  source_platform: string | null
   author: string | null
 }
 

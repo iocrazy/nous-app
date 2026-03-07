@@ -161,7 +161,7 @@ async def list_transcode_versions(
         if media_ids:
             media_result = (
                 await supabase.table("parsed_media")
-                .select("id, title, cover_urls, author")
+                .select("id, title, cover_urls, cover_download_path, source_platform, author")
                 .in_("id", media_ids)
                 .execute()
             )
@@ -207,6 +207,8 @@ async def list_transcode_versions(
                 created_at=row.get("created_at"),
                 video_title=media.get("title"),
                 cover_url=(media.get("cover_urls") or [None])[0],
+                cover_download_path=media.get("cover_download_path"),
+                source_platform=media.get("source_platform"),
                 author=media.get("author"),
             )
         )
