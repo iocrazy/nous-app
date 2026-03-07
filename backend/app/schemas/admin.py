@@ -357,3 +357,38 @@ class AdminTaskStatsResponse(BaseModel):
     completed: int
     failed: int
     cancelled: int
+
+
+# ============================================
+# Table Preferences Schemas
+# ============================================
+
+
+class TableFilter(BaseModel):
+    """Single filter condition."""
+    field: str
+    operator: str
+    value: Any = None
+
+
+class TableSort(BaseModel):
+    """Single sort directive."""
+    field: str
+    direction: str = "asc"
+
+
+class AdminTablePreferenceResponse(BaseModel):
+    """Stored table preferences for a user + table_key."""
+    table_key: str
+    filters: List[TableFilter] = []
+    sorts: List[TableSort] = []
+    visible_columns: Optional[List[str]] = None
+    column_order: Optional[List[str]] = None
+
+
+class AdminTablePreferenceUpdate(BaseModel):
+    """Upsert payload for table preferences."""
+    filters: List[TableFilter] = []
+    sorts: List[TableSort] = []
+    visible_columns: Optional[List[str]] = None
+    column_order: Optional[List[str]] = None
