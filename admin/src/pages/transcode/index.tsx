@@ -99,6 +99,8 @@ export function TranscodeList() {
     search,
     status: statusFilter,
     minSizeMb: sizeFilter ? parseInt(sizeFilter) : undefined,
+    sortBy: 'resource_id',
+    sortOrder: 'desc',
   })
   const { data: stats } = useTranscodeStats()
   const retryTranscode = useRetryTranscode()

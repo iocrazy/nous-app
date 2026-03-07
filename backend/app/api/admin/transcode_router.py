@@ -124,7 +124,7 @@ async def list_transcode_versions(
         query = query.gte("file_size_bytes", min_size_mb * 1024 * 1024)
 
     # Sorting
-    valid_sort_fields = {"created_at", "file_size_bytes", "transcode_at"}
+    valid_sort_fields = {"created_at", "file_size_bytes", "transcode_at", "resource_id"}
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
     desc = sort_order != "asc"
