@@ -185,6 +185,7 @@ export function TeamList() {
           columns={columns}
           data={teams}
           loading={isLoading}
+          scroll={{ x: 1000 }}
           expandedRowKeys={expandedRowKeys}
           onExpandedRowsChange={(keys) => setExpandedRowKeys(keys as string[])}
           expandedRowRender={(record: Team) => (

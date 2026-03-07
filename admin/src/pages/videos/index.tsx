@@ -38,6 +38,7 @@ import {
   useRetryVideo,
 } from '../../api/endpoints/videos'
 import type { VideoData } from '../../api/endpoints/videos'
+import { formatDate, formatBytes } from '../../utils/format'
 
 const PAGE_SIZE = 20
 
@@ -57,27 +58,6 @@ const PLATFORM_OPTIONS = [
   { value: 'twitter', label: 'X / Twitter' },
   { value: 'xiaohongshu', label: 'Xiaohongshu' },
 ]
-
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024
-    i++
-  }
-  return `${size.toFixed(1)} ${units[i]}`
-}
 
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 
@@ -403,6 +383,7 @@ export function VideoList() {
           columns={columns}
           data={videos}
           loading={isLoading}
+          scroll={{ x: 1200 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

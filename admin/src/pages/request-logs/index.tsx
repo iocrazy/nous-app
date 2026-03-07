@@ -277,6 +277,7 @@ function RequestLogsTab({ start_date, end_date }: TabTimeRange) {
           columns={columns}
           data={logs}
           loading={isLoading}
+          scroll={{ x: 1100 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

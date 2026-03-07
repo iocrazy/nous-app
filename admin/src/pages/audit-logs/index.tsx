@@ -244,6 +244,7 @@ export function AuditLogList() {
           columns={columns}
           data={logs}
           loading={isLoading}
+          scroll={{ x: 1100 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

@@ -227,6 +227,7 @@ export function UserList() {
           columns={columns}
           data={users}
           loading={isLoading}
+          scroll={{ x: 900 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

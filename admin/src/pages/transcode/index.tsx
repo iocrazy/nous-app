@@ -443,6 +443,7 @@ export function TranscodeList() {
           columns={columns}
           data={items}
           loading={isLoading}
+          scroll={{ x: 1200 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,
