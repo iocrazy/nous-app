@@ -12,7 +12,7 @@ from app.schemas.admin import (
     AdminTaskListResponse,
     AdminTaskStatsResponse,
 )
-from app.utils.admin_helpers import create_audit_log
+from app.utils.admin_helpers import create_audit_log, batch_get_user_auth_info
 
 
 router = APIRouter()
@@ -106,19 +106,13 @@ async def list_tasks(
     rows = result.data or []
     total = result.count or 0
 
-    # Batch lookup user emails
+    # Batch lookup user emails from auth.users
     user_ids = list({r["user_id"] for r in rows if r.get("user_id")})
     email_map: dict[str, str] = {}
     if user_ids:
-        profiles_result = (
-            await supabase.table("user_profiles")
-            .select("id, email")
-            .in_("id", user_ids)
-            .execute()
-        )
+        auth_info = await batch_get_user_auth_info(user_ids)
         email_map = {
-            str(p["id"]): p.get("email", "")
-            for p in (profiles_result.data or [])
+            uid: email for uid, (email, _) in auth_info.items() if email
         }
 
     items = [
