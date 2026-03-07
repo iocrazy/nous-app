@@ -7,7 +7,7 @@ import { Dashboard } from './pages/dashboard'
 import { UserList } from './pages/users'
 import { TeamList } from './pages/teams'
 import { AuditLogList } from './pages/audit-logs'
-import { VideoList } from './pages/videos'
+import { MediaList } from './pages/media'
 import { PlaceholderPage } from './pages/placeholder'
 import { Settings } from './pages/settings'
 import { RequestLogs } from './pages/request-logs'
@@ -29,7 +29,8 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="/users" element={<UserList />} />
               <Route path="/teams" element={<TeamList />} />
-              <Route path="/videos" element={<VideoList />} />
+              <Route path="/media" element={<MediaList />} />
+              <Route path="/videos" element={<Navigate to="/media" replace />} />
               <Route path="/transcode" element={<TranscodeList />} />
               <Route path="/tasks" element={<TaskCenter />} />
               <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
