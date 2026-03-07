@@ -1,7 +1,7 @@
 import { useState, useEffect, useReducer, useCallback } from 'react'
 import {
   Badge,
-  Popover,
+  Drawer,
   Typography,
   Tag,
   Progress,
@@ -171,7 +171,7 @@ export function TaskCenterFloat() {
   const activeTasks = state.tasks.filter(
     (t) => t.status === 'processing' || t.status === 'pending',
   )
-  const recentTasks = state.tasks.slice(0, 20)
+  const recentTasks = state.tasks.slice(0, 30)
   const activeCount = activeTasks.length
 
   const handleCancel = async (taskId: string) => {
@@ -183,118 +183,8 @@ export function TaskCenterFloat() {
     }
   }
 
-  const panel = (
-    <div style={{ width: 420, maxHeight: 480, overflow: 'auto' }}>
-      <div
-        style={{
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--color-border)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <Typography.Text bold>Task Center</Typography.Text>
-        <Space size="mini">
-          {!state.connected && (
-            <Tag size="small" color="red">
-              Disconnected
-            </Tag>
-          )}
-          {activeCount > 0 && (
-            <Tag size="small" color="blue">
-              {activeCount} active
-            </Tag>
-          )}
-        </Space>
-      </div>
-
-      {recentTasks.length === 0 ? (
-        <Empty style={{ padding: 32 }} description="No tasks" />
-      ) : (
-        <div>
-          {recentTasks.map((task) => (
-            <div
-              key={task.id}
-              style={{
-                padding: '10px 12px',
-                borderBottom: '1px solid var(--color-fill-3)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <StatusIcon status={task.status} />
-                <Typography.Text ellipsis style={{ flex: 1, fontSize: 13 }}>
-                  {task.title || 'Untitled'}
-                </Typography.Text>
-                <Tag size="small" color={TASK_TYPE_COLORS[task.task_type] || 'gray'}>
-                  {task.task_type}
-                </Tag>
-              </div>
-              {task.subtitle && (
-                <Typography.Text
-                  type="secondary"
-                  ellipsis
-                  style={{ fontSize: 12, paddingLeft: 22 }}
-                >
-                  {task.subtitle}
-                </Typography.Text>
-              )}
-              {task.status === 'processing' && (
-                <div style={{ paddingLeft: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Progress
-                    percent={task.progress}
-                    size="small"
-                    style={{ flex: 1 }}
-                    showText={false}
-                  />
-                  <Typography.Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
-                    {task.progress}%
-                    {task.speed ? ` · ${formatSpeed(task.speed)}` : ''}
-                  </Typography.Text>
-                </div>
-              )}
-              {task.status === 'failed' && task.error_msg && (
-                <Typography.Text
-                  type="error"
-                  ellipsis
-                  style={{ fontSize: 11, paddingLeft: 22 }}
-                >
-                  {task.error_msg}
-                </Typography.Text>
-              )}
-              {(task.status === 'processing' || task.status === 'pending') && (
-                <div style={{ paddingLeft: 22 }}>
-                  <Button
-                    type="text"
-                    size="mini"
-                    status="danger"
-                    icon={<IconDelete />}
-                    onClick={() => handleCancel(task.id)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-
   return (
-    <Popover
-      trigger="click"
-      position="br"
-      popupVisible={visible}
-      onVisibleChange={setVisible}
-      content={panel}
-      style={{ padding: 0 }}
-      unmountOnExit={false}
-    >
+    <>
       <Badge count={activeCount} dot={activeCount > 0} dotStyle={{ width: 8, height: 8 }}>
         <div
           style={{
@@ -304,12 +194,105 @@ export function TaskCenterFloat() {
             alignItems: 'center',
             padding: '4px 8px',
             borderRadius: 4,
-            background: visible ? 'var(--color-fill-3)' : 'transparent',
           }}
+          onClick={() => setVisible(true)}
         >
           <IconList />
         </div>
       </Badge>
-    </Popover>
+
+      <Drawer
+        title={
+          <Space>
+            <span>Task Center</span>
+            {!state.connected && (
+              <Tag size="small" color="red">Disconnected</Tag>
+            )}
+            {activeCount > 0 && (
+              <Tag size="small" color="blue">{activeCount} active</Tag>
+            )}
+          </Space>
+        }
+        visible={visible}
+        onCancel={() => setVisible(false)}
+        footer={null}
+        width={440}
+        placement="right"
+      >
+        {recentTasks.length === 0 ? (
+          <Empty description="No tasks" />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {recentTasks.map((task) => (
+              <div
+                key={task.id}
+                style={{
+                  padding: '10px 0',
+                  borderBottom: '1px solid var(--color-fill-3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <StatusIcon status={task.status} />
+                  <Typography.Text ellipsis style={{ flex: 1, fontSize: 13 }}>
+                    {task.title || 'Untitled'}
+                  </Typography.Text>
+                  <Tag size="small" color={TASK_TYPE_COLORS[task.task_type] || 'gray'}>
+                    {task.task_type}
+                  </Tag>
+                </div>
+                {task.subtitle && (
+                  <Typography.Text
+                    type="secondary"
+                    ellipsis
+                    style={{ fontSize: 12, paddingLeft: 22 }}
+                  >
+                    {task.subtitle}
+                  </Typography.Text>
+                )}
+                {task.status === 'processing' && (
+                  <div style={{ paddingLeft: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Progress
+                      percent={task.progress}
+                      size="small"
+                      style={{ flex: 1 }}
+                      showText={false}
+                    />
+                    <Typography.Text style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                      {task.progress}%
+                      {task.speed ? ` · ${formatSpeed(task.speed)}` : ''}
+                    </Typography.Text>
+                  </div>
+                )}
+                {task.status === 'failed' && task.error_msg && (
+                  <Typography.Text
+                    type="error"
+                    ellipsis
+                    style={{ fontSize: 11, paddingLeft: 22 }}
+                  >
+                    {task.error_msg}
+                  </Typography.Text>
+                )}
+                {(task.status === 'processing' || task.status === 'pending') && (
+                  <div style={{ paddingLeft: 22 }}>
+                    <Button
+                      type="text"
+                      size="mini"
+                      status="danger"
+                      icon={<IconDelete />}
+                      onClick={() => handleCancel(task.id)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Drawer>
+    </>
   )
 }
