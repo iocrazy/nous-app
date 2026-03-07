@@ -296,6 +296,7 @@ class AdminTranscodeSettingsResponse(BaseModel):
     ffmpeg_encoder: str = "auto"
     ffmpeg_preset: str = "medium"
     transcode_parallel_tiers: bool = True
+    transcode_min_size_mb: int = 100
 
 
 class AdminTranscodeSettingsUpdate(BaseModel):
@@ -305,3 +306,4 @@ class AdminTranscodeSettingsUpdate(BaseModel):
     ffmpeg_encoder: Optional[str] = None
     ffmpeg_preset: Optional[str] = None
     transcode_parallel_tiers: Optional[bool] = None
+    transcode_min_size_mb: Optional[int] = None

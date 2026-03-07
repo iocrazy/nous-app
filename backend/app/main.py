@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
             settings.FFMPEG_PRESET = transcode["preset"]
         if "parallel_tiers" in transcode:
             settings.TRANSCODE_PARALLEL_TIERS = transcode["parallel_tiers"]
+        if "min_size_mb" in transcode:
+            settings.TRANSCODE_MIN_SIZE_MB = transcode["min_size_mb"]
         logger.info(
             f"Transcode config loaded: encoder={settings.FFMPEG_ENCODER}, "
             f"preset={settings.FFMPEG_PRESET}, parallel={settings.TRANSCODE_PARALLEL_TIERS}"

@@ -112,6 +112,10 @@ class Settings(BaseSettings):
         default=True,
         description="Encode tiers (480p/720p/1080p) in parallel",
     )
+    TRANSCODE_MIN_SIZE_MB: int = Field(
+        default=100,
+        description="Minimum file size (MB) to auto-trigger HLS transcode",
+    )
 
     # ============================================
     # OpenAI Configuration (for visual analysis)

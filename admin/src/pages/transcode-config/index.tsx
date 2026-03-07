@@ -9,6 +9,7 @@ import {
   Space,
   Spin,
   Checkbox,
+  InputNumber,
 } from '@arco-design/web-react'
 import { IconSave } from '@arco-design/web-react/icon'
 import {
@@ -84,6 +85,7 @@ export function TranscodeConfig() {
   const [encoder, setEncoder] = useState('auto')
   const [preset, setPreset] = useState('medium')
   const [parallelTiers, setParallelTiers] = useState(true)
+  const [minSizeMb, setMinSizeMb] = useState(100)
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
@@ -93,6 +95,7 @@ export function TranscodeConfig() {
       setEncoder(settings.ffmpeg_encoder)
       setPreset(settings.ffmpeg_preset)
       setParallelTiers(settings.transcode_parallel_tiers)
+      setMinSizeMb(settings.transcode_min_size_mb)
       setDirty(false)
     }
   }, [settings])
@@ -109,6 +112,7 @@ export function TranscodeConfig() {
         ffmpeg_encoder: encoder,
         ffmpeg_preset: preset,
         transcode_parallel_tiers: parallelTiers,
+        transcode_min_size_mb: minSizeMb,
       },
       {
         onSuccess: () => {
@@ -145,6 +149,25 @@ export function TranscodeConfig() {
             setEnabled(v)
             setDirty(true)
           }}
+        />
+      </SettingRow>
+
+      {/* Minimum File Size */}
+      <SettingRow
+        label="Minimum File Size (MB)"
+        description="Only videos larger than this size will be auto-transcoded. H.264 files bypass this check (copy-only segmentation)."
+      >
+        <InputNumber
+          value={minSizeMb}
+          onChange={(v) => {
+            setMinSizeMb(v ?? 0)
+            setDirty(true)
+          }}
+          min={0}
+          max={10000}
+          step={10}
+          suffix="MB"
+          style={{ width: 150 }}
         />
       </SettingRow>
 
