@@ -26,6 +26,7 @@ import {
   IconSearch,
   IconNotification,
   IconThunderbolt,
+  IconList,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../auth/AuthProvider'
 
@@ -34,7 +35,7 @@ const MenuItem = Menu.Item
 const MenuItemGroup = Menu.ItemGroup
 
 const allMenuKeys = [
-  '/', '/users', '/teams', '/videos', '/transcode', '/tags', '/credits',
+  '/', '/users', '/teams', '/videos', '/transcode', '/tasks', '/tags', '/credits',
   '/monitoring', '/search', '/audit-logs', '/request-logs', '/alerts',
   '/api-keys', '/settings', '/transcode-config',
 ]
@@ -98,6 +99,7 @@ export function AdminLayout() {
             <MenuItem key="/teams"><IconUserGroup />Teams</MenuItem>
             <MenuItem key="/videos"><IconVideoCamera />Videos</MenuItem>
             <MenuItem key="/transcode"><IconThunderbolt />Transcode</MenuItem>
+            <MenuItem key="/tasks"><IconList />Tasks</MenuItem>
             <MenuItem key="/tags"><IconTags />Tags</MenuItem>
             <MenuItem key="/credits"><IconStar />Credits</MenuItem>
           </MenuItemGroup>

@@ -13,6 +13,7 @@ from .monitoring_router import router as monitoring_router
 from .search_router import router as search_router
 from .alert_rules_router import router as alert_rules_router
 from .transcode_router import router as transcode_router
+from .tasks_router import router as tasks_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -82,3 +83,4 @@ admin_router.include_router(monitoring_router, prefix="/monitoring", tags=["Admi
 admin_router.include_router(search_router, prefix="/search", tags=["Admin - Search"])
 admin_router.include_router(alert_rules_router, prefix="/alerts", tags=["Admin - Alerts"])
 admin_router.include_router(transcode_router, prefix="/transcode", tags=["Admin - Transcode"])
+admin_router.include_router(tasks_router, prefix="/tasks", tags=["Admin - Tasks"])
