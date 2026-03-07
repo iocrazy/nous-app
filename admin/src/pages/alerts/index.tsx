@@ -551,6 +551,7 @@ function AlertHistoryTab() {
           columns={columns}
           data={alerts}
           loading={isLoading}
+          scroll={{ x: 1100 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,

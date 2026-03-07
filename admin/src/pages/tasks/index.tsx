@@ -384,6 +384,7 @@ export function TaskCenter() {
           columns={columns}
           data={items}
           loading={isLoading}
+          scroll={{ x: 1100 }}
           pagination={{
             current: page,
             pageSize: PAGE_SIZE,
