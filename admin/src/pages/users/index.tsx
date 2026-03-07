@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatDate } from '../../utils/format'
 import {
   Table,
   Input,
@@ -27,15 +28,6 @@ import type { UserData } from '../../api/endpoints/users'
 
 const ROLES = ['admin', 'user', 'test'] as const
 const PAGE_SIZE = 20
-
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
 
 export function UserList() {
   const [page, setPage] = useState(1)

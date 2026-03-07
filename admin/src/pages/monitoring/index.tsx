@@ -28,15 +28,9 @@ import {
 import { TimeRangeSelector } from '../../components/TimeRangeSelector'
 import { PageHeader } from '../../components/PageHeader'
 import { EmptyState } from '../../components/EmptyState'
+import { formatDateTime } from '../../utils/format'
 
 const { Row, Col } = Grid
-
-function formatDateTime(dateStr: string): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
 
 export function MonitoringDashboard() {
   const [period, setPeriod] = useState<string>('24h')

@@ -33,6 +33,7 @@ import {
   useRetryTask,
 } from '../../api/endpoints/tasks'
 import type { AdminTaskData } from '../../api/endpoints/tasks'
+import { formatDateTime } from '../../utils/format'
 
 const PAGE_SIZE = 20
 
@@ -72,16 +73,6 @@ const TYPE_TAG_COLORS: Record<string, string> = {
   ai_extract: 'green',
   ai_transcription: 'lime',
   ai_summary: 'gold',
-}
-
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function formatSpeed(speed: number | null) {
@@ -235,7 +226,7 @@ export function TaskCenter() {
       title: 'Created',
       dataIndex: 'created_at',
       width: 140,
-      render: (value: string) => formatDate(value),
+      render: (value: string) => formatDateTime(value),
     },
     {
       title: 'Actions',

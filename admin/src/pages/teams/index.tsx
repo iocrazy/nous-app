@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatDate } from '../../utils/format'
 import {
   Table,
   Input,
@@ -21,15 +22,6 @@ import {
 import type { Team, TeamMember } from '../../api/endpoints/teams'
 
 const PAGE_SIZE = 20
-
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
 
 function ExpandedMembers({ teamId, ownerId }: { teamId: string; ownerId: string }) {
   const { data: members = [], isLoading } = useTeamMembers(teamId)

@@ -37,6 +37,7 @@ import {
 } from '../../api/endpoints/search'
 import { parseQuery, queryToParams } from '../../utils/query-parser'
 import { exportToCsv } from '../../utils/csv-export'
+import { formatDateTime } from '../../utils/format'
 
 const SOURCE_COLORS: Record<string, string> = {
   request: 'arcoblue',
@@ -74,13 +75,6 @@ function getSavedSearches(): SavedSearch[] {
   } catch {
     return []
   }
-}
-
-function formatDateTime(dateStr: string): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 const PAGE_SIZE = 50

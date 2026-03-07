@@ -47,6 +47,7 @@ import {
 import { TimeRangeSelector, periodToDateRange } from '../../components/TimeRangeSelector'
 import { PageHeader } from '../../components/PageHeader'
 import { EmptyState } from '../../components/EmptyState'
+import { formatDateTime } from '../../utils/format'
 
 const FormItem = Form.Item
 
@@ -73,13 +74,6 @@ const MUTE_DURATIONS = [
   { value: 1440, label: '24 hours' },
   { value: 10080, label: '7 days' },
 ]
-
-function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
 
 function getMetricLabel(type: string): string {
   return METRIC_TYPES.find((m) => m.value === type)?.label || type

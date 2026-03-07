@@ -32,6 +32,7 @@ import {
   useBatchTranscode,
 } from '../../api/endpoints/transcode'
 import type { TranscodeVersionData } from '../../api/endpoints/transcode'
+import { formatDate, formatBytes } from '../../utils/format'
 
 const PAGE_SIZE = 20
 
@@ -48,27 +49,6 @@ const SIZE_OPTIONS = [
   { value: '500', label: '> 500 MB' },
   { value: '1024', label: '> 1 GB' },
 ]
-
-function formatDate(dateStr: string | null) {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024
-    i++
-  }
-  return `${size.toFixed(1)} ${units[i]}`
-}
 
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 
@@ -227,10 +207,14 @@ export function TranscodeList() {
       dataIndex: 'video_title',
       render: (_: unknown, record: TranscodeVersionData) => (
         <div>
-          <Typography.Text ellipsis style={{ maxWidth: 240 }}>
-            {record.video_title || 'Untitled'}
-          </Typography.Text>
-          <br />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Typography.Text ellipsis style={{ maxWidth: 220 }}>
+              {record.video_title || 'Untitled'}
+            </Typography.Text>
+            <Tag size="small" color="arcoblue" style={{ flexShrink: 0 }}>
+              v{record.version_number}
+            </Tag>
+          </div>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {record.filename || record.id.slice(0, 12)}
           </Typography.Text>
@@ -299,9 +283,15 @@ export function TranscodeList() {
         ),
     },
     {
+      title: 'Created',
+      dataIndex: 'created_at',
+      width: 120,
+      render: (value: string | null) => formatDate(value),
+    },
+    {
       title: 'Completed',
       dataIndex: 'transcode_at',
-      width: 140,
+      width: 120,
       render: (value: string | null) => formatDate(value),
     },
     {
