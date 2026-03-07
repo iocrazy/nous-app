@@ -114,7 +114,6 @@ def _map_video_detail_response(v: dict) -> AdminVideoDetailResponse:
         updated_at=v.get("updated_at"),
         video_original_url=v.get("original_url"),
         video_download_path=v.get("video_download_path"),
-        cover_download_path=v.get("cover_download_path"),
         music_name=v.get("music_name"),
         music_download_status=v.get("music_download_status", "pending"),
         cover_download_status=v.get("cover_download_status", "pending"),
