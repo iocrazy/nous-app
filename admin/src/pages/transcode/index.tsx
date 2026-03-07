@@ -111,6 +111,7 @@ export function TranscodeList() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [sizeFilter, setSizeFilter] = useState<string | undefined>(undefined)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
 
   const { data, isLoading } = useTranscodeList({
     page,
@@ -132,9 +133,11 @@ export function TranscodeList() {
   }
 
   const handleRetry = (record: TranscodeVersionData) => {
+    setRetryingId(record.id)
     retryTranscode.mutate(record.id, {
-      onSuccess: () => Message.success('Transcode retry queued'),
+      onSuccess: () => Message.success('Transcode queued'),
       onError: (err) => Message.error(err.message),
+      onSettled: () => setRetryingId(null),
     })
   }
 
@@ -307,13 +310,14 @@ export function TranscodeList() {
       align: 'center',
       render: (_: unknown, record: TranscodeVersionData) => {
         const canRetry = !record.transcode_status || record.transcode_status === 'failed'
+        const label = record.transcode_status === 'failed' ? 'Retry Transcode' : 'Start Transcode'
         return canRetry ? (
-          <Tooltip content="Retry Transcode">
+          <Tooltip content={label}>
             <Button
               type="text"
               icon={<IconRefresh />}
               size="small"
-              loading={retryTranscode.isPending}
+              loading={retryingId === record.id}
               onClick={() => handleRetry(record)}
             />
           </Tooltip>
