@@ -1,7 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { formatDateTime } from '../../utils/format'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import {
-  Table,
   Tag,
   Modal,
   Descriptions,
@@ -12,80 +10,26 @@ import {
   Tabs,
   Switch,
 } from '@arco-design/web-react'
-import { IconEye, IconCopy, IconExport, IconPause, IconPlayArrow, IconCode } from '@arco-design/web-react/icon'
-import { exportToCsv } from '../../utils/csv-export'
-import type { ColumnProps } from '@arco-design/web-react/es/Table'
 import {
-  useRequestLogs,
-  useFrontendErrors,
-  useAppLogs,
-  type RequestLog,
-  type FrontendError,
-  type AppLog,
-} from '../../api/endpoints/request-logs'
-import { TimeRangeSelector, periodToDateRange } from '../../components/TimeRangeSelector'
-import { FilterBuilder, getFilterValue, type FilterField, type FilterCondition } from '../../components/FilterBuilder'
-import { PageHeader } from '../../components/PageHeader'
-import { EmptyState } from '../../components/EmptyState'
+  IconEye,
+  IconCopy,
+  IconExport,
+  IconPause,
+  IconPlayArrow,
+} from '@arco-design/web-react/icon'
+import { NotionTable } from '../../components/notion-table'
+import type { NotionColumnDef } from '../../components/notion-table'
+import { useNotionTable } from '../../hooks/useNotionTable'
+import { apiClient } from '../../api/client'
+import type { RequestLog, FrontendError, AppLog } from '../../api/endpoints/request-logs'
+import { exportToCsv } from '../../utils/csv-export'
+import { formatDateTime } from '../../utils/format'
 import { supabase } from '../../auth/supabase'
-
-const PAGE_SIZE = 50
+import '../../components/notion-table/notion-table.css'
 
 // ============================================
-// Filter field definitions
+// Helpers
 // ============================================
-
-const REQUEST_LOG_FIELDS: FilterField[] = [
-  {
-    key: 'method', label: 'Method', type: 'select',
-    options: [
-      { value: 'GET', label: 'GET' },
-      { value: 'POST', label: 'POST' },
-      { value: 'PUT', label: 'PUT' },
-      { value: 'PATCH', label: 'PATCH' },
-      { value: 'DELETE', label: 'DELETE' },
-    ],
-  },
-  { key: 'path', label: 'Path', type: 'text' },
-  {
-    key: 'status_group', label: 'Status', type: 'select',
-    options: [
-      { value: '2xx', label: '2xx Success' },
-      { value: '4xx', label: '4xx Client Error' },
-      { value: '5xx', label: '5xx Server Error' },
-    ],
-  },
-  { key: 'min_response_time', label: 'Response Time (ms)', type: 'number' },
-  { key: 'request_id', label: 'Request ID', type: 'text' },
-  { key: 'user_id', label: 'User ID', type: 'text' },
-]
-
-const FRONTEND_ERROR_FIELDS: FilterField[] = [
-  {
-    key: 'error_type', label: 'Error Type', type: 'select',
-    options: [
-      { value: 'runtime', label: 'Runtime' },
-      { value: 'network', label: 'Network' },
-      { value: 'unhandled_rejection', label: 'Unhandled Rejection' },
-    ],
-  },
-]
-
-const APP_LOG_FIELDS: FilterField[] = [
-  {
-    key: 'level', label: 'Level', type: 'select',
-    options: [
-      { value: 'DEBUG', label: 'DEBUG' },
-      { value: 'INFO', label: 'INFO' },
-      { value: 'SUCCESS', label: 'SUCCESS' },
-      { value: 'WARNING', label: 'WARNING' },
-      { value: 'ERROR', label: 'ERROR' },
-      { value: 'CRITICAL', label: 'CRITICAL' },
-    ],
-  },
-  { key: 'module', label: 'Module', type: 'text' },
-  { key: 'message', label: 'Message', type: 'text' },
-]
 
 function getStatusColor(code: number | null): string {
   if (code === null) return 'gray'
@@ -116,179 +60,248 @@ function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text).catch(() => {})
 }
 
-interface TabTimeRange {
-  start_date?: string
-  end_date?: string
+function getLogLevelColor(level: string): string {
+  switch (level) {
+    case 'DEBUG': return 'gray'
+    case 'INFO': return 'arcoblue'
+    case 'SUCCESS': return 'green'
+    case 'WARNING': return 'gold'
+    case 'ERROR': return 'orange'
+    case 'CRITICAL': return 'red'
+    default: return 'gray'
+  }
+}
+
+const LIVE_TAIL_MAX = 200
+
+const preStyle: React.CSSProperties = {
+  padding: 16,
+  background: 'var(--color-fill-2)',
+  borderRadius: 4,
+  overflow: 'auto',
+  fontSize: 13,
+  fontFamily: 'monospace',
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+}
+
+// ============================================
+// Date filter helper
+// ============================================
+
+function buildDateParams(
+  filters: { field: string; operator: string; value: string | string[] | number | boolean | null }[],
+  dateField: string,
+): Record<string, string> {
+  const dateFilter = filters.find((f) => f.field === dateField)
+  if (!dateFilter) return {}
+
+  const now = new Date()
+  if (dateFilter.operator === 'last_7_days') {
+    return { start_date: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString() }
+  }
+  if (dateFilter.operator === 'last_30_days') {
+    return { start_date: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString() }
+  }
+  if (dateFilter.operator === 'after' && dateFilter.value) {
+    return { start_date: new Date(dateFilter.value as string).toISOString() }
+  }
+  if (dateFilter.operator === 'before' && dateFilter.value) {
+    return { end_date: new Date(dateFilter.value as string).toISOString() }
+  }
+  return {}
 }
 
 // ============================================
 // Request Logs Tab
 // ============================================
 
-function RequestLogsTab({ start_date, end_date }: TabTimeRange) {
-  const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<FilterCondition[]>([])
+function RequestLogsTab() {
   const [detailModal, setDetailModal] = useState<RequestLog | null>(null)
 
-  const { data, isLoading } = useRequestLogs({
-    page,
-    pageSize: PAGE_SIZE,
-    method: getFilterValue(filters, 'method'),
-    path: getFilterValue(filters, 'path'),
-    status_group: getFilterValue(filters, 'status_group'),
-    min_response_time: getFilterValue(filters, 'min_response_time')
-      ? Number(getFilterValue(filters, 'min_response_time'))
-      : undefined,
-    request_id: getFilterValue(filters, 'request_id'),
-    user_id: getFilterValue(filters, 'user_id'),
-    start_date,
-    end_date,
-  })
-
-  const logs = data?.data ?? []
-  const total = data?.total ?? 0
-
-  const columns: ColumnProps<RequestLog>[] = [
+  const columns = useMemo<NotionColumnDef<RequestLog>[]>(() => [
     {
-      title: 'Time',
-      dataIndex: 'timestamp',
-      width: 180,
-      render: (_, record) => (
+      key: 'timestamp',
+      header: 'Time',
+      type: 'date',
+      filterable: true,
+      sortable: true,
+      required: true,
+      size: 180,
+      cell: (row) => (
         <Typography.Text style={{ fontSize: 13 }}>
-          {formatDateTime(record.timestamp)}
+          {formatDateTime(row.timestamp)}
         </Typography.Text>
       ),
     },
     {
-      title: 'Method & Path',
-      dataIndex: 'path',
-      render: (_, record) => (
-        <div>
-          <Space size={4}>
-            <Tag color={getMethodColor(record.method)} size="small">
-              {record.method}
-            </Tag>
-            <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }} ellipsis>
-              {record.path}
-            </Typography.Text>
-          </Space>
-        </div>
+      key: 'method',
+      header: 'Method',
+      type: 'select',
+      filterable: true,
+      size: 90,
+      filterOptions: [
+        { value: 'GET', label: 'GET' },
+        { value: 'POST', label: 'POST' },
+        { value: 'PUT', label: 'PUT' },
+        { value: 'PATCH', label: 'PATCH' },
+        { value: 'DELETE', label: 'DELETE' },
+      ],
+      cell: (row) => (
+        <Tag color={getMethodColor(row.method)} size="small">{row.method}</Tag>
       ),
     },
     {
-      title: 'User',
-      dataIndex: 'user_email',
-      width: 180,
-      render: (_, record) => (
+      key: 'path',
+      header: 'Path',
+      type: 'text',
+      filterable: true,
+      required: true,
+      minSize: 200,
+      cell: (row) => (
+        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }} ellipsis>
+          {row.path}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'user_email',
+      header: 'User',
+      type: 'text',
+      filterable: true,
+      size: 180,
+      cell: (row) => (
         <div>
-          <div>{record.user_email || '-'}</div>
+          <div>{row.user_email || '-'}</div>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {record.auth_type}
+            {row.auth_type}
           </Typography.Text>
         </div>
       ),
     },
     {
-      title: 'Status',
-      dataIndex: 'status_code',
-      width: 80,
-      render: (_, record) => (
-        <Tag color={getStatusColor(record.status_code)} size="small">
-          {record.status_code ?? '-'}
+      key: 'status_code',
+      header: 'Status',
+      type: 'select',
+      filterable: true,
+      size: 80,
+      filterOptions: [
+        { value: '2xx', label: '2xx Success' },
+        { value: '4xx', label: '4xx Client Error' },
+        { value: '5xx', label: '5xx Server Error' },
+      ],
+      cell: (row) => (
+        <Tag color={getStatusColor(row.status_code)} size="small">
+          {row.status_code ?? '-'}
         </Tag>
       ),
     },
     {
-      title: 'Time',
-      dataIndex: 'response_time_ms',
-      width: 90,
-      render: (_, record) => (
+      key: 'response_time_ms',
+      header: 'Time',
+      type: 'number',
+      sortable: true,
+      size: 90,
+      cell: (row) => (
         <Typography.Text
           style={{
             fontFamily: 'monospace',
             fontSize: 13,
-            color: (record.response_time_ms ?? 0) > 1000 ? 'var(--color-danger-6)' : undefined,
+            color: (row.response_time_ms ?? 0) > 1000 ? 'var(--color-danger-6)' : undefined,
           }}
         >
-          {formatResponseTime(record.response_time_ms)}
+          {formatResponseTime(row.response_time_ms)}
         </Typography.Text>
       ),
     },
     {
-      title: 'IP',
-      dataIndex: 'ip_address',
-      width: 130,
-      render: (_, record) => (
+      key: 'ip_address',
+      header: 'IP',
+      type: 'text',
+      size: 130,
+      cell: (row) => (
         <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {record.ip_address || '-'}
+          {row.ip_address || '-'}
         </Typography.Text>
       ),
     },
     {
-      title: '',
-      width: 48,
-      render: (_, record) => (
+      key: 'actions',
+      header: '',
+      type: 'text',
+      required: true,
+      size: 48,
+      cell: (row) => (
         <Button
           type="text"
           size="mini"
           icon={<IconEye />}
-          onClick={() => setDetailModal(record)}
+          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
         />
       ),
     },
-  ]
+  ], [])
+
+  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<RequestLog>({
+    tableKey: 'request-logs',
+    columns,
+    defaultSorts: [{ field: 'timestamp', direction: 'desc' }],
+    defaultPageSize: 50,
+    fetchData: async ({ page, pageSize, filters, search }) => {
+      const methodFilter = filters.find((f) => f.field === 'method')
+      const statusFilter = filters.find((f) => f.field === 'status_code')
+      const dateParams = buildDateParams(filters, 'timestamp')
+
+      const { data } = await apiClient.get('/api/v1/admin/request-logs', {
+        params: {
+          page,
+          pageSize,
+          ...(search && { path: search }),
+          ...(methodFilter?.value && { method: methodFilter.value }),
+          ...(statusFilter?.value && { status_group: statusFilter.value }),
+          ...dateParams,
+        },
+      })
+      return { items: data.data, total: data.total }
+    },
+  })
+
+  const exportButton = (
+    <Button
+      icon={<IconExport />}
+      size="small"
+      onClick={() => exportToCsv(
+        `request-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+        [
+          { key: 'timestamp', label: 'Time' },
+          { key: 'method', label: 'Method' },
+          { key: 'path', label: 'Path' },
+          { key: 'status_code', label: 'Status' },
+          { key: 'response_time_ms', label: 'Response Time (ms)' },
+          { key: 'user_email', label: 'User' },
+          { key: 'ip_address', label: 'IP Address' },
+          { key: 'request_id', label: 'Request ID' },
+        ],
+      )}
+    >
+      Export
+    </Button>
+  )
 
   return (
     <>
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <FilterBuilder
-            fields={REQUEST_LOG_FIELDS}
-            filters={filters}
-            onChange={(f) => { setFilters(f); setPage(1) }}
-          />
-          <Button
-            icon={<IconExport />}
-            size="small"
-            style={{ flexShrink: 0, marginLeft: 16 }}
-            onClick={() => exportToCsv(
-              `request-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-              logs as unknown as Record<string, unknown>[],
-              [
-                { key: 'timestamp', label: 'Time' },
-                { key: 'method', label: 'Method' },
-                { key: 'path', label: 'Path' },
-                { key: 'status_code', label: 'Status' },
-                { key: 'response_time_ms', label: 'Response Time (ms)' },
-                { key: 'user_email', label: 'User' },
-                { key: 'ip_address', label: 'IP Address' },
-                { key: 'request_id', label: 'Request ID' },
-              ],
-            )}
-          >
-            Export
-          </Button>
-        </div>
-      </Card>
-
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          data={logs}
-          loading={isLoading}
-          scroll={{ x: 1100 }}
-          pagination={{
-            current: page,
-            pageSize: PAGE_SIZE,
-            total,
-            onChange: setPage,
-            showTotal: (t) => `Total ${t} entries`,
-            sizeCanChange: false,
-          }}
-          noDataElement={<EmptyState description="No request logs found" />}
-        />
-      </Card>
+      <NotionTable<RequestLog>
+        table={table}
+        toolbarProps={toolbarProps}
+        pagination={pagination}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        toolbarExtra={exportButton}
+        emptyText="No request logs found"
+        scrollX={1100}
+      />
 
       <Modal
         title="Request Log Details"
@@ -389,130 +402,146 @@ function RequestLogsTab({ start_date, end_date }: TabTimeRange) {
 // Frontend Errors Tab
 // ============================================
 
-function FrontendErrorsTab({ start_date, end_date }: TabTimeRange) {
-  const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<FilterCondition[]>([])
+function FrontendErrorsTab() {
   const [detailModal, setDetailModal] = useState<FrontendError | null>(null)
 
-  const { data, isLoading } = useFrontendErrors({
-    page,
-    pageSize: PAGE_SIZE,
-    error_type: getFilterValue(filters, 'error_type'),
-    start_date,
-    end_date,
-  })
-
-  const errors = data?.data ?? []
-  const total = data?.total ?? 0
-
-  const columns: ColumnProps<FrontendError>[] = [
+  const columns = useMemo<NotionColumnDef<FrontendError>[]>(() => [
     {
-      title: 'Time',
-      dataIndex: 'created_at',
-      width: 180,
-      render: (_, record) => (
+      key: 'created_at',
+      header: 'Time',
+      type: 'date',
+      filterable: true,
+      sortable: true,
+      required: true,
+      size: 180,
+      cell: (row) => (
         <Typography.Text style={{ fontSize: 13 }}>
-          {formatDateTime(record.created_at)}
+          {formatDateTime(row.created_at)}
         </Typography.Text>
       ),
     },
     {
-      title: 'Type',
-      dataIndex: 'error_type',
-      width: 160,
-      render: (_, record) => (
-        <Tag color={record.error_type === 'runtime' ? 'red' : record.error_type === 'network' ? 'orange' : 'purple'} size="small">
-          {record.error_type}
+      key: 'error_type',
+      header: 'Type',
+      type: 'select',
+      filterable: true,
+      size: 160,
+      filterOptions: [
+        { value: 'runtime', label: 'Runtime' },
+        { value: 'network', label: 'Network' },
+        { value: 'unhandled_rejection', label: 'Unhandled Rejection' },
+      ],
+      cell: (row) => (
+        <Tag
+          color={row.error_type === 'runtime' ? 'red' : row.error_type === 'network' ? 'orange' : 'purple'}
+          size="small"
+        >
+          {row.error_type}
         </Tag>
       ),
     },
     {
-      title: 'Message',
-      dataIndex: 'message',
-      render: (_, record) => (
+      key: 'message',
+      header: 'Message',
+      type: 'text',
+      filterable: true,
+      required: true,
+      cell: (row) => (
         <Typography.Text style={{ fontSize: 13 }} ellipsis>
-          {record.message || '-'}
+          {row.message || '-'}
         </Typography.Text>
       ),
     },
     {
-      title: 'Page',
-      dataIndex: 'url',
-      width: 200,
-      render: (_, record) => (
+      key: 'url',
+      header: 'Page',
+      type: 'text',
+      size: 200,
+      cell: (row) => (
         <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
-          {record.url ? new URL(record.url).pathname : '-'}
+          {row.url
+            ? (() => { try { return new URL(row.url).pathname } catch { return row.url } })()
+            : '-'}
         </Typography.Text>
       ),
     },
     {
-      title: 'User',
-      dataIndex: 'user_email',
-      width: 160,
-      render: (_, record) => record.user_email || '-',
+      key: 'user_email',
+      header: 'User',
+      type: 'text',
+      size: 160,
+      cell: (row) => row.user_email || '-',
     },
     {
-      title: '',
-      width: 48,
-      render: (_, record) => (
+      key: 'actions',
+      header: '',
+      type: 'text',
+      required: true,
+      size: 48,
+      cell: (row) => (
         <Button
           type="text"
           size="mini"
           icon={<IconEye />}
-          onClick={() => setDetailModal(record)}
+          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
         />
       ),
     },
-  ]
+  ], [])
+
+  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<FrontendError>({
+    tableKey: 'frontend-errors',
+    columns,
+    defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+    defaultPageSize: 50,
+    fetchData: async ({ page, pageSize, filters }) => {
+      const errorTypeFilter = filters.find((f) => f.field === 'error_type')
+      const dateParams = buildDateParams(filters, 'created_at')
+
+      const { data } = await apiClient.get('/api/v1/admin/request-logs/frontend-errors', {
+        params: {
+          page,
+          pageSize,
+          ...(errorTypeFilter?.value && { error_type: errorTypeFilter.value }),
+          ...dateParams,
+        },
+      })
+      return { items: data.data, total: data.total }
+    },
+  })
+
+  const exportButton = (
+    <Button
+      icon={<IconExport />}
+      size="small"
+      onClick={() => exportToCsv(
+        `frontend-errors-${new Date().toISOString().slice(0, 10)}.csv`,
+        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+        [
+          { key: 'created_at', label: 'Time' },
+          { key: 'error_type', label: 'Type' },
+          { key: 'message', label: 'Message' },
+          { key: 'url', label: 'URL' },
+          { key: 'user_email', label: 'User' },
+          { key: 'stack', label: 'Stack Trace' },
+        ],
+      )}
+    >
+      Export
+    </Button>
+  )
 
   return (
     <>
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <FilterBuilder
-            fields={FRONTEND_ERROR_FIELDS}
-            filters={filters}
-            onChange={(f) => { setFilters(f); setPage(1) }}
-          />
-          <Button
-            icon={<IconExport />}
-            size="small"
-            style={{ flexShrink: 0, marginLeft: 16 }}
-            onClick={() => exportToCsv(
-              `frontend-errors-${new Date().toISOString().slice(0, 10)}.csv`,
-              errors as unknown as Record<string, unknown>[],
-              [
-                { key: 'created_at', label: 'Time' },
-                { key: 'error_type', label: 'Type' },
-                { key: 'message', label: 'Message' },
-                { key: 'url', label: 'URL' },
-                { key: 'user_email', label: 'User' },
-                { key: 'stack', label: 'Stack Trace' },
-              ],
-            )}
-          >
-            Export
-          </Button>
-        </div>
-      </Card>
-
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          data={errors}
-          loading={isLoading}
-          pagination={{
-            current: page,
-            pageSize: PAGE_SIZE,
-            total,
-            onChange: setPage,
-            showTotal: (t) => `Total ${t} entries`,
-            sizeCanChange: false,
-          }}
-          noDataElement={<EmptyState description="No frontend errors found" />}
-        />
-      </Card>
+      <NotionTable<FrontendError>
+        table={table}
+        toolbarProps={toolbarProps}
+        pagination={pagination}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        toolbarExtra={exportButton}
+        emptyText="No frontend errors found"
+      />
 
       <Modal
         title="Frontend Error Details"
@@ -530,7 +559,9 @@ function FrontendErrorsTab({ start_date, end_date }: TabTimeRange) {
                 {
                   label: 'Type',
                   value: (
-                    <Tag color={detailModal.error_type === 'runtime' ? 'red' : detailModal.error_type === 'network' ? 'orange' : 'purple'}>
+                    <Tag
+                      color={detailModal.error_type === 'runtime' ? 'red' : detailModal.error_type === 'network' ? 'orange' : 'purple'}
+                    >
                       {detailModal.error_type}
                     </Tag>
                   ),
@@ -579,26 +610,10 @@ function FrontendErrorsTab({ start_date, end_date }: TabTimeRange) {
 }
 
 // ============================================
-// Application Logs Tab
+// Application Logs Tab (Hybrid: NotionTable + Live Tail)
 // ============================================
 
-function getLogLevelColor(level: string): string {
-  switch (level) {
-    case 'DEBUG': return 'gray'
-    case 'INFO': return 'arcoblue'
-    case 'SUCCESS': return 'green'
-    case 'WARNING': return 'gold'
-    case 'ERROR': return 'orange'
-    case 'CRITICAL': return 'red'
-    default: return 'gray'
-  }
-}
-
-const LIVE_TAIL_MAX = 200
-
-function ApplicationLogsTab({ start_date, end_date }: TabTimeRange) {
-  const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<FilterCondition[]>([])
+function ApplicationLogsTab() {
   const [detailModal, setDetailModal] = useState<AppLog | null>(null)
 
   // Live Tail state
@@ -608,20 +623,116 @@ function ApplicationLogsTab({ start_date, end_date }: TabTimeRange) {
   const [newIds, setNewIds] = useState<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const { data, isLoading } = useAppLogs({
-    page,
-    pageSize: PAGE_SIZE,
-    level: getFilterValue(filters, 'level'),
-    module: getFilterValue(filters, 'module'),
-    message: getFilterValue(filters, 'message'),
-    start_date,
-    end_date,
+  const columns = useMemo<NotionColumnDef<AppLog>[]>(() => [
+    {
+      key: 'logged_at',
+      header: 'Time',
+      type: 'date',
+      filterable: true,
+      sortable: true,
+      required: true,
+      size: 180,
+      cell: (row) => (
+        <Typography.Text style={{ fontSize: 13 }}>
+          {formatDateTime(row.logged_at)}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'level',
+      header: 'Level',
+      type: 'select',
+      filterable: true,
+      size: 100,
+      filterOptions: [
+        { value: 'DEBUG', label: 'DEBUG' },
+        { value: 'INFO', label: 'INFO' },
+        { value: 'SUCCESS', label: 'SUCCESS' },
+        { value: 'WARNING', label: 'WARNING' },
+        { value: 'ERROR', label: 'ERROR' },
+        { value: 'CRITICAL', label: 'CRITICAL' },
+      ],
+      cell: (row) => (
+        <Tag color={getLogLevelColor(row.level)} size="small">{row.level}</Tag>
+      ),
+    },
+    {
+      key: 'module',
+      header: 'Location',
+      type: 'text',
+      filterable: true,
+      size: 280,
+      cell: (row) => (
+        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+          {[row.module, row.function, row.line].filter(Boolean).join(':')}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'message',
+      header: 'Message',
+      type: 'text',
+      filterable: true,
+      required: true,
+      cell: (row) => {
+        const shortModule = row.module
+          ? row.module.split('.').pop() || row.module
+          : ''
+        return (
+          <Space size={4}>
+            {shortModule && (
+              <Tag size="small" color="arcoblue" style={{ fontSize: 11, flexShrink: 0 }}>
+                {shortModule}
+              </Tag>
+            )}
+            <Typography.Text style={{ fontSize: 13 }} ellipsis>
+              {row.message}
+            </Typography.Text>
+          </Space>
+        )
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      type: 'text',
+      required: true,
+      size: 48,
+      cell: (row) => (
+        <Button
+          type="text"
+          size="mini"
+          icon={<IconEye />}
+          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
+        />
+      ),
+    },
+  ], [])
+
+  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<AppLog>({
+    tableKey: 'app-logs',
+    columns,
+    defaultSorts: [{ field: 'logged_at', direction: 'desc' }],
+    defaultPageSize: 50,
+    fetchData: async ({ page, pageSize, filters }) => {
+      const levelFilter = filters.find((f) => f.field === 'level')
+      const moduleFilter = filters.find((f) => f.field === 'module')
+      const dateParams = buildDateParams(filters, 'logged_at')
+
+      const { data } = await apiClient.get('/api/v1/admin/request-logs/app-logs', {
+        params: {
+          page,
+          pageSize,
+          ...(levelFilter?.value && { level: levelFilter.value }),
+          ...(moduleFilter?.value && { module: moduleFilter.value }),
+          ...dateParams,
+        },
+      })
+      return { items: data.data, total: data.total }
+    },
   })
 
-  const logs = data?.data ?? []
-  const total = data?.total ?? 0
-
-  // Supabase Realtime subscription
+  // Supabase Realtime subscription for Live Tail
   useEffect(() => {
     if (!liveTail) return
 
@@ -635,16 +746,12 @@ function ApplicationLogsTab({ start_date, end_date }: TabTimeRange) {
         { event: 'INSERT', schema: 'public', table: 'application_logs' },
         (payload) => {
           const row = payload.new as AppLog
-          setRealtimeLogs((prev) => {
-            const next = [row, ...prev]
-            return next.slice(0, LIVE_TAIL_MAX)
-          })
+          setRealtimeLogs((prev) => [row, ...prev].slice(0, LIVE_TAIL_MAX))
           setNewIds((prev) => {
             const next = new Set(prev)
             next.add(row.id)
             return next
           })
-          // Clear highlight after animation
           setTimeout(() => {
             setNewIds((prev) => {
               const next = new Set(prev)
@@ -677,220 +784,207 @@ function ApplicationLogsTab({ start_date, end_date }: TabTimeRange) {
     }
   }, [])
 
-  const displayLogs = liveTail ? realtimeLogs : logs
-
-  const columns: ColumnProps<AppLog>[] = [
-    {
-      title: 'Time',
-      dataIndex: 'logged_at',
-      width: 180,
-      render: (_, record) => (
-        <Typography.Text style={{ fontSize: 13 }}>
-          {formatDateTime(record.logged_at)}
-        </Typography.Text>
-      ),
-    },
-    {
-      title: 'Level',
-      dataIndex: 'level',
-      width: 100,
-      render: (_, record) => (
-        <Tag color={getLogLevelColor(record.level)} size="small">
-          {record.level}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Location',
-      dataIndex: 'module',
-      width: 280,
-      render: (_, record) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
-          {[record.module, record.function, record.line].filter(Boolean).join(':')}
-        </Typography.Text>
-      ),
-    },
-    {
-      title: 'Message',
-      dataIndex: 'message',
-      render: (_, record) => {
-        const shortModule = record.module
-          ? record.module.split('.').pop() || record.module
-          : ''
-        return (
-          <Space size={4}>
-            {shortModule && (
-              <Tag size="small" color="arcoblue" style={{ fontSize: 11, flexShrink: 0 }}>
-                {shortModule}
-              </Tag>
-            )}
-            <Typography.Text style={{ fontSize: 13 }} ellipsis>
-              {record.message}
-            </Typography.Text>
-          </Space>
-        )
-      },
-    },
-    {
-      title: '',
-      width: 48,
-      render: (_, record) => (
+  // Build toolbar extra: Live tail toggle + export button (when not in live tail)
+  const liveTailControls = (
+    <Space size={8}>
+      <Switch
+        checked={liveTail}
+        onChange={handleToggleLiveTail}
+        checkedText="Live"
+        uncheckedText="Live"
+      />
+      {liveTail && (
+        <>
+          <Tag color="green" size="small">{realtimeLogs.length} entries</Tag>
+          <Button
+            type="text"
+            size="mini"
+            icon={paused ? <IconPlayArrow /> : <IconPause />}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? 'Resume' : 'Pause'}
+          </Button>
+        </>
+      )}
+      {!liveTail && (
         <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={() => setDetailModal(record)}
-        />
-      ),
-    },
-  ]
+          icon={<IconExport />}
+          size="small"
+          onClick={() => exportToCsv(
+            `app-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+            table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+            [
+              { key: 'logged_at', label: 'Time' },
+              { key: 'level', label: 'Level' },
+              { key: 'module', label: 'Module' },
+              { key: 'function', label: 'Function' },
+              { key: 'message', label: 'Message' },
+              { key: 'exception', label: 'Exception' },
+            ],
+          )}
+        >
+          Export
+        </Button>
+      )}
+    </Space>
+  )
+
+  // Detail modal (shared between both modes)
+  const detailModalElement = (
+    <Modal
+      title="Application Log Details"
+      visible={!!detailModal}
+      onCancel={() => setDetailModal(null)}
+      footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
+      style={{ width: 720 }}
+    >
+      {detailModal && (
+        <>
+          <Descriptions
+            column={2}
+            data={[
+              { label: 'Time', value: formatDateTime(detailModal.logged_at) },
+              {
+                label: 'Level',
+                value: (
+                  <Tag color={getLogLevelColor(detailModal.level)}>
+                    {detailModal.level}
+                  </Tag>
+                ),
+              },
+              { label: 'Module', value: detailModal.module || '-' },
+              { label: 'Function', value: detailModal.function || '-' },
+              { label: 'Line', value: detailModal.line ?? '-' },
+              { label: 'File', value: detailModal.file_path || '-' },
+            ]}
+            style={{ marginBottom: 16 }}
+          />
+
+          <div style={{ marginBottom: 12 }}>
+            <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
+              Message
+            </Typography.Text>
+            <pre style={preStyle}>{detailModal.message}</pre>
+          </div>
+
+          {detailModal.exception && (
+            <div style={{ marginBottom: 12 }}>
+              <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
+                Exception
+              </Typography.Text>
+              <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>
+                {detailModal.exception}
+              </pre>
+            </div>
+          )}
+
+          {detailModal.extra && Object.keys(detailModal.extra).length > 0 && (
+            <div>
+              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
+                Extra
+              </Typography.Text>
+              <pre style={preStyle}>
+                {JSON.stringify(detailModal.extra, null, 2)}
+              </pre>
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
+  )
+
+  // When liveTail is on, render a simple live tail view instead of NotionTable
+  if (liveTail) {
+    return (
+      <>
+        <Card>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+            {liveTailControls}
+          </div>
+          <div ref={scrollRef}>
+            <style>{`
+              @keyframes liveTailHighlight {
+                from { background-color: var(--color-primary-1); }
+                to { background-color: transparent; }
+              }
+              .live-tail-new-row td {
+                animation: liveTailHighlight 2s ease-out;
+              }
+            `}</style>
+            <div className="notion-table-wrapper">
+              <table className="notion-table" style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 180 }}>Time</th>
+                    <th style={{ width: 100 }}>Level</th>
+                    <th style={{ width: 280 }}>Location</th>
+                    <th>Message</th>
+                    <th style={{ width: 48 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {realtimeLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-3)' }}>
+                        Waiting for new logs...
+                      </td>
+                    </tr>
+                  ) : (
+                    realtimeLogs.map((log) => (
+                      <tr key={log.id} className={newIds.has(log.id) ? 'live-tail-new-row' : ''}>
+                        <td>
+                          <Typography.Text style={{ fontSize: 13 }}>
+                            {formatDateTime(log.logged_at)}
+                          </Typography.Text>
+                        </td>
+                        <td>
+                          <Tag color={getLogLevelColor(log.level)} size="small">{log.level}</Tag>
+                        </td>
+                        <td>
+                          <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+                            {[log.module, log.function, log.line].filter(Boolean).join(':')}
+                          </Typography.Text>
+                        </td>
+                        <td>
+                          <Space size={4}>
+                            {log.module && (
+                              <Tag size="small" color="arcoblue" style={{ fontSize: 11 }}>
+                                {log.module.split('.').pop()}
+                              </Tag>
+                            )}
+                            <Typography.Text style={{ fontSize: 13 }} ellipsis>
+                              {log.message}
+                            </Typography.Text>
+                          </Space>
+                        </td>
+                        <td>
+                          <Button type="text" size="mini" icon={<IconEye />} onClick={() => setDetailModal(log)} />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Card>
+        {detailModalElement}
+      </>
+    )
+  }
 
   return (
     <>
-      <Card style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="medium">
-          <Space size={8}>
-            <Switch
-              checked={liveTail}
-              onChange={handleToggleLiveTail}
-              checkedText="Live"
-              uncheckedText="Live"
-            />
-            {liveTail && (
-              <>
-                <Tag color="green" size="small">{realtimeLogs.length} entries</Tag>
-                <Button
-                  type="text"
-                  size="mini"
-                  icon={paused ? <IconPlayArrow /> : <IconPause />}
-                  onClick={() => setPaused((p) => !p)}
-                >
-                  {paused ? 'Resume' : 'Pause'}
-                </Button>
-              </>
-            )}
-          </Space>
-          {!liveTail && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <FilterBuilder
-                fields={APP_LOG_FIELDS}
-                filters={filters}
-                onChange={(f) => { setFilters(f); setPage(1) }}
-              />
-              <Button
-                icon={<IconExport />}
-                size="small"
-                style={{ flexShrink: 0, marginLeft: 16 }}
-                onClick={() => exportToCsv(
-                  `app-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-                  logs as unknown as Record<string, unknown>[],
-                  [
-                    { key: 'logged_at', label: 'Time' },
-                    { key: 'level', label: 'Level' },
-                    { key: 'module', label: 'Module' },
-                    { key: 'function', label: 'Function' },
-                    { key: 'message', label: 'Message' },
-                    { key: 'exception', label: 'Exception' },
-                  ],
-                )}
-              >
-                Export
-              </Button>
-            </div>
-          )}
-        </Space>
-      </Card>
-
-      <Card>
-        <div ref={scrollRef}>
-          <style>{`
-            @keyframes liveTailHighlight {
-              from { background-color: var(--color-primary-1); }
-              to { background-color: transparent; }
-            }
-            .live-tail-new-row td {
-              animation: liveTailHighlight 2s ease-out;
-            }
-          `}</style>
-          <Table
-            rowKey="id"
-            columns={columns}
-            data={displayLogs}
-            loading={!liveTail && isLoading}
-            rowClassName={(record) => newIds.has(record.id) ? 'live-tail-new-row' : ''}
-            pagination={liveTail ? false : {
-              current: page,
-              pageSize: PAGE_SIZE,
-              total,
-              onChange: setPage,
-              showTotal: (t: number) => `Total ${t} entries`,
-              sizeCanChange: false,
-            }}
-            noDataElement={<EmptyState description={liveTail ? 'Waiting for new logs...' : 'No application logs found'} />}
-          />
-        </div>
-      </Card>
-
-      <Modal
-        title="Application Log Details"
-        visible={!!detailModal}
-        onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-        style={{ width: 720 }}
-      >
-        {detailModal && (
-          <>
-            <Descriptions
-              column={2}
-              data={[
-                { label: 'Time', value: formatDateTime(detailModal.logged_at) },
-                {
-                  label: 'Level',
-                  value: (
-                    <Tag color={getLogLevelColor(detailModal.level)}>
-                      {detailModal.level}
-                    </Tag>
-                  ),
-                },
-                { label: 'Module', value: detailModal.module || '-' },
-                { label: 'Function', value: detailModal.function || '-' },
-                { label: 'Line', value: detailModal.line ?? '-' },
-                { label: 'File', value: detailModal.file_path || '-' },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
-
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                Message
-              </Typography.Text>
-              <pre style={preStyle}>{detailModal.message}</pre>
-            </div>
-
-            {detailModal.exception && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
-                  Exception
-                </Typography.Text>
-                <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>
-                  {detailModal.exception}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.extra && Object.keys(detailModal.extra).length > 0 && (
-              <div>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Extra
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.extra, null, 2)}
-                </pre>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
+      <NotionTable<AppLog>
+        table={table}
+        toolbarProps={toolbarProps}
+        pagination={pagination}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        toolbarExtra={liveTailControls}
+        emptyText="No application logs found"
+      />
+      {detailModalElement}
     </>
   )
 }
@@ -899,49 +993,21 @@ function ApplicationLogsTab({ start_date, end_date }: TabTimeRange) {
 // Main Component
 // ============================================
 
-const preStyle: React.CSSProperties = {
-  padding: 16,
-  background: 'var(--color-fill-2)',
-  borderRadius: 4,
-  overflow: 'auto',
-  fontSize: 13,
-  fontFamily: 'monospace',
-  margin: 0,
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-all',
-}
-
 export function RequestLogs() {
-  const [period, setPeriod] = useState('24h')
-  const [dateRange, setDateRange] = useState<[string, string] | null>(null)
-
-  const timeRange = periodToDateRange(period, dateRange)
-
   return (
     <div>
-      <PageHeader
-        title="Request Logs"
-        subtitle="View API request logs, frontend errors, and application logs"
-        icon={<IconCode />}
-        breadcrumb={['Logs & Monitoring', 'Request Logs']}
-      />
-      <Card style={{ marginBottom: 16 }}>
-        <TimeRangeSelector
-          period={period}
-          onPeriodChange={setPeriod}
-          dateRange={dateRange}
-          onDateRangeChange={setDateRange}
-        />
-      </Card>
+      <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
+        Request Logs
+      </Typography.Title>
       <Tabs defaultActiveTab="requests" type="card-gutter">
         <Tabs.TabPane key="requests" title="Request Logs">
-          <RequestLogsTab {...timeRange} />
+          <RequestLogsTab />
         </Tabs.TabPane>
         <Tabs.TabPane key="errors" title="Frontend Logs">
-          <FrontendErrorsTab {...timeRange} />
+          <FrontendErrorsTab />
         </Tabs.TabPane>
         <Tabs.TabPane key="app-logs" title="Application Logs">
-          <ApplicationLogsTab {...timeRange} />
+          <ApplicationLogsTab />
         </Tabs.TabPane>
       </Tabs>
     </div>
