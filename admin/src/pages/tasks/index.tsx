@@ -1,18 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Table,
-  Input,
-  Select,
   Tag,
   Card,
-  Space,
-  Typography,
-  Statistic,
   Grid,
-  Button,
-  Tooltip,
+  Statistic,
+  Typography,
   Progress,
+  Tooltip,
+  Button,
+  Space,
   Message,
   Modal,
 } from '@arco-design/web-react'
@@ -25,36 +22,34 @@ import {
   IconRefresh,
   IconMinus,
 } from '@arco-design/web-react/icon'
-import type { ColumnProps } from '@arco-design/web-react/es/Table'
-import {
-  useAdminTasks,
-  useAdminTaskStats,
-  useCancelTask,
-  useRetryTask,
-} from '../../api/endpoints/tasks'
+import { NotionTable } from '../../components/notion-table'
+import type { NotionColumnDef } from '../../components/notion-table'
+import { useNotionTable } from '../../hooks/useNotionTable'
+import { apiClient } from '../../api/client'
 import type { AdminTaskData } from '../../api/endpoints/tasks'
+import { useAdminTaskStats, useCancelTask, useRetryTask } from '../../api/endpoints/tasks'
 import { formatDateTime } from '../../utils/format'
 import { supabase } from '../../auth/supabase'
 
-const PAGE_SIZE = 20
+// --- Constants ---
 
-const STATUS_OPTIONS = [
-  { value: 'pending', label: 'Pending' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'cancelled', label: 'Cancelled' },
+const STATUS_FILTER_OPTIONS = [
+  { label: 'Pending', value: 'pending' },
+  { label: 'Processing', value: 'processing' },
+  { label: 'Completed', value: 'completed' },
+  { label: 'Failed', value: 'failed' },
+  { label: 'Cancelled', value: 'cancelled' },
 ]
 
-const TASK_TYPE_OPTIONS = [
-  { value: 'parse', label: 'Parse' },
-  { value: 'download', label: 'Download' },
-  { value: 'upload', label: 'Upload' },
-  { value: 'transcode', label: 'Transcode' },
-  { value: 'ai_pipeline', label: 'AI Pipeline' },
-  { value: 'ai_extract', label: 'AI Extract' },
-  { value: 'ai_transcription', label: 'AI Transcription' },
-  { value: 'ai_summary', label: 'AI Summary' },
+const TYPE_FILTER_OPTIONS = [
+  { label: 'Parse', value: 'parse' },
+  { label: 'Download', value: 'download' },
+  { label: 'Upload', value: 'upload' },
+  { label: 'Transcode', value: 'transcode' },
+  { label: 'AI Pipeline', value: 'ai_pipeline' },
+  { label: 'AI Extract', value: 'ai_extract' },
+  { label: 'AI Transcription', value: 'ai_transcription' },
+  { label: 'AI Summary', value: 'ai_summary' },
 ]
 
 const STATUS_TAG_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
@@ -76,29 +71,170 @@ const TYPE_TAG_COLORS: Record<string, string> = {
   ai_summary: 'gold',
 }
 
-function formatSpeed(speed: number | null) {
+// --- Helpers ---
+
+function formatSpeed(speed: number | null): string {
   if (!speed) return ''
   if (speed < 1024) return `${speed} B/s`
   if (speed < 1024 * 1024) return `${(speed / 1024).toFixed(1)} KB/s`
   return `${(speed / 1024 / 1024).toFixed(1)} MB/s`
 }
 
+// --- Sub-components ---
+
+function StatsCards() {
+  const { data: stats } = useAdminTaskStats()
+  if (!stats) return null
+
+  return (
+    <Grid.Row gutter={16} style={{ marginBottom: 16 }}>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic title="Total" value={stats.total} />
+        </Card>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic
+            title="Processing"
+            value={stats.processing}
+            styleValue={{ color: 'rgb(var(--blue-6))' }}
+          />
+        </Card>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic
+            title="Pending"
+            value={stats.pending}
+            styleValue={{ color: 'rgb(var(--orange-6))' }}
+          />
+        </Card>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic
+            title="Completed"
+            value={stats.completed}
+            styleValue={{ color: 'rgb(var(--green-6))' }}
+          />
+        </Card>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic
+            title="Failed"
+            value={stats.failed}
+            styleValue={{ color: 'rgb(var(--red-6))' }}
+          />
+        </Card>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Card>
+          <Statistic
+            title="Cancelled"
+            value={stats.cancelled}
+            styleValue={{ color: 'var(--color-text-3)' }}
+          />
+        </Card>
+      </Grid.Col>
+    </Grid.Row>
+  )
+}
+
+function TitleCell({ record }: { record: AdminTaskData }) {
+  return (
+    <div>
+      <Typography.Text ellipsis style={{ maxWidth: 260 }}>
+        {record.title || 'Untitled'}
+      </Typography.Text>
+      {record.subtitle && (
+        <>
+          <br />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+            {record.subtitle}
+          </Typography.Text>
+        </>
+      )}
+      {record.error_msg && (
+        <>
+          <br />
+          <Tooltip content={record.error_msg}>
+            <Typography.Text type="error" style={{ fontSize: 12 }} ellipsis={{ rows: 1 }}>
+              {record.error_msg}
+            </Typography.Text>
+          </Tooltip>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ProgressCell({ record }: { record: AdminTaskData }) {
+  if (record.status !== 'processing') return null
+  return (
+    <div>
+      <Progress percent={record.progress} size="small" status="normal" style={{ width: 120 }} />
+      {record.speed ? (
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+          {formatSpeed(record.speed)}
+        </Typography.Text>
+      ) : null}
+    </div>
+  )
+}
+
+function ActionsCell({
+  record,
+  actionLoadingId,
+  onCancel,
+  onRetry,
+}: {
+  record: AdminTaskData
+  actionLoadingId: string | null
+  onCancel: (record: AdminTaskData) => void
+  onRetry: (record: AdminTaskData) => void
+}) {
+  const isLoading = actionLoadingId === record.id
+  const canCancel = record.status === 'pending' || record.status === 'processing'
+  const canRetry = record.status === 'failed'
+
+  return (
+    <Space size="mini">
+      {canCancel && (
+        <Tooltip content="Cancel">
+          <Button
+            type="text"
+            icon={<IconStop />}
+            size="small"
+            status="danger"
+            loading={isLoading}
+            onClick={() => onCancel(record)}
+          />
+        </Tooltip>
+      )}
+      {canRetry && (
+        <Tooltip content="Retry">
+          <Button
+            type="text"
+            icon={<IconRefresh />}
+            size="small"
+            loading={isLoading}
+            onClick={() => onRetry(record)}
+          />
+        </Tooltip>
+      )}
+    </Space>
+  )
+}
+
+// --- Main component ---
+
 export function TaskCenter() {
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
   const queryClient = useQueryClient()
-
-  const { data, isLoading } = useAdminTasks({
-    page,
-    pageSize: PAGE_SIZE,
-    search,
-    status: statusFilter,
-    taskType: typeFilter,
-  })
-  const { data: stats } = useAdminTaskStats()
+  const cancelTask = useCancelTask()
+  const retryTask = useRetryTask()
 
   // Supabase Realtime: auto-refresh on unified_tasks changes
   useEffect(() => {
@@ -108,7 +244,7 @@ export function TaskCenter() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'unified_tasks' },
         () => {
-          queryClient.invalidateQueries({ queryKey: ['admin-tasks'] })
+          queryClient.invalidateQueries({ queryKey: ['tasks'] })
         },
       )
       .subscribe()
@@ -116,16 +252,6 @@ export function TaskCenter() {
       supabase.removeChannel(channel)
     }
   }, [queryClient])
-  const cancelTask = useCancelTask()
-  const retryTask = useRetryTask()
-
-  const items = data?.items ?? []
-  const total = data?.total ?? 0
-
-  const handleSearch = (value: string) => {
-    setSearch(value)
-    setPage(1)
-  }
 
   const handleCancel = (record: AdminTaskData) => {
     Modal.confirm({
@@ -151,260 +277,138 @@ export function TaskCenter() {
     })
   }
 
-  const columns: ColumnProps<AdminTaskData>[] = [
-    {
-      title: 'Title',
-      dataIndex: 'title',
-      render: (_: unknown, record: AdminTaskData) => (
-        <div>
-          <Typography.Text ellipsis style={{ maxWidth: 260 }}>
-            {record.title || 'Untitled'}
+  const columns = useMemo<NotionColumnDef<AdminTaskData>[]>(
+    () => [
+      {
+        key: 'title',
+        header: 'Title',
+        type: 'text',
+        filterable: true,
+        sortable: true,
+        required: true,
+        minSize: 200,
+        cell: (row) => <TitleCell record={row} />,
+      },
+      {
+        key: 'user_email',
+        header: 'User',
+        type: 'text',
+        filterable: true,
+        size: 160,
+        cell: (row) => (
+          <Typography.Text ellipsis style={{ maxWidth: 140 }}>
+            {row.user_email || '-'}
           </Typography.Text>
-          {record.subtitle && (
-            <>
-              <br />
-              <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
-                {record.subtitle}
-              </Typography.Text>
-            </>
-          )}
-          {record.error_msg && (
-            <>
-              <br />
-              <Tooltip content={record.error_msg}>
-                <Typography.Text type="error" style={{ fontSize: 12 }} ellipsis={{ rows: 1 }}>
-                  {record.error_msg}
-                </Typography.Text>
-              </Tooltip>
-            </>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: 'User',
-      dataIndex: 'user_email',
-      width: 160,
-      render: (value: string | null) => (
-        <Typography.Text ellipsis style={{ maxWidth: 140 }}>
-          {value || '-'}
-        </Typography.Text>
-      ),
-    },
-    {
-      title: 'Type',
-      dataIndex: 'task_type',
-      width: 120,
-      render: (value: string) => (
-        <Tag size="small" color={TYPE_TAG_COLORS[value] || 'gray'}>
-          {value}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Status',
-      dataIndex: 'status',
-      width: 130,
-      render: (value: string) => {
-        const config = STATUS_TAG_CONFIG[value] || { color: 'gray', icon: null }
-        return (
-          <Tag icon={config.icon} color={config.color}>
-            {value.charAt(0).toUpperCase() + value.slice(1)}
+        ),
+      },
+      {
+        key: 'task_type',
+        header: 'Type',
+        type: 'select',
+        filterable: true,
+        size: 120,
+        filterOptions: TYPE_FILTER_OPTIONS,
+        cell: (row) => (
+          <Tag size="small" color={TYPE_TAG_COLORS[row.task_type] || 'gray'}>
+            {row.task_type}
           </Tag>
-        )
+        ),
       },
-    },
-    {
-      title: 'Progress',
-      dataIndex: 'progress',
-      width: 160,
-      render: (_: unknown, record: AdminTaskData) => {
-        if (record.status !== 'processing') return null
-        return (
-          <div>
-            <Progress
-              percent={record.progress}
-              size="small"
-              status="normal"
-              style={{ width: 120 }}
-            />
-            {record.speed ? (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                {formatSpeed(record.speed)}
-              </Typography.Text>
-            ) : null}
-          </div>
-        )
+      {
+        key: 'status',
+        header: 'Status',
+        type: 'select',
+        filterable: true,
+        sortable: true,
+        size: 130,
+        filterOptions: STATUS_FILTER_OPTIONS,
+        cell: (row) => {
+          const config = STATUS_TAG_CONFIG[row.status] || { color: 'gray', icon: null }
+          return (
+            <Tag icon={config.icon} color={config.color}>
+              {row.status.charAt(0).toUpperCase() + row.status.slice(1)}
+            </Tag>
+          )
+        },
       },
-    },
-    {
-      title: 'Created',
-      dataIndex: 'created_at',
-      width: 140,
-      render: (value: string) => formatDateTime(value),
-    },
-    {
-      title: 'Actions',
-      width: 90,
-      align: 'center',
-      render: (_: unknown, record: AdminTaskData) => {
-        const isLoading = actionLoadingId === record.id
-        const canCancel = record.status === 'pending' || record.status === 'processing'
-        const canRetry = record.status === 'failed'
+      {
+        key: 'progress',
+        header: 'Progress',
+        type: 'number',
+        size: 160,
+        cell: (row) => <ProgressCell record={row} />,
+      },
+      {
+        key: 'created_at',
+        header: 'Created',
+        type: 'date',
+        filterable: true,
+        sortable: true,
+        size: 140,
+        cell: (row) => formatDateTime(row.created_at),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        type: 'text',
+        required: true,
+        size: 90,
+        cell: (row) => (
+          <ActionsCell
+            record={row}
+            actionLoadingId={actionLoadingId}
+            onCancel={handleCancel}
+            onRetry={handleRetry}
+          />
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [actionLoadingId],
+  )
 
-        return (
-          <Space size="mini">
-            {canCancel && (
-              <Tooltip content="Cancel">
-                <Button
-                  type="text"
-                  icon={<IconStop />}
-                  size="small"
-                  status="danger"
-                  loading={isLoading}
-                  onClick={() => handleCancel(record)}
-                />
-              </Tooltip>
-            )}
-            {canRetry && (
-              <Tooltip content="Retry">
-                <Button
-                  type="text"
-                  icon={<IconRefresh />}
-                  size="small"
-                  loading={isLoading}
-                  onClick={() => handleRetry(record)}
-                />
-              </Tooltip>
-            )}
-          </Space>
-        )
-      },
+  const {
+    table,
+    toolbarProps,
+    pagination,
+    isLoading,
+    setPage,
+  } = useNotionTable<AdminTaskData>({
+    tableKey: 'tasks',
+    columns,
+    defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+    fetchData: async ({ page, pageSize, filters, sorts, search }) => {
+      const statusFilter = filters.find((f) => f.field === 'status')
+      const typeFilter = filters.find((f) => f.field === 'task_type')
+      const sortBy = sorts[0]?.field
+      const sortOrder = sorts[0]?.direction
+
+      const { data } = await apiClient.get('/api/v1/admin/tasks', {
+        params: {
+          page,
+          page_size: pageSize,
+          ...(search && { search }),
+          ...(statusFilter?.value && { status: statusFilter.value }),
+          ...(typeFilter?.value && { task_type: typeFilter.value }),
+          ...(sortBy && { sort_by: sortBy }),
+          ...(sortOrder && { sort_order: sortOrder }),
+        },
+      })
+      return { items: data.items, total: data.total }
     },
-  ]
+  })
 
   return (
-    <div>
-      <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
-        Tasks
-      </Typography.Title>
-
-      {stats && (
-        <Grid.Row gutter={16} style={{ marginBottom: 16 }}>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic title="Total" value={stats.total} />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic
-                title="Processing"
-                value={stats.processing}
-                styleValue={{ color: 'rgb(var(--blue-6))' }}
-              />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic
-                title="Pending"
-                value={stats.pending}
-                styleValue={{ color: 'rgb(var(--orange-6))' }}
-              />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic
-                title="Completed"
-                value={stats.completed}
-                styleValue={{ color: 'rgb(var(--green-6))' }}
-              />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic
-                title="Failed"
-                value={stats.failed}
-                styleValue={{ color: 'rgb(var(--red-6))' }}
-              />
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={4}>
-            <Card>
-              <Statistic
-                title="Cancelled"
-                value={stats.cancelled}
-                styleValue={{ color: 'var(--color-text-3)' }}
-              />
-            </Card>
-          </Grid.Col>
-        </Grid.Row>
-      )}
-
-      <Card style={{ marginBottom: 16 }}>
-        <Space size="medium" wrap align="center">
-          <Input.Search
-            placeholder="Search by title..."
-            onSearch={handleSearch}
-            style={{ width: 260 }}
-            allowClear
-          />
-          <Select
-            placeholder="All Statuses"
-            value={statusFilter}
-            onChange={(value) => {
-              setStatusFilter(value || undefined)
-              setPage(1)
-            }}
-            allowClear
-            style={{ width: 150 }}
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>
-                {opt.label}
-              </Select.Option>
-            ))}
-          </Select>
-          <Select
-            placeholder="All Types"
-            value={typeFilter}
-            onChange={(value) => {
-              setTypeFilter(value || undefined)
-              setPage(1)
-            }}
-            allowClear
-            style={{ width: 150 }}
-          >
-            {TASK_TYPE_OPTIONS.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>
-                {opt.label}
-              </Select.Option>
-            ))}
-          </Select>
-        </Space>
-      </Card>
-
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          data={items}
-          loading={isLoading}
-          scroll={{ x: 1100 }}
-          pagination={{
-            current: page,
-            pageSize: PAGE_SIZE,
-            total,
-            onChange: setPage,
-            showTotal: true,
-            sizeCanChange: false,
-          }}
-          noDataElement="No tasks found"
-        />
-      </Card>
-    </div>
+    <NotionTable<AdminTaskData>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      title="Tasks"
+      headerContent={<StatsCards />}
+      emptyText="No tasks found"
+      scrollX={1100}
+    />
   )
 }
