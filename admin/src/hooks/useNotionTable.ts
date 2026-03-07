@@ -31,8 +31,8 @@ export function useNotionTable<T>(config: UseNotionTableConfig<T>) {
     rowKey = 'id',
   } = config
 
-  // --- Load saved preferences ---
-  const { data: savedPrefs, isSuccess: prefsLoaded } = useTablePreference(tableKey)
+  // --- Load saved preferences (non-blocking: data loads even if prefs fail) ---
+  const { data: savedPrefs, isSuccess: prefsLoaded, isError: prefsError } = useTablePreference(tableKey)
   const updatePrefs = useUpdateTablePreference(tableKey)
 
   // --- Local state ---
@@ -46,15 +46,17 @@ export function useNotionTable<T>(config: UseNotionTableConfig<T>) {
   const [pageSize] = useState(defaultPageSize)
   const [initialized, setInitialized] = useState(false)
 
-  // --- Initialize from saved preferences ---
+  // --- Initialize from saved preferences (or fallback to defaults on error) ---
   useEffect(() => {
-    if (prefsLoaded && !initialized) {
-      if (savedPrefs?.filters?.length) setFilters(savedPrefs.filters)
-      if (savedPrefs?.sorts?.length) setSorts(savedPrefs.sorts)
-      if (savedPrefs?.visible_columns?.length) setVisibleColumns(savedPrefs.visible_columns)
+    if (!initialized && (prefsLoaded || prefsError)) {
+      if (prefsLoaded && savedPrefs) {
+        if (savedPrefs.filters?.length) setFilters(savedPrefs.filters)
+        if (savedPrefs.sorts?.length) setSorts(savedPrefs.sorts)
+        if (savedPrefs.visible_columns?.length) setVisibleColumns(savedPrefs.visible_columns)
+      }
       setInitialized(true)
     }
-  }, [prefsLoaded, savedPrefs, initialized])
+  }, [prefsLoaded, prefsError, savedPrefs, initialized])
 
   // --- Debounced save ---
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)

@@ -27,6 +27,7 @@ export function useTablePreference(tableKey: string) {
       return data
     },
     staleTime: Infinity,
+    retry: 1,
   })
 }
 
