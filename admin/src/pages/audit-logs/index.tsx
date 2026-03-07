@@ -1,58 +1,22 @@
-import { useState } from 'react'
-import { formatDateTime } from '../../utils/format'
+import { useState, useMemo } from 'react'
 import {
-  Table,
   Tag,
   Modal,
   Descriptions,
   Typography,
   Button,
-  Card,
   Space,
 } from '@arco-design/web-react'
-import { IconEye, IconExport, IconFile } from '@arco-design/web-react/icon'
+import { IconEye, IconExport } from '@arco-design/web-react/icon'
+import { NotionTable } from '../../components/notion-table'
+import type { NotionColumnDef } from '../../components/notion-table'
+import { useNotionTable } from '../../hooks/useNotionTable'
+import { apiClient } from '../../api/client'
+import type { AuditLog } from '../../api/endpoints/audit-logs'
+import { formatDateTime } from '../../utils/format'
 import { exportToCsv } from '../../utils/csv-export'
-import type { ColumnProps } from '@arco-design/web-react/es/Table'
-import { useAuditLogs, type AuditLog } from '../../api/endpoints/audit-logs'
-import { TimeRangeSelector, periodToDateRange } from '../../components/TimeRangeSelector'
-import {
-  FilterBuilder,
-  getFilterValue,
-  type FilterField,
-  type FilterCondition,
-} from '../../components/FilterBuilder'
-import { PageHeader } from '../../components/PageHeader'
-import { EmptyState } from '../../components/EmptyState'
 
-const AUDIT_LOG_FIELDS: FilterField[] = [
-  {
-    key: 'action',
-    label: 'Action',
-    type: 'select',
-    options: [
-      { value: 'create', label: 'Create' },
-      { value: 'update', label: 'Update' },
-      { value: 'delete', label: 'Delete' },
-      { value: 'ban', label: 'Ban' },
-      { value: 'unban', label: 'Unban' },
-      { value: 'role_change', label: 'Role Change' },
-    ],
-  },
-  {
-    key: 'target_type',
-    label: 'Target Type',
-    type: 'select',
-    options: [
-      { value: 'user', label: 'User' },
-      { value: 'team', label: 'Team' },
-      { value: 'video', label: 'Video' },
-      { value: 'tag', label: 'Tag' },
-      { value: 'api_key', label: 'API Key' },
-    ],
-  },
-]
-
-const PAGE_SIZE = 50
+// --- Helpers ---
 
 function getActionColor(action: string): string {
   const a = action.toLowerCase()
@@ -90,172 +54,222 @@ function renderDetailsPreview(details: Record<string, unknown> | null): string {
   return str.slice(0, 47) + '...'
 }
 
+// --- Main component ---
+
 export function AuditLogList() {
-  const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<FilterCondition[]>([])
   const [detailsModal, setDetailsModal] = useState<AuditLog | null>(null)
-  const [period, setPeriod] = useState('24h')
-  const [dateRange, setDateRange] = useState<[string, string] | null>(null)
 
-  const timeRange = periodToDateRange(period, dateRange)
-
-  const { data, isLoading } = useAuditLogs({
-    page,
-    pageSize: PAGE_SIZE,
-    action: getFilterValue(filters, 'action'),
-    target_type: getFilterValue(filters, 'target_type'),
-    ...timeRange,
-  })
-
-  const logs = data?.items ?? []
-  const total = data?.total ?? 0
-
-  const columns: ColumnProps<AuditLog>[] = [
-    {
-      title: 'Time',
-      dataIndex: 'created_at',
-      width: 200,
-      render: (_, record) => formatDateTime(record.created_at),
-    },
-    {
-      title: 'Admin',
-      dataIndex: 'admin_email',
-      width: 200,
-      render: (_, record) => (
-        <div>
-          <div>{record.admin_email || 'Unknown'}</div>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {truncateId(record.admin_id)}
-          </Typography.Text>
-        </div>
-      ),
-    },
-    {
-      title: 'Action',
-      dataIndex: 'action',
-      width: 140,
-      render: (_, record) => (
-        <Tag color={getActionColor(record.action)}>
-          {formatAction(record.action)}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Target',
-      dataIndex: 'target_type',
-      width: 180,
-      render: (_, record) => (
-        <div>
-          <div>{formatTargetType(record.target_type)}</div>
-          <Typography.Text
-            type="secondary"
-            style={{ fontSize: 12, fontFamily: 'monospace' }}
-          >
-            {truncateId(record.target_id)}
-          </Typography.Text>
-        </div>
-      ),
-    },
-    {
-      title: 'Details',
-      dataIndex: 'details',
-      render: (_, record) =>
-        record.details ? (
-          <Space>
+  const columns = useMemo<NotionColumnDef<AuditLog>[]>(
+    () => [
+      {
+        key: 'created_at',
+        header: 'Time',
+        type: 'date',
+        filterable: true,
+        sortable: true,
+        required: true,
+        size: 200,
+        cell: (row) => formatDateTime(row.created_at),
+      },
+      {
+        key: 'admin_email',
+        header: 'Admin',
+        type: 'text',
+        filterable: true,
+        size: 200,
+        cell: (row) => (
+          <div>
+            <div>{row.admin_email || 'Unknown'}</div>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {truncateId(row.admin_id)}
+            </Typography.Text>
+          </div>
+        ),
+      },
+      {
+        key: 'action',
+        header: 'Action',
+        type: 'select',
+        filterable: true,
+        size: 140,
+        filterOptions: [
+          { value: 'create', label: 'Create' },
+          { value: 'update', label: 'Update' },
+          { value: 'delete', label: 'Delete' },
+          { value: 'ban', label: 'Ban' },
+          { value: 'unban', label: 'Unban' },
+          { value: 'role_change', label: 'Role Change' },
+        ],
+        cell: (row) => (
+          <Tag color={getActionColor(row.action)}>
+            {formatAction(row.action)}
+          </Tag>
+        ),
+      },
+      {
+        key: 'target_type',
+        header: 'Target',
+        type: 'select',
+        filterable: true,
+        size: 180,
+        filterOptions: [
+          { value: 'user', label: 'User' },
+          { value: 'team', label: 'Team' },
+          { value: 'video', label: 'Video' },
+          { value: 'tag', label: 'Tag' },
+          { value: 'api_key', label: 'API Key' },
+        ],
+        cell: (row) => (
+          <div>
+            <div>{formatTargetType(row.target_type)}</div>
             <Typography.Text
               type="secondary"
-              style={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 200 }}
-              ellipsis
+              style={{ fontSize: 12, fontFamily: 'monospace' }}
             >
-              {renderDetailsPreview(record.details)}
+              {truncateId(row.target_id)}
             </Typography.Text>
-            <Button
-              type="text"
-              size="mini"
-              icon={<IconEye />}
-              onClick={() => setDetailsModal(record)}
-            />
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">-</Typography.Text>
+          </div>
         ),
-    },
-    {
-      title: 'IP Address',
-      dataIndex: 'ip_address',
-      width: 140,
-      render: (_, record) => (
-        <Typography.Text style={{ fontFamily: 'monospace' }}>
-          {record.ip_address || '-'}
-        </Typography.Text>
-      ),
-    },
-  ]
+      },
+      {
+        key: 'details',
+        header: 'Details',
+        type: 'text',
+        cell: (row) =>
+          row.details ? (
+            <Space>
+              <Typography.Text
+                type="secondary"
+                style={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 200 }}
+                ellipsis
+              >
+                {renderDetailsPreview(row.details)}
+              </Typography.Text>
+              <Button
+                type="text"
+                size="mini"
+                icon={<IconEye />}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setDetailsModal(row)
+                }}
+              />
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">-</Typography.Text>
+          ),
+      },
+      {
+        key: 'ip_address',
+        header: 'IP Address',
+        type: 'text',
+        size: 140,
+        cell: (row) => (
+          <Typography.Text style={{ fontFamily: 'monospace' }}>
+            {row.ip_address || '-'}
+          </Typography.Text>
+        ),
+      },
+    ],
+    [],
+  )
+
+  const { table, toolbarProps, pagination, isLoading, setPage } =
+    useNotionTable<AuditLog>({
+      tableKey: 'audit-logs',
+      columns,
+      defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+      defaultPageSize: 50,
+      fetchData: async ({ page, pageSize, filters, sorts, search }) => {
+        const actionFilter = filters.find((f) => f.field === 'action')
+        const targetTypeFilter = filters.find((f) => f.field === 'target_type')
+        const dateFilter = filters.find((f) => f.field === 'created_at')
+        const sortBy = sorts[0]?.field
+        const sortOrder = sorts[0]?.direction
+
+        // Map date filter operators to start_date/end_date params
+        const dateParams: Record<string, string> = {}
+        if (dateFilter) {
+          const now = new Date()
+          if (dateFilter.operator === 'last_7_days') {
+            dateParams.start_date = new Date(
+              now.getTime() - 7 * 24 * 60 * 60 * 1000,
+            ).toISOString()
+          } else if (dateFilter.operator === 'last_30_days') {
+            dateParams.start_date = new Date(
+              now.getTime() - 30 * 24 * 60 * 60 * 1000,
+            ).toISOString()
+          } else if (dateFilter.operator === 'after' && dateFilter.value) {
+            dateParams.start_date = new Date(
+              dateFilter.value as string,
+            ).toISOString()
+          } else if (dateFilter.operator === 'before' && dateFilter.value) {
+            dateParams.end_date = new Date(
+              dateFilter.value as string,
+            ).toISOString()
+          }
+        }
+
+        const { data } = await apiClient.get('/api/v1/admin/audit-logs', {
+          params: {
+            page,
+            pageSize,
+            ...(search && { search }),
+            ...(actionFilter?.value && { action: actionFilter.value }),
+            ...(targetTypeFilter?.value && {
+              target_type: targetTypeFilter.value,
+            }),
+            ...(sortBy && { sort_by: sortBy }),
+            ...(sortOrder && { sort_order: sortOrder }),
+            ...dateParams,
+          },
+        })
+        return { items: data.items, total: data.total }
+      },
+    })
+
+  const exportButton = (
+    <Button
+      icon={<IconExport />}
+      size="small"
+      onClick={() =>
+        exportToCsv(
+          `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+          table
+            .getRowModel()
+            .rows.map((r) => r.original) as unknown as Record<
+            string,
+            unknown
+          >[],
+          [
+            { key: 'created_at', label: 'Time' },
+            { key: 'admin_email', label: 'Admin' },
+            { key: 'action', label: 'Action' },
+            { key: 'target_type', label: 'Target Type' },
+            { key: 'target_id', label: 'Target ID' },
+            { key: 'ip_address', label: 'IP Address' },
+            { key: 'details', label: 'Details' },
+          ],
+        )
+      }
+    >
+      Export
+    </Button>
+  )
 
   return (
     <div>
-      <PageHeader
+      <NotionTable<AuditLog>
+        table={table}
+        toolbarProps={toolbarProps}
+        pagination={pagination}
+        onPageChange={setPage}
+        isLoading={isLoading}
         title="Audit Logs"
-        subtitle="Track admin actions — create, update, delete, and role changes"
-        icon={<IconFile />}
-        breadcrumb={['Logs & Monitoring', 'Audit Logs']}
+        toolbarExtra={exportButton}
+        emptyText="No audit logs found"
+        scrollX={1100}
       />
-      <Card style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="medium">
-          <TimeRangeSelector
-            period={period}
-            onPeriodChange={setPeriod}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-          />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <FilterBuilder
-            fields={AUDIT_LOG_FIELDS}
-            filters={filters}
-            onChange={(f) => { setFilters(f); setPage(1) }}
-          />
-          <Button
-            icon={<IconExport />}
-            size="small"
-            style={{ flexShrink: 0 }}
-            onClick={() => exportToCsv(
-              `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-              logs as unknown as Record<string, unknown>[],
-              [
-                { key: 'created_at', label: 'Time' },
-                { key: 'admin_email', label: 'Admin' },
-                { key: 'action', label: 'Action' },
-                { key: 'target_type', label: 'Target Type' },
-                { key: 'target_id', label: 'Target ID' },
-                { key: 'ip_address', label: 'IP Address' },
-                { key: 'details', label: 'Details' },
-              ],
-            )}
-          >
-            Export
-          </Button>
-        </div>
-        </Space>
-      </Card>
-
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          data={logs}
-          loading={isLoading}
-          scroll={{ x: 1100 }}
-          pagination={{
-            current: page,
-            pageSize: PAGE_SIZE,
-            total,
-            onChange: setPage,
-            showTotal: (t) => `Total ${t} entries`,
-            sizeCanChange: false,
-          }}
-          noDataElement={<EmptyState description="No audit logs found" />}
-        />
-      </Card>
 
       <Modal
         title="Audit Log Details"
