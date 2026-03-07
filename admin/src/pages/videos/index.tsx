@@ -49,12 +49,13 @@ const STATUS_OPTIONS = [
   { value: 'skipped', label: 'Skipped' },
 ]
 
-const TYPE_OPTIONS = [
-  { value: '0', label: 'Video' },
-  { value: '2', label: 'Carousel' },
-  { value: '4', label: 'Special Video' },
-  { value: '61', label: 'Special Variant' },
-  { value: '68', label: 'Image-text' },
+const PLATFORM_OPTIONS = [
+  { value: 'douyin', label: 'Douyin' },
+  { value: 'bilibili', label: 'Bilibili' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'twitter', label: 'X / Twitter' },
+  { value: 'xiaohongshu', label: 'Xiaohongshu' },
 ]
 
 function formatDate(dateStr: string | null) {
@@ -108,22 +109,11 @@ function StatusTag({ status }: { status: string }) {
   )
 }
 
-function TypeTag({ type }: { type: string | null }) {
-  if (type === null) return <span>-</span>
-  const label = TYPE_OPTIONS.find((t) => t.value === type)?.label || `Type ${type}`
-  const colorMap: Record<string, string> = {
-    '0': 'arcoblue',
-    '2': 'purple',
-    '68': 'cyan',
-  }
-  return <Tag color={colorMap[type] || 'gray'}>{label}</Tag>
-}
-
 export function VideoList() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
+  const [platformFilter, setPlatformFilter] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<number | null>(null)
 
   const { data, isLoading } = useVideos({
@@ -131,7 +121,7 @@ export function VideoList() {
     pageSize: PAGE_SIZE,
     search,
     status: statusFilter,
-    awemeType: typeFilter,
+    platform: platformFilter,
   })
   const { data: stats } = useVideoStats()
   const { data: detail, isLoading: detailLoading } = useVideoDetail(detailId)
@@ -232,12 +222,6 @@ export function VideoList() {
       dataIndex: 'author',
       width: 120,
       render: (value: string | null) => value || '-',
-    },
-    {
-      title: 'Type',
-      dataIndex: 'aweme_type',
-      width: 110,
-      render: (value: string | null) => <TypeTag type={value} />,
     },
     {
       title: 'Status',
@@ -395,16 +379,16 @@ export function VideoList() {
             ))}
           </Select>
           <Select
-            placeholder="All Types"
-            value={typeFilter}
+            placeholder="All Platforms"
+            value={platformFilter}
             onChange={(value) => {
-              setTypeFilter(value || undefined)
+              setPlatformFilter(value || undefined)
               setPage(1)
             }}
             allowClear
-            style={{ width: 150 }}
+            style={{ width: 160 }}
           >
-            {TYPE_OPTIONS.map((opt) => (
+            {PLATFORM_OPTIONS.map((opt) => (
               <Select.Option key={opt.value} value={opt.value}>
                 {opt.label}
               </Select.Option>
@@ -461,7 +445,7 @@ export function VideoList() {
                 { label: 'Aweme ID', value: detail.aweme_id },
                 { label: 'Title', value: detail.video_title || '-', span: 2 },
                 { label: 'Author', value: detail.author || '-' },
-                { label: 'Type', value: <TypeTag type={detail.aweme_type} /> },
+                { label: 'Platform', value: detail.source_platform ? detail.source_platform.charAt(0).toUpperCase() + detail.source_platform.slice(1) : '-' },
                 {
                   label: 'Download Status',
                   value: <StatusTag status={detail.video_download_status} />,

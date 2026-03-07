@@ -46,7 +46,7 @@ interface VideoListParams {
   pageSize?: number
   search?: string
   status?: string
-  awemeType?: string
+  platform?: string
   userId?: string
   sortBy?: string
   sortOrder?: string
@@ -68,9 +68,9 @@ export interface VideoStatsData {
 }
 
 export function useVideos(params: VideoListParams = {}) {
-  const { page = 1, pageSize = 20, search, status, awemeType, userId, sortBy, sortOrder } = params
+  const { page = 1, pageSize = 20, search, status, platform, userId, sortBy, sortOrder } = params
   return useQuery({
-    queryKey: ['videos', { page, pageSize, search, status, awemeType, userId, sortBy, sortOrder }],
+    queryKey: ['videos', { page, pageSize, search, status, platform, userId, sortBy, sortOrder }],
     queryFn: async () => {
       const { data } = await apiClient.get<VideoListResponse>('/api/v1/admin/videos', {
         params: {
@@ -78,7 +78,7 @@ export function useVideos(params: VideoListParams = {}) {
           page_size: pageSize,
           ...(search && { search }),
           ...(status && { status }),
-          ...(awemeType && { aweme_type: awemeType }),
+          ...(platform && { platform }),
           ...(userId && { user_id: userId }),
           ...(sortBy && { sort_by: sortBy }),
           ...(sortOrder && { sort_order: sortOrder }),
