@@ -38,7 +38,7 @@ import {
   useRetryVideo,
 } from '../../api/endpoints/videos'
 import type { VideoData } from '../../api/endpoints/videos'
-import { formatDate, formatBytes } from '../../utils/format'
+import { formatDateTime, formatBytes } from '../../utils/format'
 
 const PAGE_SIZE = 20
 
@@ -228,8 +228,8 @@ export function VideoList() {
     {
       title: 'Created',
       dataIndex: 'created_at',
-      width: 120,
-      render: (value: string) => formatDate(value),
+      width: 160,
+      render: (value: string) => formatDateTime(value),
     },
     {
       title: 'Actions',
@@ -450,7 +450,7 @@ export function VideoList() {
                   value: <StatusTag status={detail.cover_download_status} />,
                 },
                 { label: 'Keep Forever', value: detail.keep_forever ? 'Yes' : 'No' },
-                { label: 'Created', value: formatDate(detail.created_at) },
+                { label: 'Created', value: formatDateTime(detail.created_at) },
               ]}
               style={{ marginBottom: 16 }}
             />
