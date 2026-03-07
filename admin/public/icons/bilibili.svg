@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Bilibili TV face with antenna -->
+  <!-- Antenna left -->
+  <path d="M7.5 2.5L5 5.5h2.5z" fill="#FB7299" stroke="#FB7299" stroke-width="0.5" stroke-linejoin="round"/>
+  <!-- Antenna right -->
+  <path d="M16.5 2.5L19 5.5h-2.5z" fill="#FB7299" stroke="#FB7299" stroke-width="0.5" stroke-linejoin="round"/>
+  <!-- TV body -->
+  <rect x="2" y="5.5" width="20" height="14" rx="3" fill="#FB7299"/>
+  <!-- Screen -->
+  <rect x="3.5" y="7" width="17" height="11" rx="2" fill="#FB7299"/>
+  <!-- Left eye -->
+  <ellipse cx="9" cy="13" rx="1.3" ry="1.8" fill="white"/>
+  <!-- Right eye -->
+  <ellipse cx="15" cy="13" rx="1.3" ry="1.8" fill="white"/>
+  <!-- Mouth -->
+  <path d="M10 16.2q2 1.2 4 0" stroke="white" stroke-width="0.8" fill="none" stroke-linecap="round"/>
+</svg>

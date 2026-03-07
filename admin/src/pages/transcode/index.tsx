@@ -72,14 +72,7 @@ function formatBytes(bytes: number) {
 
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 
-const PLATFORM_ICONS: Record<string, { label: string; color: string }> = {
-  douyin: { label: 'DY', color: '#000000' },
-  bilibili: { label: 'B', color: '#00A1D6' },
-  youtube: { label: 'YT', color: '#FF0000' },
-  tiktok: { label: 'TT', color: '#010101' },
-  twitter: { label: 'X', color: '#1DA1F2' },
-  xiaohongshu: { label: 'XHS', color: '#FF2442' },
-}
+const KNOWN_PLATFORMS = ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter']
 
 function getCoverSrc(record: TranscodeVersionData): string | null {
   if (record.cover_download_path) {
@@ -185,9 +178,7 @@ export function TranscodeList() {
       width: 80,
       render: (_: unknown, record: TranscodeVersionData) => {
         const src = getCoverSrc(record)
-        const platform = record.source_platform
-          ? PLATFORM_ICONS[record.source_platform]
-          : null
+        const hasPlatformIcon = record.source_platform && KNOWN_PLATFORMS.includes(record.source_platform)
         return (
           <div style={{ position: 'relative', width: 60, height: 60 }}>
             {src ? (
@@ -209,24 +200,20 @@ export function TranscodeList() {
                 No cover
               </div>
             )}
-            {platform && (
-              <span
+            {hasPlatformIcon && (
+              <div
                 style={{
                   position: 'absolute',
                   top: 2,
-                  right: 2,
-                  background: platform.color,
-                  color: '#fff',
-                  fontSize: 9,
-                  fontWeight: 700,
-                  padding: '1px 3px',
-                  borderRadius: 3,
-                  lineHeight: 1.2,
-                  opacity: 0.9,
+                  left: 2,
+                  background: 'rgba(0,0,0,0.6)',
+                  borderRadius: '50%',
+                  padding: 3,
+                  lineHeight: 0,
                 }}
               >
-                {platform.label}
-              </span>
+                <img src={`/icons/${record.source_platform}.svg`} alt="" width={14} height={14} />
+              </div>
             )}
           </div>
         )
