@@ -1,4 +1,4 @@
-import { useState, useEffect, useReducer, useCallback, Component, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useCallback, Component, type ReactNode } from 'react'
 import {
   Drawer,
   Typography,
@@ -36,44 +36,6 @@ interface UnifiedTask {
   updated_at: string | null
 }
 
-interface State {
-  tasks: UnifiedTask[]
-  connected: boolean
-}
-
-type Action =
-  | { type: 'SET_TASKS'; tasks: UnifiedTask[] }
-  | { type: 'INSERT'; task: UnifiedTask }
-  | { type: 'UPDATE'; task: UnifiedTask }
-  | { type: 'DELETE'; id: string }
-  | { type: 'SET_CONNECTED'; connected: boolean }
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'SET_TASKS':
-      return { ...state, tasks: action.tasks }
-    case 'INSERT':
-      if (state.tasks.some((t) => t.id === action.task.id)) {
-        return {
-          ...state,
-          tasks: state.tasks.map((t) => (t.id === action.task.id ? action.task : t)),
-        }
-      }
-      return { ...state, tasks: [action.task, ...state.tasks] }
-    case 'UPDATE':
-      return {
-        ...state,
-        tasks: state.tasks.map((t) => (t.id === action.task.id ? action.task : t)),
-      }
-    case 'DELETE':
-      return { ...state, tasks: state.tasks.filter((t) => t.id !== action.id) }
-    case 'SET_CONNECTED':
-      return { ...state, connected: action.connected }
-    default:
-      return state
-  }
-}
-
 const TASK_TYPE_COLORS: Record<string, string> = {
   parse: 'purple',
   download: 'blue',
@@ -109,11 +71,15 @@ function formatSpeed(bytesPerSec: number | null): string {
   return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`
 }
 
+const DEBOUNCE_MS = 500
+
 export function TaskCenterFloat() {
   const [visible, setVisible] = useState(false)
-  const [state, dispatch] = useReducer(reducer, { tasks: [], connected: false })
+  const [tasks, setTasks] = useState<UnifiedTask[]>([])
+  const [connected, setConnected] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const fetchActiveTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async () => {
     try {
       const { data } = await apiClient.get('/api/v1/admin/tasks', {
         params: {
@@ -123,54 +89,50 @@ export function TaskCenterFloat() {
           sort_order: 'desc',
         },
       })
-      dispatch({ type: 'SET_TASKS', tasks: data.items || [] })
+      setTasks(data.items || [])
     } catch {
       // silent
     }
   }, [])
 
-  useEffect(() => {
-    fetchActiveTasks()
+  // Debounced refetch: batch rapid Supabase events into a single API call
+  const debouncedFetch = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      fetchTasks()
+    }, DEBOUNCE_MS)
+  }, [fetchTasks])
 
+  useEffect(() => {
+    fetchTasks()
+
+    // Single wildcard listener (same pattern as Tasks page)
     const channel = supabase
       .channel('admin-task-float')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'unified_tasks' },
-        (payload) => {
-          dispatch({ type: 'INSERT', task: payload.new as UnifiedTask })
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'unified_tasks' },
-        (payload) => {
-          dispatch({ type: 'UPDATE', task: payload.new as UnifiedTask })
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'unified_tasks' },
-        (payload) => {
-          dispatch({ type: 'DELETE', id: (payload.old as { id: string }).id })
+        { event: '*', schema: 'public', table: 'unified_tasks' },
+        () => {
+          debouncedFetch()
         },
       )
       .subscribe((status) => {
-        dispatch({ type: 'SET_CONNECTED', connected: status === 'SUBSCRIBED' })
+        setConnected(status === 'SUBSCRIBED')
         if (status === 'SUBSCRIBED') {
-          fetchActiveTasks()
+          fetchTasks()
         }
       })
 
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
       supabase.removeChannel(channel)
     }
-  }, [fetchActiveTasks])
+  }, [fetchTasks, debouncedFetch])
 
-  const activeTasks = state.tasks.filter(
+  const activeTasks = tasks.filter(
     (t) => t.status === 'processing' || t.status === 'pending',
   )
-  const recentTasks = state.tasks.slice(0, 30)
+  const recentTasks = tasks.slice(0, 30)
   const activeCount = activeTasks.length
 
   const handleCancel = async (taskId: string) => {
@@ -216,7 +178,7 @@ export function TaskCenterFloat() {
         title={
           <Space>
             <span>Task Center</span>
-            {!state.connected && (
+            {!connected && (
               <Tag size="small" color="red">Disconnected</Tag>
             )}
             {activeCount > 0 && (
@@ -229,6 +191,7 @@ export function TaskCenterFloat() {
         footer={null}
         width={440}
         placement="right"
+        unmountOnExit
       >
         {recentTasks.length === 0 ? (
           <Empty description="No tasks" />
