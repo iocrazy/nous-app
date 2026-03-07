@@ -12,7 +12,7 @@ from app.schemas.admin import (
 router = APIRouter()
 
 VALID_TABLE_KEYS = {
-    "media",
+    "admin_media",
     "tasks",
     "transcode",
     "users",
