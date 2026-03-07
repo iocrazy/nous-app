@@ -51,7 +51,7 @@ export interface TaskStatsData {
 
 export function useAdminTaskStats() {
   return useQuery({
-    queryKey: ['admin-tasks', 'stats'],
+    queryKey: ['tasks', 'stats'],
     queryFn: async () => {
       const { data } = await apiClient.get<TaskStatsData>('/api/v1/admin/tasks/stats')
       return data
@@ -88,7 +88,7 @@ export function useCancelTask() {
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 }
@@ -101,7 +101,7 @@ export function useRetryTask() {
       return data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 }
