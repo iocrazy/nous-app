@@ -29,7 +29,7 @@ import {
   IconList,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../auth/AuthProvider'
-import { TaskCenterFloat } from '../components/TaskCenterFloat'
+import { SafeTaskCenterFloat } from '../components/TaskCenterFloat'
 
 const { Sider, Header, Content } = Layout
 const MenuItem = Menu.Item
@@ -137,7 +137,7 @@ export function AdminLayout() {
             {collapsed ? <IconMenuUnfold /> : <IconMenuFold />}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <TaskCenterFloat />
+            <SafeTaskCenterFloat />
             <Tag color="arcoblue" size="small">
               {user?.role}
             </Tag>
