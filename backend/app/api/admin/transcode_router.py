@@ -252,15 +252,18 @@ async def retry_transcode(
 
     resource_id = str(version["resource_id"])
 
-    # Trigger transcode with force=True
-    from app.tasks.transcode_tasks import maybe_trigger_transcode
-    maybe_trigger_transcode(
-        resource_id=resource_id,
-        version_id=version_id,
-        mime_type=mime_type,
-        user_id=auth.user_id,
-        force=True,
+    # Mark as pending and dispatch Celery task directly.
+    # NOTE: cannot call maybe_trigger_transcode() here because it uses
+    # run_async(asyncio.run()) which crashes inside an already-running
+    # event loop (FastAPI's async handler).
+    await (
+        supabase.table("resource_versions")
+        .update({"transcode_status": "pending"})
+        .eq("id", version_id)
+        .execute()
     )
+    from app.tasks.transcode_tasks import transcode_to_hls
+    transcode_to_hls.delay(resource_id, version_id, auth.user_id)
 
     # Audit log
     await create_audit_log(
@@ -305,17 +308,20 @@ async def batch_transcode(
     versions = result.data or []
     queued = 0
 
-    from app.tasks.transcode_tasks import maybe_trigger_transcode
+    # Dispatch Celery tasks directly (cannot use maybe_trigger_transcode in async context)
+    from app.tasks.transcode_tasks import transcode_to_hls
 
     for v in versions:
         try:
-            maybe_trigger_transcode(
-                resource_id=str(v["resource_id"]),
-                version_id=str(v["id"]),
-                mime_type=v.get("mime_type") or "video/mp4",
-                user_id=auth.user_id,
-                force=True,
+            vid = str(v["id"])
+            rid = str(v["resource_id"])
+            await (
+                supabase.table("resource_versions")
+                .update({"transcode_status": "pending"})
+                .eq("id", vid)
+                .execute()
             )
+            transcode_to_hls.delay(rid, vid, auth.user_id)
             queued += 1
         except Exception as e:
             logger.warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")
