@@ -361,6 +361,9 @@ async def get_transcode_settings(auth: AdminAuthDep):
         transcode_parallel_tiers=transcode.get(
             "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
         ),
+        transcode_min_size_mb=transcode.get(
+            "min_size_mb", settings.TRANSCODE_MIN_SIZE_MB
+        ),
     )
 
 
@@ -402,6 +405,13 @@ async def update_transcode_settings(
             detail=f"Invalid preset: {body.ffmpeg_preset}. Valid: {VALID_PRESETS}",
         )
 
+    # Validate min_size_mb
+    if body.transcode_min_size_mb is not None and body.transcode_min_size_mb < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_size_mb must be >= 0 (0 means transcode all videos)",
+        )
+
     # Load, update, save config
     config = load_config()
     if "transcode" not in config:
@@ -433,6 +443,11 @@ async def update_transcode_settings(
         settings.TRANSCODE_PARALLEL_TIERS = body.transcode_parallel_tiers
         changes["parallel_tiers"] = body.transcode_parallel_tiers
 
+    if body.transcode_min_size_mb is not None:
+        config["transcode"]["min_size_mb"] = body.transcode_min_size_mb
+        settings.TRANSCODE_MIN_SIZE_MB = body.transcode_min_size_mb
+        changes["min_size_mb"] = body.transcode_min_size_mb
+
     if not save_config(config):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -459,5 +474,8 @@ async def update_transcode_settings(
         ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
         transcode_parallel_tiers=transcode.get(
             "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+        ),
+        transcode_min_size_mb=transcode.get(
+            "min_size_mb", settings.TRANSCODE_MIN_SIZE_MB
         ),
     )

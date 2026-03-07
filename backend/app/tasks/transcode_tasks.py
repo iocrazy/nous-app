@@ -21,7 +21,7 @@ from app.tasks.utils import run_async
 
 
 # ── Gating thresholds ──
-MIN_SIZE_MB = 100       # Only auto-transcode files > 100 MB
+MIN_SIZE_MB = None      # Read from settings.TRANSCODE_MIN_SIZE_MB at runtime
 MIN_DURATION_SEC = 600  # ... or > 10 minutes
 
 
@@ -278,7 +278,8 @@ def maybe_trigger_transcode(
                 )
             else:
                 duration_sec = _probe_duration_sync(str(file_path))
-                if file_size_mb < MIN_SIZE_MB and (duration_sec or 0) < MIN_DURATION_SEC:
+                min_size = settings.TRANSCODE_MIN_SIZE_MB
+                if file_size_mb < min_size and (duration_sec or 0) < MIN_DURATION_SEC:
                     logger.info(
                         f"[Transcode] Skip: non-H.264 ({video_codec}) too small "
                         f"({file_size_mb:.0f}MB, {duration_sec or '?'}s) "

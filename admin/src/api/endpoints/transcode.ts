@@ -113,6 +113,7 @@ export interface TranscodeSettings {
   ffmpeg_encoder: string
   ffmpeg_preset: string
   transcode_parallel_tiers: boolean
+  transcode_min_size_mb: number
 }
 
 export function useTranscodeSettings() {
