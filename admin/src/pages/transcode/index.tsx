@@ -14,6 +14,7 @@ import {
   Grid,
   Button,
   Tooltip,
+  Switch,
 } from '@arco-design/web-react'
 import {
   IconRefresh,
@@ -92,6 +93,7 @@ export function TranscodeList() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [sizeFilter, setSizeFilter] = useState<string | undefined>(undefined)
   const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
 
   const { data, isLoading } = useTranscodeList({
     page,
@@ -101,8 +103,8 @@ export function TranscodeList() {
     minSizeMb: sizeFilter ? parseInt(sizeFilter) : undefined,
     sortBy: 'resource_id',
     sortOrder: 'desc',
-  })
-  const { data: stats } = useTranscodeStats()
+  }, autoRefresh)
+  const { data: stats } = useTranscodeStats(autoRefresh)
   const retryTranscode = useRetryTranscode()
   const batchTranscode = useBatchTranscode()
 
@@ -436,6 +438,12 @@ export function TranscodeList() {
           >
             Transcode New
           </Button>
+          <Space size="mini">
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Auto Refresh
+            </Typography.Text>
+            <Switch checked={autoRefresh} onChange={setAutoRefresh} size="small" />
+          </Space>
         </Space>
       </Card>
 
