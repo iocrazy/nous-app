@@ -201,6 +201,8 @@ class AdminVideoResponse(BaseModel):
     aweme_type: Optional[str] = None
     video_download_status: str = "pending"
     cover_url: Optional[str] = None
+    cover_download_path: Optional[str] = None
+    source_platform: Optional[str] = None
     video_duration: Optional[str] = None
     video_datasize: Optional[str] = None
     video_datasize_bytes: int = 0
