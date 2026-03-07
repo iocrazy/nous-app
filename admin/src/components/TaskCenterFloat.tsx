@@ -1,6 +1,5 @@
-import { useState, useEffect, useReducer, useCallback } from 'react'
+import { useState, useEffect, useReducer, useCallback, Component, type ReactNode } from 'react'
 import {
-  Badge,
   Drawer,
   Typography,
   Tag,
@@ -185,21 +184,33 @@ export function TaskCenterFloat() {
 
   return (
     <>
-      <Badge count={activeCount} dot={activeCount > 0} dotStyle={{ width: 8, height: 8 }}>
-        <div
-          style={{
-            cursor: 'pointer',
-            fontSize: 18,
-            display: 'flex',
-            alignItems: 'center',
-            padding: '4px 8px',
-            borderRadius: 4,
-          }}
-          onClick={() => setVisible(true)}
-        >
-          <IconList />
-        </div>
-      </Badge>
+      <div
+        style={{
+          cursor: 'pointer',
+          fontSize: 18,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '4px 8px',
+          borderRadius: 4,
+          position: 'relative',
+        }}
+        onClick={() => setVisible(true)}
+      >
+        <IconList />
+        {activeCount > 0 && (
+          <span
+            style={{
+              position: 'absolute',
+              top: 2,
+              right: 4,
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'rgb(var(--red-6))',
+            }}
+          />
+        )}
+      </div>
 
       <Drawer
         title={
@@ -294,5 +305,26 @@ export function TaskCenterFloat() {
         )}
       </Drawer>
     </>
+  )
+}
+
+/** Error boundary so TaskCenterFloat never crashes the whole page. */
+interface EBState { hasError: boolean }
+class TaskCenterErrorBoundary extends Component<{ children: ReactNode }, EBState> {
+  state: EBState = { hasError: false }
+  static getDerivedStateFromError() { return { hasError: true } }
+  componentDidCatch(error: Error) {
+    console.warn('[TaskCenterFloat] caught error, hiding widget:', error.message)
+  }
+  render() {
+    return this.state.hasError ? null : this.props.children
+  }
+}
+
+export function SafeTaskCenterFloat() {
+  return (
+    <TaskCenterErrorBoundary>
+      <TaskCenterFloat />
+    </TaskCenterErrorBoundary>
   )
 }
