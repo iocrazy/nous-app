@@ -161,7 +161,7 @@ async def list_transcode_versions(
         if media_ids:
             media_result = (
                 await supabase.table("parsed_media")
-                .select("id, video_title, cover_url, author")
+                .select("id, title, cover_url, author")
                 .in_("id", media_ids)
                 .execute()
             )
@@ -181,7 +181,7 @@ async def list_transcode_versions(
             r for r in rows
             if search_lower in (r.get("filename") or "").lower()
             or search_lower in (
-                media_info_map.get(str(r["resource_id"]), {}).get("video_title") or ""
+                media_info_map.get(str(r["resource_id"]), {}).get("title") or ""
             ).lower()
         ]
 
@@ -205,7 +205,7 @@ async def list_transcode_versions(
                 hls_tiers=hls_tiers,
                 transcode_at=row.get("transcode_at"),
                 created_at=row.get("created_at"),
-                video_title=media.get("video_title"),
+                video_title=media.get("title"),
                 cover_url=media.get("cover_url"),
                 author=media.get("author"),
             )
