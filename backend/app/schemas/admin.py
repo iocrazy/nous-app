@@ -311,3 +311,49 @@ class AdminTranscodeSettingsUpdate(BaseModel):
     ffmpeg_preset: Optional[str] = None
     transcode_parallel_tiers: Optional[bool] = None
     transcode_min_size_mb: Optional[int] = None
+
+
+# ============================================
+# Task Management Schemas
+# ============================================
+
+
+class AdminTaskResponse(BaseModel):
+    """Admin task response with user info."""
+    id: str
+    user_id: str
+    user_email: Optional[str] = None
+    task_type: str
+    status: str
+    phase: Optional[str] = None
+    title: str
+    subtitle: Optional[str] = None
+    progress: int = 0
+    speed: Optional[int] = None
+    total_bytes: Optional[int] = None
+    error_msg: Optional[str] = None
+    error_code: Optional[str] = None
+    resource_id: Optional[str] = None
+    media_id: Optional[str] = None
+    celery_task_id: Optional[str] = None
+    created_at: str
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class AdminTaskListResponse(BaseModel):
+    """Paginated list of admin tasks."""
+    items: List[AdminTaskResponse]
+    total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class AdminTaskStatsResponse(BaseModel):
+    """Task status distribution stats."""
+    total: int
+    pending: int
+    processing: int
+    completed: int
+    failed: int
+    cancelled: int
