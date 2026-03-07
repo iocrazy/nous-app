@@ -154,20 +154,20 @@ export function PlayerPage() {
       setResourceNotes(resource.notes || '');
 
       // Step 2: Check if the current version has completed HLS transcoding
-      if (resource.mime_type?.startsWith('video/')) {
-        const { data: versions } = await supabase
-          .from('resource_versions')
-          .select('id, hls_path, transcode_status, version_number')
-          .eq('resource_id', resource.id)
-          .eq('version_number', resource.current_version || 1)
-          .limit(1)
-          .maybeSingle();
+      // NOTE: Don't gate on resource.mime_type — it's often null.
+      // Let the version's hls_path + transcode_status decide.
+      const { data: versions } = await supabase
+        .from('resource_versions')
+        .select('id, hls_path, transcode_status, version_number')
+        .eq('resource_id', resource.id)
+        .eq('version_number', resource.current_version || 1)
+        .limit(1)
+        .maybeSingle();
 
-        if (versions?.hls_path && versions.transcode_status === 'completed') {
-          const token = await getSupabaseAccessToken();
-          setAuthToken(token);
-          setHlsUrl(getVersionHlsUrl(resId, String(versions.id), token || undefined));
-        }
+      if (versions?.hls_path && versions.transcode_status === 'completed') {
+        const token = await getSupabaseAccessToken();
+        setAuthToken(token);
+        setHlsUrl(getVersionHlsUrl(resId, String(versions.id), token || undefined));
       }
     })();
   }, [video?.id]);
