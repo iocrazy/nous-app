@@ -133,7 +133,7 @@ async def list_videos(
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search by title or platform_id"),
     video_download_status: Optional[str] = Query(None, alias="status", description="Filter by download status"),
-    media_type: Optional[str] = Query(None, alias="aweme_type", description="Filter by media type"),
+    source_platform: Optional[str] = Query(None, alias="platform", description="Filter by source platform"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
 ):
@@ -150,8 +150,8 @@ async def list_videos(
     if video_download_status:
         query = query.eq("video_download_status", video_download_status)
 
-    if media_type:
-        query = query.eq("media_type", media_type)
+    if source_platform:
+        query = query.eq("source_platform", source_platform)
 
     # Apply sorting
     allowed_sort_fields = {"created_at", "datasize_bytes", "video_download_status"}
