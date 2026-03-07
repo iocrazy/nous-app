@@ -13,10 +13,7 @@ from app.schemas.admin import (
     AdminVideoDetailResponse,
     AdminVideoStatsResponse,
 )
-from app.utils.admin_helpers import (
-    batch_get_user_emails,
-    create_audit_log,
-)
+from app.utils.admin_helpers import create_audit_log
 
 
 router = APIRouter()
@@ -45,13 +42,13 @@ async def get_video_stats(auth: AdminAuthDep):
         ).eq("video_download_status", s).execute()
         counts[s] = result.count or 0
 
-    # Get total storage bytes
+    # Get total storage bytes (use SUM via count query to avoid fetching all rows)
     storage_result = await supabase.table("parsed_media").select(
-        "video_datasize_bytes"
-    ).gt("video_datasize_bytes", 0).execute()
+        "datasize_bytes"
+    ).gt("datasize_bytes", 0).execute()
 
     total_storage = sum(
-        (row.get("video_datasize_bytes") or 0)
+        (row.get("datasize_bytes") or 0)
         for row in (storage_result.data or [])
     )
 
@@ -66,30 +63,78 @@ async def get_video_stats(auth: AdminAuthDep):
     )
 
 
+def _map_video_response(v: dict) -> AdminVideoResponse:
+    """Map a parsed_media database row to AdminVideoResponse."""
+    return AdminVideoResponse(
+        id=v["id"],
+        aweme_id=str(v.get("platform_id", "")),
+        video_title=v.get("title"),
+        video_desc=v.get("description"),
+        author=v.get("author"),
+        aweme_type=str(v.get("media_type")) if v.get("media_type") is not None else None,
+        video_download_status=v.get("video_download_status", "pending"),
+        cover_url=v.get("cover_url"),
+        video_duration=str(v.get("duration")) if v.get("duration") is not None else None,
+        video_datasize=v.get("datasize"),
+        video_datasize_bytes=v.get("datasize_bytes") or 0,
+        video_digg_count=v.get("like_count") or 0,
+        video_comment_count=v.get("comment_count") or 0,
+        video_share_count=v.get("share_count") or 0,
+        error_message=v.get("error_message"),
+        download_time=v.get("download_time"),
+        created_at=v["created_at"],
+        updated_at=v.get("updated_at"),
+    )
+
+
+def _map_video_detail_response(v: dict) -> AdminVideoDetailResponse:
+    """Map a parsed_media database row to AdminVideoDetailResponse."""
+    return AdminVideoDetailResponse(
+        id=v["id"],
+        aweme_id=str(v.get("platform_id", "")),
+        video_title=v.get("title"),
+        video_desc=v.get("description"),
+        author=v.get("author"),
+        aweme_type=str(v.get("media_type")) if v.get("media_type") is not None else None,
+        video_download_status=v.get("video_download_status", "pending"),
+        cover_url=v.get("cover_url"),
+        video_duration=str(v.get("duration")) if v.get("duration") is not None else None,
+        video_datasize=v.get("datasize"),
+        video_datasize_bytes=v.get("datasize_bytes") or 0,
+        video_digg_count=v.get("like_count") or 0,
+        video_comment_count=v.get("comment_count") or 0,
+        video_share_count=v.get("share_count") or 0,
+        error_message=v.get("error_message"),
+        download_time=v.get("download_time"),
+        created_at=v["created_at"],
+        updated_at=v.get("updated_at"),
+        video_original_url=v.get("original_url"),
+        video_download_path=v.get("video_download_path"),
+        cover_download_path=v.get("cover_download_path"),
+        music_name=v.get("music_name"),
+        music_download_status=v.get("music_download_status", "pending"),
+        cover_download_status=v.get("cover_download_status", "pending"),
+        video_download_urls=v.get("video_download_urls"),
+        video_hashtag_name=v.get("hashtags"),
+        video_collect_count=v.get("favorite_count") or 0,
+        view_count=v.get("view_count") or 0,
+        storage_size=v.get("storage_size"),
+        keep_forever=v.get("keep_forever", False),
+    )
+
+
 @router.get("", response_model=AdminVideoListResponse)
 async def list_videos(
     auth: AdminAuthDep,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    search: Optional[str] = Query(None, description="Search by title or aweme_id"),
+    search: Optional[str] = Query(None, description="Search by title or platform_id"),
     video_download_status: Optional[str] = Query(None, alias="status", description="Filter by download status"),
-    aweme_type: Optional[str] = Query(None, description="Filter by aweme type"),
-    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    media_type: Optional[str] = Query(None, alias="aweme_type", description="Filter by media type"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
 ):
-    """
-    List all videos with pagination and filters.
-
-    - **page**: Page number (starts at 1)
-    - **page_size**: Number of items per page (max 100)
-    - **search**: Search by video title or aweme_id
-    - **status**: Filter by download status
-    - **aweme_type**: Filter by aweme type (0, 2, 4, 61, 68)
-    - **user_id**: Filter by user ID
-    - **sort_by**: Sort by field (created_at, video_datasize_bytes, video_download_status)
-    - **sort_order**: Sort order (asc, desc)
-    """
+    """List all videos with pagination and filters."""
     supabase = await get_async_supabase_admin()
 
     # Build query
@@ -97,19 +142,16 @@ async def list_videos(
 
     # Apply filters
     if search:
-        query = query.or_(f"video_title.ilike.%{search}%,aweme_id.ilike.%{search}%")
+        query = query.or_(f"title.ilike.%{search}%,platform_id.ilike.%{search}%")
 
     if video_download_status:
         query = query.eq("video_download_status", video_download_status)
 
-    if aweme_type:
-        query = query.eq("aweme_type", aweme_type)
-
-    if user_id:
-        query = query.eq("user_id", user_id)
+    if media_type:
+        query = query.eq("media_type", media_type)
 
     # Apply sorting
-    allowed_sort_fields = {"created_at", "video_datasize_bytes", "video_download_status"}
+    allowed_sort_fields = {"created_at", "datasize_bytes", "video_download_status"}
     if sort_by not in allowed_sort_fields:
         sort_by = "created_at"
     desc = sort_order.lower() != "asc"
@@ -125,35 +167,8 @@ async def list_videos(
     if not result.data:
         return AdminVideoListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Batch fetch user emails (avoiding N+1)
-    user_ids = list({v["user_id"] for v in result.data if v.get("user_id")})
-    user_emails = await batch_get_user_emails(user_ids)
-
     # Build response
-    items = []
-    for v in result.data:
-        items.append(AdminVideoResponse(
-            id=v["id"],
-            aweme_id=str(v.get("aweme_id", "")),
-            user_id=v.get("user_id"),
-            user_email=user_emails.get(v.get("user_id", "")) if v.get("user_id") else None,
-            video_title=v.get("video_title"),
-            video_desc=v.get("video_desc"),
-            author=v.get("author"),
-            aweme_type=str(v.get("aweme_type")) if v.get("aweme_type") is not None else None,
-            video_download_status=v.get("video_download_status", "pending"),
-            cover_url=v.get("cover_url"),
-            video_duration=str(v.get("video_duration")) if v.get("video_duration") is not None else None,
-            video_datasize=v.get("video_datasize"),
-            video_datasize_bytes=v.get("video_datasize_bytes") or 0,
-            video_digg_count=v.get("video_digg_count") or 0,
-            video_comment_count=v.get("video_comment_count") or 0,
-            video_share_count=v.get("video_share_count") or 0,
-            error_message=v.get("error_message"),
-            download_time=v.get("download_time"),
-            created_at=v["created_at"],
-            updated_at=v.get("updated_at"),
-        ))
+    items = [_map_video_response(v) for v in result.data]
 
     return AdminVideoListResponse(
         items=items,
@@ -179,48 +194,7 @@ async def get_video(
             detail="Video not found",
         )
 
-    v = result.data
-
-    # Get user email if user_id exists
-    user_email = None
-    if v.get("user_id"):
-        emails = await batch_get_user_emails([v["user_id"]])
-        user_email = emails.get(v["user_id"])
-
-    return AdminVideoDetailResponse(
-        id=v["id"],
-        aweme_id=str(v.get("aweme_id", "")),
-        user_id=v.get("user_id"),
-        user_email=user_email,
-        video_title=v.get("video_title"),
-        video_desc=v.get("video_desc"),
-        author=v.get("author"),
-        aweme_type=str(v.get("aweme_type")) if v.get("aweme_type") is not None else None,
-        video_download_status=v.get("video_download_status", "pending"),
-        cover_url=v.get("cover_url"),
-        video_duration=str(v.get("video_duration")) if v.get("video_duration") is not None else None,
-        video_datasize=v.get("video_datasize"),
-        video_datasize_bytes=v.get("video_datasize_bytes") or 0,
-        video_digg_count=v.get("video_digg_count") or 0,
-        video_comment_count=v.get("video_comment_count") or 0,
-        video_share_count=v.get("video_share_count") or 0,
-        error_message=v.get("error_message"),
-        download_time=v.get("download_time"),
-        created_at=v["created_at"],
-        updated_at=v.get("updated_at"),
-        video_original_url=v.get("video_original_url"),
-        video_download_path=v.get("video_download_path"),
-        cover_download_path=v.get("cover_download_path"),
-        music_name=v.get("music_name"),
-        music_download_status=v.get("music_download_status", "pending"),
-        cover_download_status=v.get("cover_download_status", "pending"),
-        video_download_urls=v.get("video_download_urls"),
-        video_hashtag_name=v.get("video_hashtag_name"),
-        video_collect_count=v.get("video_collect_count") or 0,
-        view_count=v.get("view_count") or 0,
-        storage_size=v.get("storage_size"),
-        keep_forever=v.get("keep_forever", False),
-    )
+    return _map_video_detail_response(result.data)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -233,14 +207,14 @@ async def delete_video(
     supabase = await get_async_supabase_admin()
 
     # Check if video exists
-    existing = await supabase.table("parsed_media").select("id, aweme_id").eq("id", video_id).single().execute()
+    existing = await supabase.table("parsed_media").select("id, platform_id").eq("id", video_id).single().execute()
     if not existing.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Video not found",
         )
 
-    aweme_id = existing.data.get("aweme_id", "")
+    platform_id = existing.data.get("platform_id", "")
 
     # Delete video
     result = await supabase.table("parsed_media").delete().eq("id", video_id).execute()
@@ -258,11 +232,11 @@ async def delete_video(
         action="delete_video",
         target_type="video",
         target_id=str(video_id),
-        details={"aweme_id": aweme_id},
+        details={"platform_id": platform_id},
         ip_address=client_ip,
     )
 
-    logger.info(f"Video {video_id} (aweme_id={aweme_id}) deleted by admin {auth.user_id}")
+    logger.info(f"Video {video_id} (platform_id={platform_id}) deleted by admin {auth.user_id}")
 
 
 @router.post("/{video_id}/retry", response_model=AdminVideoDetailResponse)
@@ -301,7 +275,7 @@ async def retry_video(
         action="retry_video",
         target_type="video",
         target_id=str(video_id),
-        details={"aweme_id": existing.data.get("aweme_id", "")},
+        details={"platform_id": existing.data.get("platform_id", "")},
         ip_address=client_ip,
     )
 
