@@ -1,27 +1,24 @@
-import { useState } from 'react'
-import { formatDate } from '../../utils/format'
+import { useMemo } from 'react'
 import {
   Table,
-  Input,
   Tag,
   Modal,
   Message,
-  Card,
-  Space,
   Typography,
   Button,
+  Space,
 } from '@arco-design/web-react'
 import { IconDelete, IconUser } from '@arco-design/web-react/icon'
 import type { ColumnProps } from '@arco-design/web-react/es/Table'
-import {
-  useTeams,
-  useTeamMembers,
-  useDeleteTeam,
-  ROLE_COLOR_MAP,
-} from '../../api/endpoints/teams'
+import { NotionTable } from '../../components/notion-table'
+import type { NotionColumnDef } from '../../components/notion-table'
+import { useNotionTable } from '../../hooks/useNotionTable'
+import { apiClient } from '../../api/client'
 import type { Team, TeamMember } from '../../api/endpoints/teams'
+import { useTeamMembers, useDeleteTeam, ROLE_COLOR_MAP } from '../../api/endpoints/teams'
+import { formatDate } from '../../utils/format'
 
-const PAGE_SIZE = 20
+// --- Expanded members sub-table (Arco Design) ---
 
 function ExpandedMembers({ teamId, ownerId }: { teamId: string; ownerId: string }) {
   const { data: members = [], isLoading } = useTeamMembers(teamId)
@@ -72,21 +69,10 @@ function ExpandedMembers({ teamId, ownerId }: { teamId: string; ownerId: string 
   )
 }
 
+// --- Main component ---
+
 export function TeamList() {
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([])
-
-  const { data, isLoading } = useTeams({ page, pageSize: PAGE_SIZE, search })
   const deleteTeam = useDeleteTeam()
-
-  const teams = data?.items ?? []
-  const total = data?.total ?? 0
-
-  const handleSearch = (value: string) => {
-    setSearch(value)
-    setPage(1)
-  }
 
   const handleDelete = (team: Team) => {
     Modal.confirm({
@@ -97,111 +83,129 @@ export function TeamList() {
         deleteTeam.mutateAsync(team.id, {
           onSuccess: () => {
             Message.success('Team deleted')
-            setExpandedRowKeys((keys) => keys.filter((k) => k !== team.id))
           },
         }),
     })
   }
 
-  const columns: ColumnProps<Team>[] = [
-    {
-      title: 'Team',
-      dataIndex: 'name',
-      render: (_: unknown, record: Team) => (
-        <Space>
-          <IconUser style={{ fontSize: 20, color: 'rgb(var(--primary-6))' }} />
-          <div>
-            <Typography.Text bold>{record.name}</Typography.Text>
-            <br />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              Owner: {record.owner_email || 'Unknown'}
-            </Typography.Text>
-          </div>
-        </Space>
-      ),
+  const columns = useMemo<NotionColumnDef<Team>[]>(
+    () => [
+      {
+        key: 'name',
+        header: 'Team',
+        type: 'text',
+        filterable: true,
+        sortable: true,
+        required: true,
+        minSize: 200,
+        cell: (row) => (
+          <Space>
+            <IconUser style={{ fontSize: 20, color: 'rgb(var(--primary-6))' }} />
+            <div>
+              <Typography.Text bold>{row.name}</Typography.Text>
+              <br />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Owner: {row.owner_email || 'Unknown'}
+              </Typography.Text>
+            </div>
+          </Space>
+        ),
+      },
+      {
+        key: 'member_count',
+        header: 'Members',
+        type: 'number',
+        sortable: true,
+        size: 100,
+      },
+      {
+        key: 'video_count',
+        header: 'Videos',
+        type: 'number',
+        sortable: true,
+        size: 100,
+      },
+      {
+        key: 'invite_code',
+        header: 'Invite Code',
+        type: 'text',
+        size: 200,
+        cell: (row) => (
+          <Typography.Paragraph
+            copyable
+            style={{ margin: 0, fontSize: 13, fontFamily: 'monospace' }}
+          >
+            {row.invite_code}
+          </Typography.Paragraph>
+        ),
+      },
+      {
+        key: 'created_at',
+        header: 'Created',
+        type: 'date',
+        filterable: true,
+        sortable: true,
+        size: 140,
+        cell: (row) => formatDate(row.created_at),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        type: 'text',
+        required: true,
+        size: 80,
+        cell: (row) => (
+          <Button
+            type="text"
+            status="danger"
+            icon={<IconDelete />}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDelete(row)
+            }}
+          />
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  const {
+    table,
+    toolbarProps,
+    pagination,
+    isLoading,
+    setPage,
+  } = useNotionTable<Team>({
+    tableKey: 'teams',
+    columns,
+    defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+    fetchData: async ({ page, pageSize, search }) => {
+      const { data } = await apiClient.get('/api/v1/admin/teams', {
+        params: {
+          page,
+          page_size: pageSize,
+          ...(search && { search }),
+        },
+      })
+      return { items: data.items, total: data.total }
     },
-    {
-      title: 'Members',
-      dataIndex: 'member_count',
-      width: 100,
-    },
-    {
-      title: 'Videos',
-      dataIndex: 'video_count',
-      width: 100,
-    },
-    {
-      title: 'Invite Code',
-      dataIndex: 'invite_code',
-      width: 200,
-      render: (code: string) => (
-        <Typography.Paragraph
-          copyable
-          style={{ margin: 0, fontSize: 13, fontFamily: 'monospace' }}
-        >
-          {code}
-        </Typography.Paragraph>
-      ),
-    },
-    {
-      title: 'Created',
-      dataIndex: 'created_at',
-      width: 140,
-      render: (value: string) => formatDate(value),
-    },
-    {
-      title: 'Actions',
-      width: 80,
-      align: 'center',
-      render: (_: unknown, record: Team) => (
-        <Button
-          type="text"
-          status="danger"
-          icon={<IconDelete />}
-          onClick={() => handleDelete(record)}
-        />
-      ),
-    },
-  ]
+  })
 
   return (
-    <div>
-      <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
-        Teams
-      </Typography.Title>
-
-      <Card style={{ marginBottom: 16 }}>
-        <Input.Search
-          placeholder="Search by team name..."
-          onSearch={handleSearch}
-          style={{ width: 320 }}
-          allowClear
-        />
-      </Card>
-
-      <Card>
-        <Table
-          rowKey="id"
-          columns={columns}
-          data={teams}
-          loading={isLoading}
-          scroll={{ x: 1000 }}
-          expandedRowKeys={expandedRowKeys}
-          onExpandedRowsChange={(keys) => setExpandedRowKeys(keys as string[])}
-          expandedRowRender={(record: Team) => (
-            <ExpandedMembers teamId={record.id} ownerId={record.owner_id} />
-          )}
-          pagination={{
-            current: page,
-            pageSize: PAGE_SIZE,
-            total,
-            onChange: setPage,
-            showTotal: true,
-            sizeCanChange: false,
-          }}
-          noDataElement="No teams found"
-        />
-      </Card>
-    </div>
+    <NotionTable<Team>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      title="Teams"
+      emptyText="No teams found"
+      expandedRowRender={(row) => (
+        <ExpandedMembers teamId={row.id} ownerId={row.owner_id} />
+      )}
+      scrollX={1000}
+    />
   )
 }
