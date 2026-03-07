@@ -70,6 +70,27 @@ function formatBytes(bytes: number) {
   return `${size.toFixed(1)} ${units[i]}`
 }
 
+const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
+
+const PLATFORM_ICONS: Record<string, { label: string; color: string }> = {
+  douyin: { label: 'DY', color: '#000000' },
+  bilibili: { label: 'B', color: '#00A1D6' },
+  youtube: { label: 'YT', color: '#FF0000' },
+  tiktok: { label: 'TT', color: '#010101' },
+  twitter: { label: 'X', color: '#1DA1F2' },
+  xiaohongshu: { label: 'XHS', color: '#FF2442' },
+}
+
+function getCoverSrc(record: TranscodeVersionData): string | null {
+  if (record.cover_download_path) {
+    const path = record.cover_download_path.startsWith('/')
+      ? record.cover_download_path
+      : `/${record.cover_download_path}`
+    return `${API_URL}/media${path}`
+  }
+  return record.cover_url || null
+}
+
 function TranscodeStatusTag({ status }: { status: string | null }) {
   const config: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
     completed: { color: 'green', icon: <IconCheckCircle />, label: 'Completed' },
@@ -162,26 +183,54 @@ export function TranscodeList() {
       title: 'Cover',
       dataIndex: 'cover_url',
       width: 80,
-      render: (value: string | null) =>
-        value ? (
-          <Image src={value} width={60} height={60} style={{ objectFit: 'cover', borderRadius: 4 }} />
-        ) : (
-          <div
-            style={{
-              width: 60,
-              height: 60,
-              background: 'var(--color-fill-2)',
-              borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--color-text-3)',
-              fontSize: 12,
-            }}
-          >
-            No cover
+      render: (_: unknown, record: TranscodeVersionData) => {
+        const src = getCoverSrc(record)
+        const platform = record.source_platform
+          ? PLATFORM_ICONS[record.source_platform]
+          : null
+        return (
+          <div style={{ position: 'relative', width: 60, height: 60 }}>
+            {src ? (
+              <Image src={src} width={60} height={60} style={{ objectFit: 'cover', borderRadius: 4 }} />
+            ) : (
+              <div
+                style={{
+                  width: 60,
+                  height: 60,
+                  background: 'var(--color-fill-2)',
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--color-text-3)',
+                  fontSize: 12,
+                }}
+              >
+                No cover
+              </div>
+            )}
+            {platform && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  background: platform.color,
+                  color: '#fff',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  padding: '1px 3px',
+                  borderRadius: 3,
+                  lineHeight: 1.2,
+                  opacity: 0.9,
+                }}
+              >
+                {platform.label}
+              </span>
+            )}
           </div>
-        ),
+        )
+      },
     },
     {
       title: 'Title',
