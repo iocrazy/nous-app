@@ -398,6 +398,8 @@ class TranscodeService:
             if not successful:
                 logger.error(f"All tiers failed for version {version_id}")
                 return None
+            if on_progress:
+                await on_progress(100, "Done")
             return successful
         else:
             # ── Serial tier encoding ──
