@@ -1,5 +1,6 @@
 """Admin API routes for HLS Transcode management."""
 
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -263,7 +264,7 @@ async def retry_transcode(
         .execute()
     )
     from app.tasks.transcode_tasks import transcode_to_hls
-    transcode_to_hls.delay(resource_id, version_id, auth.user_id)
+    await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, auth.user_id)
 
     # Audit log
     await create_audit_log(
@@ -321,7 +322,7 @@ async def batch_transcode(
                 .eq("id", vid)
                 .execute()
             )
-            transcode_to_hls.delay(rid, vid, auth.user_id)
+            await asyncio.to_thread(transcode_to_hls.delay, rid, vid, auth.user_id)
             queued += 1
         except Exception as e:
             logger.warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")
