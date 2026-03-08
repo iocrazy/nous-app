@@ -12,6 +12,7 @@ import {
   Space,
   Spin,
   Radio,
+  Select,
 } from '@arco-design/web-react'
 import { IconPlus, IconGift } from '@arco-design/web-react/icon'
 import { Line, Pie, Bar } from '@ant-design/charts'
@@ -23,6 +24,7 @@ import {
   useAdjustPoints,
   useBatchGift,
 } from '../../api/endpoints/credits'
+import { useTeams } from '../../api/endpoints/teams'
 
 const { Row, Col } = Grid
 const FormItem = Form.Item
@@ -40,6 +42,8 @@ function AdjustPointsModal({
 }) {
   const [form] = Form.useForm()
   const adjustPoints = useAdjustPoints()
+  const { data: teamsData, isLoading: teamsLoading } = useTeams({ pageSize: 100 })
+  const teams = teamsData?.items ?? []
 
   const handleSubmit = () => {
     form.validate().then((values) => {
@@ -73,8 +77,22 @@ function AdjustPointsModal({
       unmountOnExit
     >
       <Form form={form} layout="vertical">
-        <FormItem label="Team ID" field="team_id" rules={[{ required: true, message: 'Team ID is required' }]}>
-          <Input placeholder="Enter team ID" />
+        <FormItem label="Team" field="team_id" rules={[{ required: true, message: 'Please select a team' }]}>
+          <Select
+            placeholder="Select a team"
+            showSearch
+            loading={teamsLoading}
+            filterOption={(input, option) => {
+              const label = option?.props?.children as string
+              return label?.toLowerCase().includes(input.toLowerCase()) ?? false
+            }}
+          >
+            {teams.map((t) => (
+              <Select.Option key={t.id} value={t.id}>
+                {t.name} ({t.owner_email || 'No owner'})
+              </Select.Option>
+            ))}
+          </Select>
         </FormItem>
         <FormItem label="Amount" field="amount" rules={[{ required: true, message: 'Amount is required' }]}>
           <InputNumber placeholder="Positive to add, negative to deduct" style={{ width: '100%' }} />
@@ -96,16 +114,14 @@ function BatchGiftModal({
 }) {
   const [form] = Form.useForm()
   const batchGift = useBatchGift()
+  const { data: teamsData, isLoading: teamsLoading } = useTeams({ pageSize: 100 })
+  const teams = teamsData?.items ?? []
 
   const handleSubmit = () => {
     form.validate().then((values) => {
-      const teamIds = (values.team_ids as string)
-        .split(',')
-        .map((id: string) => id.trim())
-        .filter(Boolean)
-
-      if (teamIds.length === 0) {
-        Message.error('Please enter at least one team ID')
+      const teamIds = values.team_ids as string[]
+      if (!teamIds || teamIds.length === 0) {
+        Message.error('Please select at least one team')
         return
       }
 
@@ -140,11 +156,26 @@ function BatchGiftModal({
     >
       <Form form={form} layout="vertical">
         <FormItem
-          label="Team IDs"
+          label="Teams"
           field="team_ids"
-          rules={[{ required: true, message: 'Team IDs are required' }]}
+          rules={[{ required: true, message: 'Please select at least one team' }]}
         >
-          <Input placeholder="Comma-separated team IDs (e.g. id1, id2, id3)" />
+          <Select
+            mode="multiple"
+            placeholder="Select teams"
+            showSearch
+            loading={teamsLoading}
+            filterOption={(input, option) => {
+              const label = option?.props?.children as string
+              return label?.toLowerCase().includes(input.toLowerCase()) ?? false
+            }}
+          >
+            {teams.map((t) => (
+              <Select.Option key={t.id} value={t.id}>
+                {t.name} ({t.owner_email || 'No owner'})
+              </Select.Option>
+            ))}
+          </Select>
         </FormItem>
         <FormItem label="Amount" field="amount" rules={[{ required: true, message: 'Amount is required' }]}>
           <InputNumber min={1} placeholder="Points to gift (positive only)" style={{ width: '100%' }} />
