@@ -24,7 +24,7 @@ import {
   useAdjustPoints,
   useBatchGift,
 } from '../../api/endpoints/credits'
-import { useTeams } from '../../api/endpoints/teams'
+import { useTeams, getTeamDisplayName } from '../../api/endpoints/teams'
 
 const { Row, Col } = Grid
 const FormItem = Form.Item
@@ -90,7 +90,7 @@ function AdjustPointsModal({
           >
             {teams.map((t) => (
               <Select.Option key={t.id} value={t.id}>
-                {`${t.name} (${t.owner_email || 'No owner'})`}
+                {`${getTeamDisplayName(t)} (${t.owner_email || 'No owner'})`}
               </Select.Option>
             ))}
           </Select>
@@ -174,7 +174,7 @@ function BatchGiftModal({
           >
             {teams.map((t) => (
               <Select.Option key={t.id} value={t.id}>
-                {`${t.name} (${t.owner_email || 'No owner'})`}
+                {`${getTeamDisplayName(t)} (${t.owner_email || 'No owner'})`}
               </Select.Option>
             ))}
           </Select>
