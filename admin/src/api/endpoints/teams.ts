@@ -6,11 +6,21 @@ export interface Team {
   name: string
   owner_id: string
   owner_email: string | null
+  owner_username: string | null
   invite_code: string
   is_personal: boolean
   member_count: number
   points_balance: number
   created_at: string
+}
+
+/** Display name for a team: personal teams show "{Owner}'s Workspace" */
+export function getTeamDisplayName(team: Team): string {
+  if (!team.is_personal) return team.name
+  const ownerName = team.owner_username || team.owner_email?.split('@')[0] || ''
+  if (!ownerName) return team.name
+  const capitalized = ownerName.charAt(0).toUpperCase() + ownerName.slice(1)
+  return `${capitalized}'s Workspace`
 }
 
 export interface TeamMember {

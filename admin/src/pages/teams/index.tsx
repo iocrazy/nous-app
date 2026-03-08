@@ -15,7 +15,7 @@ import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
 import type { Team, TeamMember } from '../../api/endpoints/teams'
-import { useTeamMembers, useDeleteTeam, ROLE_COLOR_MAP } from '../../api/endpoints/teams'
+import { useTeamMembers, useDeleteTeam, ROLE_COLOR_MAP, getTeamDisplayName } from '../../api/endpoints/teams'
 import { formatDate } from '../../utils/format'
 
 // --- Expanded members sub-table ---
@@ -176,7 +176,7 @@ export function TeamList() {
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Typography.Text bold ellipsis>{row.name}</Typography.Text>
+                <Typography.Text bold ellipsis>{getTeamDisplayName(row)}</Typography.Text>
                 {row.is_personal && (
                   <Tag size="small" color="arcoblue">Personal</Tag>
                 )}
