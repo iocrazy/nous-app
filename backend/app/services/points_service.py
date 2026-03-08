@@ -420,6 +420,53 @@ class PointsService:
         return result
 
     # ------------------------------------------------------------------ #
+    # Reclaim daily gift (debit flow)
+    # ------------------------------------------------------------------ #
+
+    async def reclaim_daily_gift(
+        self,
+        team_id: str,
+        amount: int,
+        user_id: str | None = None,
+        description: str = "Daily gift reclaim - unused points",
+    ) -> Dict[str, Any]:
+        """Reclaim unused daily gift points from team balance."""
+        if amount <= 0:
+            return {"success": True, "reclaimed": 0}
+
+        team_quota = await self.repo.get_team_quota(team_id)
+        if team_quota is None:
+            return {"success": False, "reclaimed": 0}
+
+        current_balance = team_quota.get("points_balance", 0)
+        actual_reclaim = min(amount, current_balance)
+
+        if actual_reclaim <= 0:
+            return {"success": True, "reclaimed": 0}
+
+        new_balance = current_balance - actual_reclaim
+        await self.repo.update_points_balance(team_id, new_balance)
+
+        await self.repo.create_transaction(
+            {
+                "team_id": team_id,
+                "user_id": user_id,
+                "amount": -actual_reclaim,
+                "balance_after": new_balance,
+                "type": "daily_gift_reclaim",
+                "reference_type": "daily_gift_reclaim",
+                "description": description,
+            }
+        )
+
+        logger.info(
+            f"Reclaimed {actual_reclaim} daily gift points from team {team_id}. "
+            f"Balance: {current_balance} -> {new_balance}"
+        )
+
+        return {"success": True, "reclaimed": actual_reclaim}
+
+    # ------------------------------------------------------------------ #
     # Balance query
     # ------------------------------------------------------------------ #
 

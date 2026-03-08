@@ -207,6 +207,7 @@ export function OrdersTab() {
       tableKey: 'credits-orders',
       columns,
       defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+      refetchInterval: 30000,
       fetchData: async ({ page, pageSize, filters, sorts }) => {
         const statusFilter = filters.find((f) => f.field === 'payment_status')
         const methodFilter = filters.find((f) => f.field === 'payment_method')

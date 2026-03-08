@@ -451,6 +451,184 @@ def recover_stale_orchestrator_locks():
 
 
 @shared_task
+def grant_daily_free_points():
+    """Grant daily free points to each active user's team."""
+    logger.info("[Celery Beat] Starting daily free points grant...")
+
+    try:
+        from app.core.config import settings
+        from app.db.supabase_client import get_async_supabase_admin
+        from app.services.points_service import PointsService
+
+        amount = settings.DAILY_FREE_POINTS
+        if amount <= 0:
+            return {"status": "skipped", "reason": "DAILY_FREE_POINTS <= 0"}
+
+        async def _grant():
+            supabase = await get_async_supabase_admin()
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # Only grant to personal teams (is_personal=true)
+            teams_resp = (
+                await supabase.table("teams")
+                .select("id, owner_id")
+                .eq("is_personal", True)
+                .execute()
+            )
+            personal_teams = teams_resp.data or []
+
+            points_svc = PointsService()
+            granted = 0
+            skipped = 0
+
+            for team in personal_teams:
+                user_id = team["owner_id"]
+                team_id = team["id"]
+
+                # Check if already granted today (prevent duplicates)
+                existing = (
+                    await supabase.table("daily_point_gifts")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .eq("gift_date", today)
+                    .maybe_single()
+                    .execute()
+                )
+                if existing.data:
+                    skipped += 1
+                    continue
+
+                # Add points to team balance
+                result = await points_svc.add_points(
+                    team_id=team_id,
+                    amount=amount,
+                    type="daily_gift",
+                    description=f"Daily free points ({today})",
+                    user_id=user_id,
+                )
+
+                if result.get("success"):
+                    await supabase.table("daily_point_gifts").insert({
+                        "user_id": user_id,
+                        "team_id": team_id,
+                        "gift_date": today,
+                        "amount_granted": amount,
+                        "status": "granted",
+                    }).execute()
+                    granted += 1
+
+            return {"status": "success", "granted": granted, "skipped": skipped}
+
+        result = run_async(_grant())
+        logger.success(
+            f"[Celery Beat] Daily free points grant complete: {result}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Daily free points grant failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
+def reclaim_daily_free_points():
+    """Reclaim unused daily gift points from previous day."""
+    logger.info("[Celery Beat] Starting daily free points reclaim...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+        from app.services.points_service import PointsService
+
+        async def _reclaim():
+            supabase = await get_async_supabase_admin()
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            # Get yesterday's un-reclaimed gift records
+            gifts_resp = (
+                await supabase.table("daily_point_gifts")
+                .select("*")
+                .eq("gift_date", yesterday)
+                .eq("status", "granted")
+                .execute()
+            )
+            gifts = gifts_resp.data or []
+
+            if not gifts:
+                return {"status": "success", "reclaimed_count": 0, "total_reclaimed": 0}
+
+            points_svc = PointsService()
+            reclaimed_count = 0
+            total_reclaimed = 0
+
+            for gift in gifts:
+                user_id = gift["user_id"]
+                team_id = gift["team_id"]
+                amount_granted = gift["amount_granted"]
+                granted_at = gift["granted_at"]
+
+                # Query consumption after the gift was granted
+                txns_resp = (
+                    await supabase.table("point_transactions")
+                    .select("amount")
+                    .eq("user_id", user_id)
+                    .eq("team_id", team_id)
+                    .eq("type", "consume")
+                    .gte("created_at", granted_at)
+                    .execute()
+                )
+                consumed = sum(
+                    abs(t["amount"]) for t in (txns_resp.data or [])
+                )
+
+                # Calculate unused portion
+                used = min(amount_granted, consumed)
+                reclaim_amount = amount_granted - used
+
+                # Reclaim unused points
+                actual_reclaimed = 0
+                if reclaim_amount > 0:
+                    result = await points_svc.reclaim_daily_gift(
+                        team_id=team_id,
+                        amount=reclaim_amount,
+                        user_id=user_id,
+                        description=f"Reclaim unused daily gift ({yesterday})",
+                    )
+                    actual_reclaimed = result.get("reclaimed", 0)
+
+                # Update gift record
+                await (
+                    supabase.table("daily_point_gifts")
+                    .update({
+                        "status": "reclaimed",
+                        "amount_consumed": used,
+                        "amount_reclaimed": actual_reclaimed,
+                        "reclaimed_at": datetime.now().isoformat(),
+                    })
+                    .eq("id", gift["id"])
+                    .execute()
+                )
+
+                reclaimed_count += 1
+                total_reclaimed += actual_reclaimed
+
+            return {
+                "status": "success",
+                "reclaimed_count": reclaimed_count,
+                "total_reclaimed": total_reclaimed,
+            }
+
+        result = run_async(_reclaim())
+        logger.success(
+            f"[Celery Beat] Daily free points reclaim complete: {result}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Daily free points reclaim failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def cleanup_trashed_resources():
     """Permanently delete trashed resources older than 15 days."""
     logger.info("[Celery Beat] Starting trashed resource cleanup...")

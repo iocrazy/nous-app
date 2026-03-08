@@ -17,6 +17,8 @@ const TYPE_FILTER_OPTIONS = [
   { label: 'Consume', value: 'consume' },
   { label: 'Refund', value: 'refund' },
   { label: 'Gift', value: 'gift' },
+  { label: 'Daily Gift', value: 'daily_gift' },
+  { label: 'Daily Gift Reclaim', value: 'daily_gift_reclaim' },
   { label: 'Admin Adjust', value: 'admin_adjust' },
 ]
 
@@ -25,6 +27,8 @@ const TYPE_COLORS: Record<string, string> = {
   consume: 'red',
   refund: 'purple',
   gift: 'blue',
+  daily_gift: 'cyan',
+  daily_gift_reclaim: 'orangered',
   admin_adjust: 'orange',
 }
 
@@ -229,6 +233,7 @@ export function TransactionsTab() {
     tableKey: 'credits-transactions',
     columns,
     defaultSorts: [{ field: 'created_at', direction: 'desc' }],
+    refetchInterval: 30000,
     fetchData: async ({ page, pageSize, filters, sorts }) => {
       const typeFilter = filters.find((f) => f.field === 'type')
       const teamFilter = filters.find((f) => f.field === 'team_name')

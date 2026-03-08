@@ -101,6 +101,7 @@ export function useCreditsStats() {
       const { data } = await apiClient.get<CreditsStats>('/api/v1/admin/credits/stats')
       return data
     },
+    refetchInterval: 60000,
   })
 }
 
@@ -114,6 +115,7 @@ export function useRevenueChart(period: string = 'day', days: number = 30) {
       )
       return data
     },
+    refetchInterval: 60000,
   })
 }
 
@@ -126,6 +128,7 @@ export function useConsumptionChart() {
       )
       return data
     },
+    refetchInterval: 60000,
   })
 }
 
@@ -139,6 +142,7 @@ export function useTopTeams(limit: number = 10) {
       )
       return data
     },
+    refetchInterval: 60000,
   })
 }
 
