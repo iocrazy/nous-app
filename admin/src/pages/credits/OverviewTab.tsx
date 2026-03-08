@@ -83,13 +83,14 @@ function AdjustPointsModal({
             showSearch
             loading={teamsLoading}
             filterOption={(input, option) => {
-              const label = option?.props?.children as string
-              return label?.toLowerCase().includes(input.toLowerCase()) ?? false
+              const label = option?.props?.children
+              const text = typeof label === 'string' ? label : String(label ?? '')
+              return text.toLowerCase().includes(input.toLowerCase())
             }}
           >
             {teams.map((t) => (
               <Select.Option key={t.id} value={t.id}>
-                {t.name} ({t.owner_email || 'No owner'})
+                {`${t.name} (${t.owner_email || 'No owner'})`}
               </Select.Option>
             ))}
           </Select>
@@ -166,13 +167,14 @@ function BatchGiftModal({
             showSearch
             loading={teamsLoading}
             filterOption={(input, option) => {
-              const label = option?.props?.children as string
-              return label?.toLowerCase().includes(input.toLowerCase()) ?? false
+              const label = option?.props?.children
+              const text = typeof label === 'string' ? label : String(label ?? '')
+              return text.toLowerCase().includes(input.toLowerCase())
             }}
           >
             {teams.map((t) => (
               <Select.Option key={t.id} value={t.id}>
-                {t.name} ({t.owner_email || 'No owner'})
+                {`${t.name} (${t.owner_email || 'No owner'})`}
               </Select.Option>
             ))}
           </Select>
