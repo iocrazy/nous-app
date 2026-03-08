@@ -91,6 +91,20 @@ export function TeamList() {
   const columns = useMemo<NotionColumnDef<Team>[]>(
     () => [
       {
+        key: 'id',
+        header: 'Team ID',
+        type: 'text',
+        size: 200,
+        cell: (row) => (
+          <Typography.Paragraph
+            copyable
+            style={{ margin: 0, fontSize: 12, fontFamily: 'monospace' }}
+          >
+            {row.id}
+          </Typography.Paragraph>
+        ),
+      },
+      {
         key: 'name',
         header: 'Team',
         type: 'text',
