@@ -13,6 +13,8 @@ import hashlib
 import json
 import mimetypes
 import re
+
+import aiofiles
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -80,8 +82,8 @@ class ResourcesService:
         save_dir = Path(settings.DOWNLOAD_PATH) / "teams" / scope_id / "uploads" / resource_id / "v1"
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
-        with open(target, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(target, "wb") as f:
+            await f.write(content)
 
         relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
@@ -173,8 +175,8 @@ class ResourcesService:
         save_dir = Path(settings.DOWNLOAD_PATH) / base_relative / f"v{next_version}"
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
-        with open(target, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(target, "wb") as f:
+            await f.write(content)
 
         mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
         file_type = self._classify_file_type(mime)

@@ -43,7 +43,10 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
   const [packages, setPackages] = useState<PointPackage[]>([]);
   const [orders, setOrders] = useState<PaymentOrder[]>([]);
   const [pricing, setPricing] = useState<PointPricing[]>([]);
-  const [usageStats, setUsageStats] = useState<any>(null);
+  const [usageStats, setUsageStats] = useState<{
+    total_consumed_this_month?: number;
+    top_consumers?: Array<{ user_id?: string; name?: string; email?: string; points_used: number }>;
+  } | null>(null);
   const [adjustAmount, setAdjustAmount] = useState<number>(0);
   const [adjustDescription, setAdjustDescription] = useState('');
   const [adjusting, setAdjusting] = useState(false);
@@ -251,7 +254,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
           )}
 
           {!usageStats && (
-            <p className="text-sm text-zinc-500">No consumption data available yet.</p>
+            <p className="text-sm text-zinc-500">{t('billing.noConsumptionData', 'No consumption data available yet.')}</p>
           )}
         </div>
       </section>
@@ -287,7 +290,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
                       {new Date(order.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-5 py-3 text-zinc-300">
-                      {order.package_id}
+                      {packages.find((p) => p.id === order.package_id)?.name || order.package_id}
                     </td>
                     <td className="px-5 py-3 text-right font-mono text-amber-400">
                       {order.points_amount.toLocaleString()}

@@ -21,6 +21,8 @@ VALID_TABLE_KEYS = {
     "request-logs",
     "frontend-errors",
     "app-logs",
+    "credits-transactions",
+    "credits-orders",
 }
 
 

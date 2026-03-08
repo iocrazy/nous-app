@@ -78,14 +78,16 @@ class OpenAIProvider(AIProvider):
         return response.choices[0].message.content
 
     async def transcribe(self, audio_path: str, **kwargs) -> TranscriptResult:
-        with open(audio_path, "rb") as audio_file:
-            response = await self._client.audio.transcriptions.create(
-                model=kwargs.pop("model", "whisper-1"),
-                file=audio_file,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-                **kwargs,
-            )
+        import aiofiles
+        async with aiofiles.open(audio_path, "rb") as f:
+            audio_bytes = await f.read()
+        response = await self._client.audio.transcriptions.create(
+            model=kwargs.pop("model", "whisper-1"),
+            file=("audio.mp3", audio_bytes),
+            response_format="verbose_json",
+            timestamp_granularities=["segment"],
+            **kwargs,
+        )
 
         segments = []
         for seg in getattr(response, "segments", []) or []:

@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Wallet, CreditCard, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { createOrder, pollOrderStatus } from '../services/paymentService';
 import { PointPackage } from '../types';
+
+const MAX_POLL_ATTEMPTS = 100; // 100 × 3s = 5 minutes max
 
 type PaymentStep = 'select' | 'processing' | 'success' | 'error';
 type PaymentMethod = 'wechat' | 'alipay';
@@ -65,7 +68,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   const startPolling = (orderId: string) => {
+    let attempts = 0;
     pollingRef.current = setInterval(async () => {
+      attempts++;
+      if (attempts > MAX_POLL_ATTEMPTS) {
+        cleanupTimers();
+        setErrorMessage('Payment timed out. Please check your order status later.');
+        setStep('error');
+        return;
+      }
       try {
         const status = await pollOrderStatus(orderId);
         if (status.payment_status === 'paid') {
@@ -237,11 +248,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               {/* Payment URL / QR code placeholder */}
               {paymentUrl && (
                 <div className="p-4 bg-zinc-800/50 rounded-xl">
-                  <div className="w-48 h-48 mx-auto bg-zinc-700/50 rounded-lg flex items-center justify-center border border-zinc-600/50">
-                    <div className="text-center">
-                      <Wallet size={32} className="mx-auto text-zinc-500 mb-2" />
-                      <p className="text-xs text-zinc-500">QR Code</p>
-                    </div>
+                  <div className="w-48 h-48 mx-auto bg-white rounded-lg flex items-center justify-center p-2">
+                    <QRCodeSVG
+                      value={paymentUrl}
+                      size={176}
+                      level="M"
+                      includeMargin={false}
+                    />
                   </div>
                   <p className="text-xs text-zinc-500 mt-3">
                     Scan with {paymentMethod === 'wechat' ? 'WeChat' : 'Alipay'} to pay

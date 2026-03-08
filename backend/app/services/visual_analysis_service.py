@@ -99,8 +99,10 @@ class VisualAnalysisService:
     async def _encode_image_from_file(self, file_path: str) -> Optional[str]:
         """Read and encode local image to base64."""
         try:
-            with open(file_path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+            import aiofiles
+            async with aiofiles.open(file_path, "rb") as f:
+                data = await f.read()
+            return base64.b64encode(data).decode("utf-8")
         except Exception as e:
             logger.error(f"Failed to read image from {file_path}: {e}")
         return None

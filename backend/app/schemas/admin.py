@@ -392,3 +392,127 @@ class AdminTablePreferenceUpdate(BaseModel):
     sorts: List[TableSort] = []
     visible_columns: Optional[List[str]] = None
     column_order: Optional[List[str]] = None
+
+
+# ============================================
+# Credits Management Schemas (Admin)
+# ============================================
+
+
+class AdminCreditsStatsResponse(BaseModel):
+    """System-wide credits statistics for the admin dashboard."""
+    total_points_in_system: int = 0
+    total_consumed: int = 0
+    total_purchased: int = 0
+    total_revenue_cents: int = 0
+    active_teams_count: int = 0
+    pending_orders_count: int = 0
+    monthly_revenue_cents: int = 0
+
+
+class AdminRevenueChartItem(BaseModel):
+    """Single data point for the revenue trend chart."""
+    date: str
+    revenue_cents: int = 0
+    points_sold: int = 0
+
+
+class AdminConsumptionChartItem(BaseModel):
+    """Single data point for the consumption distribution chart."""
+    action_type: str
+    total_points: int = 0
+
+
+class AdminTopTeamItem(BaseModel):
+    """Team entry for the top-consumers ranking."""
+    team_id: str
+    team_name: str
+    total_consumed: int = 0
+
+
+class AdminCreditTransactionResponse(BaseModel):
+    """A single point_transactions row enriched with team/user info."""
+    id: str
+    team_id: str
+    team_name: Optional[str] = None
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    type: str
+    amount: int = 0
+    balance_after: int = 0
+    description: Optional[str] = None
+    created_at: str
+
+
+class AdminCreditTransactionListResponse(BaseModel):
+    """Paginated list of credit transactions."""
+    items: List[AdminCreditTransactionResponse]
+    total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class AdminOrderResponse(BaseModel):
+    """A single orders row enriched with team/user/package info."""
+    id: str
+    order_no: str
+    team_id: str
+    team_name: Optional[str] = None
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    package_name: Optional[str] = None
+    points_amount: int = 0
+    amount_cents: int = 0
+    payment_method: Optional[str] = None
+    payment_status: str
+    created_at: str
+    paid_at: Optional[str] = None
+
+
+class AdminOrderListResponse(BaseModel):
+    """Paginated list of orders."""
+    items: List[AdminOrderResponse]
+    total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class AdminPackageRequest(BaseModel):
+    """Create or update a point package."""
+    name: str
+    description: Optional[str] = None
+    points_amount: int
+    price_cents: int
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class AdminPricingUpdateRequest(BaseModel):
+    """Update pricing for a specific action_type."""
+    points_cost: int
+    description: Optional[str] = None
+
+
+class AdminBatchGiftRequest(BaseModel):
+    """Gift points to multiple teams at once."""
+    team_ids: List[str]
+    amount: int
+    description: Optional[str] = None
+
+
+class AdminPointsAdjustRequest(BaseModel):
+    """Admin manual points adjustment for a single team."""
+    team_id: str
+    amount: int = Field(..., description="Amount to adjust (positive or negative)")
+    description: Optional[str] = None
+
+
+class AdminTeamCreditsDetailResponse(BaseModel):
+    """Detailed credits info for a single team."""
+    team_id: str
+    team_name: str
+    points_balance: int = 0
+    storage_limit_bytes: int = 0
+    storage_used_bytes: int = 0
+    member_count: int = 0
+    recent_transactions: List[AdminCreditTransactionResponse] = []
