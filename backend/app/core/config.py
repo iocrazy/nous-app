@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Daily free points
+    # ============================================
+    DAILY_FREE_POINTS: int = Field(
+        default=100,
+        description="Daily free points granted to each active user",
+    )
+
+    # ============================================
     # Notion 集成（可选）
     # ============================================
     NOTION_API_KEY: str = Field(default="", description="Notion API密钥")

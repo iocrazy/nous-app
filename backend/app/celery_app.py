@@ -102,6 +102,14 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.recover_stale_orchestrator_locks",
             "schedule": 3600.0,  # Every hour
         },
+        "grant-daily-free-points": {
+            "task": "app.tasks.scheduled_tasks.grant_daily_free_points",
+            "schedule": crontab(minute=0, hour=0),  # 每天 00:00
+        },
+        "reclaim-daily-free-points": {
+            "task": "app.tasks.scheduled_tasks.reclaim_daily_free_points",
+            "schedule": crontab(minute=20, hour=0),  # 每天 00:20
+        },
     },
 )
 
