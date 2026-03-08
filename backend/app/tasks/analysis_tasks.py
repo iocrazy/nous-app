@@ -1,7 +1,7 @@
 """Celery tasks for video analysis."""
 
+import asyncio
 import os
-import subprocess
 import tempfile
 
 from celery import shared_task
@@ -150,10 +150,13 @@ def analyze_video_l2_task(
                     "default=noprint_wrappers=1:nokey=1",
                     video_path,
                 ]
-                duration_output = subprocess.check_output(
-                    probe_cmd, stderr=subprocess.DEVNULL
+                proc = await asyncio.create_subprocess_exec(
+                    *probe_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
-                duration = float(duration_output.decode().strip())
+                stdout_bytes, _ = await proc.communicate()
+                duration = float(stdout_bytes.decode().strip())
 
                 # Extract frames at 25%, 50%, 75%
                 for i, pct in enumerate([0.25, 0.50, 0.75]):
@@ -173,7 +176,12 @@ def analyze_video_l2_task(
                         "2",
                         output_path,
                     ]
-                    subprocess.run(extract_cmd, capture_output=True, check=True)
+                    extract_proc = await asyncio.create_subprocess_exec(
+                        *extract_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await extract_proc.communicate()
 
                     if os.path.exists(output_path):
                         keyframe_paths.append(output_path)

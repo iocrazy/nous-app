@@ -266,7 +266,8 @@
     "adjustDescriptionPlaceholder": "调整原因...",
     "adjustSubmit": "调整积分",
     "adjustSuccess": "已调整 {{amount}} 积分。新余额：{{balance}}",
-    "adjustError": "积分调整失败"
+    "adjustError": "积分调整失败",
+    "noConsumptionData": "暂无消耗数据"
   },
   "members": {
     "title": "成员",

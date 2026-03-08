@@ -11,6 +11,8 @@ import asyncio
 import json
 import mimetypes
 import re
+
+import aiofiles
 from pathlib import Path
 from typing import Optional
 
@@ -155,8 +157,8 @@ class ProjectsService:
             counter += 1
 
         content = await file.read()
-        with open(target, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(target, "wb") as f:
+            await f.write(content)
 
         # Classify
         mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
@@ -291,8 +293,8 @@ class ProjectsService:
 
         target = save_dir / f"v{next_version}_{safe_name}"
         content = await file.read()
-        with open(target, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(target, "wb") as f:
+            await f.write(content)
 
         # Classify and extract metadata
         mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""

@@ -266,7 +266,8 @@
     "adjustDescriptionPlaceholder": "Reason for adjustment...",
     "adjustSubmit": "Adjust Points",
     "adjustSuccess": "Adjusted {{amount}} points. New balance: {{balance}}",
-    "adjustError": "Failed to adjust points"
+    "adjustError": "Failed to adjust points",
+    "noConsumptionData": "No consumption data available yet."
   },
   "members": {
     "title": "Members",

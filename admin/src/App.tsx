@@ -9,6 +9,7 @@ import { TeamList } from './pages/teams'
 import { AuditLogList } from './pages/audit-logs'
 import { MediaList } from './pages/media'
 import { PlaceholderPage } from './pages/placeholder'
+import { CreditsPage } from './pages/credits'
 import { Settings } from './pages/settings'
 import { RequestLogs } from './pages/request-logs'
 import { MonitoringDashboard } from './pages/monitoring'
@@ -34,7 +35,7 @@ export default function App() {
               <Route path="/transcode" element={<TranscodeList />} />
               <Route path="/tasks" element={<TaskCenter />} />
               <Route path="/tags" element={<PlaceholderPage title="Tags" />} />
-              <Route path="/credits" element={<PlaceholderPage title="Credits" />} />
+              <Route path="/credits" element={<CreditsPage />} />
               <Route path="/monitoring" element={<MonitoringDashboard />} />
               <Route path="/search" element={<GlobalSearch />} />
               <Route path="/audit-logs" element={<AuditLogList />} />

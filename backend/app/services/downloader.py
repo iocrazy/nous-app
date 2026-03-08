@@ -43,7 +43,6 @@ class DownloaderService:
         Returns True if optimization succeeded, False otherwise.
         """
         import shutil
-        import subprocess
 
         if not file_path.endswith(".mp4"):
             return True  # Skip non-MP4 files
@@ -52,24 +51,30 @@ class DownloaderService:
 
         try:
             # Run ffmpeg to optimize the video
-            result = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",  # Overwrite output
-                    "-i",
-                    file_path,
-                    "-c",
-                    "copy",  # Copy streams without re-encoding (fast)
-                    "-movflags",
-                    "faststart",  # Move moov atom to beginning
-                    temp_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minute timeout for large files
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-y",  # Overwrite output
+                "-i",
+                file_path,
+                "-c",
+                "copy",  # Copy streams without re-encoding (fast)
+                "-movflags",
+                "faststart",  # Move moov atom to beginning
+                temp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            try:
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning(f"视频优化超时: {os.path.basename(file_path)}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return False
 
-            if result.returncode == 0 and os.path.exists(temp_path):
+            if proc.returncode == 0 and os.path.exists(temp_path):
                 # Check if the optimized file is valid
                 optimized_size = os.path.getsize(temp_path)
                 original_size = os.path.getsize(file_path)
@@ -87,18 +92,14 @@ class DownloaderService:
                     os.remove(temp_path)
                     return False
             else:
+                stderr_text = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
                 logger.warning(
-                    f"视频优化失败: {result.stderr[:200] if result.stderr else 'Unknown error'}"
+                    f"视频优化失败: {stderr_text[:200] if stderr_text else 'Unknown error'}"
                 )
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
                 return False
 
-        except subprocess.TimeoutExpired:
-            logger.warning(f"视频优化超时: {os.path.basename(file_path)}")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            return False
         except FileNotFoundError:
             logger.warning("ffmpeg not found, skipping video optimization")
             return False
@@ -115,28 +116,31 @@ class DownloaderService:
 
         Returns True if video is valid, False if corrupted.
         """
-        import subprocess
-
         try:
             # Use ffmpeg to verify the file can be decoded
-            result = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-v",
-                    "error",
-                    "-i",
-                    file_path,
-                    "-f",
-                    "null",
-                    "-",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,  # 1 minute timeout
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                file_path,
+                "-f",
+                "null",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            try:
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning(f"视频验证超时: {os.path.basename(file_path)}")
+                return True  # Don't fail on timeout, assume OK
+
+            stderr = stderr_bytes.decode(errors="replace").lower() if stderr_bytes else ""
 
             # Check for critical errors
-            stderr = result.stderr.lower()
             critical_errors = [
                 "partial file",
                 "invalid nal unit",
@@ -153,16 +157,13 @@ class DownloaderService:
                     return False
 
             # If return code is non-zero and has errors, file is bad
-            if result.returncode != 0 and stderr:
+            if proc.returncode != 0 and stderr:
                 logger.error(f"视频验证失败: {stderr[:200]}")
                 return False
 
             logger.debug(f"视频完整性验证通过: {os.path.basename(file_path)}")
             return True
 
-        except subprocess.TimeoutExpired:
-            logger.warning(f"视频验证超时: {os.path.basename(file_path)}")
-            return True  # Don't fail on timeout, assume OK
         except FileNotFoundError:
             logger.warning("ffmpeg not found, skipping video integrity check")
             return True  # Skip check if ffmpeg not installed
