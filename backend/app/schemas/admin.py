@@ -80,7 +80,9 @@ class AdminTeamResponse(BaseModel):
     owner_username: Optional[str] = None
     invite_code: str
     description: Optional[str] = None
+    is_personal: bool = False
     member_count: int = 0
+    points_balance: int = 0
     created_at: datetime
 
 

@@ -7,8 +7,9 @@ export interface Team {
   owner_id: string
   owner_email: string | null
   invite_code: string
+  is_personal: boolean
   member_count: number
-  video_count: number
+  points_balance: number
   created_at: string
 }
 

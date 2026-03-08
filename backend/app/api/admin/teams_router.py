@@ -72,13 +72,21 @@ async def list_teams(
     if not result.data:
         return AdminTeamListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Batch fetch: member counts and owner info in parallel (avoiding N+1 queries)
+    # Batch fetch: member counts, owner info, and points balances in parallel
     team_ids = [t["id"] for t in result.data]
     owner_ids = list(set(t["owner_id"] for t in result.data))
 
-    member_counts, owner_info = await asyncio.gather(
+    async def batch_get_points_balances(tids: list) -> dict:
+        """Get points_balance for multiple teams from team_quotas."""
+        if not tids:
+            return {}
+        resp = await supabase.table("team_quotas").select("team_id, points_balance").in_("team_id", tids).execute()
+        return {str(r["team_id"]): r.get("points_balance", 0) for r in (resp.data or [])}
+
+    member_counts, owner_info, points_balances = await asyncio.gather(
         batch_get_team_member_counts(team_ids),
         batch_get_user_info(owner_ids),
+        batch_get_points_balances(team_ids),
     )
 
     # Build response
@@ -95,7 +103,9 @@ async def list_teams(
             owner_username=owner_username,
             invite_code=team["invite_code"],
             description=team.get("description"),
+            is_personal=team.get("is_personal", False),
             member_count=member_counts.get(tid, 0),
+            points_balance=points_balances.get(str(tid), 0),
             created_at=team["created_at"],
         ))
 
@@ -126,10 +136,15 @@ async def get_team(
 
     team = result.data
 
-    # Get member count and owner info concurrently
-    member_count, (owner_email, owner_username) = await asyncio.gather(
+    # Get member count, owner info, and points balance concurrently
+    async def get_points_balance(tid: str) -> int:
+        resp = await supabase.table("team_quotas").select("points_balance").eq("team_id", tid).maybe_single().execute()
+        return resp.data.get("points_balance", 0) if resp.data else 0
+
+    member_count, (owner_email, owner_username), points_balance = await asyncio.gather(
         get_team_member_count(team_id),
         get_user_info(team["owner_id"]),
+        get_points_balance(team_id),
     )
 
     return AdminTeamResponse(
@@ -140,7 +155,9 @@ async def get_team(
         owner_username=owner_username,
         invite_code=team["invite_code"],
         description=team.get("description"),
+        is_personal=team.get("is_personal", False),
         member_count=member_count,
+        points_balance=points_balance,
         created_at=team["created_at"],
     )
 
