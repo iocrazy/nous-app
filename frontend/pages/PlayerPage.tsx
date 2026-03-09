@@ -40,8 +40,19 @@ export function PlayerPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
   const { addToast } = useToast();
   const isDragging = useRef(false);
+
+  // Track mobile breakpoint for responsive layout
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
 
@@ -331,34 +342,34 @@ export function PlayerPage() {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-      <div className="flex flex-col h-full p-4 md:p-0">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 mb-2 shrink-0">
+      <div className="flex flex-col h-full p-2 sm:p-4 md:p-0">
+        <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
           {/* Left: back + title */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
             <button
               onClick={handleBack}
-              className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+              className="flex items-center gap-1 sm:gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
             >
               <ArrowLeft size={16} />
-              <span>Back</span>
+              <span className="hidden sm:inline">Back</span>
             </button>
-            <span className="text-sm text-zinc-200 font-medium truncate max-w-[400px]">
+            <span className="text-xs sm:text-sm text-zinc-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}
             </span>
           </div>
 
           {/* Right: share + download + more */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {video.original_url && (
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(video.original_url);
                   addToast('Link copied to clipboard', 'success');
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
               >
                 <Share2 size={14} />
-                <span>Share</span>
+                <span className="hidden sm:inline">Share</span>
               </button>
             )}
 
@@ -367,10 +378,10 @@ export function PlayerPage() {
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
                 disabled={isDownloading || isFetching}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
               >
                 {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                <span>Download</span>
+                <span className="hidden sm:inline">Download</span>
               </button>
               {showDownloadMenu && (
                 <>
@@ -512,9 +523,9 @@ export function PlayerPage() {
             </div>
           </div>
         </div>
-        <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
-          <div className="flex-1 min-w-0 relative">
+          <div className="w-full md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
             {(hlsUrl || getVideoUrl(video)) ? (
               <VideoPlayer
                 src={hlsUrl || getVideoUrl(video)!}
@@ -555,30 +566,30 @@ export function PlayerPage() {
               </div>
             )}
           </div>
-          {/* Resize handle */}
+          {/* Resize handle — desktop only */}
           <div
             onMouseDown={handleResizeStart}
-            className="w-1 shrink-0 cursor-col-resize group relative mx-1.5"
+            className="hidden md:block w-1 shrink-0 cursor-col-resize group relative mx-1.5"
           >
             <div className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-blue-500/30 transition-colors rounded" />
           </div>
-          {/* Detail Panel — right sidebar */}
+          {/* Detail Panel — full width on mobile, resizable on desktop */}
           <div
-            style={{ width: panelWidth }}
-            className="shrink-0 overflow-y-auto custom-scrollbar"
+            className="w-full md:w-auto shrink-0 overflow-y-auto custom-scrollbar"
+            style={isMobile ? undefined : { width: panelWidth }}
           >
-            <VideoDetailPanel
-              video={video}
-              onClose={handleBack}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-              hidePreview
-              resourceRating={resourceRating}
-              resourceNotes={resourceNotes}
-              onRatingChange={resourceId ? handleRatingChange : undefined}
-              onNotesChange={resourceId ? handleNotesChange : undefined}
-              onNotesBlur={resourceId ? handleNotesBlur : undefined}
-            />
+              <VideoDetailPanel
+                video={video}
+                onClose={handleBack}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+                hidePreview
+                resourceRating={resourceRating}
+                resourceNotes={resourceNotes}
+                onRatingChange={resourceId ? handleRatingChange : undefined}
+                onNotesChange={resourceId ? handleNotesChange : undefined}
+                onNotesBlur={resourceId ? handleNotesBlur : undefined}
+              />
           </div>
         </div>
       </div>
