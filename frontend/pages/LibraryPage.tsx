@@ -228,7 +228,7 @@ export function LibraryPage() {
 
           {/* Mobile Library Search */}
           {!selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (
-            <div className="md:hidden fixed top-0 left-0 right-0 z-30 p-4 flex justify-end items-start pointer-events-none bg-gradient-to-b from-black/60 to-transparent">
+            <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
               <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
                 {isMobileSearchOpen ? (
                   <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">

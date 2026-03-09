@@ -108,7 +108,7 @@ const PanelShell: React.FC<{
   className?: string;
 }> = ({ children, className = '' }) => (
   <div
-    className={`absolute right-0 top-full mt-2 bg-zinc-900 border border-zinc-700/50 rounded-xl shadow-2xl z-50 ${className}`}
+    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-zinc-900 border border-zinc-700/50 rounded-xl shadow-2xl z-50 ${className}`}
   >
     {children}
   </div>
@@ -156,7 +156,7 @@ const TaskCenterPanel: React.FC = () => {
   const activeCount = (totalActive - activeUploadTasks) + uploadingItems.length;
 
   return (
-    <PanelShell className="w-96">
+    <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <span className="text-sm font-semibold text-zinc-200">{t('topbar.taskCenter')}</span>
@@ -320,7 +320,7 @@ const TaskCenterPanel: React.FC = () => {
 const NotificationsPanel: React.FC = () => {
   const { t } = useTranslation();
   return (
-    <PanelShell className="w-80">
+    <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
       <div className="px-4 py-3 border-b border-zinc-800">
         <span className="text-sm font-semibold text-zinc-200">{t('topbar.notifications')}</span>
       </div>
@@ -472,7 +472,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-6 gap-2 transition-[left] duration-300`}>
+    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
       {/* Language Switcher */}
       <LanguageSwitcher />
 

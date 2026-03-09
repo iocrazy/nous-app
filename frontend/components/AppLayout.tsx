@@ -130,7 +130,7 @@ export function AppLayout() {
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'library'
       ? 'p-0 sm:p-8 sm:pt-20 pb-20 sm:pb-8'
-      : 'p-4 sm:p-8 sm:pt-20 pb-24 sm:pb-8'
+      : 'px-3 py-3 pt-16 sm:p-8 sm:pt-20 pb-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -240,7 +240,7 @@ export function AppLayout() {
       />
 
       {/* Mobile Nav */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around p-4 z-40 pb-6">
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around px-4 py-2 z-40 pb-[env(safe-area-inset-bottom,8px)]">
         {/* Parser */}
         <button
           onClick={() => handleMobileNavClick('parser')}
