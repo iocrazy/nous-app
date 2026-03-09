@@ -1,5 +1,6 @@
 """Admin API routes for Credits / Points management."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -26,6 +27,7 @@ from app.schemas.admin import (
 from app.utils.admin_helpers import (
     create_audit_log,
     batch_get_user_auth_info,
+    batch_get_user_info,
     batch_get_team_member_counts,
 )
 
@@ -36,17 +38,35 @@ router = APIRouter()
 # Helper: build team name map
 # ============================================
 
+async def _get_team_display_name(team: dict, supabase=None) -> str:
+    """Get display name for a team. Personal teams show '{Owner}'s Workspace'."""
+    if not team.get("is_personal"):
+        return team["name"]
+    owner_id = team.get("owner_id")
+    if not owner_id:
+        return team["name"]
+    email, username = await get_user_info(str(owner_id))
+    owner_name = username or (email.split("@")[0] if email else "")
+    if not owner_name:
+        return team["name"]
+    return f"{owner_name[0].upper()}{owner_name[1:]}'s Workspace"
+
+
 async def _get_team_name_map(supabase, team_ids: list[str]) -> dict[str, str]:
-    """Fetch team names for a list of team_ids."""
+    """Fetch display names for a list of team_ids."""
     if not team_ids:
         return {}
     result = (
         await supabase.table("teams")
-        .select("id, name")
+        .select("id, name, is_personal, owner_id")
         .in_("id", team_ids)
         .execute()
     )
-    return {str(t["id"]): t["name"] for t in (result.data or [])}
+    teams = result.data or []
+    entries = await asyncio.gather(
+        *[_get_team_display_name(t) for t in teams]
+    )
+    return {str(teams[i]["id"]): entries[i] for i in range(len(teams))}
 
 
 # ============================================
@@ -803,7 +823,7 @@ async def get_team_detail(
     # Team info
     team_result = (
         await supabase.table("teams")
-        .select("id, name")
+        .select("id, name, is_personal, owner_id")
         .eq("id", team_id)
         .maybe_single()
         .execute()
@@ -812,6 +832,7 @@ async def get_team_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
     team = team_result.data
+    team_display_name = await _get_team_display_name(team)
 
     # Quota
     quota_result = (
@@ -846,7 +867,7 @@ async def get_team_detail(
         AdminCreditTransactionResponse(
             id=str(r["id"]),
             team_id=str(r["team_id"]),
-            team_name=team["name"],
+            team_name=team_display_name,
             user_id=str(r["user_id"]) if r.get("user_id") else None,
             user_email=tx_email_map.get(str(r["user_id"]), (None,))[0] if r.get("user_id") else None,
             type=r.get("type", ""),
@@ -860,7 +881,7 @@ async def get_team_detail(
 
     return AdminTeamCreditsDetailResponse(
         team_id=team_id,
-        team_name=team["name"],
+        team_name=team_display_name,
         points_balance=quota.get("points_balance") or 0,
         storage_limit_bytes=quota.get("storage_limit_bytes") or 0,
         storage_used_bytes=quota.get("storage_used_bytes") or 0,

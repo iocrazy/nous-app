@@ -62,7 +62,8 @@ export function AppLayout() {
 
   const {
     teams, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
-    currentTeam, userPermissions, isCreateTeamModalOpen, setIsCreateTeamModalOpen,
+    currentTeam, userPermissions, isModuleEnabled, isViewEnabled,
+    isCreateTeamModalOpen, setIsCreateTeamModalOpen,
     isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
     handleCreateTeam, handleTeamCreated, handleTeamUpdated, handleTeamDeleted, handleTeamLeft,
     handleMarkNotificationRead, handleMarkAllNotificationsRead,
@@ -364,6 +365,7 @@ export function AppLayout() {
         personalTeamId={personalTeamId}
         currentTeam={currentTeam}
         permissions={userPermissions}
+        isViewEnabled={isViewEnabled}
         userName={userProfile?.name}
         activeProject={selectedProject}
         isLibraryOpen={isLibraryOpen}

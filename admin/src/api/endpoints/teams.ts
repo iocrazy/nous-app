@@ -11,7 +11,20 @@ export interface Team {
   is_personal: boolean
   member_count: number
   points_balance: number
+  enabled_modules: string[]
   created_at: string
+}
+
+export interface ModuleDefinition {
+  key: string
+  name: string
+  description: string
+  enabled: boolean
+}
+
+export interface TeamModulesResponse {
+  team_id: string
+  modules: ModuleDefinition[]
 }
 
 /** Display name for a team: personal teams show "{Owner}'s Workspace" */
@@ -85,6 +98,35 @@ export function useDeleteTeam() {
   return useMutation({
     mutationFn: async (id: string) => {
       const { data } = await apiClient.delete(`/api/v1/admin/teams/${id}`)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] })
+    },
+  })
+}
+
+export function useTeamModules(teamId: string | null) {
+  return useQuery({
+    queryKey: ['teams', teamId, 'modules'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<TeamModulesResponse>(
+        `/api/v1/admin/teams/${teamId}/modules`,
+      )
+      return data
+    },
+    enabled: !!teamId,
+  })
+}
+
+export function useUpdateTeamModules() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ teamId, enabledModules }: { teamId: string; enabledModules: string[] }) => {
+      const { data } = await apiClient.patch(
+        `/api/v1/admin/teams/${teamId}/modules`,
+        { enabled_modules: enabledModules },
+      )
       return data
     },
     onSuccess: () => {

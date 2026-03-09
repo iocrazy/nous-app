@@ -83,7 +83,27 @@ class AdminTeamResponse(BaseModel):
     is_personal: bool = False
     member_count: int = 0
     points_balance: int = 0
+    enabled_modules: List[str] = []
     created_at: datetime
+
+
+class AdminModuleDefinition(BaseModel):
+    """Module definition for API response."""
+    key: str
+    name: str
+    description: str
+    enabled: bool
+
+
+class AdminTeamModulesResponse(BaseModel):
+    """Team module settings response."""
+    team_id: str
+    modules: List[AdminModuleDefinition]
+
+
+class AdminUpdateModulesRequest(BaseModel):
+    """Request to update team module permissions."""
+    enabled_modules: List[str]
 
 
 class AdminTeamListResponse(BaseModel):

@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import { AppLayout } from './components/AppLayout';
+import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
 import { LoginPage } from './pages/LoginPage';
 import { ParserPage } from './pages/ParserPage';
@@ -68,23 +69,23 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
-          { path: 'parser', element: <ParserPage /> },
-          { path: 'library', element: <LibraryPage /> },
-          { path: 'library/:itemId', element: <LibraryPage /> },
-          { path: 'dashboard', element: <DashboardPage /> },
-          { path: 'dashboard/:subview', element: <DashboardPage /> },
-          { path: 'resources', element: <ResourcesPage /> },
-          { path: 'resources/file/:resourceId', element: <ResourceDetailPage /> },
-          { path: 'resources/:section', element: <ResourcesPage /> },
-          { path: 'resources/folder/:folderId', element: <ResourcesPage /> },
-          { path: 'resources/smart/:smartFolderId', element: <ResourcesPage /> },
-          { path: 'resources/library/:libraryId', element: <ResourcesPage /> },
-          { path: 'resources/library/:libraryId/folder/:folderId', element: <ResourcesPage /> },
-          { path: 'projects', element: <ProjectsPage /> },
-          { path: 'projects/:projectId', element: <ProjectsPage /> },
-          { path: 'projects/:projectId/review/:fileId', element: <ProjectsPage /> },
+          { path: 'parser', element: <ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard> },
+          { path: 'library', element: <ModuleGuard moduleKey="library"><LibraryPage /></ModuleGuard> },
+          { path: 'library/:itemId', element: <ModuleGuard moduleKey="library"><LibraryPage /></ModuleGuard> },
+          { path: 'dashboard', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
+          { path: 'dashboard/:subview', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
+          { path: 'resources', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'resources/file/:resourceId', element: <ModuleGuard moduleKey="resources"><ResourceDetailPage /></ModuleGuard> },
+          { path: 'resources/:section', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'resources/folder/:folderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'resources/smart/:smartFolderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'resources/library/:libraryId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'resources/library/:libraryId/folder/:folderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
+          { path: 'projects', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
+          { path: 'projects/:projectId', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
+          { path: 'projects/:projectId/review/:fileId', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
           { path: 'settings', element: <SettingsPage /> },
-          { path: 'cleanup', element: <CleanupPage /> },
+          { path: 'cleanup', element: <ModuleGuard moduleKey="cleanup"><CleanupPage /></ModuleGuard> },
           { path: 'points', element: <PointsPage /> },
           { path: 'members', element: <MembersPage /> },
           { path: 'billing', element: <BillingPage /> },

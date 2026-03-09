@@ -21,6 +21,8 @@ interface TeamContextValue {
   setIsSettingsModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   settingsModalInitialTab: string;
   setSettingsModalInitialTab: React.Dispatch<React.SetStateAction<string>>;
+  isModuleEnabled: (moduleKey: string) => boolean;
+  isViewEnabled: (viewKey: string) => boolean;
   handleCreateTeam: () => void;
   handleTeamCreated: (team: Team) => void;
   handleTeamSettings: (teamId: string) => void;
