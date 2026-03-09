@@ -24,6 +24,30 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
   // Derived
   const currentTeam = teams.find(t => t.id === selectedTeamId) || null;
 
+  // Module permission check — all modules enabled by default if field is absent
+  const ALL_MODULES = ['parser', 'resources', 'library', 'projects', 'ai_analysis', 'dashboard', 'cleanup'];
+  const isModuleEnabled = (moduleKey: string): boolean => {
+    if (!currentTeam) return true;
+    const enabled = currentTeam.enabled_modules;
+    if (!enabled || enabled.length === 0) return true; // default: all enabled
+    return enabled.includes(moduleKey);
+  };
+
+  // Map sidebar view keys to module keys
+  const isViewEnabled = (viewKey: string): boolean => {
+    const viewToModule: Record<string, string> = {
+      parser: 'parser',
+      resources: 'resources',
+      library: 'library',
+      mediatrack: 'projects',
+      dashboard: 'dashboard',
+      cleanup: 'cleanup',
+    };
+    const moduleKey = viewToModule[viewKey];
+    if (!moduleKey) return true; // views without module mapping are always enabled
+    return isModuleEnabled(moduleKey);
+  };
+
   // Persist selected team to localStorage (for fallback on next visit)
   useEffect(() => {
     if (selectedTeamId) {
@@ -157,6 +181,10 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     setIsSettingsModalOpen,
     settingsModalInitialTab,
     setSettingsModalInitialTab,
+
+    // Module permissions
+    isModuleEnabled,
+    isViewEnabled,
 
     // Handlers
     handleCreateTeam,

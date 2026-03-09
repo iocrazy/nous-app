@@ -14,8 +14,12 @@ from app.schemas.admin import (
     AdminTeamListResponse,
     AdminTeamMemberResponse,
     AdminUpdateMemberRoleRequest,
+    AdminTeamModulesResponse,
+    AdminModuleDefinition,
+    AdminUpdateModulesRequest,
     TeamRoleResponse,
 )
+from app.core.modules import MODULE_DEFINITIONS, ALL_MODULE_KEYS, validate_module_keys
 from app.utils.admin_helpers import (
     create_audit_log,
     get_user_info,
@@ -106,6 +110,7 @@ async def list_teams(
             is_personal=team.get("is_personal", False),
             member_count=member_counts.get(tid, 0),
             points_balance=points_balances.get(str(tid), 0),
+            enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
             created_at=team["created_at"],
         ))
 
@@ -158,6 +163,7 @@ async def get_team(
         is_personal=team.get("is_personal", False),
         member_count=member_count,
         points_balance=points_balance,
+        enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
         created_at=team["created_at"],
     )
 
@@ -450,3 +456,85 @@ async def remove_member(
     )
 
     logger.info(f"Member {user_id} (role={old_role}) removed from team {team_id} by admin {auth.user_id}")
+
+
+# ============================================
+# Module Permission Endpoints
+# ============================================
+
+
+@router.get("/{team_id}/modules", response_model=AdminTeamModulesResponse)
+async def get_team_modules(
+    team_id: str,
+    auth: AdminAuthDep,
+):
+    """Get current module settings for a team."""
+    supabase = await get_async_supabase_admin()
+
+    result = await supabase.table("teams").select("id, enabled_modules").eq("id", team_id).single().execute()
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    enabled = result.data.get("enabled_modules") or ALL_MODULE_KEYS
+
+    modules = [
+        AdminModuleDefinition(
+            key=m["key"],
+            name=m["name"],
+            description=m["description"],
+            enabled=m["key"] in enabled,
+        )
+        for m in MODULE_DEFINITIONS
+    ]
+
+    return AdminTeamModulesResponse(team_id=str(result.data["id"]), modules=modules)
+
+
+@router.patch("/{team_id}/modules", response_model=AdminTeamModulesResponse)
+async def update_team_modules(
+    team_id: str,
+    body: AdminUpdateModulesRequest,
+    auth: AdminAuthDep,
+    request: Request,
+):
+    """Update module permissions for a team."""
+    # Validate module keys
+    invalid_keys = validate_module_keys(body.enabled_modules)
+    if invalid_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid module keys: {', '.join(invalid_keys)}. Valid keys: {', '.join(ALL_MODULE_KEYS)}",
+        )
+
+    supabase = await get_async_supabase_admin()
+
+    # Check team exists and get current state
+    result = await supabase.table("teams").select("id, enabled_modules").eq("id", team_id).single().execute()
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    old_modules = result.data.get("enabled_modules") or ALL_MODULE_KEYS
+
+    # Update
+    await supabase.table("teams").update({
+        "enabled_modules": body.enabled_modules,
+    }).eq("id", team_id).execute()
+
+    # Audit log
+    client_ip = request.client.host if request.client else None
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_team_modules",
+        target_type="team",
+        target_id=team_id,
+        details={
+            "old_modules": old_modules,
+            "new_modules": body.enabled_modules,
+        },
+        ip_address=client_ip,
+    )
+
+    logger.info(f"Team {team_id} modules updated by admin {auth.user_id}: {body.enabled_modules}")
+
+    # Return updated state
+    return await get_team_modules(team_id, auth)

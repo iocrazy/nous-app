@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Table,
   Tag,
@@ -7,15 +7,24 @@ import {
   Typography,
   Button,
   Badge,
+  Checkbox,
+  Spin,
 } from '@arco-design/web-react'
-import { IconDelete, IconUser, IconUserGroup } from '@arco-design/web-react/icon'
+import { IconDelete, IconUser, IconUserGroup, IconApps } from '@arco-design/web-react/icon'
 import type { ColumnProps } from '@arco-design/web-react/es/Table'
 import { NotionTable } from '../../components/notion-table'
 import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
 import type { Team, TeamMember } from '../../api/endpoints/teams'
-import { useTeamMembers, useDeleteTeam, ROLE_COLOR_MAP, getTeamDisplayName } from '../../api/endpoints/teams'
+import {
+  useTeamMembers,
+  useTeamModules,
+  useUpdateTeamModules,
+  useDeleteTeam,
+  ROLE_COLOR_MAP,
+  getTeamDisplayName,
+} from '../../api/endpoints/teams'
 import { formatDate } from '../../utils/format'
 
 // --- Expanded members sub-table ---
@@ -119,6 +128,77 @@ function ExpandedMembers({ teamId, ownerId }: { teamId: string; ownerId: string 
         border={false}
         style={{ background: 'var(--color-fill-1)', borderRadius: 6 }}
       />
+    </div>
+  )
+}
+
+// --- Module access section ---
+
+function ModuleAccess({ teamId }: { teamId: string }) {
+  const { data, isLoading } = useTeamModules(teamId)
+  const updateModules = useUpdateTeamModules()
+  const [saving, setSaving] = useState(false)
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: '8px 0' }}>
+        <Spin size={16} />
+      </div>
+    )
+  }
+
+  const modules = data?.modules ?? []
+  const enabledKeys = modules.filter((m) => m.enabled).map((m) => m.key)
+
+  const handleChange = (newKeys: string[]) => {
+    setSaving(true)
+    updateModules.mutate(
+      { teamId, enabledModules: newKeys },
+      {
+        onSuccess: () => {
+          Message.success('Module permissions updated')
+          setSaving(false)
+        },
+        onError: (err) => {
+          Message.error(err.message || 'Failed to update modules')
+          setSaving(false)
+        },
+      },
+    )
+  }
+
+  return (
+    <div
+      style={{
+        borderLeft: '3px solid rgb(var(--orange-6))',
+        marginLeft: 16,
+        paddingLeft: 16,
+        paddingTop: 8,
+        paddingBottom: 8,
+        marginTop: 12,
+      }}
+    >
+      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <IconApps style={{ color: 'var(--color-text-3)', fontSize: 14 }} />
+        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+          Module Access
+        </Typography.Text>
+        {saving && <Spin size={12} style={{ marginLeft: 4 }} />}
+      </div>
+      <Checkbox.Group
+        value={enabledKeys}
+        onChange={handleChange}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}
+      >
+        {modules.map((m) => (
+          <Checkbox key={m.key} value={m.key}>
+            <span style={{ fontSize: 13 }}>{m.name}</span>
+            <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+              ({m.description})
+            </Typography.Text>
+          </Checkbox>
+        ))}
+      </Checkbox.Group>
     </div>
   )
 }
@@ -307,7 +387,10 @@ export function TeamList() {
       title="Teams"
       emptyText="No teams found"
       expandedRowRender={(row) => (
-        <ExpandedMembers teamId={row.id} ownerId={row.owner_id} />
+        <div>
+          <ExpandedMembers teamId={row.id} ownerId={row.owner_id} />
+          <ModuleAccess teamId={row.id} />
+        </div>
       )}
       scrollX={900}
     />

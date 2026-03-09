@@ -197,6 +197,7 @@ export interface Team {
   owner_id: string;
   invite_code: string;
   is_personal?: boolean;
+  enabled_modules?: string[];
   created_at: string;
 }
 
