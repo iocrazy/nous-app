@@ -10,7 +10,7 @@ const { TabPane } = Tabs
 export function CreditsPage() {
   return (
     <div style={{ padding: '0 4px' }}>
-      <Tabs defaultActiveTab="overview" size="large" type="rounded">
+      <Tabs defaultActiveTab="overview" size="large" type="rounded" lazyload destroyOnHide>
         <TabPane key="overview" title="Overview">
           <OverviewTab />
         </TabPane>
