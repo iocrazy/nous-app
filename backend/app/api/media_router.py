@@ -329,20 +329,36 @@ async def fetch_video(
 
         logger.info(f"[Fetch/Parse] User {auth.user_id} parsing URL, url={url}")
 
-        # === Points check ===
+        # === Points check (skip if video already parsed) ===
         points_service = PointsService()
         _team_id = await _resolve_team_id(auth.user_id, raw_request)
         _points_cost = 0
         if _team_id:
             await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
-            points_result = await points_service.check_and_consume(
-                team_id=_team_id,
-                user_id=auth.user_id,
-                action_type="video_parse",
+
+            # Check if this URL was already parsed (avoid double-charging)
+            from app.db.supabase_client import get_async_supabase_admin as _get_admin
+            _admin = await _get_admin()
+            _existing = (
+                await _admin.table("parsed_media")
+                .select("id")
+                .eq("original_url", url)
+                .limit(1)
+                .execute()
             )
-            if not points_result["success"]:
-                raise HTTPException(status_code=402, detail=points_result["reason"])
-            _points_cost = points_result.get("points_cost", 0)
+
+            if not _existing.data:
+                points_result = await points_service.check_and_consume(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    action_type="video_parse",
+                    reference_id=url,
+                )
+                if not points_result["success"]:
+                    raise HTTPException(status_code=402, detail=points_result["reason"])
+                _points_cost = points_result.get("points_cost", 0)
+            else:
+                logger.info(f"[Fetch/Parse] URL already parsed, skipping points charge")
         # === End points check ===
 
         # Detect platform and handler type
@@ -419,7 +435,6 @@ async def fetch_media_by_type(
     request: MediaTypeFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
-    raw_request: Request,
 ):
     """
     Fetch specific media types for an already-parsed video.
@@ -449,20 +464,7 @@ async def fetch_media_by_type(
         media_type = media.get("media_type", 0)
         video_title = media.get("title", platform_id)
 
-        # 2) Points check
-        points_service = PointsService()
-        _team_id = await _resolve_team_id(auth.user_id, raw_request)
-        _points_cost = 0
-        if _team_id:
-            await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
-            points_result = await points_service.check_and_consume(
-                team_id=_team_id,
-                user_id=auth.user_id,
-                action_type="video_parse",
-            )
-            if not points_result["success"]:
-                raise HTTPException(status_code=402, detail=points_result["reason"])
-            _points_cost = points_result.get("points_cost", 0)
+        # 2) Download does not consume points (already charged at parse time)
 
         # 3) Ensure user resource record exists
         from app.repositories.resources_repository import ResourcesRepository
