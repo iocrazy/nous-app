@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel, field_validator
@@ -41,6 +41,27 @@ TAGS_VIDEOS = ["Video Management"]  # CRUD for stored data
 TAGS_STATS = ["Statistics"]  # Statistics and analytics
 TAGS_DOWNLOAD = ["Download Management"]  # Download operations
 TAGS_LOGS = ["Logs"]  # User action logs
+
+
+async def _resolve_team_id(user_id: str, request: Request) -> Optional[str]:
+    """Resolve team_id from X-Team-Id header, falling back to first team membership."""
+    from app.db.supabase_client import get_async_supabase_admin as _get_admin
+
+    # Prefer explicit header from frontend
+    team_id = request.headers.get("X-Team-Id")
+    if team_id:
+        return team_id
+
+    # Fallback: pick first team from team_members
+    admin = await _get_admin()
+    tm = (
+        await admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return tm.data[0]["team_id"] if tm.data else None
 
 
 # ============================================
@@ -263,7 +284,8 @@ async def _dedup_and_dispatch(
 
 @router.post("/fetch", tags=TAGS_FETCH)
 async def fetch_video(
-    request: MediaFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
+    request: MediaFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep,
+    raw_request: Request,
 ):
     """
     Fetch a single video
@@ -290,17 +312,7 @@ async def fetch_video(
 
         # === Points check ===
         points_service = PointsService()
-        from app.db.supabase_client import get_async_supabase_admin as _get_admin
-
-        _admin = await _get_admin()
-        _tm = (
-            await _admin.table("team_members")
-            .select("team_id")
-            .eq("user_id", auth.user_id)
-            .limit(1)
-            .execute()
-        )
-        _team_id = _tm.data[0]["team_id"] if _tm.data else None
+        _team_id = await _resolve_team_id(auth.user_id, raw_request)
         _points_cost = 0
         if _team_id:
             await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -388,6 +400,7 @@ async def fetch_media_by_type(
     request: MediaTypeFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    raw_request: Request,
 ):
     """
     Fetch specific media types for an already-parsed video.
@@ -419,16 +432,7 @@ async def fetch_media_by_type(
 
         # 2) Points check
         points_service = PointsService()
-        from app.db.supabase_client import get_async_supabase_admin as _get_admin
-        _admin = await _get_admin()
-        _tm = (
-            await _admin.table("team_members")
-            .select("team_id")
-            .eq("user_id", auth.user_id)
-            .limit(1)
-            .execute()
-        )
-        _team_id = _tm.data[0]["team_id"] if _tm.data else None
+        _team_id = await _resolve_team_id(auth.user_id, raw_request)
         _points_cost = 0
         if _team_id:
             await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -608,7 +612,8 @@ async def extract_audio(
 
 @router.post("/fetch/batch", tags=TAGS_FETCH)
 async def fetch_videos_batch(
-    request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep
+    request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep,
+    raw_request: Request,
 ):
     """
     Batch fetch videos
@@ -623,17 +628,7 @@ async def fetch_videos_batch(
     """
     # === Points check ===
     points_service = PointsService()
-    from app.db.supabase_client import get_async_supabase_admin as _get_admin
-
-    _admin = await _get_admin()
-    _tm = (
-        await _admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", auth.user_id)
-        .limit(1)
-        .execute()
-    )
-    _team_id = _tm.data[0]["team_id"] if _tm.data else None
+    _team_id = await _resolve_team_id(auth.user_id, raw_request)
     _batch_points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)

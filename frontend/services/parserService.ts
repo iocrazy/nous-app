@@ -45,6 +45,14 @@ const buildHeaders = async (): Promise<HeadersInit> => {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
+  // Attach selected team ID for points/quota resolution
+  try {
+    const teamId = window.localStorage.getItem('mediahub_selected_team');
+    if (teamId) {
+      headers['X-Team-Id'] = teamId;
+    }
+  } catch (_) {}
+
   return headers;
 };
 
