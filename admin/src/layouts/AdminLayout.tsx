@@ -29,6 +29,7 @@ import {
   IconList,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../auth/AuthProvider'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { SafeTaskCenterFloat } from '../components/TaskCenterFloat'
 
 const { Sider, Header, Content } = Layout
@@ -158,7 +159,9 @@ export function AdminLayout() {
             backgroundColor: 'var(--color-fill-2)',
           }}
         >
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </Content>
       </Layout>
     </Layout>

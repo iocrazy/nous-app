@@ -999,7 +999,7 @@ export function RequestLogs() {
       <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
         Request Logs
       </Typography.Title>
-      <Tabs defaultActiveTab="requests" type="card-gutter">
+      <Tabs defaultActiveTab="requests" type="card-gutter" lazyload destroyOnHide>
         <Tabs.TabPane key="requests" title="Request Logs">
           <RequestLogsTab />
         </Tabs.TabPane>

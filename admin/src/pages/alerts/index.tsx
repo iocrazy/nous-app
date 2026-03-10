@@ -580,7 +580,7 @@ export function Alerts() {
         icon={<IconNotification />}
         breadcrumb={['Logs & Monitoring', 'Alerts']}
       />
-      <Tabs defaultActiveTab="rules" type="card-gutter">
+      <Tabs defaultActiveTab="rules" type="card-gutter" lazyload destroyOnHide>
         <Tabs.TabPane key="rules" title="Alert Rules">
           <AlertRulesTab />
         </Tabs.TabPane>
