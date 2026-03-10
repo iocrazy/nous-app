@@ -29,6 +29,7 @@ from app.utils.admin_helpers import (
     batch_get_user_auth_info,
     batch_get_user_info,
     batch_get_team_member_counts,
+    get_user_info,
 )
 
 router = APIRouter()
