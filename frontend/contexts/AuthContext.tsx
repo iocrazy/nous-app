@@ -129,11 +129,17 @@ export function AuthProvider({
       supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
     }));
 
-    const handleSession = async (session: { user: { id: string; email?: string | null } } | null) => {
+    const handleSession = async (session: { user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
       if (session?.user) {
+        const displayName =
+          (session.user.user_metadata?.display_name as string) ||
+          (session.user.user_metadata?.full_name as string) ||
+          (session.user.user_metadata?.name as string) ||
+          session.user.email?.split('@')[0] ||
+          'User';
         setUserProfile(prev => ({
           ...prev,
-          name: session.user.email?.split('@')[0] || 'User',
+          name: displayName,
           email: session.user.email || '',
         }));
         setCurrentUserId(session.user.id);
