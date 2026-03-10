@@ -50,6 +50,20 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
 
     try:
         client = await get_async_supabase_admin()
+
+        # Prefer personal team
+        personal = (
+            await client.table("teams")
+            .select("id")
+            .eq("owner_id", user_id)
+            .eq("is_personal", True)
+            .limit(1)
+            .execute()
+        )
+        if personal.data:
+            return str(personal.data[0]["id"])
+
+        # Fallback: any team membership
         result = (
             await client.table("team_members")
             .select("team_id")

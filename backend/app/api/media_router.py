@@ -44,16 +44,33 @@ TAGS_LOGS = ["Logs"]  # User action logs
 
 
 async def _resolve_team_id(user_id: str, request: Request) -> Optional[str]:
-    """Resolve team_id from X-Team-Id header, falling back to first team membership."""
+    """Resolve team_id from X-Team-Id header, falling back to personal team."""
     from app.db.supabase_client import get_async_supabase_admin as _get_admin
 
     # Prefer explicit header from frontend
     team_id = request.headers.get("X-Team-Id")
     if team_id:
+        logger.debug(f"[_resolve_team_id] Using X-Team-Id header: {team_id}")
         return team_id
 
-    # Fallback: pick first team from team_members
+    # Fallback: prefer personal team, then any team
     admin = await _get_admin()
+
+    # Try personal team first
+    personal = (
+        await admin.table("teams")
+        .select("id")
+        .eq("owner_id", user_id)
+        .eq("is_personal", True)
+        .limit(1)
+        .execute()
+    )
+    if personal.data:
+        tid = str(personal.data[0]["id"])
+        logger.debug(f"[_resolve_team_id] Fallback to personal team: {tid}")
+        return tid
+
+    # Last resort: any team membership
     tm = (
         await admin.table("team_members")
         .select("team_id")
@@ -61,7 +78,9 @@ async def _resolve_team_id(user_id: str, request: Request) -> Optional[str]:
         .limit(1)
         .execute()
     )
-    return tm.data[0]["team_id"] if tm.data else None
+    tid = str(tm.data[0]["team_id"]) if tm.data else None
+    logger.debug(f"[_resolve_team_id] Fallback to first membership: {tid}")
+    return tid
 
 
 # ============================================
