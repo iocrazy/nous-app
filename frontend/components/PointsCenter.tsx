@@ -10,6 +10,7 @@ import {
 import { fetchPackages } from '../services/paymentService';
 
 interface PointsCenterProps {
+  teamId?: string;
   onBuyPackage: (pkg: PointPackage) => void;
 }
 
@@ -28,7 +29,7 @@ const formatPrice = (cents: number): string => {
   return `\u00A5${(cents / 100).toFixed(2)}`;
 };
 
-export const PointsCenter: React.FC<PointsCenterProps> = ({ onBuyPackage }) => {
+export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage }) => {
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<TeamQuota | null>(null);
   const [transactions, setTransactions] = useState<PointTransaction[]>([]);
@@ -41,11 +42,11 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ onBuyPackage }) => {
       setLoading(true);
       try {
         const [balanceData, txData, pricingData, pkgData, usageData] = await Promise.all([
-          fetchPointsBalance().catch(() => null),
-          fetchPointsTransactions(undefined, 20).catch(() => []),
+          fetchPointsBalance(teamId).catch(() => null),
+          fetchPointsTransactions(teamId, 20).catch(() => []),
           fetchPointsPricing().catch(() => []),
           fetchPackages().catch(() => []),
-          fetchUsageStats().catch(() => null),
+          fetchUsageStats(teamId).catch(() => null),
         ]);
 
         setBalance(balanceData);
@@ -59,7 +60,7 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ onBuyPackage }) => {
     };
 
     loadData();
-  }, []);
+  }, [teamId]);
 
   if (loading) {
     return (

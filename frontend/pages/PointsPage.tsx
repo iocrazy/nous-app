@@ -10,7 +10,7 @@ export function PointsPage() {
 
   return (
     <>
-      <PointsCenter onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
+      <PointsCenter teamId={selectedTeamId ?? undefined} onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)} />
       {selectedPaymentPackage && selectedTeamId && (
         <PaymentModal
           package={selectedPaymentPackage}
