@@ -406,7 +406,7 @@ export const TagsSettings: React.FC = () => {
                       </span>
                       <span className="text-xs text-zinc-600">({groupTags.length})</span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {groupTags.map((tag) => (
                         <div key={tag.id} className="group relative">
                           {deletingTagId === tag.id ? (
@@ -435,9 +435,9 @@ export const TagsSettings: React.FC = () => {
                               }`}
                               style={getTagStyle(tag.color, tag.enabled === false)}
                             >
-                              <TagIcon size={11} />
-                              <span>{getDisplayName(tag)}</span>
-                              <span className="opacity-50">
+                              <TagIcon size={11} className="shrink-0" />
+                              <span className="truncate">{getDisplayName(tag)}</span>
+                              <span className="opacity-50 shrink-0">
                                 {tag.media_count ?? 0}
                               </span>
                               <button
