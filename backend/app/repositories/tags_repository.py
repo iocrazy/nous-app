@@ -69,7 +69,7 @@ class TagsRepository:
         tags = system_tags + time_tags
 
         if user_id:
-            user_tags = await _query_tags(user_filter=user_id)
+            user_tags = await _query_tags(type_filter="user", user_filter=user_id)
             tags.extend(user_tags)
 
         # Flatten group info and calculate media_count for each tag
