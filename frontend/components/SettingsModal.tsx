@@ -146,7 +146,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal — wider, fixed height */}
-      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-7xl md:mx-4 h-full md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-full md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
         {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
