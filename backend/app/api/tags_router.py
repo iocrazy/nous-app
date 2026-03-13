@@ -1,11 +1,13 @@
 """API routes for Tags management."""
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
+from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.tags_repository import TagsRepository
 from app.schemas.tags import (
     TagCountItem,
@@ -19,20 +21,51 @@ from app.schemas.tags import (
 router = APIRouter(prefix="/tags", tags=["Tags"])
 
 
+class TagGroupItem(BaseModel):
+    id: str
+    name: str
+    sort_order: int
+
+
+class TagGroupsListResponse(BaseModel):
+    groups: List[TagGroupItem]
+
+
+@router.get("/groups", response_model=TagGroupsListResponse)
+async def list_tag_groups(auth: AuthDep = None):
+    """List all tag groups (for frontend tag picker grouping)."""
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("tag_groups")
+        .select("id, name, sort_order")
+        .order("sort_order")
+        .execute()
+    )
+    groups = [
+        TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
+        for g in (result.data or [])
+    ]
+    return TagGroupsListResponse(groups=groups)
+
+
 @router.get("", response_model=TagListResponse)
 async def list_tags(
     type_filter: Optional[str] = Query(
         None, description="Filter by tag type: system, user, time"
+    ),
+    include_disabled: bool = Query(
+        False, description="Include disabled tags (for settings page)"
     ),
     auth: AuthDep = None,
 ):
     """
     List all available tags.
     Returns system tags and user's own tags.
+    By default only returns enabled tags; pass include_disabled=true for settings.
     """
     user_id = auth.user_id
     repo = TagsRepository()
-    tags = await repo.get_all_tags(user_id)
+    tags = await repo.get_all_tags(user_id, enabled_only=not include_disabled)
 
     if type_filter:
         tags = [t for t in tags if t["type"] == type_filter]
@@ -127,22 +160,29 @@ async def update_tag(
     auth: AuthDep = None,
 ):
     """
-    Update a user tag.
-    Only user tags can be updated. System tags are immutable.
+    Update a tag.
+    - For user tags: can update name, color, icon, enabled
+    - For system tags: can only update enabled (visibility toggle)
     """
     user_id = auth.user_id
     repo = TagsRepository()
 
-    # Check tag exists and is user's own
     existing = await repo.get_tag_by_id(tag_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found"
         )
 
+    # System tags: only allow toggling 'enabled'
     if existing["type"] != "user":
+        if tag_update.enabled is not None:
+            updated = await repo.update_tag_admin(
+                tag_id=tag_id, enabled=tag_update.enabled
+            )
+            return updated
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Cannot update system tags"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System tags can only toggle enabled status",
         )
 
     if existing["user_id"] != user_id:
@@ -156,6 +196,7 @@ async def update_tag(
         name=tag_update.name,
         color=tag_update.color,
         icon=tag_update.icon,
+        enabled=tag_update.enabled,
     )
 
     return updated

@@ -1,8 +1,9 @@
 /**
  * TagsSettings Component - Tag management in Settings
+ * Shows tags grouped by tag_groups with usage counts and enabled status.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Tag as TagIcon,
@@ -13,13 +14,18 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  Eye,
+  EyeOff,
+  FolderOpen,
 } from 'lucide-react';
 import {
   fetchTags,
+  fetchTagGroups,
   createTag,
   updateTag,
   deleteTag,
   Tag,
+  TagGroup,
 } from '../services/tagsService';
 
 // Color palette for tags
@@ -34,89 +40,14 @@ const TAG_COLORS = [
   { name: 'Pink', value: '#ec4899' },
 ];
 
-// Bilingual tag mapping for display
-const TAG_TRANSLATIONS: Record<string, { en: string; zh: string }> = {
-  // English to Chinese
-  'Sports': { en: 'Sports', zh: '运动' },
-  'Drama': { en: 'Drama', zh: '剧情' },
-  'Music': { en: 'Music', zh: '音乐' },
-  'Text': { en: 'Text', zh: '文字' },
-  'Family': { en: 'Family', zh: '亲子' },
-  'Beauty': { en: 'Beauty', zh: '颜值' },
-  'Filming': { en: 'Filming', zh: '拍摄' },
-  'Post-production': { en: 'Post-production', zh: '后期' },
-  'Recreation': { en: 'Recreation', zh: '仿拍' },
-  'Travel': { en: 'Travel', zh: '旅行' },
-  'Tech': { en: 'Tech', zh: '科技' },
-  'Finance': { en: 'Finance', zh: '财经' },
-  'Variety': { en: 'Variety', zh: '综艺' },
-  'Fashion': { en: 'Fashion', zh: '时尚' },
-  'Comedy': { en: 'Comedy', zh: '搞笑' },
-  'Tutorial': { en: 'Tutorial', zh: '教程' },
-  'Other': { en: 'Other', zh: '其他' },
-  'Food': { en: 'Food', zh: '美食' },
-  'Dance': { en: 'Dance', zh: '舞蹈' },
-  'Pets': { en: 'Pets', zh: '宠物' },
-  'Gaming': { en: 'Gaming', zh: '游戏' },
-  'Vlog': { en: 'Vlog', zh: '日常' },
-  // Chinese to English (reverse mapping)
-  '运动': { en: 'Sports', zh: '运动' },
-  '剧情': { en: 'Drama', zh: '剧情' },
-  '音乐': { en: 'Music', zh: '音乐' },
-  '文字': { en: 'Text', zh: '文字' },
-  '亲子': { en: 'Family', zh: '亲子' },
-  '颜值': { en: 'Beauty', zh: '颜值' },
-  '拍摄': { en: 'Filming', zh: '拍摄' },
-  '后期': { en: 'Post-production', zh: '后期' },
-  '仿拍': { en: 'Recreation', zh: '仿拍' },
-  '旅行': { en: 'Travel', zh: '旅行' },
-  '科技': { en: 'Tech', zh: '科技' },
-  '财经': { en: 'Finance', zh: '财经' },
-  '综艺': { en: 'Variety', zh: '综艺' },
-  '时尚': { en: 'Fashion', zh: '时尚' },
-  '搞笑': { en: 'Comedy', zh: '搞笑' },
-  '教程': { en: 'Tutorial', zh: '教程' },
-  '其他': { en: 'Other', zh: '其他' },
-  '美食': { en: 'Food', zh: '美食' },
-  '舞蹈': { en: 'Dance', zh: '舞蹈' },
-  '宠物': { en: 'Pets', zh: '宠物' },
-  '游戏': { en: 'Gaming', zh: '游戏' },
-  '日常': { en: 'Vlog', zh: '日常' },
-};
-
-// Predefined tags with bilingual support
-const PREDEFINED_TAGS: { en: string; zh: string; color: string }[] = [
-  { en: 'Food', zh: '美食', color: '#f97316' },
-  { en: 'Tutorial', zh: '教程', color: '#14b8a6' },
-  { en: 'Comedy', zh: '搞笑', color: '#eab308' },
-  { en: 'Dance', zh: '舞蹈', color: '#ec4899' },
-  { en: 'Music', zh: '音乐', color: '#ec4899' },
-  { en: 'Beauty', zh: '颜值', color: '#ec4899' },
-  { en: 'Fashion', zh: '时尚', color: '#ec4899' },
-  { en: 'Gaming', zh: '游戏', color: '#8b5cf6' },
-  { en: 'Pets', zh: '宠物', color: '#f97316' },
-  { en: 'Travel', zh: '旅行', color: '#22c55e' },
-  { en: 'Tech', zh: '科技', color: '#3b82f6' },
-  { en: 'Sports', zh: '运动', color: '#22c55e' },
-  { en: 'Vlog', zh: '日常', color: '#3b82f6' },
-  { en: 'Other', zh: '其他', color: '#71717a' },
-  { en: 'Drama', zh: '剧情', color: '#8b5cf6' },
-  { en: 'Text', zh: '文字', color: '#3b82f6' },
-  { en: 'Family', zh: '亲子', color: '#f97316' },
-  { en: 'Filming', zh: '拍摄', color: '#14b8a6' },
-  { en: 'Post-production', zh: '后期', color: '#8b5cf6' },
-  { en: 'Recreation', zh: '仿拍', color: '#eab308' },
-  { en: 'Finance', zh: '财经', color: '#ef4444' },
-  { en: 'Variety', zh: '综艺', color: '#f97316' },
-];
-
 // Helper to generate tag style from color
-const getTagStyle = (color: string | null) => {
+const getTagStyle = (color: string | null, disabled = false) => {
   const baseColor = color || '#3b82f6';
   return {
-    backgroundColor: `${baseColor}15`,
-    color: baseColor,
-    borderColor: `${baseColor}30`,
+    backgroundColor: disabled ? 'transparent' : `${baseColor}15`,
+    color: disabled ? '#71717a' : baseColor,
+    borderColor: disabled ? '#3f3f46' : `${baseColor}30`,
+    opacity: disabled ? 0.5 : 1,
   };
 };
 
@@ -125,6 +56,7 @@ export const TagsSettings: React.FC = () => {
   const isZh = i18n.language?.startsWith('zh');
 
   const [tags, setTags] = useState<Tag[]>([]);
+  const [groups, setGroups] = useState<TagGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,17 +77,24 @@ export const TagsSettings: React.FC = () => {
   // Delete confirmation
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
 
-  // Load tags
+  // Toggle enabled (optimistic)
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+
+  // Load tags and groups
   useEffect(() => {
-    loadTags();
+    loadData();
   }, []);
 
-  const loadTags = async () => {
+  const loadData = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const fetchedTags = await fetchTags();
+      const [fetchedTags, fetchedGroups] = await Promise.all([
+        fetchTags(true), // include_disabled=true for settings page
+        fetchTagGroups(),
+      ]);
       setTags(fetchedTags);
+      setGroups(fetchedGroups);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tags');
     } finally {
@@ -164,28 +103,79 @@ export const TagsSettings: React.FC = () => {
   };
 
   // Get display name based on current language
-  // Priority: database name_zh > TAG_TRANSLATIONS > original name
   const getDisplayName = (tag: Tag): string => {
-    if (isZh) {
-      // Chinese mode: use name_zh from DB, fallback to translation map, then original
-      if (tag.name_zh) return tag.name_zh;
-      const translation = TAG_TRANSLATIONS[tag.name];
-      if (translation) return translation.zh;
-      return tag.name;
-    } else {
-      // English mode: use original name
-      return tag.name;
-    }
+    if (isZh && tag.name_zh) return tag.name_zh;
+    return tag.name;
   };
 
-  // Filter tags based on search (search both English and Chinese names)
-  const filteredTags = tags.filter((tag) => {
+  // Filter tags based on search
+  const filteredTags = useMemo(() => {
+    if (!searchQuery) return tags;
     const query = searchQuery.toLowerCase();
-    const nameMatch = tag.name.toLowerCase().includes(query);
-    const nameZhMatch = tag.name_zh?.toLowerCase().includes(query);
-    const translationMatch = TAG_TRANSLATIONS[tag.name]?.zh.toLowerCase().includes(query);
-    return nameMatch || nameZhMatch || translationMatch;
-  });
+    return tags.filter((tag) => {
+      const nameMatch = tag.name.toLowerCase().includes(query);
+      const nameZhMatch = tag.name_zh?.toLowerCase().includes(query);
+      const groupMatch = tag.group_name?.toLowerCase().includes(query);
+      return nameMatch || nameZhMatch || groupMatch;
+    });
+  }, [tags, searchQuery]);
+
+  // Group tags by group_name, preserving group sort order
+  const groupedTags = useMemo(() => {
+    const groupMap = new Map<string, Tag[]>();
+
+    // Initialize groups in order
+    for (const group of groups) {
+      groupMap.set(group.name, []);
+    }
+    groupMap.set('__uncategorized__', []);
+
+    for (const tag of filteredTags) {
+      const key = tag.group_name || '__uncategorized__';
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(tag);
+    }
+
+    // Remove empty groups
+    const result: { name: string; tags: Tag[] }[] = [];
+    for (const [name, groupTags] of groupMap) {
+      if (groupTags.length > 0) {
+        result.push({
+          name: name === '__uncategorized__' ? 'Uncategorized' : name,
+          tags: groupTags,
+        });
+      }
+    }
+    return result;
+  }, [filteredTags, groups]);
+
+  // Toggle enabled status
+  const handleToggleEnabled = async (tag: Tag, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newEnabled = !tag.enabled;
+
+    // Optimistic update
+    setTags((prev) =>
+      prev.map((t) => (t.id === tag.id ? { ...t, enabled: newEnabled } : t))
+    );
+    setTogglingIds((prev) => new Set(prev).add(tag.id));
+
+    try {
+      await updateTag(tag.id, { enabled: newEnabled });
+    } catch (err) {
+      // Revert on failure
+      setTags((prev) =>
+        prev.map((t) => (t.id === tag.id ? { ...t, enabled: !newEnabled } : t))
+      );
+      setError(err instanceof Error ? err.message : 'Failed to toggle tag');
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tag.id);
+        return next;
+      });
+    }
+  };
 
   // Handle create tag
   const handleCreateTag = async () => {
@@ -197,7 +187,7 @@ export const TagsSettings: React.FC = () => {
         name_zh: newTagNameZh.trim() || undefined,
         color: newTagColor,
       });
-      setTags([...tags, newTag]);
+      setTags((prev) => [...prev, newTag]);
       setNewTagName('');
       setNewTagNameZh('');
       setShowCreateForm(false);
@@ -220,11 +210,11 @@ export const TagsSettings: React.FC = () => {
     if (!editingTag || !editTagName.trim()) return;
     setIsSaving(true);
     try {
-      const updated = await updateTag(editingTag.id as unknown as number, {
+      const updated = await updateTag(editingTag.id, {
         name: editTagName.trim(),
         color: editTagColor,
       });
-      setTags(tags.map((t) => (t.id === editingTag.id ? updated : t)));
+      setTags((prev) => prev.map((t) => (t.id === editingTag.id ? updated : t)));
       setEditingTag(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update tag');
@@ -243,42 +233,15 @@ export const TagsSettings: React.FC = () => {
   const handleDeleteTag = async (tagId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     try {
-      await deleteTag(tagId as unknown as number);
-      setTags(tags.filter((t) => t.id !== tagId));
+      await deleteTag(tagId);
+      setTags((prev) => prev.filter((t) => t.id !== tagId));
       setDeletingTagId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete tag');
     }
   };
 
-  // Create predefined tags with bilingual support
-  const handleCreatePredefinedTags = async () => {
-    setIsCreating(true);
-    try {
-      // Check existing tags by both English and Chinese names
-      const existingNames = tags.map((t) => t.name.toLowerCase());
-      const existingNamesZh = tags.map((t) => t.name_zh?.toLowerCase()).filter(Boolean);
-      const tagsToCreate = PREDEFINED_TAGS.filter(
-        (pt) =>
-          !existingNames.includes(pt.en.toLowerCase()) &&
-          !existingNamesZh.includes(pt.zh.toLowerCase())
-      );
-
-      for (const predefined of tagsToCreate) {
-        // Always store English as primary name, Chinese as name_zh
-        const newTag = await createTag({
-          name: predefined.en,
-          name_zh: predefined.zh,
-          color: predefined.color,
-        });
-        setTags((prev) => [...prev, newTag]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create tags');
-    } finally {
-      setIsCreating(false);
-    }
-  };
+  const enabledCount = tags.filter((t) => t.enabled !== false).length;
 
   return (
     <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
@@ -290,23 +253,12 @@ export const TagsSettings: React.FC = () => {
           </div>
           <div>
             <h2 className="font-semibold text-zinc-200">{t('settings.tags.title')}</h2>
-            <p className="text-xs text-zinc-500">{t('settings.tags.subtitle')}</p>
+            <p className="text-xs text-zinc-500">
+              {tags.length} tags, {enabledCount} enabled
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleCreatePredefinedTags}
-            disabled={isCreating}
-            className="px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors text-sm font-medium flex items-center gap-2"
-            title={t('settings.tags.addPresetHint')}
-          >
-            {isCreating ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Plus size={14} />
-            )}
-            {t('settings.tags.addPreset')}
-          </button>
           <button
             onClick={() => setShowCreateForm(true)}
             className="bg-zinc-100 hover:bg-white text-zinc-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
@@ -345,7 +297,7 @@ export const TagsSettings: React.FC = () => {
         </div>
       </div>
 
-      {/* Tags Grid - Compact flex layout */}
+      {/* Tags by Group */}
       <div className="p-4">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -357,64 +309,87 @@ export const TagsSettings: React.FC = () => {
             <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {filteredTags.map((tag) => (
-              <div
-                key={tag.id}
-                className="group relative"
-              >
-                {deletingTagId === tag.id ? (
-                  // Delete confirmation
-                  <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/10 text-sm">
-                    <span className="text-red-400 mr-1">{t('common.delete')}?</span>
-                    <button
-                      onClick={(e) => handleDeleteTag(tag.id, e)}
-                      className="p-0.5 text-red-400 hover:text-red-300"
-                      title={t('common.confirm')}
-                    >
-                      <Check size={14} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setDeletingTagId(null); }}
-                      className="p-0.5 text-zinc-400 hover:text-zinc-300"
-                      title={t('common.cancel')}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  // Normal tag display
-                  <div
-                    onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
-                      tag.type !== 'system'
-                        ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
-                        : 'cursor-default opacity-70'
-                    }`}
-                    style={getTagStyle(tag.color)}
-                    title={tag.type !== 'system' ? t('settings.tags.clickToEdit') : t('settings.tags.system')}
-                  >
-                    <TagIcon size={12} />
-                    <span>{getDisplayName(tag)}</span>
-                    <span className="text-xs opacity-60">
-                      {tag.video_count ?? 0}
-                    </span>
-                    {tag.type === 'system' && (
-                      <span className="text-xs px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-400 ml-1">
-                        {t('settings.tags.system')}
-                      </span>
-                    )}
-                    {tag.type !== 'system' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
-                        className="ml-1 p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all"
-                        title={t('common.delete')}
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                )}
+          <div className="space-y-5">
+            {groupedTags.map(({ name, tags: groupTags }) => (
+              <div key={name}>
+                <div className="flex items-center gap-2 mb-2">
+                  <FolderOpen size={14} className="text-zinc-500" />
+                  <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                    {name}
+                  </span>
+                  <span className="text-xs text-zinc-600">({groupTags.length})</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {groupTags.map((tag) => (
+                    <div key={tag.id} className="group relative">
+                      {deletingTagId === tag.id ? (
+                        <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/10 text-sm">
+                          <span className="text-red-400 mr-1">{t('common.delete')}?</span>
+                          <button
+                            onClick={(e) => handleDeleteTag(tag.id, e)}
+                            className="p-0.5 text-red-400 hover:text-red-300"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDeletingTagId(null); }}
+                            className="p-0.5 text-zinc-400 hover:text-zinc-300"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
+                          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
+                            tag.type !== 'system'
+                              ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
+                              : 'cursor-default'
+                          }`}
+                          style={getTagStyle(tag.color, tag.enabled === false)}
+                        >
+                          <TagIcon size={12} />
+                          <span>{getDisplayName(tag)}</span>
+                          <span className="text-xs opacity-60">
+                            {tag.media_count ?? 0}
+                          </span>
+                          {tag.type === 'system' && (
+                            <span className="text-xs px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-400 ml-1">
+                              {t('settings.tags.system')}
+                            </span>
+                          )}
+                          {/* Enabled/Disabled toggle */}
+                          <button
+                            onClick={(e) => handleToggleEnabled(tag, e)}
+                            className={`ml-1 p-0.5 rounded transition-all ${
+                              tag.enabled === false
+                                ? 'text-zinc-600 hover:text-zinc-400'
+                                : 'text-current opacity-40 hover:opacity-100'
+                            }`}
+                            title={tag.enabled === false ? 'Enable tag' : 'Disable tag'}
+                          >
+                            {togglingIds.has(tag.id) ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : tag.enabled === false ? (
+                              <EyeOff size={12} />
+                            ) : (
+                              <Eye size={12} />
+                            )}
+                          </button>
+                          {tag.type !== 'system' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
+                              className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
+                              title={t('common.delete')}
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
