@@ -41,6 +41,7 @@ class TagUpdate(BaseModel):
     )
     color: Optional[str] = Field(None, description="Hex color code")
     icon: Optional[str] = Field(None, description="Emoji or icon identifier")
+    enabled: Optional[bool] = Field(None, description="Whether visible in frontend API")
 
 
 class TagResponse(TagBase):
@@ -49,6 +50,9 @@ class TagResponse(TagBase):
     id: SnowflakeId
     type: Literal["system", "user", "time"]
     user_id: Optional[str] = None
+    group_id: Optional[SnowflakeId] = None
+    group_name: Optional[str] = Field(None, description="Tag group name")
+    enabled: bool = Field(True, description="Whether visible in frontend API")
     created_at: datetime
     media_count: Optional[int] = Field(0, description="Number of resources using this tag")
 

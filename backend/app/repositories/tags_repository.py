@@ -30,26 +30,43 @@ class TagsRepository:
         client = await self._get_client()
         return client.table(self.RESOURCE_TAGS_TABLE)
 
-    async def get_all_tags(self, user_id: Optional[str] = None) -> List[dict]:
-        """Get all tags (system + time + user's own tags) with media_count."""
+    async def get_all_tags(
+        self, user_id: Optional[str] = None, enabled_only: bool = False
+    ) -> List[dict]:
+        """Get all tags (system + time + user's own tags) with media_count and group info."""
         table = await self._get_table()
         resource_tags_table = await self._get_resource_tags_table()
 
+        select_fields = "*, tag_groups(name)"
+
         # Get system tags
-        system_result = await table.select("*").eq("type", "system").execute()
+        query = table.select(select_fields).eq("type", "system")
+        if enabled_only:
+            query = query.eq("enabled", True)
+        system_result = await query.execute()
 
         # Get time tags
-        time_result = await table.select("*").eq("type", "time").execute()
+        query = table.select(select_fields).eq("type", "time")
+        if enabled_only:
+            query = query.eq("enabled", True)
+        time_result = await query.execute()
 
         tags = system_result.data + time_result.data
 
         # Get user tags if user_id provided
         if user_id:
-            user_result = await table.select("*").eq("user_id", user_id).execute()
+            query = table.select(select_fields).eq("user_id", user_id)
+            if enabled_only:
+                query = query.eq("enabled", True)
+            user_result = await query.execute()
             tags.extend(user_result.data)
 
-        # Calculate media_count for each tag
+        # Flatten group info and calculate media_count for each tag
         for tag in tags:
+            # Extract group_name from joined tag_groups
+            group_data = tag.pop("tag_groups", None)
+            tag["group_name"] = group_data.get("name") if group_data else None
+
             tag_id = str(tag.get("id"))
             count_result = (
                 await resource_tags_table.select("*", count="exact")
@@ -152,6 +169,21 @@ class TagsRepository:
             await table.update(update_data)
             .eq("id", tag_id)
             .eq("user_id", user_id)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    async def update_tag_admin(self, tag_id: str, **kwargs) -> Optional[dict]:
+        """Update any tag (no user_id check). Used for toggling enabled on system tags."""
+        update_data = {k: v for k, v in kwargs.items() if v is not None}
+
+        if not update_data:
+            return await self.get_tag_by_id(tag_id)
+
+        table = await self._get_table()
+        result = (
+            await table.update(update_data)
+            .eq("id", tag_id)
             .execute()
         )
         return result.data[0] if result.data else None

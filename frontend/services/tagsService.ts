@@ -25,8 +25,17 @@ export interface Tag {
   icon: string | null;
   type: 'system' | 'user' | 'time';
   user_id?: string;
+  group_id?: string | null;
+  group_name?: string | null;
+  enabled?: boolean;
   media_count?: number;
   created_at: string;
+}
+
+export interface TagGroup {
+  id: string;
+  name: string;
+  sort_order: number;
 }
 
 export interface TagCreate {
@@ -39,15 +48,18 @@ export interface TagUpdate {
   name?: string;
   color?: string;
   icon?: string;
+  enabled?: boolean;
 }
 
 /**
- * Get all tags for the current user
+ * Get all tags for the current user.
+ * @param includeDisabled - if true, returns all tags including disabled ones (for settings page)
  */
-export const fetchTags = async (): Promise<Tag[]> => {
+export const fetchTags = async (includeDisabled = false): Promise<Tag[]> => {
   const apiUrl = getApiUrl();
+  const params = includeDisabled ? '?include_disabled=true' : '';
 
-  const response = await fetch(`${apiUrl}/api/v1/tags`, {
+  const response = await fetch(`${apiUrl}/api/v1/tags${params}`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -59,6 +71,26 @@ export const fetchTags = async (): Promise<Tag[]> => {
 
   const data = await response.json();
   return data.tags || [];
+};
+
+/**
+ * Get all tag groups
+ */
+export const fetchTagGroups = async (): Promise<TagGroup[]> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/tags/groups`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch tag groups' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.groups || [];
 };
 
 /**
