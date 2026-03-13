@@ -22,13 +22,8 @@ jobs:
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
             echo "🔍 Finding Supabase DB container..."
-            DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i 'postgres\|supabase.*db\|db.*supabase' | head -1)
-            if [ -z "$DB_CONTAINER" ]; then
-              echo "Trying broader search..."
-              sudo docker ps --format '{{.Names}} {{.Image}}' | grep -i postgres
-              DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i postgres | head -1)
-            fi
-            echo "Found DB container: $DB_CONTAINER"
+            DB_CONTAINER="mediahub-db"
+            echo "Using DB container: $DB_CONTAINER"
 
             echo "🔧 Running migration 102: Add enabled column to tags..."
             sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -c "
@@ -40,10 +35,7 @@ jobs:
             echo "✅ Migration complete!"
 
             echo "🔄 Reloading PostgREST schema cache..."
-            REST_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i 'rest\|postgrest' | head -1)
-            if [ -n "$REST_CONTAINER" ]; then
-              sudo docker kill --signal=SIGUSR1 "$REST_CONTAINER" 2>/dev/null || true
-              echo "Reloaded PostgREST: $REST_CONTAINER"
-            fi
+            sudo docker kill --signal=SIGUSR1 mediahub-rest 2>/dev/null || true
+            echo "Reloaded PostgREST: mediahub-rest"
 
             echo "✅ Done!"
