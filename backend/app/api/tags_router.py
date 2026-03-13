@@ -53,19 +53,19 @@ async def list_tags(
     type_filter: Optional[str] = Query(
         None, description="Filter by tag type: system, user, time"
     ),
-    include_disabled: bool = Query(
-        False, description="Include disabled tags (for settings page)"
+    enabled_only: bool = Query(
+        False, description="If true, only return enabled tags (for Shortcuts/public API)"
     ),
     auth: AuthDep = None,
 ):
     """
     List all available tags.
     Returns system tags and user's own tags.
-    By default only returns enabled tags; pass include_disabled=true for settings.
+    Pass enabled_only=true to filter out disabled tags.
     """
     user_id = auth.user_id
     repo = TagsRepository()
-    tags = await repo.get_all_tags(user_id, enabled_only=not include_disabled)
+    tags = await repo.get_all_tags(user_id, enabled_only=enabled_only)
 
     if type_filter:
         tags = [t for t in tags if t["type"] == type_filter]
