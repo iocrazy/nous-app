@@ -21,8 +21,17 @@ jobs:
             set -e
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+            echo "🔍 Finding Supabase DB container..."
+            DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i 'postgres\|supabase.*db\|db.*supabase' | head -1)
+            if [ -z "$DB_CONTAINER" ]; then
+              echo "Trying broader search..."
+              sudo docker ps --format '{{.Names}} {{.Image}}' | grep -i postgres
+              DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i postgres | head -1)
+            fi
+            echo "Found DB container: $DB_CONTAINER"
+
             echo "🔧 Running migration 102: Add enabled column to tags..."
-            sudo docker exec -i supabase-db psql -U postgres -d postgres -c "
+            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -c "
               ALTER TABLE tags ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
               CREATE INDEX IF NOT EXISTS idx_tags_enabled ON tags(enabled);
               COMMENT ON COLUMN tags.enabled IS 'Whether this tag is visible in the frontend API.';
@@ -31,6 +40,10 @@ jobs:
             echo "✅ Migration complete!"
 
             echo "🔄 Reloading PostgREST schema cache..."
-            sudo docker kill --signal=SIGUSR1 supabase-rest 2>/dev/null || true
+            REST_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -i 'rest\|postgrest' | head -1)
+            if [ -n "$REST_CONTAINER" ]; then
+              sudo docker kill --signal=SIGUSR1 "$REST_CONTAINER" 2>/dev/null || true
+              echo "Reloaded PostgREST: $REST_CONTAINER"
+            fi
 
             echo "✅ Done!"
