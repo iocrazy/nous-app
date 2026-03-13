@@ -53,11 +53,11 @@ export interface TagUpdate {
 
 /**
  * Get all tags for the current user.
- * @param includeDisabled - if true, returns all tags including disabled ones (for settings page)
+ * @param enabledOnly - if true, only returns enabled tags (for Shortcuts/public API)
  */
-export const fetchTags = async (includeDisabled = false): Promise<Tag[]> => {
+export const fetchTags = async (enabledOnly = false): Promise<Tag[]> => {
   const apiUrl = getApiUrl();
-  const params = includeDisabled ? '?include_disabled=true' : '';
+  const params = enabledOnly ? '?enabled_only=true' : '';
 
   const response = await fetch(`${apiUrl}/api/v1/tags${params}`, {
     method: 'GET',

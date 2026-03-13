@@ -90,7 +90,7 @@ export const TagsSettings: React.FC = () => {
     setError(null);
     try {
       const [fetchedTags, fetchedGroups] = await Promise.all([
-        fetchTags(true), // include_disabled=true for settings page
+        fetchTags(), // get all tags (settings page shows all including disabled)
         fetchTagGroups(),
       ]);
       setTags(fetchedTags);
