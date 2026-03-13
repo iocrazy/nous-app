@@ -39,33 +39,48 @@ class TagsRepository:
 
         select_fields = "*, tag_groups(name)"
 
-        # Get system tags
-        query = table.select(select_fields).eq("type", "system")
-        if enabled_only:
-            query = query.eq("enabled", True)
-        system_result = await query.execute()
-
-        # Get time tags
-        query = table.select(select_fields).eq("type", "time")
-        if enabled_only:
-            query = query.eq("enabled", True)
-        time_result = await query.execute()
-
-        tags = system_result.data + time_result.data
-
-        # Get user tags if user_id provided
-        if user_id:
-            query = table.select(select_fields).eq("user_id", user_id)
+        async def _query_tags(type_filter: Optional[str] = None, user_filter: Optional[str] = None):
+            """Query tags with graceful fallback if 'enabled' column doesn't exist."""
+            query = table.select(select_fields)
+            if type_filter:
+                query = query.eq("type", type_filter)
+            if user_filter:
+                query = query.eq("user_id", user_filter)
             if enabled_only:
-                query = query.eq("enabled", True)
-            user_result = await query.execute()
-            tags.extend(user_result.data)
+                try:
+                    result = await query.eq("enabled", True).execute()
+                    return result.data
+                except Exception:
+                    # 'enabled' column may not exist yet — fall back without filter
+                    logger.warning("'enabled' column not found, skipping filter")
+                    query = table.select(select_fields)
+                    if type_filter:
+                        query = query.eq("type", type_filter)
+                    if user_filter:
+                        query = query.eq("user_id", user_filter)
+                    result = await query.execute()
+                    return result.data
+            result = await query.execute()
+            return result.data
+
+        # Get system + time + user tags
+        system_tags = await _query_tags(type_filter="system")
+        time_tags = await _query_tags(type_filter="time")
+        tags = system_tags + time_tags
+
+        if user_id:
+            user_tags = await _query_tags(user_filter=user_id)
+            tags.extend(user_tags)
 
         # Flatten group info and calculate media_count for each tag
         for tag in tags:
             # Extract group_name from joined tag_groups
             group_data = tag.pop("tag_groups", None)
             tag["group_name"] = group_data.get("name") if group_data else None
+
+            # Ensure 'enabled' field exists (default True for backward compat)
+            if "enabled" not in tag:
+                tag["enabled"] = True
 
             tag_id = str(tag.get("id"))
             count_result = (
