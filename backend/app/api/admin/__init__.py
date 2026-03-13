@@ -16,6 +16,7 @@ from .transcode_router import router as transcode_router
 from .tasks_router import router as tasks_router
 from .table_preferences_router import router as table_preferences_router
 from .credits_router import router as credits_router
+from .tags_router import router as tags_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -88,3 +89,4 @@ admin_router.include_router(transcode_router, prefix="/transcode", tags=["Admin 
 admin_router.include_router(tasks_router, prefix="/tasks", tags=["Admin - Tasks"])
 admin_router.include_router(table_preferences_router, prefix="/table-preferences", tags=["Admin - Table Preferences"])
 admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Credits"])
+admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
