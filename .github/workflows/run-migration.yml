@@ -1,0 +1,36 @@
+name: Run SQL Migration on NAS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Execute SQL Migration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run migration via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          port: ${{ secrets.NAS_PORT }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -e
+            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+            echo "🔧 Running migration 102: Add enabled column to tags..."
+            sudo docker exec -i supabase-db psql -U postgres -d postgres -c "
+              ALTER TABLE tags ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+              CREATE INDEX IF NOT EXISTS idx_tags_enabled ON tags(enabled);
+              COMMENT ON COLUMN tags.enabled IS 'Whether this tag is visible in the frontend API.';
+            "
+
+            echo "✅ Migration complete!"
+
+            echo "🔄 Reloading PostgREST schema cache..."
+            sudo docker kill --signal=SIGUSR1 supabase-rest 2>/dev/null || true
+
+            echo "✅ Done!"
