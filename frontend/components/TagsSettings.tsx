@@ -17,6 +17,9 @@ import {
   Eye,
   EyeOff,
   FolderOpen,
+  LayoutGrid,
+  Circle,
+  GripVertical,
 } from 'lucide-react';
 import {
   fetchTags,
@@ -80,6 +83,9 @@ export const TagsSettings: React.FC = () => {
   // Toggle enabled (optimistic)
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
 
+  // Sidebar selection: null = All, '__uncategorized__' = Uncategorized, group name = specific group
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+
   // Load tags and groups
   useEffect(() => {
     loadData();
@@ -120,23 +126,42 @@ export const TagsSettings: React.FC = () => {
     });
   }, [tags, searchQuery]);
 
+  // Count tags per group (for sidebar, uses unfiltered tags)
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const group of groups) {
+      counts.set(group.name, 0);
+    }
+    counts.set('__uncategorized__', 0);
+    for (const tag of tags) {
+      const key = tag.group_name || '__uncategorized__';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }, [tags, groups]);
+
   // Group tags by group_name, preserving group sort order
   const groupedTags = useMemo(() => {
     const groupMap = new Map<string, Tag[]>();
 
-    // Initialize groups in order
     for (const group of groups) {
       groupMap.set(group.name, []);
     }
     groupMap.set('__uncategorized__', []);
 
-    for (const tag of filteredTags) {
+    // Apply sidebar filter + search
+    const source = filteredTags.filter((tag) => {
+      if (selectedGroup === null) return true;
+      if (selectedGroup === '__uncategorized__') return !tag.group_name;
+      return tag.group_name === selectedGroup;
+    });
+
+    for (const tag of source) {
       const key = tag.group_name || '__uncategorized__';
       if (!groupMap.has(key)) groupMap.set(key, []);
       groupMap.get(key)!.push(tag);
     }
 
-    // Remove empty groups
     const result: { name: string; tags: Tag[] }[] = [];
     for (const [name, groupTags] of groupMap) {
       if (groupTags.length > 0) {
@@ -147,7 +172,7 @@ export const TagsSettings: React.FC = () => {
       }
     }
     return result;
-  }, [filteredTags, groups]);
+  }, [filteredTags, groups, selectedGroup]);
 
   // Toggle enabled status
   const handleToggleEnabled = async (tag: Tag, e: React.MouseEvent) => {
@@ -280,120 +305,184 @@ export const TagsSettings: React.FC = () => {
         </div>
       )}
 
-      {/* Search */}
-      <div className="p-4 border-b border-zinc-800">
-        <div className="relative">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-          />
-          <input
-            type="text"
-            placeholder={t('settings.tags.searchPlaceholder')}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      </div>
+      {/* Main layout: Sidebar + Content */}
+      <div className="flex">
+        {/* Sidebar */}
+        <div className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-950/30">
+          <div className="p-3 space-y-0.5">
+            {/* All */}
+            <button
+              onClick={() => setSelectedGroup(null)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                selectedGroup === null
+                  ? 'bg-indigo-500/15 text-indigo-400'
+                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+              }`}
+            >
+              <LayoutGrid size={15} />
+              <span className="flex-1 text-left font-medium">All</span>
+              <span className="text-xs text-zinc-500">{tags.length}</span>
+            </button>
 
-      {/* Tags by Group */}
-      <div className="p-4">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={24} className="animate-spin text-zinc-500" />
-          </div>
-        ) : filteredTags.length === 0 ? (
-          <div className="text-center py-12 text-zinc-500">
-            <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
-            <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
-          </div>
-        ) : (
-          <div className="space-y-5">
-            {groupedTags.map(({ name, tags: groupTags }) => (
-              <div key={name}>
-                <div className="flex items-center gap-2 mb-2">
-                  <FolderOpen size={14} className="text-zinc-500" />
-                  <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                    {name}
-                  </span>
-                  <span className="text-xs text-zinc-600">({groupTags.length})</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {groupTags.map((tag) => (
-                    <div key={tag.id} className="group relative">
-                      {deletingTagId === tag.id ? (
-                        <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/10 text-sm">
-                          <span className="text-red-400 mr-1">{t('common.delete')}?</span>
-                          <button
-                            onClick={(e) => handleDeleteTag(tag.id, e)}
-                            className="p-0.5 text-red-400 hover:text-red-300"
-                          >
-                            <Check size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setDeletingTagId(null); }}
-                            className="p-0.5 text-zinc-400 hover:text-zinc-300"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div
-                          onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
-                          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
-                            tag.type !== 'system'
-                              ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
-                              : 'cursor-default'
-                          }`}
-                          style={getTagStyle(tag.color, tag.enabled === false)}
-                        >
-                          <TagIcon size={12} />
-                          <span>{getDisplayName(tag)}</span>
-                          <span className="text-xs opacity-60">
-                            {tag.media_count ?? 0}
-                          </span>
-                          {tag.type === 'system' && (
-                            <span className="text-xs px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-400 ml-1">
-                              {t('settings.tags.system')}
-                            </span>
-                          )}
-                          {/* Enabled/Disabled toggle */}
-                          <button
-                            onClick={(e) => handleToggleEnabled(tag, e)}
-                            className={`ml-1 p-0.5 rounded transition-all ${
-                              tag.enabled === false
-                                ? 'text-zinc-600 hover:text-zinc-400'
-                                : 'text-current opacity-40 hover:opacity-100'
-                            }`}
-                            title={tag.enabled === false ? 'Enable tag' : 'Disable tag'}
-                          >
-                            {togglingIds.has(tag.id) ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : tag.enabled === false ? (
-                              <EyeOff size={12} />
-                            ) : (
-                              <Eye size={12} />
-                            )}
-                          </button>
-                          {tag.type !== 'system' && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
-                              className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
-                              title={t('common.delete')}
-                            >
-                              <X size={12} />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Uncategorized */}
+            <button
+              onClick={() => setSelectedGroup('__uncategorized__')}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                selectedGroup === '__uncategorized__'
+                  ? 'bg-indigo-500/15 text-indigo-400'
+                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+              }`}
+            >
+              <Circle size={15} />
+              <span className="flex-1 text-left font-medium">Uncategorized</span>
+              <span className="text-xs text-zinc-500">{groupCounts.get('__uncategorized__') || 0}</span>
+            </button>
+
+            {/* Groups header */}
+            <div className="flex items-center justify-between pt-4 pb-1 px-3">
+              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Groups ({groups.length})
+              </span>
+            </div>
+
+            {/* Group list */}
+            {groups.map((group) => (
+              <button
+                key={group.id}
+                onClick={() => setSelectedGroup(group.name)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  selectedGroup === group.name
+                    ? 'bg-indigo-500/15 text-indigo-400'
+                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                }`}
+              >
+                <GripVertical size={12} className="text-zinc-600 shrink-0" />
+                <FolderOpen size={14} className="shrink-0" />
+                <span className="flex-1 text-left truncate">{group.name}</span>
+                <span className="text-xs text-zinc-500">{groupCounts.get(group.name) || 0}</span>
+              </button>
             ))}
           </div>
-        )}
+        </div>
+
+        {/* Right content */}
+        <div className="flex-1 min-w-0">
+          {/* Search */}
+          <div className="p-4 border-b border-zinc-800">
+            <div className="relative">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
+              <input
+                type="text"
+                placeholder={t('settings.tags.searchPlaceholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Tags by Group */}
+          <div className="p-4">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={24} className="animate-spin text-zinc-500" />
+              </div>
+            ) : filteredTags.length === 0 ? (
+              <div className="text-center py-12 text-zinc-500">
+                <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
+                <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {groupedTags.map(({ name, tags: groupTags }) => (
+                  <div key={name}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <FolderOpen size={14} className="text-zinc-500" />
+                      <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                        {name}
+                      </span>
+                      <span className="text-xs text-zinc-600">({groupTags.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {groupTags.map((tag) => (
+                        <div key={tag.id} className="group relative">
+                          {deletingTagId === tag.id ? (
+                            <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/10 text-sm">
+                              <span className="text-red-400 mr-1">{t('common.delete')}?</span>
+                              <button
+                                onClick={(e) => handleDeleteTag(tag.id, e)}
+                                className="p-0.5 text-red-400 hover:text-red-300"
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeletingTagId(null); }}
+                                className="p-0.5 text-zinc-400 hover:text-zinc-300"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
+                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
+                                tag.type !== 'system'
+                                  ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
+                                  : 'cursor-default'
+                              }`}
+                              style={getTagStyle(tag.color, tag.enabled === false)}
+                            >
+                              <TagIcon size={12} />
+                              <span>{getDisplayName(tag)}</span>
+                              <span className="text-xs opacity-60">
+                                {tag.media_count ?? 0}
+                              </span>
+                              {tag.type === 'system' && (
+                                <span className="text-xs px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-400 ml-1">
+                                  {t('settings.tags.system')}
+                                </span>
+                              )}
+                              {/* Enabled/Disabled toggle */}
+                              <button
+                                onClick={(e) => handleToggleEnabled(tag, e)}
+                                className={`ml-1 p-0.5 rounded transition-all ${
+                                  tag.enabled === false
+                                    ? 'text-zinc-600 hover:text-zinc-400'
+                                    : 'text-current opacity-40 hover:opacity-100'
+                                }`}
+                                title={tag.enabled === false ? 'Enable tag' : 'Disable tag'}
+                              >
+                                {togglingIds.has(tag.id) ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : tag.enabled === false ? (
+                                  <EyeOff size={12} />
+                                ) : (
+                                  <Eye size={12} />
+                                )}
+                              </button>
+                              {tag.type !== 'system' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
+                                  className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
+                                  title={t('common.delete')}
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Create Tag Modal */}
