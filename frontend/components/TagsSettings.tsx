@@ -428,27 +428,21 @@ export const TagsSettings: React.FC = () => {
                           ) : (
                             <div
                               onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
-                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all ${
                                 tag.type !== 'system'
                                   ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
                                   : 'cursor-default'
                               }`}
                               style={getTagStyle(tag.color, tag.enabled === false)}
                             >
-                              <TagIcon size={12} />
+                              <TagIcon size={11} />
                               <span>{getDisplayName(tag)}</span>
-                              <span className="text-xs opacity-60">
+                              <span className="opacity-50">
                                 {tag.media_count ?? 0}
                               </span>
-                              {tag.type === 'system' && (
-                                <span className="text-xs px-1.5 py-0.5 bg-zinc-700/50 rounded text-zinc-400 ml-1">
-                                  {t('settings.tags.system')}
-                                </span>
-                              )}
-                              {/* Enabled/Disabled toggle */}
                               <button
                                 onClick={(e) => handleToggleEnabled(tag, e)}
-                                className={`ml-1 p-0.5 rounded transition-all ${
+                                className={`p-0.5 rounded transition-all ${
                                   tag.enabled === false
                                     ? 'text-zinc-600 hover:text-zinc-400'
                                     : 'text-current opacity-40 hover:opacity-100'
@@ -456,11 +450,11 @@ export const TagsSettings: React.FC = () => {
                                 title={tag.enabled === false ? 'Enable tag' : 'Disable tag'}
                               >
                                 {togglingIds.has(tag.id) ? (
-                                  <Loader2 size={12} className="animate-spin" />
+                                  <Loader2 size={11} className="animate-spin" />
                                 ) : tag.enabled === false ? (
-                                  <EyeOff size={12} />
+                                  <EyeOff size={11} />
                                 ) : (
-                                  <Eye size={12} />
+                                  <Eye size={11} />
                                 )}
                               </button>
                               {tag.type !== 'system' && (
@@ -469,7 +463,7 @@ export const TagsSettings: React.FC = () => {
                                   className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
                                   title={t('common.delete')}
                                 >
-                                  <X size={12} />
+                                  <X size={11} />
                                 </button>
                               )}
                             </div>
