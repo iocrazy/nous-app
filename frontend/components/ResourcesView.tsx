@@ -966,6 +966,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedResourceTags([]);
       return;
     }
+    setSelectedResourceTags([]);
     fetchResourceTags(selectedResource.resource.id)
       .then(setSelectedResourceTags)
       .catch(() => setSelectedResourceTags([]));

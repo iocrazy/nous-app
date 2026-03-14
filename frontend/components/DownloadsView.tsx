@@ -400,6 +400,7 @@ export const DownloadsView: React.FC = () => {
       setSelectedVideoTags([]);
       return;
     }
+    setSelectedVideoTags([]);
     fetchResourceTags(selectedResourceData.id)
       .then(setSelectedVideoTags)
       .catch(() => setSelectedVideoTags([]));

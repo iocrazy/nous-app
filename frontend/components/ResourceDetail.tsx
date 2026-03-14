@@ -541,6 +541,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
   // Fetch resource data
   useEffect(() => {
+    setAssignedTags([]);
     let cancelled = false;
     const loadData = async () => {
       setLoading(true);
