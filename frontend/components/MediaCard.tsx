@@ -22,7 +22,7 @@ import {
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getSupabaseClient } from '../supabaseClient';
-import { UnifiedTagPicker } from './UnifiedTagPicker';
+import { EagleTagPicker } from './EagleTagPicker';
 
 interface MediaCardProps {
   data: Video;
@@ -818,7 +818,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Tags - editable via UnifiedTagPicker */}
           {resourceId && (
             <div className="mb-4 -mx-4">
-              <UnifiedTagPicker
+              <EagleTagPicker
                 assignedTags={resourceTags.map(item => item.tag).filter((t): t is import('../types').Tag => !!t)}
                 allTags={allTags}
                 onAdd={handleAddTag}

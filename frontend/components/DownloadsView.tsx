@@ -46,7 +46,7 @@ import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { UnifiedTagPicker } from './UnifiedTagPicker';
+import { EagleTagPicker } from './EagleTagPicker';
 
 // ─── AI Status Badge ──────────────────────────────────
 const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
@@ -810,7 +810,7 @@ export const DownloadsView: React.FC = () => {
 
             {/* Tags - editable via UnifiedTagPicker */}
             {selectedResourceData && (
-              <UnifiedTagPicker
+              <EagleTagPicker
                 assignedTags={selectedVideoTags.map(item => item.tag).filter((t): t is import('../types').Tag => !!t)}
                 allTags={allTags}
                 onAdd={handleAddTag}

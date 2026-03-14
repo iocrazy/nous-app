@@ -52,7 +52,7 @@ import {
 } from '../services/resourceService';
 import { fetchTags } from '../services/tagsService';
 import { createTag } from '../services/unifiedTagService';
-import { UnifiedTagPicker } from './UnifiedTagPicker';
+import { EagleTagPicker } from './EagleTagPicker';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
@@ -1209,7 +1209,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </div>
 
           {/* Tags */}
-          <UnifiedTagPicker
+          <EagleTagPicker
             assignedTags={assignedTags.map(item => item.tag).filter((t): t is Tag => !!t)}
             allTags={allTags}
             onAdd={handleAddTag}
