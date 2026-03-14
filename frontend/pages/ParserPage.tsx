@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Link as LinkIcon, AlertCircle, Loader2,
   Layers, Download, CheckCircle2,
   ListVideo, HardDrive, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Video } from '../types';
+import { Video, Tag } from '../types';
+import { fetchTags, createTag } from '../services/tagsService';
 import { MediaCard } from '../components/MediaCard';
 import { CompactMediaCard } from '../components/CompactMediaCard';
 import { ParseModeCard } from '../components/ParseModeCard';
-import { ParserTagSelector } from '../components/ParserTagSelector';
+import { EagleTagPicker } from '../components/EagleTagPicker';
 import { TaskMonitor } from '../components/TaskMonitor';
 import { useAuth } from '../contexts/AuthContext';
 import { useLibrary } from '../hooks/useLibrary';
@@ -31,7 +32,12 @@ export function ParserPage() {
 
   const [currentResult, setCurrentResult] = useState<Video | null>(null);
   const [showActiveTasks, setShowActiveTasks] = useState(false);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
   const { activeTasks, cancelTask } = useTaskManager();
+
+  useEffect(() => {
+    fetchTags().then(setAllTags).catch(console.error);
+  }, []);
 
   const {
     library, setLibrary, sharedVideoIds,
@@ -145,9 +151,17 @@ export function ParserPage() {
       </div>
 
       {/* Tag Selector */}
-      <ParserTagSelector
+      <EagleTagPicker
         selectedTagIds={selectedTagIds}
         onTagsChange={setSelectedTagIds}
+        allTags={allTags}
+        onCreate={async (name, color) => {
+          try {
+            const tag = await createTag({ name, color, type: 'user' });
+            setAllTags(prev => [...prev, tag]);
+            return tag as any;
+          } catch { return null; }
+        }}
       />
 
       {error && (

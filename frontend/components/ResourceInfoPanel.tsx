@@ -3,7 +3,7 @@ import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain,
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
-import { UnifiedTagPicker } from './UnifiedTagPicker';
+import { EagleTagPicker } from './EagleTagPicker';
 
 interface ResourceInfoPanelProps {
   resource: Resource;
@@ -314,7 +314,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       )}
 
       {/* Tags */}
-      <UnifiedTagPicker
+      <EagleTagPicker
         assignedTags={assignedTags}
         allTags={allTags}
         readOnly={readOnly}
