@@ -162,6 +162,11 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
         ApiKeyScope.TAGS_READ.value,
         ApiKeyScope.TAGS_ALL.value,
     ],
+    # Temp token (create temp token for web page access)
+    ("POST", "/auth/temp-token"): [
+        ApiKeyScope.TAGS_READ.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
     # Resources
     ("GET", "/resources"): [
         ApiKeyScope.RESOURCES_READ.value,
