@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Plus, Palette } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { X, Plus, Palette, Search, FolderOpen, Flame } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Tag } from '../types';
 
@@ -37,10 +37,9 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [newColor, setNewColor] = useState(TAG_COLORS[5]); // default blue
+  const [newColor, setNewColor] = useState(TAG_COLORS[5]);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -55,12 +54,42 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
 
   const assignedIds = new Set(assignedTags.map((tag) => String(tag.id)));
   const available = allTags.filter((tag) => !assignedIds.has(String(tag.id)));
+
   const filtered = search
     ? available.filter((tag) =>
         tag.name.toLowerCase().includes(search.toLowerCase()) ||
         (tag.name_zh && tag.name_zh.toLowerCase().includes(search.toLowerCase()))
       )
     : available;
+
+  // Group filtered tags by group_name
+  const grouped = useMemo(() => {
+    const map = new Map<string, Tag[]>();
+    const ungrouped: Tag[] = [];
+    for (const tag of filtered) {
+      const group = tag.group_name;
+      if (!group) {
+        ungrouped.push(tag);
+      } else {
+        if (!map.has(group)) map.set(group, []);
+        map.get(group)!.push(tag);
+      }
+    }
+    const entries = Array.from(map.entries());
+    if (ungrouped.length > 0) {
+      entries.push(['Other', ungrouped]);
+    }
+    return entries;
+  }, [filtered]);
+
+  // Recently used: tags with highest media_count (top 6, only when not searching)
+  const recentTags = useMemo(() => {
+    if (search) return [];
+    return [...available]
+      .filter((tag) => (tag.media_count ?? tag.video_count ?? 0) > 0)
+      .sort((a, b) => (b.media_count ?? b.video_count ?? 0) - (a.media_count ?? a.video_count ?? 0))
+      .slice(0, 6);
+  }, [available, search]);
 
   const handleCreate = useCallback(async () => {
     const name = search.trim();
@@ -77,6 +106,13 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
   const noExactMatch = search.trim() && !allTags.some(
     (tag) => tag.name.toLowerCase() === search.trim().toLowerCase(),
   );
+
+  const getCount = (tag: Tag) => tag.media_count ?? tag.video_count ?? 0;
+
+  const handleAdd = (tagId: string) => {
+    onAdd(tagId);
+    // Don't close dropdown — allow multi-select
+  };
 
   return (
     <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
@@ -119,45 +155,93 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
             </button>
 
             {showDropdown && (
-              <div className="absolute left-0 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-52 py-1">
+              <div className="absolute left-0 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-72 py-1">
                 {/* Search */}
                 <div className="px-2 pb-1">
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => { setSearch(e.target.value); setShowCreate(false); }}
-                    placeholder={t('resources.searchTags', 'Search tags...')}
-                    className="w-full bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && noExactMatch && onCreate) {
-                        e.preventDefault();
-                        handleCreate();
-                      }
-                    }}
-                  />
+                  <div className="relative">
+                    <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => { setSearch(e.target.value); setShowCreate(false); }}
+                      placeholder={t('resources.searchTags', 'Search tags...')}
+                      className="w-full bg-zinc-800 border border-zinc-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && noExactMatch && onCreate) {
+                          e.preventDefault();
+                          handleCreate();
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
 
-                {/* Available tags list */}
-                <div className="max-h-36 overflow-y-auto">
-                  {filtered.map((tag) => (
-                    <button
-                      key={tag.id}
-                      onClick={() => { onAdd(String(tag.id)); setShowDropdown(false); setSearch(''); }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-                    >
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: tag.color || '#6366f1' }}
-                      />
-                      <span className="truncate">{tagLabel(tag)}</span>
-                      {tag.type === 'system' && (
-                        <span className="ml-auto text-[10px] text-zinc-600">system</span>
-                      )}
-                    </button>
+                {/* Tag list with groups */}
+                <div className="max-h-64 overflow-y-auto">
+                  {/* Recently used */}
+                  {recentTags.length > 0 && (
+                    <div className="px-2 py-1">
+                      <div className="flex items-center gap-1.5 px-1 py-1">
+                        <Flame size={10} className="text-orange-500" />
+                        <span className="text-[10px] font-semibold text-orange-400/80 uppercase tracking-wider">
+                          {i18n.language === 'zh' ? '常用' : 'Recent'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-1">
+                        {recentTags.map((tag) => (
+                          <TagRow
+                            key={`recent-${tag.id}`}
+                            tag={tag}
+                            label={tagLabel(tag)}
+                            count={getCount(tag)}
+                            onClick={() => handleAdd(String(tag.id))}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grouped tags */}
+                  {grouped.map(([groupName, groupTags]) => (
+                    <div key={groupName} className="px-2 py-1">
+                      <div className="flex items-center gap-1.5 px-1 py-1">
+                        <FolderOpen size={10} className="text-zinc-500" />
+                        <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+                          {groupName}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-1">
+                        {groupTags.map((tag) => (
+                          <TagRow
+                            key={tag.id}
+                            tag={tag}
+                            label={tagLabel(tag)}
+                            count={getCount(tag)}
+                            onClick={() => handleAdd(String(tag.id))}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ))}
+
+                  {/* Flat list fallback when no groups exist */}
+                  {grouped.length === 0 && recentTags.length === 0 && filtered.length > 0 && (
+                    <div className="px-2 py-1 grid grid-cols-2 gap-x-1">
+                      {filtered.map((tag) => (
+                        <TagRow
+                          key={tag.id}
+                          tag={tag}
+                          label={tagLabel(tag)}
+                          count={getCount(tag)}
+                          onClick={() => handleAdd(String(tag.id))}
+                        />
+                      ))}
+                    </div>
+                  )}
+
                   {filtered.length === 0 && !noExactMatch && (
-                    <p className="text-xs text-zinc-600 text-center py-2">
+                    <p className="text-xs text-zinc-600 text-center py-3">
                       {t('resources.noTagsAvailable', 'No tags available')}
                     </p>
                   )}
@@ -209,3 +293,25 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
     </div>
   );
 };
+
+/** Single tag row in the dropdown */
+const TagRow: React.FC<{
+  tag: Tag;
+  label: string;
+  count: number;
+  onClick: () => void;
+}> = ({ tag, label, count, onClick }) => (
+  <button
+    onClick={onClick}
+    className="flex items-center gap-1.5 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 rounded transition-colors w-full min-w-0"
+  >
+    <span
+      className="w-2 h-2 rounded-full shrink-0"
+      style={{ backgroundColor: tag.color || '#6366f1' }}
+    />
+    <span className="truncate">{label}</span>
+    {count > 0 && (
+      <span className="ml-auto text-[10px] text-zinc-600 shrink-0">({count})</span>
+    )}
+  </button>
+);
