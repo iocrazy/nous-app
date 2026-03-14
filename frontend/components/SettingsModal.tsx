@@ -241,7 +241,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 relative">
           {/* Desktop Header */}
           <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-zinc-800">
             <h2 className="text-lg font-semibold text-white">
