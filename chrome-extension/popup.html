@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>MediaHub Push</h1>
+
+    <!-- Settings view -->
+    <div id="settingsView">
+      <div class="field">
+        <label for="apiUrl">API URL</label>
+        <input type="url" id="apiUrl" placeholder="https://mediahub.heygo.cn">
+      </div>
+      <div class="field">
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey" placeholder="dk_...">
+      </div>
+      <button id="saveBtn">Save</button>
+      <div id="status" class="status"></div>
+    </div>
+
+    <!-- Push view (shown when configured) -->
+    <div id="pushView" style="display:none;">
+      <div class="current-url" id="currentUrl"></div>
+
+      <div class="section-label">Select Tags</div>
+      <div id="tagsLoading" class="tags-loading">Loading tags...</div>
+      <div id="tagsContainer" class="tags-container"></div>
+
+      <button id="pushBtn" class="push-btn">Push to MediaHub</button>
+      <div class="bottom-row">
+        <span id="pushStatus" class="status"></span>
+        <button id="settingsToggle" class="link-btn">Settings</button>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
