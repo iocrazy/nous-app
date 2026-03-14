@@ -397,8 +397,10 @@ export interface Tag {
   color: string | null;
   icon: string | null;
   type: 'system' | 'user' | 'time';
+  group_name?: string | null;
   user_id?: string;
   video_count?: number;
+  media_count?: number;
   created_at: string;
 }
 
