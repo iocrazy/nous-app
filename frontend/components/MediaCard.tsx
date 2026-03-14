@@ -145,6 +145,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   useEffect(() => {
     if (!data.id) return;
+    setResourceTags([]);
+    setResourceId(null);
     let cancelled = false;
     (async () => {
       const supabase = getSupabaseClient();

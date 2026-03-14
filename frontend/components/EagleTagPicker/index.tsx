@@ -74,8 +74,10 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
   }, [onCreate, handleToggleTag]);
 
   return (
-    <div className="space-y-2">
-      {/* Assigned / selected tag pills */}
+    <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
+      <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+        {t('resources.tags', 'Tags')}
+      </h4>
       <div className="flex flex-wrap gap-1.5">
         {displayTags.map((tag) => (
           <TagPill key={tag.id} tag={tag} onRemove={handleRemove} readOnly={readOnly} />
