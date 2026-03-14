@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   AlertTriangle,
   Clock,
@@ -35,6 +35,7 @@ import {
   Globe,
   Sparkles,
   Eye,
+  Menu,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
@@ -173,7 +174,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const { tasks: allUnifiedTasks } = useTaskManager();
   const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resPath = (path: string) => teamId ? `/team/${teamId}${path}` : path;
+
+  // Auto-close mobile sidebar on navigation
+  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
 
   // URL-driven state
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
@@ -184,6 +189,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const selectedLibraryId = urlLibraryId ?? null;
 
   // Data
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [childFolders, setChildFolders] = useState<Folder[]>([]);
   const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>>({});
@@ -2042,8 +2048,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   return (
     <div className="flex h-full animate-in fade-in duration-300">
+      {/* ── Mobile sidebar overlay ── */}
+      {mobileSidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/60 z-40"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
       {/* ── Left panel: Unified sidebar navigation ── */}
-      <div className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col">
+      <div className={`
+        ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:translate-x-0 fixed md:static inset-y-0 left-0 z-50 md:z-auto
+        w-64 md:w-56 shrink-0 border-r border-zinc-800/80 flex flex-col
+        bg-black md:bg-transparent transition-transform duration-200 ease-out
+      `}>
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {/* ── Top section: Shared / Recycle Bin ── */}
@@ -2260,17 +2278,35 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         className="flex-1 min-w-0 flex flex-col"
       >
         {isDownloadsView ? (
-          <DownloadsView />
+          <>
+            {/* Mobile sidebar toggle for Downloads view */}
+            <div className="md:hidden px-4 py-2 border-b border-zinc-800/80">
+              <button
+                onClick={() => setMobileSidebarOpen(true)}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <Menu size={18} />
+              </button>
+            </div>
+            <DownloadsView />
+          </>
         ) : (
         <>
         {/* Toolbar */}
         <div
-          className="px-6 py-3 border-b border-zinc-800/80"
+          className="px-3 md:px-6 py-3 border-b border-zinc-800/80"
           style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         >
           {/* Single row: Breadcrumb + controls */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
+              {/* Mobile sidebar toggle */}
+              <button
+                onClick={() => setMobileSidebarOpen(true)}
+                className="md:hidden p-1.5 -ml-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <Menu size={18} />
+              </button>
               <Breadcrumb segments={breadcrumbSegments} />
               {!loading && (
                 <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
@@ -2905,7 +2941,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
           }`}
-          style={{ width: `${infoPanelWidth}px` }}
+          style={{ width: `min(100vw, ${infoPanelWidth}px)` }}
         >
           {/* Collapse tab — attached to left edge of panel */}
           <button
