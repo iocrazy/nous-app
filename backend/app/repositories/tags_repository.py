@@ -59,15 +59,23 @@ class TagsRepository:
         result = await query.execute()
         tags = result.data
 
-        # Batch count: get all tag usage counts in one query via RPC or aggregation
+        # Batch count: use RPC for database-level GROUP BY aggregation
         tag_ids = [str(t["id"]) for t in tags]
         count_map: dict[str, int] = {}
         if tag_ids:
-            rt_table = client.table("resource_tags")
-            count_result = await rt_table.select("tag_id").in_("tag_id", tag_ids).execute()
-            for row in count_result.data:
-                tid = str(row["tag_id"])
-                count_map[tid] = count_map.get(tid, 0) + 1
+            try:
+                count_result = await client.rpc(
+                    "get_tag_counts_by_ids", {"p_tag_ids": tag_ids}
+                ).execute()
+                for row in (count_result.data or []):
+                    count_map[str(row["tag_id"])] = row["count"]
+            except Exception:
+                # Fallback: pull rows and count client-side
+                rt_table = client.table("resource_tags")
+                count_result = await rt_table.select("tag_id").in_("tag_id", tag_ids).execute()
+                for row in count_result.data:
+                    tid = str(row["tag_id"])
+                    count_map[tid] = count_map.get(tid, 0) + 1
 
         # Flatten group info and attach counts
         for tag in tags:
