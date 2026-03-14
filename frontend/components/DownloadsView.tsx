@@ -420,7 +420,7 @@ export const DownloadsView: React.FC = () => {
     if (!selectedResourceData?.id) return;
     try {
       await removeResourceTag(selectedResourceData.id, tagId);
-      setSelectedVideoTags(prev => prev.filter(t => t.tag?.id !== tagId));
+      setSelectedVideoTags(prev => prev.filter(t => String(t.tag?.id) !== tagId));
     } catch (err) {
       console.error('Failed to remove tag:', err);
     }
