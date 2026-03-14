@@ -147,10 +147,22 @@ async def save_selection(token: str, request: SelectionRequest):
     return {"success": True}
 
 
-@router.get("/{token}/selection", response_model=SelectionResponse)
-async def get_selection(token: str):
+@router.get("/{token}/selection")
+async def get_selection(
+    token: str,
+    format: str = Query("json", description="Response format: json or text"),
+):
     """
     Retrieve saved tag selection. Called by Shortcuts after web view closes.
+
+    Use ?format=text to get comma-separated plain text (e.g. "tag1,tag2,tag3").
     """
+    from fastapi.responses import PlainTextResponse
+
     data = await _get_token_data(token)
-    return SelectionResponse(tags=data.get("selection") or [])
+    tags = data.get("selection") or []
+
+    if format == "text":
+        return PlainTextResponse(",".join(tags))
+
+    return SelectionResponse(tags=tags)
