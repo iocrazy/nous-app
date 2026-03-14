@@ -132,7 +132,7 @@ export const ShortcutsTagsPage: React.FC = () => {
     });
   }, []);
 
-  // Save selection to Redis and show success screen
+  // Save selection to Redis, then try to close the page
   const handleConfirm = useCallback(async () => {
     if (!token || selected.size === 0) return;
     setSaving(true);
@@ -142,10 +142,12 @@ export const ShortcutsTagsPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags: Array.from(selected) }),
       });
-      setSaved(true);
+      // Try to close the web view (works in some iOS contexts)
+      window.close();
+      // If still here after 300ms, show success screen as fallback
+      setTimeout(() => setSaved(true), 300);
     } catch (err) {
       console.error('Failed to save selection:', err);
-    } finally {
       setSaving(false);
     }
   }, [token, selected]);
