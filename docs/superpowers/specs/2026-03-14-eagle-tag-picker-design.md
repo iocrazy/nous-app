@@ -56,7 +56,9 @@ Replace `UnifiedTagPicker` and `ParserTagSelector` with a unified `EagleTagPicke
 - **Left sidebar** (≈120px): All / Uncategorized / Groups list with counts
 - **Right content area**: Search bar + settings gear + sections (Starred, Recently, Recommended, Grouped tags)
 - **Rendered as Portal** (`position: fixed`), positioned to the left of the trigger element
-- **Resizable** by dragging edges/corners, size persisted to backend
+- **Resizable** by dragging edges/corners, size persisted to backend (debounced 500ms after drag end)
+- **Positioning fallback**: if insufficient space on the left, flip to right or center
+- **Z-index**: `z-[60]` (above existing modals at `z-50`)
 
 ### Interactions
 
@@ -96,7 +98,7 @@ Small popover from the gear icon:
 ```sql
 CREATE TABLE user_tag_preferences (
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  starred_tag_ids BIGINT[] DEFAULT '{}',
+  starred_tag_ids TEXT[] DEFAULT '{}',   -- TEXT to match Snowflake ID string serialization
   picker_settings JSONB DEFAULT '{
     "layout": "list",
     "columnWidth": "medium",
@@ -131,7 +133,9 @@ CREATE POLICY "Users can manage own tag preferences"
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/tags/preferences` | GET | Get user's tag picker preferences (starred, settings, panel size) |
-| `/api/v1/tags/preferences` | PUT | Update preferences (partial update via JSONB merge) |
+| `/api/v1/tags/preferences` | PATCH | Update preferences (partial merge — only provided fields updated) |
+
+**Route registration:** The `/preferences` route MUST be registered **before** the `/{tag_id}` parameterized route in `tags_router.py` to avoid FastAPI route collision.
 
 ### Request/Response
 
@@ -151,7 +155,7 @@ CREATE POLICY "Users can manage own tag preferences"
 }
 ```
 
-**PUT /api/v1/tags/preferences**
+**PATCH /api/v1/tags/preferences**
 ```json
 {
   "starred_tag_ids": ["123", "456"],
@@ -165,24 +169,26 @@ All fields optional — only provided fields are updated.
 ## Component Props
 
 ```typescript
-interface EagleTagPickerProps {
-  // Mode 1: Resource detail (add/remove tags via API)
-  resourceId?: string;
-  mediaId?: string;
+import type { Tag } from '../../types';  // Use Tag from types.ts (not tagsService.ts)
 
-  // Mode 2: Form selection (controlled component)
+interface EagleTagPickerProps {
+  // Mode 1: Resource detail (parent manages assigned tags, provides callbacks)
+  assignedTags?: Tag[];
+  onAdd?: (tagId: string) => void;
+  onRemove?: (tagId: string) => void;
+
+  // Mode 2: Form selection (controlled component, e.g. ParserTagSelector)
   selectedTagIds?: string[];
   onTagsChange?: (tagIds: string[]) => void;
 
   // Shared
   allTags: Tag[];
-  assignedTags?: Tag[];
   readOnly?: boolean;
   onCreate?: (name: string, color: string) => Promise<Tag | null>;
 }
 ```
 
-**Mode 1** (resource detail): Uses `resourceId` to call add/remove tag APIs directly.
+**Mode 1** (resource detail): Parent passes `assignedTags` and `onAdd`/`onRemove` callbacks. Parent is responsible for calling tag APIs and updating `assignedTags` state.
 **Mode 2** (parser form): Uses `selectedTagIds` + `onTagsChange` as controlled component.
 
 ## Component File Structure
@@ -208,8 +214,9 @@ frontend/components/
 - Star/unstar via right-click context menu
 - Hidden when `showStarred` setting is OFF or no starred tags
 
-### Recently Used
+### Frequently Used
 - Top 6 tags by `media_count` (from available/unselected tags)
+- Label: "Frequently Used" (not "Recently" — `media_count` reflects popularity, not recency)
 - Hidden when `showRecently` setting is OFF
 
 ### Recommended
@@ -221,6 +228,16 @@ frontend/components/
 - All tags grouped by `group_name`
 - Filtered when a specific group is selected in sidebar
 - Two-column layout (list mode) or flex-wrap (grid mode)
+
+## Migration File
+
+`supabase/migrations/105_user_tag_preferences.sql`
+
+## Error Handling
+
+- **Preferences API failure**: Silently use defaults, log error to console. Picker remains fully functional without preferences.
+- **First-time user**: GET returns 404 → use defaults. First PATCH auto-creates the row (upsert).
+- **Panel opened before `allTags` loaded**: Show loading spinner in content area.
 
 ## Bug Fixes Included
 
