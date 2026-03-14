@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, LayoutDashboard, User,
+  Search, Library, LayoutDashboard, User, FolderOpen,
   LayoutList, LayoutGrid, Smartphone, ListTodo,
   ScrollText, Activity, BarChart3,
 } from 'lucide-react';
@@ -126,11 +126,13 @@ export function AppLayout() {
     navigate('/login');
   };
 
-  // Main content padding
+  // Main content padding — mobile: clear TopBar (pt-14) + Tab Bar (pb-20)
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'library'
-      ? 'p-0 sm:p-8 sm:pt-20 pb-20 sm:pb-8'
-      : 'px-3 py-3 pt-16 sm:p-8 sm:pt-20 pb-20 sm:pb-8'
+      ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
+      : view === 'resources'
+        ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
+        : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -239,26 +241,25 @@ export function AppLayout() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Nav */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex justify-around px-4 py-2 z-40 pb-[env(safe-area-inset-bottom,8px)]">
+      {/* Mobile Tab Bar — 5 tabs with labels, app-style */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] z-40">
         {/* Parser */}
         <button
           onClick={() => handleMobileNavClick('parser')}
-          className={`flex flex-col items-center gap-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
         >
-          <Search size={24}/>
+          <Search size={22} />
+          <span className="text-[10px] leading-tight">Parser</span>
         </button>
 
         {/* Library */}
         <div className="relative">
           <button
             onClick={handleMobileLibraryClick}
-            className={`flex flex-col items-center gap-1 transition-colors relative ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors relative ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
-            <Library size={24}/>
-            {view === 'library' && isMobileMenuOpen && (
-               <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-            )}
+            <Library size={22} />
+            <span className="text-[10px] leading-tight">Library</span>
           </button>
 
           {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
@@ -266,21 +267,18 @@ export function AppLayout() {
                 <button
                   onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
                   className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                  title="Table View"
                 >
                   <LayoutList size={20} />
                 </button>
                 <button
                   onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
                   className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                  title="Grid View"
                 >
                   <LayoutGrid size={20} />
                 </button>
                 <button
                   onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
                   className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                  title="Feed View"
                 >
                   <Smartphone size={20} />
                 </button>
@@ -289,16 +287,23 @@ export function AppLayout() {
           )}
         </div>
 
+        {/* Resources */}
+        <button
+          onClick={() => handleMobileNavClick('resources')}
+          className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
+        >
+          <FolderOpen size={22} />
+          <span className="text-[10px] leading-tight">Resources</span>
+        </button>
+
         {/* Dashboard */}
         <div className="relative">
           <button
             onClick={handleMobileDashboardClick}
-            className={`flex flex-col items-center gap-1 transition-colors relative ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors relative ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
-            <LayoutDashboard size={24}/>
-            {view === 'dashboard' && isDashboardMenuOpen && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-            )}
+            <LayoutDashboard size={22} />
+            <span className="text-[10px] leading-tight">Dashboard</span>
           </button>
 
           {isDashboardMenuOpen && view === 'dashboard' && (
@@ -306,21 +311,18 @@ export function AppLayout() {
               <button
                 onClick={() => { setDashboardSubView('overview'); setIsDashboardMenuOpen(false); }}
                 className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'overview' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Overview"
               >
                 <BarChart3 size={20} />
               </button>
               <button
                 onClick={() => { setDashboardSubView('tasks'); setIsDashboardMenuOpen(false); }}
                 className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'tasks' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Tasks"
               >
                 <ListTodo size={20} />
               </button>
               <button
                 onClick={() => { setDashboardSubView('logs'); setIsDashboardMenuOpen(false); }}
                 className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'logs' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Logs"
               >
                 <ScrollText size={20} />
               </button>
@@ -328,7 +330,6 @@ export function AppLayout() {
               <button
                 onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
                 className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                title="Monitor"
               >
                 <Activity size={20} />
               </button>
@@ -338,18 +339,19 @@ export function AppLayout() {
           )}
         </div>
 
-        {/* User Profile */}
+        {/* Profile */}
         <button
           onClick={() => setIsProfileModalOpen(true)}
-          className="flex flex-col items-center gap-1 transition-colors text-zinc-500 hover:text-zinc-300"
+          className="flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors text-zinc-500"
         >
           {userProfile.avatarUrl ? (
-             <div className="w-6 h-6 rounded-full overflow-hidden border border-zinc-600">
+             <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
                 <img src={userProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
              </div>
           ) : (
-             <User size={24} />
+             <User size={22} />
           )}
+          <span className="text-[10px] leading-tight">Me</span>
         </button>
       </div>
 
