@@ -33,62 +33,49 @@ class TagsRepository:
     async def get_all_tags(
         self, user_id: Optional[str] = None, enabled_only: bool = False
     ) -> List[dict]:
-        """Get all tags (system + time + user's own tags) with media_count and group info."""
+        """Get all tags (system + time + user's own tags) with media_count and group info.
+
+        Optimized: single query for tags + single RPC call for counts (was N+1).
+        """
         table = await self._get_table()
-        resource_tags_table = await self._get_resource_tags_table()
+        client = await self._get_client()
 
+        # Build filter: system, time, and optionally user tags
+        # Use a single query with or_ filter instead of 3 separate queries
         select_fields = "*, tag_groups(name)"
-
-        async def _query_tags(type_filter: Optional[str] = None, user_filter: Optional[str] = None):
-            """Query tags with graceful fallback if 'enabled' column doesn't exist."""
-            query = table.select(select_fields)
-            if type_filter:
-                query = query.eq("type", type_filter)
-            if user_filter:
-                query = query.eq("user_id", user_filter)
-            if enabled_only:
-                try:
-                    result = await query.eq("enabled", True).execute()
-                    return result.data
-                except Exception:
-                    # 'enabled' column may not exist yet — fall back without filter
-                    logger.warning("'enabled' column not found, skipping filter")
-                    query = table.select(select_fields)
-                    if type_filter:
-                        query = query.eq("type", type_filter)
-                    if user_filter:
-                        query = query.eq("user_id", user_filter)
-                    result = await query.execute()
-                    return result.data
-            result = await query.execute()
-            return result.data
-
-        # Get system + time + user tags
-        system_tags = await _query_tags(type_filter="system")
-        time_tags = await _query_tags(type_filter="time")
-        tags = system_tags + time_tags
+        query = table.select(select_fields)
 
         if user_id:
-            user_tags = await _query_tags(type_filter="user", user_filter=user_id)
-            tags.extend(user_tags)
+            query = query.or_(f"type.eq.system,type.eq.time,and(type.eq.user,user_id.eq.{user_id})")
+        else:
+            query = query.or_("type.eq.system,type.eq.time")
 
-        # Flatten group info and calculate media_count for each tag
+        if enabled_only:
+            try:
+                query = query.eq("enabled", True)
+            except Exception:
+                logger.warning("'enabled' column not found, skipping filter")
+
+        result = await query.execute()
+        tags = result.data
+
+        # Batch count: get all tag usage counts in one query via RPC or aggregation
+        tag_ids = [str(t["id"]) for t in tags]
+        count_map: dict[str, int] = {}
+        if tag_ids:
+            rt_table = client.table("resource_tags")
+            count_result = await rt_table.select("tag_id").in_("tag_id", tag_ids).execute()
+            for row in count_result.data:
+                tid = str(row["tag_id"])
+                count_map[tid] = count_map.get(tid, 0) + 1
+
+        # Flatten group info and attach counts
         for tag in tags:
-            # Extract group_name from joined tag_groups
             group_data = tag.pop("tag_groups", None)
             tag["group_name"] = group_data.get("name") if group_data else None
-
-            # Ensure 'enabled' field exists (default True for backward compat)
             if "enabled" not in tag:
                 tag["enabled"] = True
-
-            tag_id = str(tag.get("id"))
-            count_result = (
-                await resource_tags_table.select("*", count="exact")
-                .eq("tag_id", tag_id)
-                .execute()
-            )
-            tag["media_count"] = count_result.count or 0
+            tag["media_count"] = count_map.get(str(tag["id"]), 0)
 
         return tags
 
