@@ -122,6 +122,14 @@ async def create_temp_token(
     )
 
 
+class SelectionRequest(BaseModel):
+    tags: list[str]  # selected tag names
+
+
+class SelectionResponse(BaseModel):
+    tags: list[str]
+
+
 @router.get("/{token}/tags", response_model=TagListResponse)
 async def get_tags_by_token(
     token: str,
@@ -147,3 +155,39 @@ async def get_tags_by_token(
     tags = await repo.get_all_tags(user_id, enabled_only=enabled_only)
 
     return TagListResponse(tags=tags, total=len(tags))
+
+
+@router.post("/{token}/selection")
+async def save_selection(token: str, request: SelectionRequest):
+    """
+    Save tag selection to the temp token record.
+    Called by the web page when user confirms their selection.
+    """
+    row = await _validate_temp_token(token)
+    client = await get_async_supabase_admin()
+
+    try:
+        await (
+            client.table("temp_tokens")
+            .update({"selection": request.tags})
+            .eq("id", row["id"])
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"Failed to save selection: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save selection",
+        )
+
+    return {"success": True}
+
+
+@router.get("/{token}/selection", response_model=SelectionResponse)
+async def get_selection(token: str):
+    """
+    Retrieve saved tag selection.
+    Called by Shortcuts after user closes the web view.
+    """
+    row = await _validate_temp_token(token)
+    return SelectionResponse(tags=row.get("selection") or [])

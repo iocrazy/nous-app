@@ -130,12 +130,24 @@ export const ShortcutsTagsPage: React.FC = () => {
     });
   }, []);
 
-  const handleConfirm = () => {
-    const selectedList = Array.from(selected).join(',');
-    if (callbackName) {
-      window.location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(callbackName)}&input=text&text=${encodeURIComponent(selectedList)}`;
-    } else {
-      window.location.href = `shortcuts://x-callback-url/run-shortcut?input=text&text=${encodeURIComponent(selectedList)}`;
+  const [confirmed, setConfirmed] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!token) return;
+    setConfirming(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: Array.from(selected) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setConfirmed(true);
+    } catch (err) {
+      console.error('Failed to save selection:', err);
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -255,19 +267,29 @@ export const ShortcutsTagsPage: React.FC = () => {
 
       {/* Fixed bottom confirm button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 safe-area-pb">
-        <button
-          onClick={handleConfirm}
-          disabled={selected.size === 0}
-          className={`w-full py-3 rounded-xl text-base font-semibold transition-all ${
-            selected.size > 0
-              ? 'bg-indigo-600 text-white active:bg-indigo-700'
-              : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-          }`}
-        >
-          {selected.size > 0
-            ? (lang === 'zh' ? `确认 (${selected.size})` : `Confirm (${selected.size})`)
-            : (lang === 'zh' ? '请选择标签' : 'Select tags to continue')}
-        </button>
+        {confirmed ? (
+          <div className="text-center py-3">
+            <p className="text-green-400 text-base font-semibold">
+              {lang === 'zh' ? '已保存，请点击上方 Done 关闭' : 'Saved! Tap Done above to close'}
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={handleConfirm}
+            disabled={selected.size === 0 || confirming}
+            className={`w-full py-3 rounded-xl text-base font-semibold transition-all ${
+              selected.size > 0 && !confirming
+                ? 'bg-indigo-600 text-white active:bg-indigo-700'
+                : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+            }`}
+          >
+            {confirming
+              ? (lang === 'zh' ? '保存中...' : 'Saving...')
+              : selected.size > 0
+                ? (lang === 'zh' ? `确认 (${selected.size})` : `Confirm (${selected.size})`)
+                : (lang === 'zh' ? '请选择标签' : 'Select tags to continue')}
+          </button>
+        )}
       </div>
     </div>
   );
