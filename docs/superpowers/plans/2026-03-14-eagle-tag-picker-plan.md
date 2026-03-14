@@ -90,8 +90,10 @@ CREATE POLICY "Users can manage own tag preferences"
 -- Allow service role full access
 CREATE POLICY "Service role full access on user_tag_preferences"
   ON user_tag_preferences FOR ALL
-  USING (auth.role() = 'service_role');
+  USING (auth.jwt()->>'role' = 'service_role');
 ```
+
+**Note:** Verify no other migration has taken number 105 before creating. If a conflict exists, use the next available number.
 
 - [ ] **Step 2: Apply migration via Supabase MCP**
 
@@ -173,7 +175,7 @@ git commit -m "feat(schemas): add tag preferences Pydantic models"
 import json
 from typing import Optional
 
-from app.db.supabase_client import get_async_supabase
+from app.db.supabase_client import get_async_supabase_admin
 
 
 class TagPreferencesRepository:
@@ -194,7 +196,7 @@ class TagPreferencesRepository:
 
     async def get_preferences(self, user_id: str) -> dict:
         """Get preferences for a user. Returns defaults if not found."""
-        client = await get_async_supabase()
+        client = await get_async_supabase_admin()
         result = (
             await client.table("user_tag_preferences")
             .select("starred_tag_ids, picker_settings, panel_size")
@@ -215,7 +217,7 @@ class TagPreferencesRepository:
 
     async def upsert_preferences(self, user_id: str, updates: dict) -> dict:
         """Upsert preferences. Merges picker_settings at field level."""
-        client = await get_async_supabase()
+        client = await get_async_supabase_admin()
 
         # Get current to merge
         current = await self.get_preferences(user_id)
@@ -268,6 +270,8 @@ from app.schemas.tag_preferences import (
     TagPreferencesUpdate,
 )
 ```
+
+**IMPORTANT:** Unlike other routes in this file that use optional auth (`AuthDep = None`), preferences endpoints require authentication because they read `auth.user_id`. Do NOT add `= None` default.
 
 Add routes before `/{tag_id}`:
 
@@ -891,20 +895,168 @@ git commit -m "feat(ui): add SettingsPopover for picker display preferences"
 
 - [ ] **Step 1: Create TagContent component**
 
-This is the right-side content area showing Starred, Frequently Used, and grouped tag sections. It receives the filtered tags (based on sidebar group selection and search) and renders them with TagRow.
+```typescript
+import React, { useMemo, useState, useCallback } from 'react';
+import { Star, Flame, FolderOpen } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { TagRow } from './TagRow';
+import type { Tag } from '../../types';
+import type { PickerSettings } from '../../services/tagPreferencesService';
 
-Key logic:
-- Filter tags by search query (match `name` and `name_zh`)
-- Filter by selected group (from CategorySidebar)
-- Show Starred section (from preferences)
-- Show Frequently Used section (top 6 by `media_count`)
-- Show grouped tags
-- Support list/grid layout toggle
-- Handle right-click context menu for star/unstar
-- Two-column grid in list mode, flex-wrap in grid mode
-- Column width affects tag row sizing
+interface TagContentProps {
+  allTags: Tag[];
+  selectedIds: Set<string>;
+  starredIds: string[];
+  settings: PickerSettings;
+  selectedGroup: string | null;
+  search: string;
+  onToggleTag: (tagId: string) => void;
+  onToggleStar: (tagId: string) => void;
+}
 
-The component should be ~150 lines. Import `TagRow` for rendering individual tags. Accept `selectedGroup`, `search`, `settings`, `starredIds`, callbacks for toggle/star.
+export const TagContent: React.FC<TagContentProps> = ({
+  allTags,
+  selectedIds,
+  starredIds,
+  settings,
+  selectedGroup,
+  search,
+  onToggleTag,
+  onToggleStar,
+}) => {
+  const { i18n } = useTranslation();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tagId: string } | null>(null);
+
+  const starredSet = useMemo(() => new Set(starredIds), [starredIds]);
+
+  // Filter by search
+  const searchFiltered = useMemo(() => {
+    if (!search) return allTags;
+    const q = search.toLowerCase();
+    return allTags.filter(
+      (t) => t.name.toLowerCase().includes(q) || (t.name_zh && t.name_zh.toLowerCase().includes(q)),
+    );
+  }, [allTags, search]);
+
+  // Filter by group
+  const groupFiltered = useMemo(() => {
+    if (selectedGroup === null) return searchFiltered;
+    if (selectedGroup === '__uncategorized__') return searchFiltered.filter((t) => !t.group_name);
+    return searchFiltered.filter((t) => t.group_name === selectedGroup);
+  }, [searchFiltered, selectedGroup]);
+
+  // Starred tags
+  const starredTags = useMemo(
+    () => (settings.showStarred ? groupFiltered.filter((t) => starredSet.has(String(t.id))) : []),
+    [groupFiltered, starredSet, settings.showStarred],
+  );
+
+  // Frequently used (top 6 by media_count, only when not searching)
+  const frequentTags = useMemo(() => {
+    if (!settings.showRecently || search) return [];
+    return [...groupFiltered]
+      .filter((t) => (t.media_count ?? t.video_count ?? 0) > 0)
+      .sort((a, b) => (b.media_count ?? b.video_count ?? 0) - (a.media_count ?? a.video_count ?? 0))
+      .slice(0, 6);
+  }, [groupFiltered, settings.showRecently, search]);
+
+  // Grouped tags
+  const grouped = useMemo(() => {
+    const map = new Map<string, Tag[]>();
+    const ungrouped: Tag[] = [];
+    for (const tag of groupFiltered) {
+      const group = tag.group_name;
+      if (!group) ungrouped.push(tag);
+      else {
+        if (!map.has(group)) map.set(group, []);
+        map.get(group)!.push(tag);
+      }
+    }
+    const entries = Array.from(map.entries());
+    if (ungrouped.length > 0) entries.push(['Uncategorized', ungrouped]);
+    return entries;
+  }, [groupFiltered]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, tagId: string) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, tagId });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  const colWidthClass = settings.columnWidth === 'small' ? 'grid-cols-3' : settings.columnWidth === 'large' ? 'grid-cols-1' : 'grid-cols-2';
+  const gridClass = settings.layout === 'grid' ? 'flex flex-wrap gap-1' : `grid ${colWidthClass} gap-x-1`;
+
+  const renderTag = (tag: Tag) => (
+    <TagRow
+      key={tag.id}
+      tag={tag}
+      isSelected={selectedIds.has(String(tag.id))}
+      isStarred={starredSet.has(String(tag.id))}
+      showCount={settings.showCount}
+      onClick={() => onToggleTag(String(tag.id))}
+      onContextMenu={(e) => handleContextMenu(e, String(tag.id))}
+    />
+  );
+
+  const SectionHeader: React.FC<{ icon: React.ReactNode; label: string; count: number }> = ({ icon, label, count }) => (
+    <div className="flex items-center gap-1.5 px-1 py-1.5">
+      {icon}
+      <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+        {label} ({count})
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="flex-1 overflow-y-auto p-2 space-y-2" onClick={closeContextMenu}>
+      {/* Starred */}
+      {starredTags.length > 0 && (
+        <div>
+          <SectionHeader icon={<Star size={10} className="text-yellow-500 fill-yellow-500" />} label="Starred" count={starredTags.length} />
+          <div className={gridClass}>{starredTags.map(renderTag)}</div>
+        </div>
+      )}
+
+      {/* Frequently Used */}
+      {frequentTags.length > 0 && (
+        <div>
+          <SectionHeader icon={<Flame size={10} className="text-orange-500" />} label="Frequently Used" count={frequentTags.length} />
+          <div className={gridClass}>{frequentTags.map(renderTag)}</div>
+        </div>
+      )}
+
+      {/* Grouped tags */}
+      {grouped.map(([groupName, groupTags]) => (
+        <div key={groupName}>
+          <SectionHeader icon={<FolderOpen size={10} className="text-zinc-500" />} label={groupName} count={groupTags.length} />
+          <div className={gridClass}>{groupTags.map(renderTag)}</div>
+        </div>
+      ))}
+
+      {groupFiltered.length === 0 && (
+        <p className="text-xs text-zinc-600 text-center py-6">No tags found</p>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-[80] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-32"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => { onToggleStar(contextMenu.tagId); closeContextMenu(); }}
+            className="w-full px-3 py-1.5 text-xs text-left text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+          >
+            <Star size={10} className={starredSet.has(contextMenu.tagId) ? 'fill-yellow-500 text-yellow-500' : ''} />
+            {starredSet.has(contextMenu.tagId) ? 'Unstar' : 'Star'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+```
 
 - [ ] **Step 2: Commit**
 
@@ -922,27 +1074,212 @@ git commit -m "feat(ui): add TagContent with starred, frequent, and grouped sect
 
 - [ ] **Step 1: Create FloatingPanel component**
 
-This is the Portal-based floating panel that:
-- Renders via `createPortal` to `document.body`
-- Positions to the left of `triggerRef` element (with fallback to right/center)
-- Contains CategorySidebar (left) + TagContent (right) + search bar + settings gear
-- Is resizable by dragging bottom-right corner
-- Closes on click outside or ESC
-- Has `z-[60]` z-index
+```typescript
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { Search, Settings, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { CategorySidebar } from './CategorySidebar';
+import { TagContent } from './TagContent';
+import { SettingsPopover } from './SettingsPopover';
+import type { Tag } from '../../types';
+import type { PickerSettings, PanelSize } from '../../services/tagPreferencesService';
 
-Key structure:
+interface FloatingPanelProps {
+  triggerRef: React.RefObject<HTMLElement | null>;
+  allTags: Tag[];
+  selectedIds: Set<string>;
+  starredIds: string[];
+  settings: PickerSettings;
+  panelSize: PanelSize;
+  onToggleTag: (tagId: string) => void;
+  onToggleStar: (tagId: string) => void;
+  onUpdateSettings: (partial: Partial<PickerSettings>) => void;
+  onPanelResize: (size: PanelSize) => void;
+  onClose: () => void;
+}
+
+export const FloatingPanel: React.FC<FloatingPanelProps> = ({
+  triggerRef,
+  allTags,
+  selectedIds,
+  starredIds,
+  settings,
+  panelSize,
+  onToggleTag,
+  onToggleStar,
+  onUpdateSettings,
+  onPanelResize,
+  onClose,
+}) => {
+  const { t } = useTranslation();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [search, setSearch] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [size, setSize] = useState(panelSize);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Position panel to the left of trigger
+  useEffect(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const panelW = size.width;
+    const panelH = size.height;
+
+    let left = rect.left - panelW - 8;
+    let top = rect.top;
+
+    // Fallback: if not enough space on left, try right
+    if (left < 8) {
+      left = rect.right + 8;
+    }
+    // Fallback: if not enough space on right either, center
+    if (left + panelW > window.innerWidth - 8) {
+      left = Math.max(8, (window.innerWidth - panelW) / 2);
+    }
+    // Vertical bounds
+    if (top + panelH > window.innerHeight - 8) {
+      top = Math.max(8, window.innerHeight - panelH - 8);
+    }
+
+    setPosition({ top, left });
+  }, [triggerRef, size.width, size.height]);
+
+  // Close on ESC
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // Close on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    // Use setTimeout to avoid closing immediately from the same click that opened
+    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 0);
+    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handler); };
+  }, [onClose]);
+
+  // Resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, startW: size.width, startH: size.height };
+    const handleMove = (me: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const newW = Math.min(1200, Math.max(300, resizeRef.current.startW + me.clientX - resizeRef.current.startX));
+      const newH = Math.min(800, Math.max(250, resizeRef.current.startH + me.clientY - resizeRef.current.startY));
+      setSize({ width: newW, height: newH });
+    };
+    const handleUp = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      resizeRef.current = null;
+      // Debounced persist
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        setSize((s) => { onPanelResize(s); return s; });
+      }, 500);
+    };
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+  }, [size, onPanelResize]);
+
+  // Compute group info
+  const { groups, totalCount, uncategorizedCount } = useMemo(() => {
+    const groupMap = new Map<string, number>();
+    let uncat = 0;
+    for (const tag of allTags) {
+      if (tag.group_name) {
+        groupMap.set(tag.group_name, (groupMap.get(tag.group_name) || 0) + 1);
+      } else {
+        uncat++;
+      }
+    }
+    return {
+      groups: Array.from(groupMap.entries()).map(([name, count]) => ({ name, count })),
+      totalCount: allTags.length,
+      uncategorizedCount: uncat,
+    };
+  }, [allTags]);
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className="fixed z-[60] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
+      style={{ top: position.top, left: position.left, width: size.width, height: size.height }}
+    >
+      {/* Top bar: search + settings */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+        <div className="flex-1 relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('resources.searchTags', 'Search tags...')}
+            className="w-full bg-zinc-800 border border-zinc-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+            autoFocus
+          />
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            <Settings size={14} />
+          </button>
+          {showSettings && (
+            <SettingsPopover settings={settings} onUpdate={onUpdateSettings} onClose={() => setShowSettings(false)} />
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Main content: sidebar + tags */}
+      <div className="flex flex-1 min-h-0">
+        <CategorySidebar
+          totalCount={totalCount}
+          uncategorizedCount={uncategorizedCount}
+          groups={groups}
+          selectedGroup={selectedGroup}
+          onSelectGroup={setSelectedGroup}
+        />
+        <TagContent
+          allTags={allTags}
+          selectedIds={selectedIds}
+          starredIds={starredIds}
+          settings={settings}
+          selectedGroup={selectedGroup}
+          search={search}
+          onToggleTag={onToggleTag}
+          onToggleStar={onToggleStar}
+        />
+      </div>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleResizeStart}
+        className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
+        style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(113,113,122,0.4) 50%)' }}
+      />
+    </div>,
+    document.body,
+  );
+};
 ```
-┌──────────┬─────────────────────────┐
-│ Category │ 🔍 Search...     ⚙️ ⊞  │
-│ Sidebar  │─────────────────────────│
-│          │ [Tag sections]          │
-│          │                         │
-└──────────┴─────────────────────────┘
-```
-
-Accept props: `triggerRef`, `allTags`, `selectedIds` (Set), `starredIds`, `settings`, `panelSize`, callbacks for toggle/star/settings/resize/close.
-
-The resize handle should be a small drag handle at the bottom-right corner. On drag end (debounced), call `onPanelResize`.
 
 - [ ] **Step 2: Commit**
 
@@ -960,16 +1297,179 @@ git commit -m "feat(ui): add FloatingPanel with portal, positioning, and resize"
 
 - [ ] **Step 1: Create main component**
 
-This is the entry point that:
-- Renders assigned TagPills with ✕ buttons (in sidebar/form)
-- Renders "+ Add Tag" button
-- Manages panel open/close state
-- Uses `useTagPreferences` hook
-- Adapts between Mode 1 (assignedTags + onAdd/onRemove) and Mode 2 (selectedTagIds + onTagsChange)
-- Passes correct props to FloatingPanel
-- Includes inline tag creation UI (from existing UnifiedTagPicker)
+```typescript
+import React, { useState, useRef, useMemo, useCallback } from 'react';
+import { Plus, Palette } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { TagPill } from './TagPill';
+import { FloatingPanel } from './FloatingPanel';
+import { useTagPreferences } from './useTagPreferences';
+import type { EagleTagPickerProps } from './types';
+import type { Tag } from '../../types';
 
-The component determines `selectedIds` (Set of tag IDs) from either `assignedTags` or `selectedTagIds` depending on mode.
+const TAG_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
+];
+
+export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
+  assignedTags,
+  onAdd,
+  onRemove,
+  selectedTagIds,
+  onTagsChange,
+  allTags,
+  readOnly = false,
+  onCreate,
+}) => {
+  const { t } = useTranslation();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState(TAG_COLORS[5]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const { prefs, toggleStar, updateSettings, updatePanelSize } = useTagPreferences();
+
+  // Determine mode and selected IDs
+  const isMode1 = assignedTags !== undefined;
+  const selectedIds = useMemo(() => {
+    if (isMode1) return new Set(assignedTags!.map((t) => String(t.id)));
+    return new Set(selectedTagIds || []);
+  }, [isMode1, assignedTags, selectedTagIds]);
+
+  // Tags to display as pills (assigned in Mode 1, selected from allTags in Mode 2)
+  const displayTags = useMemo(() => {
+    if (isMode1) return assignedTags!;
+    return allTags.filter((t) => selectedIds.has(String(t.id)));
+  }, [isMode1, assignedTags, allTags, selectedIds]);
+
+  const handleToggleTag = useCallback(
+    (tagId: string) => {
+      if (isMode1) {
+        if (selectedIds.has(tagId)) {
+          onRemove?.(tagId);
+        } else {
+          onAdd?.(tagId);
+        }
+      } else {
+        const current = selectedTagIds || [];
+        const next = current.includes(tagId)
+          ? current.filter((id) => id !== tagId)
+          : [...current, tagId];
+        onTagsChange?.(next);
+      }
+    },
+    [isMode1, selectedIds, onAdd, onRemove, selectedTagIds, onTagsChange],
+  );
+
+  const handleRemove = useCallback(
+    (tagId: string) => {
+      if (isMode1) {
+        onRemove?.(tagId);
+      } else {
+        onTagsChange?.((selectedTagIds || []).filter((id) => id !== tagId));
+      }
+    },
+    [isMode1, onRemove, onTagsChange, selectedTagIds],
+  );
+
+  const handleCreate = useCallback(async () => {
+    const name = newName.trim();
+    if (!name || !onCreate) return;
+    const created = await onCreate(name, newColor);
+    if (created) {
+      handleToggleTag(String(created.id));
+      setNewName('');
+      setShowCreate(false);
+    }
+  }, [newName, newColor, onCreate, handleToggleTag]);
+
+  return (
+    <div className="space-y-2">
+      {/* Assigned / selected tag pills */}
+      <div className="flex flex-wrap gap-1.5">
+        {displayTags.map((tag) => (
+          <TagPill key={tag.id} tag={tag} onRemove={handleRemove} readOnly={readOnly} />
+        ))}
+        {!readOnly && (
+          <>
+            <button
+              ref={triggerRef}
+              onClick={() => setPanelOpen(!panelOpen)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            >
+              <Plus size={10} />
+              {t('resources.addTag', 'Add Tag')}
+            </button>
+
+            {/* Inline create */}
+            {onCreate && !showCreate && (
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <Palette size={10} />
+                {t('resources.createTag', 'Create')}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Inline create form */}
+      {showCreate && onCreate && (
+        <div className="flex items-center gap-2 p-2 bg-zinc-800/50 rounded-lg">
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Tag name..."
+            className="flex-1 bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+            autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowCreate(false); }}
+          />
+          <div className="flex gap-1">
+            {TAG_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setNewColor(c)}
+                className={`w-4 h-4 rounded-full border-2 transition-all ${
+                  newColor === c ? 'border-white scale-110' : 'border-transparent'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+          <button
+            onClick={handleCreate}
+            disabled={!newName.trim()}
+            className="px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded disabled:opacity-50 transition-colors"
+          >
+            Create
+          </button>
+        </div>
+      )}
+
+      {/* Floating panel */}
+      {panelOpen && (
+        <FloatingPanel
+          triggerRef={triggerRef}
+          allTags={allTags}
+          selectedIds={selectedIds}
+          starredIds={prefs.starred_tag_ids}
+          settings={prefs.picker_settings}
+          panelSize={prefs.panel_size}
+          onToggleTag={handleToggleTag}
+          onToggleStar={toggleStar}
+          onUpdateSettings={updateSettings}
+          onPanelResize={updatePanelSize}
+          onClose={() => setPanelOpen(false)}
+        />
+      )}
+    </div>
+  );
+};
+```
 
 - [ ] **Step 2: Commit**
 
