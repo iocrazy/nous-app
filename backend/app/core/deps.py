@@ -174,7 +174,15 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
 
     required_scopes = get_required_scopes(method, path)
 
-    if required_scopes and not check_scope_permission(required_scopes, user_scopes):
+    if not required_scopes:
+        # Endpoint not in scope map — deny by default (security: least privilege)
+        logger.warning(f"API Key denied: endpoint {method} {path} has no scope mapping")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This endpoint is not available via API Key",
+        )
+
+    if not check_scope_permission(required_scopes, user_scopes):
         logger.warning(f"API Key 权限不足: 需要 {required_scopes}, 拥有 {user_scopes}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
