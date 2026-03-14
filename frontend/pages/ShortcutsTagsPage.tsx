@@ -36,8 +36,7 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Read params from both query string and hash fragment
   const params = new URLSearchParams(window.location.search);
@@ -120,6 +119,10 @@ export const ShortcutsTagsPage: React.FC = () => {
     return entries;
   }, [tags]);
 
+  /** Get display label (may be Chinese), but always use English name for storage */
+  const getStorageName = (tag: Tag) => tag.name;
+
+  // Toggle tag and auto-save to Redis
   const toggle = useCallback((tagName: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -128,53 +131,33 @@ export const ShortcutsTagsPage: React.FC = () => {
       } else {
         next.add(tagName);
       }
+      // Auto-save to Redis
+      if (token && next.size > 0) {
+        setSaveStatus('saving');
+        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: Array.from(next) }),
+        })
+          .then(() => {
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 1500);
+          })
+          .catch((err) => {
+            console.error('Failed to save selection:', err);
+            setSaveStatus('idle');
+          });
+      } else if (token && next.size === 0) {
+        // Clear selection
+        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: [] }),
+        }).catch((err) => console.error('Failed to clear selection:', err));
+      }
       return next;
     });
-  }, []);
-
-  /** Get display label (may be Chinese), but always use English name for storage */
-  const getStorageName = (tag: Tag) => tag.name;
-
-  // Save selection to Redis, then try to close the page
-  const handleConfirm = useCallback(async () => {
-    if (!token || selected.size === 0) return;
-    setSaving(true);
-    try {
-      await fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: Array.from(selected) }),
-      });
-      // Try to close the web view (works in some iOS contexts)
-      window.close();
-      // If still here after 300ms, show success screen as fallback
-      setTimeout(() => setSaved(true), 300);
-    } catch (err) {
-      console.error('Failed to save selection:', err);
-      setSaving(false);
-    }
-  }, [token, selected]);
-
-  // Success screen — shown after confirming
-  if (saved) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
-            <Check size={32} className="text-emerald-400" />
-          </div>
-          <p className="text-emerald-400 text-lg font-semibold mb-2">
-            {lang === 'zh' ? '标签已保存' : 'Tags Saved'}
-          </p>
-          <p className="text-zinc-400 text-sm">
-            {lang === 'zh'
-              ? `已选择 ${selected.size} 个标签，请关闭此页面继续`
-              : `${selected.size} tag(s) selected. Close this page to continue.`}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  }, [token]);
 
   if (loading) {
     return (
@@ -295,15 +278,24 @@ export const ShortcutsTagsPage: React.FC = () => {
       {/* Fixed bottom bar */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 safe-area-pb">
         {selected.size > 0 ? (
-          <button
-            onClick={handleConfirm}
-            disabled={saving}
-            className="w-full py-3 rounded-xl text-base font-semibold bg-indigo-600 text-white active:bg-indigo-700 disabled:opacity-50 transition-all"
-          >
-            {saving
-              ? (lang === 'zh' ? '保存中...' : 'Saving...')
-              : (lang === 'zh' ? `确认 (${selected.size})` : `Confirm (${selected.size})`)}
-          </button>
+          <div className="text-center">
+            <p className="text-sm font-medium text-indigo-400">
+              {lang === 'zh'
+                ? `已选 ${selected.size} 个标签`
+                : `${selected.size} tag(s) selected`}
+              {saveStatus === 'saving' && (
+                <span className="text-zinc-500 ml-2">
+                  {lang === 'zh' ? '保存中...' : 'saving...'}
+                </span>
+              )}
+              {saveStatus === 'saved' && (
+                <span className="text-emerald-400 ml-2">✓</span>
+              )}
+            </p>
+            <p className="text-xs text-zinc-500 mt-1">
+              {lang === 'zh' ? '选完后点左上角 ✕ 关闭' : 'Tap ✕ to close when done'}
+            </p>
+          </div>
         ) : (
           <p className="text-center text-sm text-zinc-500">
             {lang === 'zh' ? '请选择标签' : 'Select tags to continue'}
