@@ -1107,7 +1107,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     if (!selectedResource?.resource?.id) return;
     try {
       await removeResourceTag(selectedResource.resource.id, tagId);
-      setSelectedResourceTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
+      setSelectedResourceTags((prev) => prev.filter((t) => String(t.tag?.id) !== tagId));
     } catch { /* ignore */ }
   }, [selectedResource]);
 

@@ -584,7 +584,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   const handleRemoveTag = useCallback(async (tagId: string) => {
     try {
       await removeResourceTag(resourceId, tagId);
-      setAssignedTags((prev) => prev.filter((t) => t.tag?.id !== tagId));
+      setAssignedTags((prev) => prev.filter((t) => String(t.tag?.id) !== tagId));
     } catch { /* ignore */ }
   }, [resourceId]);
 

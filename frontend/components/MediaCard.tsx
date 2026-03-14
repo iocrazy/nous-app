@@ -181,7 +181,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     if (!resourceId) return;
     try {
       await removeResourceTag(resourceId, tagId);
-      setResourceTags(prev => prev.filter(t => t.tag?.id !== tagId));
+      setResourceTags(prev => prev.filter(t => String(t.tag?.id) !== tagId));
     } catch (err) {
       console.error('Failed to remove tag:', err);
     }

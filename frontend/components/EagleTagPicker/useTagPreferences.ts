@@ -23,7 +23,7 @@ const DEFAULTS: TagPreferences = {
 export function useTagPreferences() {
   const [prefs, setPrefs] = useState<TagPreferences>(DEFAULTS);
   const [loading, setLoading] = useState(true);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     fetchTagPreferences()

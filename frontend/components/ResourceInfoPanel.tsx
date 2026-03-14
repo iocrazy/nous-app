@@ -172,7 +172,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
   // ─── Notes ──────────────────────────────────────────
   const [notesValue, setNotesValue] = useState(resource.notes || '');
-  const notesTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const notesTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     setNotesValue(resource.notes || '');

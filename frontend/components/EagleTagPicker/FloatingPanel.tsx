@@ -1,12 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Settings, X } from 'lucide-react';
+import { Search, Settings, X, Plus, Palette } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CategorySidebar } from './CategorySidebar';
 import { TagContent } from './TagContent';
 import { SettingsPopover } from './SettingsPopover';
 import type { Tag } from '../../types';
 import type { PickerSettings, PanelSize } from '../../services/tagPreferencesService';
+
+const TAG_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
+];
 
 interface FloatingPanelProps {
   triggerRef: React.RefObject<HTMLElement | null>;
@@ -20,6 +25,7 @@ interface FloatingPanelProps {
   onUpdateSettings: (partial: Partial<PickerSettings>) => void;
   onPanelResize: (size: PanelSize) => void;
   onClose: () => void;
+  onCreate?: (name: string, color: string) => Promise<Tag | null>;
 }
 
 export const FloatingPanel: React.FC<FloatingPanelProps> = ({
@@ -34,6 +40,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   onUpdateSettings,
   onPanelResize,
   onClose,
+  onCreate,
 }) => {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -41,9 +48,11 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [size, setSize] = useState(panelSize);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [newColor, setNewColor] = useState(TAG_COLORS[5]);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Position panel to the left of trigger
   useEffect(() => {
@@ -133,6 +142,23 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
     };
   }, [allTags]);
 
+  // Check if search term has no exact match (for create option)
+  const noExactMatch = useMemo(() => {
+    if (!search.trim()) return false;
+    const q = search.trim().toLowerCase();
+    return !allTags.some((t) => t.name.toLowerCase() === q);
+  }, [search, allTags]);
+
+  const handleCreate = useCallback(async () => {
+    const name = search.trim();
+    if (!name || !onCreate) return;
+    const created = await onCreate(name, newColor);
+    if (created) {
+      setSearch('');
+      setShowColorPicker(false);
+    }
+  }, [search, newColor, onCreate]);
+
   return createPortal(
     <div
       ref={panelRef}
@@ -150,6 +176,12 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
             placeholder={t('resources.searchTags', 'Search tags...')}
             className="w-full bg-zinc-800 border border-zinc-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
             autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && noExactMatch && onCreate) {
+                e.preventDefault();
+                handleCreate();
+              }
+            }}
           />
         </div>
         <div className="relative">
@@ -170,6 +202,45 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
           <X size={14} />
         </button>
       </div>
+
+      {/* Create tag option (Eagle-style: shown at top when search has no exact match) */}
+      {noExactMatch && onCreate && (
+        <div className="border-b border-zinc-800 px-3 py-1.5">
+          {!showColorPicker ? (
+            <button
+              onClick={() => setShowColorPicker(true)}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
+            >
+              <Plus size={12} className="text-indigo-400" />
+              <span>Create &quot;{search.trim()}&quot;</span>
+            </button>
+          ) : (
+            <div className="space-y-1.5 py-1">
+              <div className="flex items-center gap-2">
+                <Palette size={10} className="text-zinc-500 shrink-0" />
+                <div className="flex gap-1">
+                  {TAG_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setNewColor(c)}
+                      className={`w-4 h-4 rounded-full border-2 transition-all ${
+                        newColor === c ? 'border-white scale-110' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={handleCreate}
+                className="w-full py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors"
+              >
+                Create &quot;{search.trim()}&quot;
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main content: sidebar + tags */}
       <div className="flex flex-1 min-h-0">
