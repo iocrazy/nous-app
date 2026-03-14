@@ -257,12 +257,18 @@ export const ShortcutsTagsPage: React.FC = () => {
       {/* Fixed bottom bar */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 safe-area-pb">
         {selected.size > 0 ? (
-          <button
-            onClick={() => window.close()}
-            className="w-full py-3 rounded-xl text-base font-semibold bg-indigo-600 text-white active:bg-indigo-700 transition-all"
-          >
-            {lang === 'zh' ? `完成 (${selected.size})` : `Done (${selected.size})`}
-          </button>
+          <div className="text-center">
+            <p className="text-sm text-indigo-400 font-medium">
+              {lang === 'zh'
+                ? `已选 ${selected.size} 个标签（已自动保存）`
+                : `${selected.size} tag(s) selected (auto-saved)`}
+            </p>
+            <p className="text-xs text-zinc-500 mt-1">
+              {lang === 'zh'
+                ? '点击左上角 ✕ 关闭页面'
+                : 'Tap ✕ in the top-left to close'}
+            </p>
+          </div>
         ) : (
           <p className="text-center text-sm text-zinc-500">
             {lang === 'zh' ? '请选择标签' : 'Select tags to continue'}
