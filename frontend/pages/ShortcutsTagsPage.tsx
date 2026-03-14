@@ -38,9 +38,12 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Read params from both query string and hash fragment
-  // API key can be passed via hash (#api_key=dk_xxx) for security (hash is never sent to server)
   const params = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+
+  // Temp token (secure) — preferred over api_key
+  const token = params.get('token') || hashParams.get('token') || '';
+  // Legacy: api_key via hash fragment (still supported for backward compat)
   const apiKey = hashParams.get('api_key') || params.get('api_key') || '';
   const callbackName = params.get('callback') || hashParams.get('callback') || '';
   const lang = params.get('lang') || hashParams.get('lang') || 'zh';
@@ -50,20 +53,30 @@ export const ShortcutsTagsPage: React.FC = () => {
     lang === 'zh' ? (tag.name_zh || tag.name) : tag.name;
 
   useEffect(() => {
-    if (!apiKey) {
-      setError('Missing api_key parameter');
+    if (!token && !apiKey) {
+      setError('Missing token parameter');
       setLoading(false);
       return;
     }
 
-    fetch(`${API_BASE}/api/v1/tags?enabled_only=true`, {
-      headers: {
-        'X-API-Key': apiKey,
-        'Content-Type': 'application/json',
-      },
-    })
+    // Determine fetch URL based on auth method
+    const fetchUrl = token
+      ? `${API_BASE}/api/v1/auth/temp-token/${token}/tags?enabled_only=true`
+      : `${API_BASE}/api/v1/tags?enabled_only=true`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (!token && apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+
+    fetch(fetchUrl, { headers })
       .then((res) => {
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        if (!res.ok) {
+          if (res.status === 401) throw new Error('Token expired or invalid');
+          throw new Error(`API error: ${res.status}`);
+        }
         return res.json();
       })
       .then((data) => {
@@ -74,7 +87,7 @@ export const ShortcutsTagsPage: React.FC = () => {
         setError(err.message);
         setLoading(false);
       });
-  }, [apiKey]);
+  }, [token, apiKey]);
 
   // Top 8 most used tags
   const topTags = useMemo(() =>

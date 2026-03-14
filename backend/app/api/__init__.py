@@ -25,6 +25,7 @@ from app.api.reviews_router import router as reviews_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
 from app.api.supabase_auth_router import router as auth_router
+from app.api.temp_token_router import router as temp_token_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
 from app.api.task_manager_router import router as task_manager_router
@@ -43,6 +44,8 @@ from app.api.admin import admin_router
 api_router = APIRouter()
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
+
+api_router.include_router(router=temp_token_router, tags=["Temp Token"])
 
 api_router.include_router(router=media_router, tags=["Media"])
 
