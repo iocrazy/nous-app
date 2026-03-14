@@ -863,8 +863,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* Create/Edit Key Modal */}
       {isKeyModalOpen && (
-         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-20 p-4 overflow-y-auto">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-20 flex items-start justify-center pt-12 p-4 overflow-y-auto">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
                <div className="px-6 py-5 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
                   <h3 className="text-lg font-bold text-white">
                      {newKeySecret ? 'API Key Created!' : editingKeyId ? 'Edit API Key' : 'Create New API Key'}

@@ -25,6 +25,16 @@ class ApiKeyScope(str, Enum):
     # All video permissions (wildcard)
     VIDEOS_ALL = "videos:*"
 
+    # Tags related
+    TAGS_READ = "tags:read"
+    TAGS_WRITE = "tags:write"
+    TAGS_ALL = "tags:*"
+
+    # Resources related
+    RESOURCES_READ = "resources:read"
+    RESOURCES_WRITE = "resources:write"
+    RESOURCES_ALL = "resources:*"
+
     # User related
     USER_PROFILE_READ = "user:profile:read"
     USER_PROFILE_WRITE = "user:profile:write"
@@ -127,6 +137,52 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
         ApiKeyScope.VIDEOS_RETRY.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
+    # Tags
+    ("GET", "/tags"): [
+        ApiKeyScope.TAGS_READ.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("POST", "/tags"): [
+        ApiKeyScope.TAGS_WRITE.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("PUT", "/tags/{id}"): [
+        ApiKeyScope.TAGS_WRITE.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("DELETE", "/tags/{id}"): [
+        ApiKeyScope.TAGS_WRITE.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("GET", "/tags/media/{media_id}/tags"): [
+        ApiKeyScope.TAGS_READ.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("GET", "/tags/groups"): [
+        ApiKeyScope.TAGS_READ.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    # Resources
+    ("GET", "/resources"): [
+        ApiKeyScope.RESOURCES_READ.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    ("GET", "/resources/{id}"): [
+        ApiKeyScope.RESOURCES_READ.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    ("PATCH", "/resources/{id}"): [
+        ApiKeyScope.RESOURCES_WRITE.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    ("GET", "/resources/{id}/tags"): [
+        ApiKeyScope.TAGS_READ.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
+    ("POST", "/resources/{id}/tags"): [
+        ApiKeyScope.TAGS_WRITE.value,
+        ApiKeyScope.TAGS_ALL.value,
+    ],
 }
 
 
@@ -179,6 +235,44 @@ AVAILABLE_SCOPES = [
         "name": "Full Access",
         "description": "All video-related permissions",
         "category": "Video",
+    },
+    # Tags
+    {
+        "scope": ApiKeyScope.TAGS_READ.value,
+        "name": "Read Tags",
+        "description": "View tags and tag groups",
+        "category": "Tags",
+    },
+    {
+        "scope": ApiKeyScope.TAGS_WRITE.value,
+        "name": "Manage Tags",
+        "description": "Create, update, and delete tags",
+        "category": "Tags",
+    },
+    {
+        "scope": ApiKeyScope.TAGS_ALL.value,
+        "name": "Full Tag Access",
+        "description": "All tag-related permissions",
+        "category": "Tags",
+    },
+    # Resources
+    {
+        "scope": ApiKeyScope.RESOURCES_READ.value,
+        "name": "Read Resources",
+        "description": "View resource library and details",
+        "category": "Resources",
+    },
+    {
+        "scope": ApiKeyScope.RESOURCES_WRITE.value,
+        "name": "Manage Resources",
+        "description": "Update and organize resources",
+        "category": "Resources",
+    },
+    {
+        "scope": ApiKeyScope.RESOURCES_ALL.value,
+        "name": "Full Resource Access",
+        "description": "All resource-related permissions",
+        "category": "Resources",
     },
 ]
 
