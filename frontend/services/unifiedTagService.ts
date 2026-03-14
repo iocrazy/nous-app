@@ -19,14 +19,40 @@ const getApiUrl = (): string => {
 
 // ─── Global tag CRUD ──────────────────────────────────────
 
+// Module-level cache with short TTL to avoid duplicate requests
+let _allTagsCache: { data: Tag[]; ts: number } | null = null;
+let _allTagsPromise: Promise<Tag[]> | null = null;
+const ALL_TAGS_TTL_MS = 5000; // 5 second cache
+
 export async function fetchAllTags(): Promise<Tag[]> {
-  const apiUrl = getApiUrl();
-  const res = await fetch(`${apiUrl}/api/v1/tags`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch tags');
-  const json = await res.json();
-  return json.tags ?? json.data ?? [];
+  // Return cached if fresh
+  if (_allTagsCache && Date.now() - _allTagsCache.ts < ALL_TAGS_TTL_MS) {
+    return _allTagsCache.data;
+  }
+  // Deduplicate concurrent requests
+  if (_allTagsPromise) return _allTagsPromise;
+
+  _allTagsPromise = (async () => {
+    const apiUrl = getApiUrl();
+    const res = await fetch(`${apiUrl}/api/v1/tags`, {
+      headers: await getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error('Failed to fetch tags');
+    const json = await res.json();
+    const tags = json.tags ?? json.data ?? [];
+    _allTagsCache = { data: tags, ts: Date.now() };
+    return tags;
+  })();
+  try {
+    return await _allTagsPromise;
+  } finally {
+    _allTagsPromise = null;
+  }
+}
+
+/** Invalidate tags cache (call after create/delete) */
+export function invalidateAllTagsCache() {
+  _allTagsCache = null;
 }
 
 export async function createTag(data: {
@@ -41,6 +67,7 @@ export async function createTag(data: {
     body: JSON.stringify({ ...data, type: data.type || 'user' }),
   });
   if (!res.ok) throw new Error('Failed to create tag');
+  invalidateAllTagsCache();
   return res.json();
 }
 
@@ -51,6 +78,7 @@ export async function deleteTag(tagId: string): Promise<void> {
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to delete tag');
+  invalidateAllTagsCache();
 }
 
 // ─── Resource tag associations ────────────────────────────

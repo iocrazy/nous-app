@@ -35,17 +35,38 @@ const DEFAULTS: TagPreferences = {
   panel_size: { width: 480, height: 400 },
 };
 
+// Module-level cache to avoid duplicate requests across EagleTagPicker instances
+let _cachedPrefs: TagPreferences | null = null;
+let _fetchPromise: Promise<TagPreferences> | null = null;
+
 export async function fetchTagPreferences(): Promise<TagPreferences> {
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/tags/preferences`, {
-      headers: await getAuthHeaders(),
-    });
-    if (!res.ok) return { ...DEFAULTS };
-    return await res.json();
-  } catch (err) {
-    console.error('Failed to fetch tag preferences:', err);
-    return { ...DEFAULTS };
-  }
+  // Return cached result if available
+  if (_cachedPrefs) return { ..._cachedPrefs };
+  // Deduplicate concurrent requests
+  if (_fetchPromise) return _fetchPromise;
+
+  _fetchPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/tags/preferences`, {
+        headers: await getAuthHeaders(),
+      });
+      if (!res.ok) return { ...DEFAULTS };
+      const data = await res.json();
+      _cachedPrefs = data;
+      return data;
+    } catch (err) {
+      console.error('Failed to fetch tag preferences:', err);
+      return { ...DEFAULTS };
+    } finally {
+      _fetchPromise = null;
+    }
+  })();
+  return _fetchPromise;
+}
+
+/** Invalidate preferences cache (called after update) */
+export function invalidatePreferencesCache() {
+  _cachedPrefs = null;
 }
 
 export async function updateTagPreferences(
@@ -60,5 +81,7 @@ export async function updateTagPreferences(
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new Error(`Failed to update preferences: ${res.status}`);
-  return await res.json();
+  const data = await res.json();
+  _cachedPrefs = data; // Update cache with latest
+  return data;
 }
