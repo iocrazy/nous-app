@@ -130,12 +130,24 @@ export const ShortcutsTagsPage: React.FC = () => {
     });
   }, []);
 
-  const handleConfirm = () => {
+  const [confirmed, setConfirmed] = useState(false);
+
+  const handleConfirm = async () => {
     const selectedList = Array.from(selected).join(',');
-    if (callbackName) {
-      window.location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(callbackName)}&input=text&text=${encodeURIComponent(selectedList)}`;
-    } else {
-      window.location.href = `shortcuts://x-callback-url/run-shortcut?input=text&text=${encodeURIComponent(selectedList)}`;
+    try {
+      await navigator.clipboard.writeText(selectedList);
+      setConfirmed(true);
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = selectedList;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setConfirmed(true);
     }
   };
 
@@ -255,19 +267,27 @@ export const ShortcutsTagsPage: React.FC = () => {
 
       {/* Fixed bottom confirm button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 safe-area-pb">
-        <button
-          onClick={handleConfirm}
-          disabled={selected.size === 0}
-          className={`w-full py-3 rounded-xl text-base font-semibold transition-all ${
-            selected.size > 0
-              ? 'bg-indigo-600 text-white active:bg-indigo-700'
-              : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-          }`}
-        >
-          {selected.size > 0
-            ? (lang === 'zh' ? `确认 (${selected.size})` : `Confirm (${selected.size})`)
-            : (lang === 'zh' ? '请选择标签' : 'Select tags to continue')}
-        </button>
+        {confirmed ? (
+          <div className="text-center py-3">
+            <p className="text-green-400 text-base font-semibold">
+              {lang === 'zh' ? '已复制到剪贴板，请点 Done 关闭' : 'Copied! Tap Done to close'}
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={handleConfirm}
+            disabled={selected.size === 0}
+            className={`w-full py-3 rounded-xl text-base font-semibold transition-all ${
+              selected.size > 0
+                ? 'bg-indigo-600 text-white active:bg-indigo-700'
+                : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+            }`}
+          >
+            {selected.size > 0
+              ? (lang === 'zh' ? `确认 (${selected.size})` : `Confirm (${selected.size})`)
+              : (lang === 'zh' ? '请选择标签' : 'Select tags to continue')}
+          </button>
+        )}
       </div>
     </div>
   );
