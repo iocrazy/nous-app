@@ -37,10 +37,13 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Read params from both query string and hash fragment
+  // API key can be passed via hash (#api_key=dk_xxx) for security (hash is never sent to server)
   const params = new URLSearchParams(window.location.search);
-  const apiKey = params.get('api_key') || '';
-  const callbackName = params.get('callback') || '';
-  const lang = params.get('lang') || 'zh'; // 'zh' = Chinese, 'en' = English
+  const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+  const apiKey = hashParams.get('api_key') || params.get('api_key') || '';
+  const callbackName = params.get('callback') || hashParams.get('callback') || '';
+  const lang = params.get('lang') || hashParams.get('lang') || 'zh';
 
   /** Get display label based on lang */
   const getLabel = (tag: Tag) =>
