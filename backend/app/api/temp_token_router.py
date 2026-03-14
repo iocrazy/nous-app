@@ -6,29 +6,33 @@ Temporary Token Router
 Provides endpoints to create and validate short-lived tokens
 for secure web page access (e.g. Shortcuts tag picker).
 
+Uses Redis for storage — tokens auto-expire via TTL.
+
 Flow:
 1. Client calls POST /auth/temp-token with API Key → gets temp token
-2. Client opens web page with ?token=xxx in URL (safe, short-lived)
-3. Web page calls GET /auth/temp-token/{token}/tags → gets tags (no auth needed)
+2. Client opens web page with ?token=xxx in URL
+3. Web page calls GET /auth/temp-token/{token}/tags → gets tags
+4. User selects tags, confirms → POST /auth/temp-token/{token}/selection
+5. Shortcuts calls GET /auth/temp-token/{token}/selection → gets result
 """
 
+import json
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.core.redis import get_async_redis
 from app.repositories.tags_repository import TagsRepository
 from app.schemas.tags import TagListResponse
 
 router = APIRouter(prefix="/auth/temp-token", tags=["Temp Token"])
 
-TOKEN_TTL_MINUTES = 5
+TOKEN_TTL_SECONDS = 5 * 60  # 5 minutes
 TOKEN_LENGTH = 32  # 32 bytes = 64 hex chars
+REDIS_PREFIX = "temp_token:"
 
 
 class TempTokenRequest(BaseModel):
@@ -41,43 +45,29 @@ class TempTokenResponse(BaseModel):
     ttl_seconds: int
 
 
-async def _validate_temp_token(token: str) -> dict:
-    """Validate a temp token and return the row if valid.
+class SelectionRequest(BaseModel):
+    tags: list[str]
+
+
+class SelectionResponse(BaseModel):
+    tags: list[str]
+
+
+async def _get_token_data(token: str) -> dict:
+    """Validate a temp token from Redis.
 
     Raises HTTPException if invalid or expired.
     """
-    client = await get_async_supabase_admin()
+    redis = await get_async_redis()
+    raw = await redis.get(f"{REDIS_PREFIX}{token}")
 
-    try:
-        result = (
-            await client.table("temp_tokens")
-            .select("*")
-            .eq("token", token)
-            .execute()
-        )
-    except Exception as e:
-        logger.error(f"Failed to verify temp token: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Token verification failed",
-        )
-
-    if not result.data:
+    if not raw:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
 
-    row = result.data[0]
-    expires_at = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
-
-    if expires_at < datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-        )
-
-    return row
+    return json.loads(raw)
 
 
 @router.post("", response_model=TempTokenResponse)
@@ -93,41 +83,25 @@ async def create_temp_token(
     """
     scopes = (request.scopes if request and request.scopes else ["tags:read"])
     token = secrets.token_hex(TOKEN_LENGTH)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
 
-    client = await get_async_supabase_admin()
+    data = {
+        "user_id": auth.user_id,
+        "scopes": scopes,
+        "selection": [],
+    }
 
-    try:
-        await (
-            client.table("temp_tokens")
-            .insert({
-                "token": token,
-                "user_id": auth.user_id,
-                "scopes": scopes,
-                "expires_at": expires_at.isoformat(),
-            })
-            .execute()
-        )
-    except Exception as e:
-        logger.error(f"Failed to create temp token: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create temporary token",
-        )
+    redis = await get_async_redis()
+    await redis.setex(
+        f"{REDIS_PREFIX}{token}",
+        TOKEN_TTL_SECONDS,
+        json.dumps(data),
+    )
 
     return TempTokenResponse(
         token=token,
-        expires_at=expires_at.isoformat(),
-        ttl_seconds=TOKEN_TTL_MINUTES * 60,
+        expires_at="",  # TTL-based, no fixed timestamp needed
+        ttl_seconds=TOKEN_TTL_SECONDS,
     )
-
-
-class SelectionRequest(BaseModel):
-    tags: list[str]  # selected tag names
-
-
-class SelectionResponse(BaseModel):
-    tags: list[str]
 
 
 @router.get("/{token}/tags", response_model=TagListResponse)
@@ -137,22 +111,18 @@ async def get_tags_by_token(
 ):
     """
     Get tags using a temporary token. No auth header needed.
-
-    This is the endpoint the Shortcuts tag picker page calls.
     """
-    row = await _validate_temp_token(token)
+    data = await _get_token_data(token)
 
-    # Check scope
-    scopes = row.get("scopes", [])
+    scopes = data.get("scopes", [])
     if "tags:read" not in scopes and "tags:*" not in scopes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Token does not have tags:read scope",
         )
 
-    user_id = row["user_id"]
     repo = TagsRepository()
-    tags = await repo.get_all_tags(user_id, enabled_only=enabled_only)
+    tags = await repo.get_all_tags(data["user_id"], enabled_only=enabled_only)
 
     return TagListResponse(tags=tags, total=len(tags))
 
@@ -160,24 +130,18 @@ async def get_tags_by_token(
 @router.post("/{token}/selection")
 async def save_selection(token: str, request: SelectionRequest):
     """
-    Save tag selection to the temp token record.
-    Called by the web page when user confirms their selection.
+    Save tag selection to the token. Called by the web page on confirm.
     """
-    row = await _validate_temp_token(token)
-    client = await get_async_supabase_admin()
+    data = await _get_token_data(token)
+    data["selection"] = request.tags
 
-    try:
-        await (
-            client.table("temp_tokens")
-            .update({"selection": request.tags})
-            .eq("id", row["id"])
-            .execute()
-        )
-    except Exception as e:
-        logger.error(f"Failed to save selection: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save selection",
+    redis = await get_async_redis()
+    ttl = await redis.ttl(f"{REDIS_PREFIX}{token}")
+    if ttl > 0:
+        await redis.setex(
+            f"{REDIS_PREFIX}{token}",
+            ttl,
+            json.dumps(data),
         )
 
     return {"success": True}
@@ -186,8 +150,7 @@ async def save_selection(token: str, request: SelectionRequest):
 @router.get("/{token}/selection", response_model=SelectionResponse)
 async def get_selection(token: str):
     """
-    Retrieve saved tag selection.
-    Called by Shortcuts after user closes the web view.
+    Retrieve saved tag selection. Called by Shortcuts after web view closes.
     """
-    row = await _validate_temp_token(token)
-    return SelectionResponse(tags=row.get("selection") or [])
+    data = await _get_token_data(token)
+    return SelectionResponse(tags=data.get("selection") or [])
