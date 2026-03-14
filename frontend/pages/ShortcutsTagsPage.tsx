@@ -132,6 +132,9 @@ export const ShortcutsTagsPage: React.FC = () => {
     });
   }, []);
 
+  /** Get display label (may be Chinese), but always use English name for storage */
+  const getStorageName = (tag: Tag) => tag.name;
+
   // Save selection to Redis, then try to close the page
   const handleConfirm = useCallback(async () => {
     if (!token || selected.size === 0) return;
@@ -220,12 +223,13 @@ export const ShortcutsTagsPage: React.FC = () => {
             <div className="flex flex-wrap gap-2">
               {topTags.map((tag) => {
                 const label = getLabel(tag);
-                const isSelected = selected.has(label);
+                const name = getStorageName(tag);
+                const isSelected = selected.has(name);
                 const style = getTagStyle(tag.color, isSelected);
                 return (
                   <button
                     key={`top-${tag.id}`}
-                    onClick={() => toggle(label)}
+                    onClick={() => toggle(name)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-all active:scale-95"
                     style={style}
                   >
@@ -260,13 +264,14 @@ export const ShortcutsTagsPage: React.FC = () => {
             <div className="flex flex-wrap gap-2">
               {groupTags.map((tag) => {
                 const label = getLabel(tag);
-                const isSelected = selected.has(label);
+                const name = getStorageName(tag);
+                const isSelected = selected.has(name);
                 const style = getTagStyle(tag.color, isSelected);
 
                 return (
                   <button
                     key={tag.id}
-                    onClick={() => toggle(label)}
+                    onClick={() => toggle(name)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-all active:scale-95 truncate"
                     style={style}
                   >
