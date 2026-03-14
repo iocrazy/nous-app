@@ -31,7 +31,9 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
   onRemove,
   onCreate,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const tagLabel = (tag: Tag) =>
+    i18n.language === 'zh' && tag.name_zh ? tag.name_zh : tag.name;
   const [showDropdown, setShowDropdown] = useState(false);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -54,7 +56,10 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
   const assignedIds = new Set(assignedTags.map((tag) => String(tag.id)));
   const available = allTags.filter((tag) => !assignedIds.has(String(tag.id)));
   const filtered = search
-    ? available.filter((tag) => tag.name.toLowerCase().includes(search.toLowerCase()))
+    ? available.filter((tag) =>
+        tag.name.toLowerCase().includes(search.toLowerCase()) ||
+        (tag.name_zh && tag.name_zh.toLowerCase().includes(search.toLowerCase()))
+      )
     : available;
 
   const handleCreate = useCallback(async () => {
@@ -89,7 +94,7 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
               color: tag.color || '#6366f1',
             }}
           >
-            {tag.name}
+            {tagLabel(tag)}
             {!readOnly && (
               <button
                 onClick={() => onRemove(String(tag.id))}
@@ -145,7 +150,7 @@ export const UnifiedTagPicker: React.FC<UnifiedTagPickerProps> = ({
                         className="w-2.5 h-2.5 rounded-full shrink-0"
                         style={{ backgroundColor: tag.color || '#6366f1' }}
                       />
-                      <span className="truncate">{tag.name}</span>
+                      <span className="truncate">{tagLabel(tag)}</span>
                       {tag.type === 'system' && (
                         <span className="ml-auto text-[10px] text-zinc-600">system</span>
                       )}

@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Tag as TagIcon, Plus, X, Check, Loader2, Search, ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   fetchTags,
   createTag,
@@ -42,6 +43,9 @@ export const ParserTagSelector: React.FC<ParserTagSelectorProps> = ({
   selectedTagIds,
   onTagsChange,
 }) => {
+  const { i18n } = useTranslation();
+  const tagLabel = (tag: Tag) =>
+    i18n.language === 'zh' && tag.name_zh ? tag.name_zh : tag.name;
   const [isOpen, setIsOpen] = useState(false);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -89,7 +93,8 @@ export const ParserTagSelector: React.FC<ParserTagSelectorProps> = ({
   // Filter available tags (not yet selected)
   const filteredTags = allTags.filter(
     (tag) =>
-      tag.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+      (tag.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (tag.name_zh && tag.name_zh.toLowerCase().includes(searchQuery.toLowerCase()))) &&
       !selectedTagIds.includes(tag.id)
   );
 
@@ -142,7 +147,7 @@ export const ParserTagSelector: React.FC<ParserTagSelectorProps> = ({
                     handleRemoveTag(tag.id);
                   }}
                 >
-                  {tag.name}
+                  {tagLabel(tag)}
                   <X size={10} className="opacity-60 hover:opacity-100" />
                 </span>
               ))}
@@ -186,7 +191,7 @@ export const ParserTagSelector: React.FC<ParserTagSelectorProps> = ({
                     style={getTagStyle(tag.color)}
                     onClick={() => handleRemoveTag(tag.id)}
                   >
-                    {tag.name}
+                    {tagLabel(tag)}
                     <X size={10} />
                   </span>
                 ))}
@@ -214,7 +219,7 @@ export const ParserTagSelector: React.FC<ParserTagSelectorProps> = ({
                       style={{ color: tag.color || '#fff' }}
                     >
                       <TagIcon size={14} />
-                      {tag.name}
+                      {tagLabel(tag)}
                     </span>
                     <span className="text-xs text-zinc-500">{tag.video_count ?? 0} videos</span>
                   </button>
