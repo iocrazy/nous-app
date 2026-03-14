@@ -19,6 +19,7 @@ import { PlayerPage } from './pages/PlayerPage';
 import { ResourceDetailPage } from './pages/ResourceDetailPage';
 import { SharePage } from './pages/SharePage';
 import { SharedPage } from './pages/SharedPage';
+import { ShortcutsTagsPage } from './pages/ShortcutsTagsPage';
 
 export const router = createBrowserRouter([
   // Public routes (no auth required)
@@ -29,6 +30,10 @@ export const router = createBrowserRouter([
   {
     path: '/share/:shareCode',
     element: <SharePage />,
+  },
+  {
+    path: '/shortcuts/tags',
+    element: <ShortcutsTagsPage />,
   },
 
   // Authenticated routes
