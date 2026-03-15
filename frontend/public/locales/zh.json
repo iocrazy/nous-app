@@ -933,5 +933,93 @@
       "uploading": "上传中...",
       "upload": "上传新版本"
     }
+  },
+  "storyboard": {
+    "title": "故事板工作台",
+    "newProject": "新建项目",
+    "blankProject": "空白项目",
+    "fromScript": "从脚本导入",
+    "fromVideo": "从视频导入",
+    "projectName": "项目名称",
+    "search": "搜索项目...",
+    "sortBy": "排序方式",
+    "noProjects": "暂无故事板项目",
+    "createFirst": "创建您的第一个项目开始使用",
+    "back": "返回",
+    "sort": {
+      "name": "名称",
+      "created": "创建时间",
+      "updated": "更新时间"
+    },
+    "canvas": {
+      "addNode": "添加节点",
+      "fitView": "适应视图",
+      "lock": "锁定",
+      "unlock": "解锁",
+      "undo": "撤销",
+      "redo": "重做",
+      "export": "导出",
+      "characters": "角色",
+      "emptyCanvas": "拖放节点到此处开始构建您的故事板"
+    },
+    "nodes": {
+      "upload": "上传图片",
+      "imageEdit": "AI 生成",
+      "storyboardSplit": "分镜拆分",
+      "storyboardGen": "批量生成",
+      "imageToVideo": "图片转视频",
+      "textAnnotation": "文字注释",
+      "group": "分组",
+      "export": "导出"
+    },
+    "chat": {
+      "title": "AI 助手",
+      "placeholder": "向 AI 提问...",
+      "selectedFrame": "已选择：第 {{number}} 帧",
+      "applyToFrame": "应用到帧",
+      "regenerate": "重新生成"
+    },
+    "timeline": {
+      "play": "播放",
+      "pause": "暂停",
+      "stop": "停止",
+      "speed": "速度",
+      "preview": "预览"
+    },
+    "characters": {
+      "title": "角色",
+      "newCharacter": "新建角色",
+      "editCharacter": "编辑角色",
+      "noCharacters": "暂无角色",
+      "usedInFrames": "已在 {{count}} 帧中使用"
+    },
+    "tools": {
+      "crop": "裁剪",
+      "annotate": "标注",
+      "split": "分割",
+      "shotInfo": "镜头信息",
+      "apply": "应用",
+      "cancel": "取消"
+    },
+    "export": {
+      "title": "导出故事板",
+      "pngGrid": "PNG 网格",
+      "pdfDocument": "PDF 文档",
+      "zipBundle": "ZIP 压缩包",
+      "includeFrameNumbers": "包含帧编号",
+      "includeAnnotations": "包含标注",
+      "columns": "列数",
+      "exporting": "导出中...",
+      "downloadReady": "下载就绪"
+    },
+    "shot": {
+      "extremeCloseUp": "极近景",
+      "closeUp": "近景",
+      "mediumCloseUp": "中近景",
+      "medium": "中景",
+      "mediumWide": "中远景",
+      "wide": "远景",
+      "extremeWide": "极远景"
+    }
   }
 }
