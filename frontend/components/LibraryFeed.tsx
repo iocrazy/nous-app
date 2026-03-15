@@ -1,8 +1,8 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { Video } from '../types';
 import {
-  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check
+  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 
@@ -107,8 +107,24 @@ const FeedItem = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const descRef = useRef<HTMLParagraphElement>(null);
   const [copiedShare, setCopiedShare] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [descClamped, setDescClamped] = useState(false);
   const isVideo = isVideoType(item.media_type);
+
+  // Detect if description text is clamped (overflows 2 lines)
+  useEffect(() => {
+    const el = descRef.current;
+    if (el) {
+      setDescClamped(el.scrollHeight > el.clientHeight + 1);
+    }
+  }, [item.description]);
+
+  const toggleDesc = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDescExpanded(prev => !prev);
+  }, []);
   // 视频 URL: 优先使用 download_path
   const videoUrl = getVideoUrl(item);
   // 封面 URL
@@ -200,8 +216,8 @@ const FeedItem = ({
         </button>
       )}
 
-      {/* Right Sidebar Actions */}
-      <div className="absolute bottom-20 right-2 flex flex-col items-center gap-4 z-20">
+      {/* Right Sidebar Actions — bottom-36 on mobile to clear tab bar + text area */}
+      <div className="absolute bottom-36 sm:bottom-20 right-2 flex flex-col items-center gap-4 z-20">
         <div className="relative">
           <div className="w-10 h-10 rounded-full border border-white bg-zinc-800 overflow-hidden">
              <div className="w-full h-full flex items-center justify-center text-zinc-500">
@@ -250,14 +266,31 @@ const FeedItem = ({
         </div>
       </div>
 
-      {/* Bottom Content Info */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent pt-20 z-10">
+      {/* Bottom Content Info — pb-16 on mobile to clear tab bar */}
+      <div className="absolute bottom-0 left-0 right-0 p-4 pb-16 sm:pb-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent pt-20 z-10">
         <div className="max-w-[80%]">
-          <h3 className="text-white font-bold text-lg mb-1 drop-shadow-md cursor-pointer hover:underline">@{item.author || 'User'}</h3>
-          <p className="text-zinc-100 text-sm mb-2 line-clamp-2 drop-shadow-md leading-relaxed">
-             {item.description}
-          </p>
-          <div className="flex items-center gap-2 text-white/80 animate-pulse-slow">
+          <h3 className="text-white font-bold text-base mb-1 drop-shadow-md cursor-pointer hover:underline">@{item.author || 'User'}</h3>
+          <div className="relative">
+            <p
+              ref={descRef}
+              className={`text-zinc-100 text-sm drop-shadow-md leading-relaxed ${descExpanded ? '' : 'line-clamp-1'}`}
+            >
+              {item.description}
+            </p>
+            {(descClamped || descExpanded) && (
+              <button
+                onClick={toggleDesc}
+                className="text-zinc-300 text-xs font-medium mt-0.5 flex items-center gap-0.5 hover:text-white transition-colors"
+              >
+                {descExpanded ? (
+                  <><ChevronUp size={12} /> less</>
+                ) : (
+                  <><ChevronDown size={12} /> more</>
+                )}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-white/80 mt-1.5">
              <Music size={14} />
              <div className="text-xs overflow-hidden w-40">
                 <div className="whitespace-nowrap animate-marquee">
