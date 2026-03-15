@@ -56,6 +56,15 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     }
   })();
 
+  // Sync real-time download progress into taskProgress for TaskMonitor
+  useEffect(() => {
+    if (!downloadCeleryId || !currentDownloadTask) return;
+    if (currentDownloadTask.status === 'processing' && downloadPercent > 0) {
+      setTaskProgress(downloadPercent);
+      setTaskStatus('Downloading');
+    }
+  }, [downloadPercent, downloadCeleryId, currentDownloadTask?.status]);
+
   // Track parse task via unified_task_id
   const currentParseTask = useMemo(
     () => parseUnifiedTaskId ? tasks.find(t => t.id === parseUnifiedTaskId) : undefined,

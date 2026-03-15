@@ -176,6 +176,7 @@ export function ParserPage() {
           progress={taskProgress}
           status={taskStatus}
           systemStatus={systemStatus}
+          downloadSpeed={downloadSpeed}
         />
       )}
 
