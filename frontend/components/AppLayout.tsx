@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, User, FolderOpen, Download, Check,
-  LayoutList, LayoutGrid, Smartphone,
+  Search, Library, User, FolderOpen, Check,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage } from '../types';
@@ -106,7 +105,6 @@ function AppLayoutInner() {
     searchQueryText, setSearchQueryText,
     activeSmartCollectionId, setActiveSmartCollectionId,
     isCreateCollectionModalOpen, setIsCreateCollectionModalOpen,
-    libraryViewMode, setLibraryViewMode,
     loadLibraryData, handleCreateCollection,
   } = useLibraryContext();
 
@@ -132,11 +130,9 @@ function AppLayoutInner() {
 
   // Main content padding — mobile: clear TopBar (pt-14) + Tab Bar (pb-20)
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
-    view === 'library'
+    view === 'resources'
       ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-      : view === 'resources'
-        ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-        : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
+      : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -165,15 +161,6 @@ function AppLayoutInner() {
     setIsDashboardMenuOpen(false);
   };
 
-  const handleMobileLibraryClick = () => {
-    setIsDashboardMenuOpen(false);
-    if (view === 'library') {
-      setIsMobileMenuOpen(!isMobileMenuOpen);
-    } else {
-      navigate(teamPath('/library'));
-      setIsMobileMenuOpen(false);
-    }
-  };
 
   const handleMobileDashboardClick = () => {
     if (view === 'dashboard') {
@@ -240,7 +227,7 @@ function AppLayoutInner() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Tab Bar — 4 tabs: Parser, Downloads, Resources, Me */}
+      {/* Mobile Tab Bar — 3 tabs: Parser, Resources, Me */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
         {/* Backdrop to dismiss popups */}
         {(isMobileMenuOpen || isResourcesMenuOpen) && (
@@ -260,39 +247,6 @@ function AppLayoutInner() {
             <Search size={22} />
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
-
-          {/* Downloads (formerly Library) — with view mode popup */}
-          <div className="relative">
-            {isMobileMenuOpen && view === 'library' && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-                <button
-                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutList size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <Smartphone size={20} />
-                </button>
-              </div>
-            )}
-            <button
-              onClick={handleMobileLibraryClick}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
-            >
-              <Download size={22} />
-              <span className="text-[10px] leading-tight">Downloads</span>
-            </button>
-          </div>
 
           {/* Resources — with team picker popup */}
           <div className="relative">
@@ -413,7 +367,7 @@ function AppLayoutInner() {
           setSearchResults([]);
           setSearchQueryText('');
           setActiveSmartCollectionId(collection?.id || null);
-          navigate(teamPath('/library'));
+          navigate(teamPath('/resources'));
           setActiveCollectionId(null);
           setActiveLibraryTab('my-library');
         }}
