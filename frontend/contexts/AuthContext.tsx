@@ -72,13 +72,20 @@ export function AuthProvider({
   const [aiSettings, setAISettings] = useState<AISettingsType>(DEFAULT_AI_SETTINGS);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  // Load frontend config from backend YAML on mount
+  // Load frontend config from backend YAML on mount.
+  // If Supabase is already configured via env vars, mark config as loaded
+  // immediately so auth init is not blocked by a slow API call.
   useEffect(() => {
+    const alreadyConfigured = isSupabaseConfigured();
+    if (alreadyConfigured) {
+      // Auth can start immediately — load config in background for extras
+      setIsConfigLoaded(true);
+    }
+
     const loadFrontendConfig = async () => {
       try {
         const config = await fetchFrontendConfig();
         if (config) {
-          // Transcode settings (always apply if present)
           const transcodeUpdates: Partial<typeof DEFAULT_SETTINGS> = {};
           if (config.transcode_enabled != null) transcodeUpdates.transcodeEnabled = config.transcode_enabled;
           if (config.transcode_tiers != null) transcodeUpdates.transcodeTiers = config.transcode_tiers;
@@ -86,7 +93,7 @@ export function AuthProvider({
           if (config.ffmpeg_preset != null) transcodeUpdates.ffmpegPreset = config.ffmpeg_preset;
           if (config.transcode_parallel_tiers != null) transcodeUpdates.transcodeParallelTiers = config.transcode_parallel_tiers;
 
-          if (config.supabase_url && config.supabase_anon_key) {
+          if (config.supabase_url && config.supabase_anon_key && !alreadyConfigured) {
             reinitializeSupabaseClient(config.supabase_url, config.supabase_anon_key);
             setUserSettings(prev => ({
               ...prev,
@@ -106,7 +113,9 @@ export function AuthProvider({
       } catch (err) {
         console.error('Failed to load frontend config:', err);
       } finally {
-        setIsConfigLoaded(true);
+        if (!alreadyConfigured) {
+          setIsConfigLoaded(true);
+        }
       }
     };
     loadFrontendConfig();
@@ -145,30 +154,29 @@ export function AuthProvider({
         setCurrentUserId(session.user.id);
         setIsAuthenticated(true);
 
-        try {
-          const { data: profile } = await supabase
-            .from('user_profiles')
-            .select('role')
-            .eq('id', session.user.id)
-            .single();
-          if (profile?.role) {
-            setUserProfile(prev => ({ ...prev, role: profile.role }));
-          }
-        } catch (err) {
-          console.debug('Failed to load user role:', err);
-        }
+        // Load profile and settings in background — don't block data loading
+        supabase
+          .from('user_profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single()
+          .then(({ data: profile }) => {
+            if (profile?.role) {
+              setUserProfile(prev => ({ ...prev, role: profile.role }));
+            }
+          })
+          .catch((err) => console.debug('Failed to load user role:', err));
 
-        try {
-          const settings = await fetchUserSettings();
-          if (settings) {
-            setUserSettings(prev => ({
-              ...prev,
-              downloadPath: settings.download_path || prev.downloadPath,
-            }));
-          }
-        } catch (err) {
-          console.error('Failed to load user settings:', err);
-        }
+        fetchUserSettings()
+          .then((settings) => {
+            if (settings) {
+              setUserSettings(prev => ({
+                ...prev,
+                downloadPath: settings.download_path || prev.downloadPath,
+              }));
+            }
+          })
+          .catch((err) => console.error('Failed to load user settings:', err));
       } else {
         setIsAuthenticated(false);
         setCurrentUserId(null);
