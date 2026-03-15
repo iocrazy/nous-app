@@ -141,7 +141,7 @@ type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smalles
 // ─── Skeleton ─────────────────────────────────────────
 
 const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
         <div className="h-32 bg-zinc-800" />
@@ -252,6 +252,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
+
+  // Mobile detection (matches Tailwind md: breakpoint at 768px)
+  const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
 
   // Mobile-specific state
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
@@ -2424,9 +2427,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     navigate(resPath('/resources'));
                   }
                 }}
-                className="p-1 -ml-1 text-zinc-400 hover:text-zinc-200"
+                className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={22} />
               </button>
             )}
             <div className="flex-1 min-w-0">
@@ -2858,7 +2861,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     {sortedItems.length > 0 && (
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                     )}
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
                       {recycleSubFolders.map((folder) => (
                         <FolderCard
                           key={`trashed-folder-${folder.id}`}
@@ -2895,7 +2898,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
                         {filteredFolders.map((folder) => {
                           const folderNavigate = () => {
                             if (selectedLibraryId) {
@@ -2914,6 +2917,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             folder={folder}
                             onClick={(e?: any) => {
+                              if (isMobileDevice) {
+                                folderNavigate();
+                                return;
+                              }
                               handleCardClick(`folder:${folder.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
                                 setSelectedResource(null);
@@ -2924,7 +2931,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                                   setShowInfoPanel(true);
                                 }
                               }
-                              handleTap(`folder:${folder.id}`, folderNavigate);
                             }}
                             onDoubleClick={folderNavigate}
                             viewMode="grid"
@@ -2966,6 +2972,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <FolderCard
                             folder={folder}
                             onClick={(e?: any) => {
+                              if (isMobileDevice) {
+                                folderNavigate();
+                                return;
+                              }
                               handleCardClick(`folder:${folder.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
                                 setSelectedResource(null);
@@ -2976,7 +2986,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                                   setShowInfoPanel(true);
                                 }
                               }
-                              handleTap(`folder:${folder.id}`, folderNavigate);
                             }}
                             onDoubleClick={folderNavigate}
                             viewMode="list"
@@ -3024,15 +3033,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       </div>
                     )}
                     {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
                         {sortedItems.map((item) => (
                           <div key={item.id} {...getItemTouchHandlers('file', item)}>
                           <ResourceCard
                             item={item}
                             onClick={(e?: any) => {
+                              if (isMobileDevice) {
+                                handleResourceDoubleClick(item);
+                                return;
+                              }
                               handleCardClick(`item:${item.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                              handleTap(`item:${item.id}`, () => handleResourceDoubleClick(item));
                             }}
                             onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="grid"
@@ -3066,9 +3078,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                           <ResourceCard
                             item={item}
                             onClick={(e?: any) => {
+                              if (isMobileDevice) {
+                                handleResourceDoubleClick(item);
+                                return;
+                              }
                               handleCardClick(`item:${item.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                              handleTap(`item:${item.id}`, () => handleResourceDoubleClick(item));
                             }}
                             onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="list"
