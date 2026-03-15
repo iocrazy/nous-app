@@ -124,19 +124,40 @@ type Action =
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
 
+/** Map WebSocket status strings to task lifecycle status. */
+function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
+  switch (wsStatus) {
+    case 'downloading': return 'processing';
+    case 'completed': return 'completed';
+    case 'failed': return 'failed';
+    default: return undefined;
+  }
+}
+
 function reducer(state: TaskManagerState, action: Action): TaskManagerState {
   switch (action.type) {
     case 'SET_TASKS':
       return { ...state, tasks: action.tasks, isLoading: false };
-    case 'INSERT':
-      // Avoid duplicates
+    case 'INSERT': {
+      // Avoid duplicates by id
       if (state.tasks.some(t => t.id === action.task.id)) {
         return {
           ...state,
           tasks: state.tasks.map(t => t.id === action.task.id ? action.task : t),
         };
       }
+      // Also check for placeholder tasks matching by celery_task_id (from DOWNLOAD_STARTED)
+      const placeholderIdx = action.task.celery_task_id
+        ? state.tasks.findIndex(t => t.celery_task_id === action.task.celery_task_id && t.id.startsWith('ws-dl-'))
+        : -1;
+      if (placeholderIdx >= 0) {
+        return {
+          ...state,
+          tasks: state.tasks.map((t, i) => i === placeholderIdx ? action.task : t),
+        };
+      }
       return { ...state, tasks: [action.task, ...state.tasks] };
+    }
     case 'UPDATE':
       return {
         ...state,
@@ -144,15 +165,6 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
       };
     case 'UPDATE_PROGRESS': {
       const p = action.payload;
-      // Map WebSocket status strings to task lifecycle status
-      const wsStatusToTaskStatus = (wsStatus?: string): TaskStatus | undefined => {
-        switch (wsStatus) {
-          case 'downloading': return 'processing';
-          case 'completed': return 'completed';
-          case 'failed': return 'failed';
-          default: return undefined;
-        }
-      };
       const mappedStatus = wsStatusToTaskStatus(p.status);
       return {
         ...state,
@@ -165,7 +177,7 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
             ...t,
             progress: p.percent,
             speed: p.speed ? parseSpeedToBytes(p.speed) : t.speed,
-            total_bytes: p.total || t.total_bytes,
+            total_bytes: p.total ?? t.total_bytes,
             ...(mappedStatus ? { status: mappedStatus } : {}),
           };
         }),
