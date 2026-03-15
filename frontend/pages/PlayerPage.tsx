@@ -288,7 +288,7 @@ export function PlayerPage() {
 
   const handleBack = () => {
     if (from === 'downloads' && teamId) {
-      navigate(`/team/${teamId}/resources/downloads`);
+      navigate(`/team/${teamId}/library`);
     } else {
       navigate(-1);
     }
@@ -358,8 +358,8 @@ export function PlayerPage() {
             </span>
           </div>
 
-          {/* Right: share + download + more */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Right: share + download + more — hidden on mobile, shown in metadata area instead */}
+          <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0">
             {video.original_url && (
               <button
                 onClick={() => {
@@ -565,6 +565,35 @@ export function PlayerPage() {
                 <span>@{video.author}</span>
               </div>
             )}
+          </div>
+          {/* Mobile action bar — share/download/more below player */}
+          <div className="flex sm:hidden items-center gap-2 px-3 py-2 border-b border-zinc-800/60">
+            {video.original_url && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(video.original_url);
+                  addToast('Link copied to clipboard', 'success');
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+              >
+                <Share2 size={14} />
+                Share
+              </button>
+            )}
+            <button
+              onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+              disabled={isDownloading || isFetching}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
+            >
+              {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Download
+            </button>
+            <button
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors ml-auto"
+            >
+              <MoreHorizontal size={16} />
+            </button>
           </div>
           {/* Resize handle — desktop only */}
           <div
