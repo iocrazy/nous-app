@@ -27,6 +27,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // View mode
@@ -98,8 +99,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
-        // Clean up stale downloads in background (don't block library load)
-        cleanupStaleDownloads().catch(() => {});
         perfMark('fetchLibraryPaginated start');
         const result = await fetchLibraryPaginated(0);
         perfMark('fetchLibraryPaginated done (' + result.data.length + ' items)');
@@ -121,6 +120,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
     } finally {
       setIsLoadingLibrary(false);
+      setInitialLoadComplete(true);
       perfMark('loadLibraryData done');
     }
   };
@@ -152,12 +152,16 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     }
   }, [isAuthenticated]);
 
-  // Fetch collections on auth
+  // Fetch collections + cleanup AFTER initial data load (reduce concurrent NAS requests)
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchMyCollections().then(setCollections).catch(console.error);
-    }
-  }, [isAuthenticated]);
+    if (!initialLoadComplete || !isAuthenticated) return;
+    fetchMyCollections().then(setCollections).catch(console.error);
+    // Defer cleanup further to avoid competing with collections fetch
+    const timer = setTimeout(() => {
+      cleanupStaleDownloads().catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [initialLoadComplete, isAuthenticated]);
 
   // Reset on logout
   useEffect(() => {
@@ -223,10 +227,10 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   // --- Realtime Subscriptions ---
 
-  // Videos realtime
+  // Videos realtime — deferred until after initial load to reduce NAS connection contention
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
+    if (!initialLoadComplete || !isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const channel = supabase
       .channel('parsed_media_realtime')
@@ -282,15 +286,15 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       console.log('Unsubscribing from realtime channel');
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated]);
+  }, [initialLoadComplete, isAuthenticated]);
 
   // NOTE: media_collections realtime subscription removed — table dropped in 076 migration.
   // Collection realtime will be rebuilt on resource_items when collection UI is migrated.
 
-  // Video tags realtime
+  // Video tags realtime — deferred until after initial load
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
+    if (!initialLoadComplete || !isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const tagsChannel = supabase
       .channel('resource_tags_realtime')
@@ -341,7 +345,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       console.log('Unsubscribing from video tags realtime channel');
       supabase.removeChannel(tagsChannel);
     };
-  }, [isAuthenticated]);
+  }, [initialLoadComplete, isAuthenticated]);
 
   // --- Selected Video Collections ---
   const loadSelectedVideoCollections = async (awemeId: string) => {
