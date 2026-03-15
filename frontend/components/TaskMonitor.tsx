@@ -13,12 +13,14 @@ export const TaskMonitor = ({
   logs,
   progress,
   status,
-  systemStatus
+  systemStatus,
+  downloadSpeed,
 }: {
   logs: LogEntry[],
   progress: number,
   status: string,
-  systemStatus: SystemStatus | null
+  systemStatus: SystemStatus | null,
+  downloadSpeed?: string,
 }) => {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -78,11 +80,11 @@ export const TaskMonitor = ({
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Network</span>
               <div className="flex items-center gap-1.5 text-zinc-300">
                  <Wifi size={14} className={
-                   systemStatus?.network.status === 'active' ? 'text-emerald-400' :
+                   downloadSpeed || systemStatus?.network.status === 'active' ? 'text-emerald-400' :
                    systemStatus?.network.status === 'error' ? 'text-red-400' : 'text-zinc-500'
                  } />
                  <span className="font-mono text-xs font-medium">
-                   {systemStatus?.network.speed || '0 B/s'}
+                   {downloadSpeed || systemStatus?.network.speed || '0 B/s'}
                  </span>
               </div>
            </div>
