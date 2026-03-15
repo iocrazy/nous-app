@@ -2054,20 +2054,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   return (
     <div className="flex h-full animate-in fade-in duration-300">
-      {/* ── Mobile sidebar overlay ── */}
-      {mobileSidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/60 z-40"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
-      {/* ── Left panel: Unified sidebar navigation ── */}
-      <div className={`
-        ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:translate-x-0 fixed md:static inset-y-0 left-0 z-50 md:z-auto
-        w-64 md:w-56 shrink-0 border-r border-zinc-800/80 flex flex-col
-        bg-black md:bg-transparent transition-transform duration-200 ease-out
-      `}>
+      {/* ── Left panel: Desktop sidebar navigation (hidden on mobile — replaced by horizontal tabs) ── */}
+      <div className="hidden md:flex md:static w-56 shrink-0 border-r border-zinc-800/80 flex-col">
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {/* ── Top section: Shared / Recycle Bin ── */}
@@ -2342,13 +2330,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           {/* Single row: Breadcrumb + controls */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              {/* Mobile sidebar toggle */}
-              <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="md:hidden p-1.5 -ml-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-              >
-                <Menu size={18} />
-              </button>
+              {/* Mobile sidebar toggle — hidden, replaced by horizontal tabs */}
               <Breadcrumb segments={breadcrumbSegments} />
               {!loading && (
                 <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
