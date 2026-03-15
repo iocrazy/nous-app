@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { useLibrary } from '../hooks/useLibrary';
+import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { Video } from '../types';
 import { CompactMediaCard } from './CompactMediaCard';
@@ -89,27 +89,59 @@ export const DownloadsView: React.FC = () => {
   // ─── Tag search map (media_id → space-joined tag names) ───
   const [tagSearchMap, setTagSearchMap] = useState<Record<string, string>>({});
 
-  // ─── Library data ──────────────────────────────────
+  // ─── Library data (shared via context — avoids duplicate Supabase fetch) ───
   const {
     library,
     isLoadingLibrary,
     libraryError,
-    filteredLibrary,
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
     libraryViewMode,
     setLibraryViewMode,
-    setSearchQuery,
-    setSearchResults,
-    isSearchActive,
-    setIsSearchActive,
-    setSearchQueryText,
     sharedVideoIds,
     setLibrary,
     loadLibraryData,
     handleUpdateLibraryItem,
-  } = useLibrary({ isAuthenticated: true, selectedTeamId: null, extraSearchMap: tagSearchMap });
+  } = useLibraryContext();
+
+  // ─── Local search state (independent from Library page's search) ───
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<import('../services/searchService').SearchResult[]>([]);
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchQueryText, setSearchQueryText] = useState('');
+
+  // ─── Local filtered library (supports tag search via extraSearchMap) ───
+  const filteredLibrary = useMemo(() => {
+    if (isSearchActive) {
+      if (searchResults.length === 0) return [];
+      const searchIds = new Set(searchResults.map(r => r.platform_id));
+      return library
+        .filter(item => searchIds.has(item.platform_id))
+        .sort((a, b) => {
+          const aScore = searchResults.find(r => r.platform_id === a.platform_id)?.similarity_score || 0;
+          const bScore = searchResults.find(r => r.platform_id === b.platform_id)?.similarity_score || 0;
+          return bScore - aScore;
+        });
+    }
+    return library
+      .filter(item => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          const title = (item.title || '').toLowerCase();
+          const author = ((item as any).author_nickname || '').toLowerCase();
+          const desc = (item.description || '').toLowerCase();
+          const extra = (tagSearchMap?.[item.id] || '').toLowerCase();
+          return title.includes(q) || author.includes(q) || desc.includes(q) || extra.includes(q);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [library, isSearchActive, searchResults, searchQuery, tagSearchMap]);
 
   // ─── Resource data mapping (notes/rating/id from resources table) ───
   const [resourceDataMap, setResourceDataMap] = useState<Record<string, { id: string; notes: string | null; rating: number }>>({});
@@ -189,7 +221,7 @@ export const DownloadsView: React.FC = () => {
     setIsSearchActive(false);
     setSearchResults([]);
     setSearchQuery(query);
-  }, [setIsSearchActive, setSearchResults, setSearchQuery]);
+  }, []);
 
   const handleAISearch = useCallback(async (query: string, mode: 'hybrid' | 'semantic') => {
     setIsAISearching(true);
@@ -210,14 +242,14 @@ export const DownloadsView: React.FC = () => {
     } finally {
       setIsAISearching(false);
     }
-  }, [library, setSearchResults, setIsSearchActive, setSearchQueryText]);
+  }, [library]);
 
   const handleSearchClear = useCallback(() => {
     setSearchResults([]);
     setIsSearchActive(false);
     setSearchQueryText('');
     setSearchQuery('');
-  }, [setSearchResults, setIsSearchActive, setSearchQueryText, setSearchQuery]);
+  }, []);
 
   // ─── Selection state ───────────────────────────────
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
