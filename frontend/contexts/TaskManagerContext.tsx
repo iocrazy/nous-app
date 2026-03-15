@@ -144,6 +144,16 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
       };
     case 'UPDATE_PROGRESS': {
       const p = action.payload;
+      // Map WebSocket status strings to task lifecycle status
+      const wsStatusToTaskStatus = (wsStatus?: string): TaskStatus | undefined => {
+        switch (wsStatus) {
+          case 'downloading': return 'processing';
+          case 'completed': return 'completed';
+          case 'failed': return 'failed';
+          default: return undefined;
+        }
+      };
+      const mappedStatus = wsStatusToTaskStatus(p.status);
       return {
         ...state,
         tasks: state.tasks.map(t => {
@@ -156,6 +166,7 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
             progress: p.percent,
             speed: p.speed ? parseSpeedToBytes(p.speed) : t.speed,
             total_bytes: p.total || t.total_bytes,
+            ...(mappedStatus ? { status: mappedStatus } : {}),
           };
         }),
       };
