@@ -38,6 +38,7 @@ import {
   Menu,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { DownloadsView } from './DownloadsView';
 import { ToolbarSearch } from './ToolbarSearch';
 import { semanticSearch, hybridSearch } from '../services/searchService';
 import { usePermission } from '../hooks/usePermission';
@@ -53,6 +54,7 @@ import {
   permanentDeleteResource,
   permanentDeleteFolder,
   fetchTrashedResources,
+  fetchDownloadedResources,
   fetchResourceTags,
   addResourceTag,
   removeResourceTag,
@@ -129,7 +131,7 @@ interface ResourcesViewProps {
   scopeId: string;
 }
 
-type SidebarView = 'resources' | 'shared' | 'recycle';
+type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
 type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 
@@ -181,7 +183,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // URL-driven state
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
@@ -214,6 +216,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
   const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
   const [pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders] = useState<string[] | null>(null);
+
+  // Downloads (parser-created resources)
+  const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
 
   // Tags
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -344,6 +349,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const isResourcesView = sidebarView === 'resources';
   const isRecycleView = sidebarView === 'recycle';
   const isSharedView = sidebarView === 'shared';
+  const isDownloadsView = sidebarView === 'downloads';
   const canUpload = isResourcesView && canDo('upload');
 
   // ─── Load folders on scope change ────────────────────
@@ -508,7 +514,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // ─── Bulk load tag names for search ──────────────────
   useEffect(() => {
-    const allItems = [...resources];
+    const allItems = [...resources, ...downloadedResources];
     const resourceIds = allItems
       .map((item) => item.resource?.id)
       .filter((id): id is string => !!id)
@@ -537,7 +543,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         }
         setResourceTagNamesMap(map);
       });
-  }, [resources]);
+  }, [resources, downloadedResources]);
 
   // ─── Load trashed resources ──────────────────────────
 
@@ -597,6 +603,24 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return () => { cancelled = true; };
   }, [recycleFolderId]);
 
+  // ─── Load downloaded resources ─────────────────────
+
+  const loadDownloadedResources = useCallback(async () => {
+    try {
+      const items = await fetchDownloadedResources(scopeType, scopeId);
+      setDownloadedResources(items);
+    } catch {
+      setDownloadedResources([]);
+    }
+  }, [scopeType, scopeId]);
+
+  useEffect(() => {
+    if (sidebarView === 'downloads') {
+      setSelectedIds(new Set());
+      setLoading(true);
+      loadDownloadedResources().finally(() => setLoading(false));
+    }
+  }, [sidebarView, loadDownloadedResources]);
 
   // ─── Focus new folder/library input ─────────────────
 
@@ -1651,6 +1675,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       }
       return segments;
     }
+    if (isDownloadsView) return [{ label: t('resources.downloads') }];
 
     if (selectedSmartFolderId) {
       const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
@@ -1701,7 +1726,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
 
     return segments;
-  }, [isSharedView, isRecycleView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders]);
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folders, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders]);
 
   // ─── Sort ────────────────────────────────────────────
 
@@ -1756,7 +1781,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   const currentItems = sidebarView === 'recycle'
     ? recycleItems
-    : resources;
+    : sidebarView === 'downloads'
+      ? downloadedResources
+      : resources;
 
   // Apply filter and search
   const filteredItems = useMemo(() => {
@@ -2136,6 +2163,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </>
           ) : (
             <>
+              {/* Personal mode: My Downloads + My Resources */}
+              <button
+                onClick={() => navigate(resPath('/resources/downloads'))}
+                className={sidebarItemClass(isDownloadsView)}
+              >
+                <Download size={15} className="shrink-0 opacity-70" />
+                <span>{t('resources.downloads')}</span>
+              </button>
+
               {/* My Resources with ➕ */}
               <div className="flex items-center justify-between pr-1">
                 <button
@@ -2253,7 +2289,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 ))}
               </>
             ) : (
-              <button
+              <>
+                <button
+                  onClick={() => navigate(resPath('/resources/downloads'))}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    isDownloadsView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  Downloads
+                </button>
+                <button
                   onClick={() => navigate(resPath('/resources'))}
                   className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     isResourcesView && !selectedFolderId && !selectedSmartFolderId ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
@@ -2261,6 +2306,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 >
                   {t('resources.myResources')}
                 </button>
+              </>
             )}
             <button
               onClick={() => navigate(resPath('/resources/recycle'))}
@@ -2274,6 +2320,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           </div>
         </div>
 
+        {isDownloadsView ? (
+          <DownloadsView />
+        ) : (
+        <>
         {/* Toolbar */}
         <div
           className="px-3 md:px-6 py-3 border-b border-zinc-800/80"
@@ -2907,10 +2957,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             )
           )}
         </div>
+        </>
+        )}
       </div>
 
       {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
-      {(selectedResource?.resource || selectedFolder) && (
+      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && (
         <div
           className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
@@ -2971,7 +3023,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       )}
 
       {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
-      {(selectedResource?.resource || selectedFolder) && !showInfoPanel && (
+      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && !showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
           className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
@@ -2982,7 +3034,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       )}
 
       {/* ── Batch Selection Toolbar ── */}
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && !isDownloadsView && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
           <span className="text-sm text-zinc-300 font-medium">
             {t('resources.selected', { count: selectedIds.size })}
