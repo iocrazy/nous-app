@@ -612,7 +612,7 @@ export function PlayerPage() {
                       {showMoreMenu && (
                         <>
                           <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                          <div className="absolute left-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
                             {(() => {
                               const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
                               const hasVideoFile = !!(video.download_path || video.hls_path);
