@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { fetchLibraryPaginated, updateItem, deleteItem, cleanupStaleDownloads } from '../services/dataService';
+import { perfMark } from '../utils/perfLog';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
 import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
@@ -90,6 +91,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   // --- Data Loading ---
   const loadLibraryData = async () => {
+    perfMark('loadLibraryData start');
     setIsLoadingLibrary(true);
     setLibraryError(null);
     setCurrentPage(0);
@@ -98,7 +100,9 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       if (isSupabaseConfigured()) {
         // Clean up stale downloads in background (don't block library load)
         cleanupStaleDownloads().catch(() => {});
+        perfMark('fetchLibraryPaginated start');
         const result = await fetchLibraryPaginated(0);
+        perfMark('fetchLibraryPaginated done (' + result.data.length + ' items)');
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
@@ -117,6 +121,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
     } finally {
       setIsLoadingLibrary(false);
+      perfMark('loadLibraryData done');
     }
   };
 
@@ -228,8 +233,9 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         { event: '*', schema: 'public', table: 'parsed_media' },
         async (payload) => {
           console.log('Realtime update:', payload.eventType, payload);
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.user) return;
+          const user = session.user;
 
           const newRecord = payload.new as Video;
           const oldRecord = payload.old as Video;

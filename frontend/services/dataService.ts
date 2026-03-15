@@ -1,5 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { ParsedMedia } from '../types';
+import { perfMark } from '../utils/perfLog';
 
 const TABLE_NAME = 'parsed_media';
 const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
@@ -239,7 +240,9 @@ export const fetchLibraryPaginated = async (
 
   try {
     // Use getSession (reads localStorage) instead of getUser (API call) for speed
+    perfMark('  getSession (in query)');
     const { data: { session } } = await supabase.auth.getSession();
+    perfMark('  getSession done (in query)');
     if (!session?.user) {
       throw new Error("User not authenticated");
     }
@@ -248,6 +251,7 @@ export const fetchLibraryPaginated = async (
     const from = page * pageSize;
 
     // Fetch pageSize + 1 to detect if more data exists (avoids slow count: 'exact')
+    perfMark('  supabase query start');
     const { data, error } = await supabase
       .from('resources')
       .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
@@ -256,6 +260,8 @@ export const fetchLibraryPaginated = async (
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
       .range(from, from + pageSize);  // fetch one extra to check hasMore
+
+    perfMark('  supabase query done');
 
     if (error) throw error;
 
@@ -270,6 +276,7 @@ export const fetchLibraryPaginated = async (
       page,
     };
   } catch (err: any) {
+    perfMark('  supabase query ERROR: ' + (err?.message || err));
     throw err;
   }
 };

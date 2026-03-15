@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from '../supabaseClient';
 import { UserProfile, UserSettings, AISettings as AISettingsType } from '../types';
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
+import { perfMark } from '../utils/perfLog';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -76,15 +77,18 @@ export function AuthProvider({
   // If Supabase is already configured via env vars, mark config as loaded
   // immediately so auth init is not blocked by a slow API call.
   useEffect(() => {
+    perfMark('AuthProvider mount');
     const alreadyConfigured = isSupabaseConfigured();
     if (alreadyConfigured) {
-      // Auth can start immediately — load config in background for extras
+      perfMark('configLoaded (env vars)');
       setIsConfigLoaded(true);
     }
 
     const loadFrontendConfig = async () => {
+      perfMark('fetchFrontendConfig start');
       try {
         const config = await fetchFrontendConfig();
+        perfMark('fetchFrontendConfig done');
         if (config) {
           const transcodeUpdates: Partial<typeof DEFAULT_SETTINGS> = {};
           if (config.transcode_enabled != null) transcodeUpdates.transcodeEnabled = config.transcode_enabled;
@@ -183,7 +187,9 @@ export function AuthProvider({
       }
     };
 
+    perfMark('auth.getSession start');
     supabase.auth.getSession().then(({ data: { session } }) => {
+      perfMark('auth.getSession done (session=' + !!session?.user + ')');
       handleSession(session);
       setIsAuthLoading(false);
     });
