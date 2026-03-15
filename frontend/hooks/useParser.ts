@@ -36,6 +36,8 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
   // Download tracking via TaskManagerContext (no more HTTP polling)
   const [downloadCeleryId, setDownloadCeleryId] = useState<string | null>(null);
+  // media_id to watch for download task (resolves race condition with Supabase Realtime)
+  const [pendingDownloadMediaId, setPendingDownloadMediaId] = useState<string | null>(null);
   // Parse task tracking (async parse flow)
   const [parseUnifiedTaskId, setParseUnifiedTaskId] = useState<string | null>(null);
   const { tasks } = useTaskManager();
@@ -88,15 +90,11 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       setIsParsing(false);
 
       // Parse complete → download task auto-created by backend
-      // Find the download task via media_id
+      // Set pendingDownloadMediaId so useEffect below can find download task
+      // when it arrives via Supabase Realtime (race condition fix)
       const mediaId = currentParseTask.media_id;
       if (mediaId) {
-        const dlTask = tasks.find(t =>
-          t.task_type === 'download' && t.media_id === mediaId
-        );
-        if (dlTask?.celery_task_id) {
-          setDownloadCeleryId(dlTask.celery_task_id);
-        }
+        setPendingDownloadMediaId(mediaId);
         // Refresh library to show parsed metadata
         fetchVideoByPlatformId(mediaId).then(updated => {
           if (updated) setCurrentResult(updated);
@@ -111,6 +109,19 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       setIsParsing(false);
     }
   }, [currentParseTask?.status]);
+
+  // Watch for download task to appear in tasks array (race condition fix)
+  // After parse completes, download task may not be in Realtime yet
+  useEffect(() => {
+    if (!pendingDownloadMediaId || downloadCeleryId) return;
+    const dlTask = tasks.find(t =>
+      t.task_type === 'download' && t.media_id === pendingDownloadMediaId
+    );
+    if (dlTask?.celery_task_id) {
+      setDownloadCeleryId(dlTask.celery_task_id);
+      setPendingDownloadMediaId(null);
+    }
+  }, [tasks, pendingDownloadMediaId, downloadCeleryId]);
 
   // React to download completion/failure from TaskManager
   const prevDownloadStatusRef = useRef<string | null>(null);
@@ -182,6 +193,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     setTaskProgress(0);
     setTaskStatus('Initializing');
     setDownloadCeleryId(null);
+    setPendingDownloadMediaId(null);
     setParseUnifiedTaskId(null);
     prevDownloadStatusRef.current = null;
     prevParseStatusRef.current = null;
