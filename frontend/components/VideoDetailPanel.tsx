@@ -28,6 +28,8 @@ interface VideoDetailPanelProps {
   onRatingChange?: (rating: number) => void;
   onNotesChange?: (notes: string) => void;
   onNotesBlur?: () => void;
+  /** Optional mobile action buttons rendered below the ID line */
+  mobileActions?: React.ReactNode;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis';
@@ -81,6 +83,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   onRatingChange,
   onNotesChange,
   onNotesBlur,
+  mobileActions,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -261,6 +264,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             onRatingChange={onRatingChange}
             onNotesChange={onNotesChange}
             onNotesBlur={onNotesBlur}
+            mobileActions={mobileActions}
           />
         )}
 

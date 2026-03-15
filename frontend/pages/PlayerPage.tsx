@@ -566,35 +566,6 @@ export function PlayerPage() {
               </div>
             )}
           </div>
-          {/* Mobile action bar — share/download/more below player */}
-          <div className="flex sm:hidden items-center gap-2 px-3 py-2 border-b border-zinc-800/60">
-            {video.original_url && (
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(video.original_url);
-                  addToast('Link copied to clipboard', 'success');
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
-              >
-                <Share2 size={14} />
-                Share
-              </button>
-            )}
-            <button
-              onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-              disabled={isDownloading || isFetching}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-70"
-            >
-              {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              Download
-            </button>
-            <button
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors ml-auto"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-          </div>
           {/* Resize handle — desktop only */}
           <div
             onMouseDown={handleResizeStart}
@@ -618,6 +589,86 @@ export function PlayerPage() {
                 onRatingChange={resourceId ? handleRatingChange : undefined}
                 onNotesChange={resourceId ? handleNotesChange : undefined}
                 onNotesBlur={resourceId ? handleNotesBlur : undefined}
+                mobileActions={
+                  <>
+                    {video.original_url && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(video.original_url);
+                          addToast('Link copied to clipboard', 'success');
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+                      >
+                        <Share2 size={14} />
+                        Share
+                      </button>
+                    )}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowMoreMenu(!showMoreMenu)}
+                        className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+                      {showMoreMenu && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                          <div className="absolute left-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                            {(() => {
+                              const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
+                              const hasVideoFile = !!(video.download_path || video.hls_path);
+                              const hasCoverFile = !!video.cover_download_path;
+                              const hasAudioFile = !!video.music_download_path;
+                              const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors";
+                              return (
+                                <>
+                                  {isCompleted(video.video_download_status) && hasVideoFile && (
+                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('video'); }} className={btnClass}>
+                                      <Download size={13} className="text-indigo-400" /> Download Video
+                                    </button>
+                                  )}
+                                  {!isCompleted(video.video_download_status) && video.original_url && (
+                                    <button onClick={() => { setShowMoreMenu(false); handleFetchMedia({ video: true }); }} className={btnClass}>
+                                      <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+                                    </button>
+                                  )}
+                                  {isCompleted(video.cover_download_status) && hasCoverFile && (
+                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('cover'); }} className={btnClass}>
+                                      <Download size={13} className="text-emerald-400" /> Download Cover
+                                    </button>
+                                  )}
+                                  {hasAudioFile && (
+                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('audio'); }} className={btnClass}>
+                                      <Download size={13} className="text-amber-400" /> Download Audio
+                                    </button>
+                                  )}
+                                  {video.original_url && (
+                                    <a
+                                      href={video.original_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className={btnClass}
+                                      onClick={() => setShowMoreMenu(false)}
+                                    >
+                                      <ExternalLink size={13} /> Open Original
+                                    </a>
+                                  )}
+                                  <div className="border-t border-zinc-700 my-1" />
+                                  <button
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+                                    onClick={() => { setShowMoreMenu(false); setShowDeleteDialog(true); }}
+                                  >
+                                    <Trash2 size={13} /> Delete
+                                  </button>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </>
+                }
               />
           </div>
         </div>

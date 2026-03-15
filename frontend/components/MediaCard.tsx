@@ -46,6 +46,8 @@ interface MediaCardProps {
   onRatingChange?: (rating: number) => void;
   onNotesChange?: (notes: string) => void;
   onNotesBlur?: () => void;
+  /** Optional mobile action buttons rendered below the ID line (PlayerPage uses this) */
+  mobileActions?: React.ReactNode;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -107,6 +109,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   onRatingChange,
   onNotesChange,
   onNotesBlur,
+  mobileActions,
 }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -709,6 +712,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               )}
             </div>
           </div>
+
+          {/* Mobile action buttons (injected by PlayerPage) */}
+          {mobileActions && (
+            <div className="sm:hidden flex items-center gap-2 mb-2">
+              {mobileActions}
+            </div>
+          )}
 
           {/* Title */}
           <h2 className="text-2xl font-bold text-zinc-100 mb-3 leading-tight">
