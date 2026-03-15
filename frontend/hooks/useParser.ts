@@ -57,10 +57,11 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   })();
 
   // Sync real-time download progress into taskProgress for TaskMonitor
+  // Use Math.max to prevent progress bar from jumping backwards
   useEffect(() => {
     if (!downloadCeleryId || !currentDownloadTask) return;
     if (currentDownloadTask.status === 'processing' && downloadPercent > 0) {
-      setTaskProgress(downloadPercent);
+      setTaskProgress(prev => Math.max(prev, downloadPercent));
       setTaskStatus('Downloading');
     }
   }, [downloadPercent, downloadCeleryId, currentDownloadTask?.status]);
