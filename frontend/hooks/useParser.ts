@@ -59,11 +59,12 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
   })();
 
   // Sync real-time download progress into taskProgress for TaskMonitor
-  // Use Math.max to prevent progress bar from jumping backwards
+  // Map backend download 0-100% to TaskMonitor 50-100% (parse = 0-50%, download = 50-100%)
   useEffect(() => {
     if (!downloadCeleryId || !currentDownloadTask) return;
-    if (currentDownloadTask.status === 'processing' && downloadPercent > 0) {
-      setTaskProgress(prev => Math.max(prev, downloadPercent));
+    if (currentDownloadTask.status === 'processing') {
+      const mapped = 50 + Math.floor(downloadPercent / 2);
+      setTaskProgress(mapped);
       setTaskStatus('Downloading');
     }
   }, [downloadPercent, downloadCeleryId, currentDownloadTask?.status]);
