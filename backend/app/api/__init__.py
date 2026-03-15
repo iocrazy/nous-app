@@ -40,6 +40,11 @@ from app.api.notifications_router import router as notifications_router
 from app.api.realtime_router import router as realtime_router
 from app.api.error_report_router import router as error_report_router
 from app.api.admin import admin_router
+from app.api.sb_projects_router import router as sb_projects_router
+from app.api.sb_canvas_router import router as sb_canvas_router
+from app.api.sb_characters_router import router as sb_characters_router
+from app.api.sb_ai_router import router as sb_ai_router
+from app.api.sb_export_router import router as sb_export_router
 
 api_router = APIRouter()
 
@@ -107,3 +112,9 @@ api_router.include_router(router=realtime_router, tags=["Realtime"])
 api_router.include_router(router=error_report_router, tags=["Error Reporting"])
 
 api_router.include_router(router=admin_router, tags=["Admin"])
+
+api_router.include_router(router=sb_projects_router, tags=["Storyboard Projects"])
+api_router.include_router(router=sb_canvas_router, tags=["Storyboard Canvas"])
+api_router.include_router(router=sb_characters_router, tags=["Storyboard Characters"])
+api_router.include_router(router=sb_ai_router, tags=["Storyboard AI"])
+api_router.include_router(router=sb_export_router, tags=["Storyboard Export"])
