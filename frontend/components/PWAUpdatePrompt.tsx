@@ -15,7 +15,7 @@ export default function PWAUpdatePrompt() {
   if (!needRefresh && !offlineReady) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[9999] max-w-sm animate-in slide-in-from-bottom-4 fade-in duration-300">
+    <div className="fixed bottom-20 sm:bottom-4 left-4 right-4 sm:left-auto sm:right-4 z-[9999] max-w-sm animate-in slide-in-from-bottom-4 fade-in duration-300">
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-4">
         {needRefresh ? (
           <>

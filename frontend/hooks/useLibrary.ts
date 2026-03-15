@@ -96,8 +96,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
-        // Clean up downloads stuck in 'downloading' state before loading
-        await cleanupStaleDownloads().catch(() => {});
+        // Clean up stale downloads in background (don't block library load)
+        cleanupStaleDownloads().catch(() => {});
         const result = await fetchLibraryPaginated(0);
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
