@@ -933,5 +933,93 @@
       "uploading": "Uploading...",
       "upload": "Upload New Version"
     }
+  },
+  "storyboard": {
+    "title": "Storyboard Workbench",
+    "newProject": "New Project",
+    "blankProject": "Blank Project",
+    "fromScript": "From Script",
+    "fromVideo": "From Video",
+    "projectName": "Project Name",
+    "search": "Search projects...",
+    "sortBy": "Sort by",
+    "noProjects": "No storyboard projects yet",
+    "createFirst": "Create your first project to get started",
+    "back": "Back",
+    "sort": {
+      "name": "Name",
+      "created": "Created",
+      "updated": "Updated"
+    },
+    "canvas": {
+      "addNode": "Add Node",
+      "fitView": "Fit View",
+      "lock": "Lock",
+      "unlock": "Unlock",
+      "undo": "Undo",
+      "redo": "Redo",
+      "export": "Export",
+      "characters": "Characters",
+      "emptyCanvas": "Drop nodes here to start building your storyboard"
+    },
+    "nodes": {
+      "upload": "Upload Image",
+      "imageEdit": "AI Generate",
+      "storyboardSplit": "Storyboard Split",
+      "storyboardGen": "Batch Generate",
+      "imageToVideo": "Image to Video",
+      "textAnnotation": "Text Note",
+      "group": "Group",
+      "export": "Export"
+    },
+    "chat": {
+      "title": "AI Assistant",
+      "placeholder": "Ask AI...",
+      "selectedFrame": "Selected: Frame {{number}}",
+      "applyToFrame": "Apply to Frame",
+      "regenerate": "Regenerate"
+    },
+    "timeline": {
+      "play": "Play",
+      "pause": "Pause",
+      "stop": "Stop",
+      "speed": "Speed",
+      "preview": "Preview"
+    },
+    "characters": {
+      "title": "Characters",
+      "newCharacter": "New Character",
+      "editCharacter": "Edit Character",
+      "noCharacters": "No characters yet",
+      "usedInFrames": "Used in {{count}} frames"
+    },
+    "tools": {
+      "crop": "Crop",
+      "annotate": "Annotate",
+      "split": "Split",
+      "shotInfo": "Shot Info",
+      "apply": "Apply",
+      "cancel": "Cancel"
+    },
+    "export": {
+      "title": "Export Storyboard",
+      "pngGrid": "PNG Grid",
+      "pdfDocument": "PDF Document",
+      "zipBundle": "ZIP Bundle",
+      "includeFrameNumbers": "Include frame numbers",
+      "includeAnnotations": "Include annotations",
+      "columns": "Columns",
+      "exporting": "Exporting...",
+      "downloadReady": "Download Ready"
+    },
+    "shot": {
+      "extremeCloseUp": "Extreme Close-up",
+      "closeUp": "Close-up",
+      "mediumCloseUp": "Medium Close-up",
+      "medium": "Medium",
+      "mediumWide": "Medium Wide",
+      "wide": "Wide",
+      "extremeWide": "Extreme Wide"
+    }
   }
 }
