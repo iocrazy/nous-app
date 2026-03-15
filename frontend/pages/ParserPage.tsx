@@ -252,7 +252,7 @@ export function ParserPage() {
 
       {!currentResult && batchResults.length === 0 && !isParsing && taskProgress === 0 && (
         <>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-8">
            <button
               onClick={() => setShowActiveTasks(prev => !prev)}
               className={`p-3 md:p-5 rounded-xl bg-zinc-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 cursor-pointer ${
