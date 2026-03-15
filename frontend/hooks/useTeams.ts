@@ -6,7 +6,10 @@ import { resolvePermissions } from '../utils/permissions';
 
 export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, currentUserId: string | null) {
   const [teams, setTeams] = useState<Team[]>([]);
-  const [personalTeamId, setPersonalTeamId] = useState<string | null>(null);
+  const [personalTeamId, setPersonalTeamId] = useState<string | null>(() => {
+    const saved = localStorage.getItem('mediahub_personal_team');
+    return saved || null;
+  });
   const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -63,7 +66,10 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
       Promise.all([
         fetchMyTeams().then(t => { loadedTeams = t; setTeams(t); }).catch(console.error),
         fetchPersonalTeam().then(pt => {
-          if (pt) setPersonalTeamId(pt.id);
+          if (pt) {
+            setPersonalTeamId(pt.id);
+            localStorage.setItem('mediahub_personal_team', pt.id);
+          }
         }).catch(console.error),
         fetchNotifications().then(setNotifications).catch(console.error),
       ]).finally(() => {
