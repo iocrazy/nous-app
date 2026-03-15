@@ -657,55 +657,36 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                     />
                     <div className="absolute top-full right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
                       <div className="py-1">
-                        {/* Refetch section — only show items NOT yet downloaded */}
-                        {!videoDownloaded && (
+                        {/* Download section */}
+                        <button
+                          onClick={() => { setShowMoreMenu(false); onDownloadVideo(); }}
+                          className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                        >
+                          <VideoIcon size={16} className="text-amber-400" />
+                          Video
+                        </button>
+                        <button
+                          onClick={() => { setShowMoreMenu(false); onDownloadCoverFile(); }}
+                          className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
+                        >
+                          <ImageIcon size={16} className="text-emerald-400" />
+                          Cover
+                        </button>
+                        {data.music_download_path && (
                           <button
-                            onClick={() => onRefetch({ video: true })}
+                            onClick={() => { setShowMoreMenu(false); onDownloadAudio(); }}
                             className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
                           >
-                            <VideoIcon size={16} className="text-indigo-400" />
-                            Fetch Video
+                            <Music size={16} className="text-indigo-400" />
+                            Audio
                           </button>
                         )}
-                        {!coverDownloaded && (
-                          <button
-                            onClick={() => onRefetch({ cover: true })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                          >
-                            <ImageIcon size={16} className="text-emerald-400" />
-                            Fetch Cover
-                          </button>
-                        )}
-                        {(videoDownloaded && coverDownloaded) ? (
-                          <>
-                            <div className="px-4 py-2.5 text-sm text-zinc-500 flex items-center gap-3">
-                              <Check size={16} className="text-emerald-400" />
-                              All Fetched
-                            </div>
-                            <div className="border-t border-zinc-700 my-1" />
-                            <button
-                              onClick={() => onRefetch({ video: true, cover: true, force: true })}
-                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                            >
-                              <RefreshCw size={16} className="text-orange-400" />
-                              Re-fetch All
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <div className="border-t border-zinc-700 my-1" />
-                            <button
-                              onClick={() => onRefetch({
-                                video: !videoDownloaded,
-                                cover: !coverDownloaded,
-                              })}
-                              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-3 transition-colors"
-                            >
-                              <Download size={16} className="text-sky-400" />
-                              Fetch All
-                            </button>
-                          </>
-                        )}
+
+                        {/* ID row */}
+                        <div className="border-t border-zinc-700 my-1" />
+                        <div className="px-4 py-2 text-xs text-zinc-500 font-mono truncate">
+                          ID: {data.id}
+                        </div>
 
                         {/* Delete section */}
                         {onDelete && (
@@ -1009,20 +990,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
              </div>
 
-             {!hidePreview && data.music_download_status && data.music_download_status !== 'skipped' && data.music_download_status !== 'SKIPPED' && (
-               <button
-                 onClick={onDownloadAudio}
-                 className="w-full flex items-between justify-between px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
-               >
-                 <div className="flex items-center gap-3">
-                   <div className="p-1.5 bg-indigo-500/10 rounded-md">
-                      <Music className="w-3.5 h-3.5 text-indigo-500" />
-                   </div>
-                   <span className="truncate max-w-[250px] font-medium">{data.music_name || 'Original Audio'}</span>
-                 </div>
-                 <Download className="w-3.5 h-3.5" />
-               </button>
-             )}
           </div>
           )}
         </div>
