@@ -27,9 +27,17 @@ import { PaymentModal } from './PaymentModal';
 // Supports both /team/:teamId/:view and legacy /:view patterns
 // ---------------------------------------------------------------------------
 
-export function pathnameToView(pathname: string): ViewState {
+export function pathnameToView(pathname: string, search?: string): ViewState {
   // Strip /team/:teamId/ prefix if present
   const stripped = pathname.replace(/^\/team\/[^/]+/, '');
+  // PlayerPage: derive view from ?from= query param
+  if (stripped.startsWith('/player/')) {
+    const params = new URLSearchParams(search || '');
+    const from = params.get('from');
+    if (from === 'downloads') return 'library';
+    if (from === 'resources') return 'resources';
+    return 'library';
+  }
   if (stripped.startsWith('/library')) return 'library';
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
@@ -83,7 +91,7 @@ function AppLayoutInner() {
     }
   }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
-  const view = pathnameToView(location.pathname);
+  const view = pathnameToView(location.pathname, location.search);
 
   const {
     settingsTab, setSettingsTab,
