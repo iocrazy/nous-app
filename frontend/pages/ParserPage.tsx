@@ -13,9 +13,9 @@ import { ParseModeCard } from '../components/ParseModeCard';
 import { EagleTagPicker } from '../components/EagleTagPicker';
 import { TaskMonitor } from '../components/TaskMonitor';
 import { useAuth } from '../contexts/AuthContext';
-import { useLibrary } from '../hooks/useLibrary';
+import { useLibraryContext } from '../contexts/LibraryContext';
 import { useParser } from '../hooks/useParser';
-import { useTeamContext } from '../contexts/TeamContext';
+
 import { getStorageDisplay } from '../services/systemService';
 import {
   useTaskManager,
@@ -28,8 +28,6 @@ import {
 export function ParserPage() {
   const { t } = useTranslation();
   const { userSettings } = useAuth();
-  const { selectedTeamId } = useTeamContext();
-
   const [currentResult, setCurrentResult] = useState<Video | null>(null);
   const [showActiveTasks, setShowActiveTasks] = useState(false);
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -42,7 +40,7 @@ export function ParserPage() {
   const {
     library, setLibrary, sharedVideoIds,
     loadLibraryData, handleUpdateLibraryItem,
-  } = useLibrary({ isAuthenticated: true, selectedTeamId });
+  } = useLibraryContext();
 
   const {
     urlInput, setUrlInput, parserMode, setParserMode, batchInput, setBatchInput,

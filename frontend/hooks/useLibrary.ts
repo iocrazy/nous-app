@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { fetchLibraryPaginated, updateItem, deleteItem, cleanupStaleDownloads } from '../services/dataService';
-import { perfMark } from '../utils/perfLog';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
 import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
@@ -92,16 +91,13 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   // --- Data Loading ---
   const loadLibraryData = async () => {
-    perfMark('loadLibraryData start');
     setIsLoadingLibrary(true);
     setLibraryError(null);
     setCurrentPage(0);
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
-        perfMark('fetchLibraryPaginated start');
         const result = await fetchLibraryPaginated(0);
-        perfMark('fetchLibraryPaginated done (' + result.data.length + ' items)');
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
@@ -121,7 +117,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     } finally {
       setIsLoadingLibrary(false);
       setInitialLoadComplete(true);
-      perfMark('loadLibraryData done');
     }
   };
 
