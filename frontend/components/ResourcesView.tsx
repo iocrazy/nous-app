@@ -386,7 +386,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
     // Load libraries in team mode
     if (scopeType === 'team') {
-      fetchLibraries(scopeId).then(setLibraries).catch(() => setLibraries([]));
+      fetchLibraries(scopeId).then((libs) => {
+        setLibraries(libs);
+        // Auto-redirect to first library if none selected (avoids empty state)
+        if (libs.length > 0 && !urlLibraryId && !section) {
+          navigate(resPath(`/resources/library/${libs[0].id}`), { replace: true });
+        }
+      }).catch(() => setLibraries([]));
     } else {
       setLibraries([]);
     }
@@ -2277,19 +2283,55 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       <div
         className="flex-1 min-w-0 flex flex-col"
       >
-        {isDownloadsView ? (
-          <>
-            {/* Mobile sidebar toggle for Downloads view */}
-            <div className="md:hidden px-4 py-2 border-b border-zinc-800/80">
+        {/* Mobile section switcher — horizontal tabs replacing sidebar on mobile */}
+        <div className="md:hidden flex items-center gap-1 px-3 py-2 border-b border-zinc-800/60 overflow-x-auto no-scrollbar">
+          {scopeType === 'team' ? (
+            <>
+              {libraries.map((lib) => (
+                <button
+                  key={lib.id}
+                  onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    selectedLibraryId === String(lib.id) ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  {lib.name}
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
               <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                onClick={() => navigate(resPath('/resources/downloads'))}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  isDownloadsView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                }`}
               >
-                <Menu size={18} />
+                Downloads
               </button>
-            </div>
-            <DownloadsView />
-          </>
+              <button
+                onClick={() => navigate(resPath('/resources'))}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  isResourcesView && !selectedFolderId && !selectedSmartFolderId ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                }`}
+              >
+                {t('resources.myResources')}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => navigate(resPath('/resources/recycle'))}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              isRecycleView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+            }`}
+          >
+            <Trash2 size={12} className="inline -mt-0.5 mr-1" />
+            {t('resources.recycleBin')}
+          </button>
+        </div>
+
+        {isDownloadsView ? (
+          <DownloadsView />
         ) : (
         <>
         {/* Toolbar */}
