@@ -14,7 +14,7 @@ const PARSED_MEDIA_LIST_COLUMNS = `
   cover_urls, dynamic_cover_url, cover_download_path, cover_download_status,
   image_download_urls, image_download_status, image_download_path,
   video_download_status, music_download_status, download_path, download_time,
-  tags, transcript_status, summary_status, visual_analysis_status,
+  transcript_status, summary_status, visual_analysis_status,
   resolution, datasize, datasize_bytes, music_name, music_download_path,
   error_message, created_at, updated_at
 `.replace(/\s+/g, ' ').trim();
