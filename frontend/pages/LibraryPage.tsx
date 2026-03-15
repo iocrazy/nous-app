@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Loader2, LayoutGrid, LayoutList, Smartphone, Folder,
   Video as VideoIcon, ArrowLeft, RefreshCw, CloudOff, Search, X,
@@ -8,66 +9,36 @@ import { useTranslation } from 'react-i18next';
 import { CompactMediaCard } from '../components/CompactMediaCard';
 import { LibraryTable } from '../components/LibraryTable';
 import { LibraryFeed } from '../components/LibraryFeed';
-import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { SemanticSearchBar } from '../components/SemanticSearchBar';
 import { useLibraryContext } from '../contexts/LibraryContext';
+import { useTeamContext } from '../contexts/TeamContext';
+import type { Video } from '../types';
 
 export function LibraryPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { selectedTeamId } = useTeamContext();
 
   const {
-    library, setLibrary, isLoadingLibrary, libraryError,
-    selectedLibraryItem, setSelectedLibraryItem,
+    library, isLoadingLibrary, libraryError,
     filteredLibrary, hasMoreData, isLoadingMore, loadMoreRef,
     libraryViewMode, setLibraryViewMode, activeLibraryTab,
     searchQuery, setSearchQuery, searchResults, setSearchResults,
     isSearchActive, setIsSearchActive, searchQueryText, setSearchQueryText,
     collections, activeCollectionId, setActiveCollectionId, collectionVideoIds,
-    isCreateCollectionModalOpen, setIsCreateCollectionModalOpen,
-    selectedVideoCollectionIds, sharedVideoIds,
-    loadLibraryData, handleCreateCollection, handleToggleVideoCollection,
-    handleUpdateLibraryItem, handleDeleteLibraryItem,
+    sharedVideoIds,
+    loadLibraryData, handleUpdateLibraryItem,
   } = useLibraryContext();
 
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const detailRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to top when opening a media detail
-  useEffect(() => {
-    if (selectedLibraryItem) {
-      window.scrollTo(0, 0);
-      detailRef.current?.scrollTo(0, 0);
-    }
-  }, [selectedLibraryItem]);
+  const handleItemClick = (item: Video) => {
+    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
+    navigate(`${teamPath}/player/${item.id}?from=downloads`);
+  };
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-      {selectedLibraryItem ? (
-        <div ref={detailRef} className="flex flex-col h-full p-4 md:p-0">
-           <div className="flex items-center gap-3 mb-4 shrink-0">
-              <button
-                onClick={() => setSelectedLibraryItem(null)}
-                className="p-2 -ml-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
-              >
-                 <ArrowLeft size={24} />
-              </button>
-              <h2 className="text-xl font-bold text-white">Media Details</h2>
-           </div>
-           <div className="flex-1 min-h-0">
-              <VideoDetailPanel
-                video={selectedLibraryItem}
-                onClose={() => setSelectedLibraryItem(null)}
-                onUpdate={handleUpdateLibraryItem}
-                onDelete={handleDeleteLibraryItem}
-                collections={collections}
-                videoCollectionIds={selectedVideoCollectionIds}
-                onToggleCollection={handleToggleVideoCollection}
-                onCreateCollection={handleCreateCollection}
-              />
-           </div>
-        </div>
-      ) : (
-        <>
           {/* Desktop Header */}
           <header className="hidden md:flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -181,7 +152,7 @@ export function LibraryPage() {
                               <CompactMediaCard
                                 key={`${item.platform_id}-${idx}`}
                                 data={item}
-                                onClick={() => setSelectedLibraryItem(item)}
+                                onClick={() => handleItemClick(item)}
                                 isShared={sharedVideoIds.includes(item.platform_id)}
                               />
                             ))}
@@ -212,7 +183,7 @@ export function LibraryPage() {
                     <LibraryTable
                       data={filteredLibrary}
                       onUpdate={handleUpdateLibraryItem}
-                      onItemClick={(item) => setSelectedLibraryItem(item)}
+                      onItemClick={(item) => handleItemClick(item)}
                     />
                   </div>
                 ) : (
@@ -224,7 +195,7 @@ export function LibraryPage() {
           )}
 
           {/* Mobile Library Search — portaled to body so fixed positioning works */}
-          {!selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && createPortal(
+          {(activeLibraryTab === 'my-library' || activeCollectionId) && createPortal(
             <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
               <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
                 {isMobileSearchOpen ? (
@@ -259,8 +230,6 @@ export function LibraryPage() {
             </div>,
             document.body,
           )}
-        </>
-      )}
     </div>
   );
 }

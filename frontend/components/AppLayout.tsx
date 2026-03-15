@@ -107,7 +107,6 @@ function AppLayoutInner() {
     activeSmartCollectionId, setActiveSmartCollectionId,
     isCreateCollectionModalOpen, setIsCreateCollectionModalOpen,
     libraryViewMode, setLibraryViewMode,
-    selectedLibraryItem, setSelectedLibraryItem,
     loadLibraryData, handleCreateCollection,
   } = useLibraryContext();
 
@@ -169,14 +168,9 @@ function AppLayoutInner() {
   const handleMobileLibraryClick = () => {
     setIsDashboardMenuOpen(false);
     if (view === 'library') {
-      if (selectedLibraryItem) {
-        setSelectedLibraryItem(null);
-      } else {
-        setIsMobileMenuOpen(!isMobileMenuOpen);
-      }
+      setIsMobileMenuOpen(!isMobileMenuOpen);
     } else {
       navigate(teamPath('/library'));
-      setSelectedLibraryItem(null);
       setIsMobileMenuOpen(false);
     }
   };
@@ -269,7 +263,7 @@ function AppLayoutInner() {
 
           {/* Downloads (formerly Library) — with view mode popup */}
           <div className="relative">
-            {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
+            {isMobileMenuOpen && view === 'library' && (
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
                 <button
                   onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
