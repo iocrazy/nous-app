@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -19,6 +20,7 @@ import {
   Zap,
   FolderPlus,
   FolderSearch,
+  Search,
   Check,
   X,
   UploadCloud,
@@ -96,6 +98,7 @@ import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
 import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
+import { useTouchDragDrop } from '../hooks/useTouchDragDrop';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
 import { downloadWithAuth } from '../utils/download';
@@ -249,6 +252,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
+
+  // Mobile-specific state
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+  const lastTapRef = useRef<{ id: string; time: number } | null>(null);
 
   // Detail panel
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
@@ -1239,6 +1247,132 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedIds(new Set());
     } catch { /* ignore */ }
   }, [selectedLibraryId, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders]);
+
+  // ─── Touch drag-and-drop (mobile) ────────────────
+  const {
+    dragState: touchDragState,
+    startDrag: startTouchDrag,
+    handleTouchMove: handleTouchDragMove,
+    handleTouchEnd: handleTouchDragEnd,
+    isDropTarget: isTouchDropTarget,
+  } = useTouchDragDrop({
+    onDrop: (dragIds, targetFolderId) => {
+      handleDropOnFolder(targetFolderId, dragIds);
+    },
+    selectedIds,
+  });
+
+  // ─── Double-tap detection (mobile) ─────────────
+  const DOUBLE_TAP_DELAY = 300;
+  const handleTap = useCallback(
+    (id: string, onDoubleTap: () => void) => {
+      const now = Date.now();
+      if (lastTapRef.current && lastTapRef.current.id === id && now - lastTapRef.current.time < DOUBLE_TAP_DELAY) {
+        lastTapRef.current = null;
+        onDoubleTap();
+      } else {
+        lastTapRef.current = { id, time: now };
+      }
+    },
+    [],
+  );
+
+  // ─── Long-press handlers for mobile context menu + drag ──
+  const getItemTouchHandlers = useCallback(
+    (itemType: 'file' | 'folder', item: any) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let startPos: { x: number; y: number } | null = null;
+      let dragStarted = false;
+
+      return {
+        onTouchStart: (e: React.TouchEvent) => {
+          const touch = e.touches[0];
+          startPos = { x: touch.clientX, y: touch.clientY };
+          dragStarted = false;
+          timer = setTimeout(() => {
+            const mockEvent = {
+              preventDefault: () => {},
+              stopPropagation: () => {},
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+            } as unknown as React.MouseEvent;
+            if (itemType === 'file') {
+              handleFileContextMenu(mockEvent, item);
+            } else {
+              handleFolderContextMenu(mockEvent, item);
+            }
+            timer = null;
+          }, 500);
+        },
+        onTouchMove: (e: React.TouchEvent) => {
+          if (!startPos || !timer || dragStarted) return;
+          const touch = e.touches[0];
+          const dx = touch.clientX - startPos.x;
+          const dy = touch.clientY - startPos.y;
+          if (Math.sqrt(dx * dx + dy * dy) > 10) {
+            clearTimeout(timer);
+            timer = null;
+            dragStarted = true;
+            const compositeId = itemType === 'folder'
+              ? `folder:${item.id}`
+              : `item:${item.id}`;
+            startTouchDrag(compositeId, e);
+          }
+        },
+        onTouchEnd: () => {
+          if (timer) { clearTimeout(timer); timer = null; }
+          startPos = null;
+          dragStarted = false;
+        },
+        onTouchCancel: () => {
+          if (timer) { clearTimeout(timer); timer = null; }
+          startPos = null;
+          dragStarted = false;
+        },
+      };
+    },
+    [handleFileContextMenu, handleFolderContextMenu, startTouchDrag],
+  );
+
+  // ─── Empty area long-press for mobile ──────────
+  const emptyAreaTouchRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    startPos: { x: number; y: number } | null;
+  }>({ timer: null, startPos: null });
+
+  const handleEmptyAreaTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!isResourcesView) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-context-item]')) return;
+    const touch = e.touches[0];
+    emptyAreaTouchRef.current.startPos = { x: touch.clientX, y: touch.clientY };
+    emptyAreaTouchRef.current.timer = setTimeout(() => {
+      handleEmptyAreaContextMenu({
+        preventDefault: () => {},
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        target,
+      } as unknown as React.MouseEvent);
+    }, 500);
+  }, [isResourcesView, handleEmptyAreaContextMenu]);
+
+  const handleEmptyAreaTouchMove = useCallback((e: React.TouchEvent) => {
+    const ref = emptyAreaTouchRef.current;
+    if (!ref.timer || !ref.startPos) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - ref.startPos.x;
+    const dy = touch.clientY - ref.startPos.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) {
+      clearTimeout(ref.timer);
+      ref.timer = null;
+    }
+  }, []);
+
+  const handleEmptyAreaTouchEnd = useCallback(() => {
+    const ref = emptyAreaTouchRef.current;
+    if (ref.timer) { clearTimeout(ref.timer); ref.timer = null; }
+    ref.startPos = null;
+  }, []);
 
   // ─── Sidebar drop handlers ────────────────────────
 
@@ -2271,62 +2405,43 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       <div
         className="flex-1 min-w-0 flex flex-col"
       >
-        {/* Mobile section tabs — team switching moved to bottom tab bar popup */}
-        <div className="md:hidden border-b border-zinc-800/60">
-          <div className="flex items-center gap-1 px-3 py-2 overflow-x-auto no-scrollbar">
-            {scopeType === 'team' ? (
-              <>
-                {libraries.map((lib) => (
-                  <button
-                    key={lib.id}
-                    onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
-                    className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                      selectedLibraryId === String(lib.id) ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-                    }`}
-                  >
-                    {lib.name}
-                  </button>
-                ))}
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => navigate(resPath('/resources/downloads'))}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    isDownloadsView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-                  }`}
-                >
-                  Downloads
-                </button>
-                <button
-                  onClick={() => navigate(resPath('/resources'))}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    isResourcesView && !selectedFolderId && !selectedSmartFolderId ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-                  }`}
-                >
-                  {t('resources.myResources')}
-                </button>
-              </>
+        {/* Mobile breadcrumb navigation — replaces horizontal tabs */}
+        {!isDownloadsView && (
+          <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
+            {(selectedFolderId || isRecycleView) && (
+              <button
+                onClick={() => {
+                  if (isRecycleView) {
+                    if (recycleFolderId) {
+                      setRecycleFolderId(null);
+                    } else {
+                      navigate(resPath('/resources'));
+                    }
+                  } else if (folderChain.length > 1) {
+                    const parentId = folderChain[folderChain.length - 2]?.id;
+                    navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
+                  } else {
+                    navigate(resPath('/resources'));
+                  }
+                }}
+                className="p-1 -ml-1 text-zinc-400 hover:text-zinc-200"
+              >
+                <ChevronLeft size={20} />
+              </button>
             )}
-            <button
-              onClick={() => navigate(resPath('/resources/recycle'))}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                isRecycleView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-              }`}
-            >
-              <Trash2 size={12} className="inline -mt-0.5 mr-1" />
-              {t('resources.recycleBin')}
-            </button>
+            <div className="flex-1 min-w-0">
+              <Breadcrumb segments={breadcrumbSegments} />
+            </div>
           </div>
-        </div>
+        )}
 
         {isDownloadsView ? (
           <DownloadsView />
         ) : (
         <>
-        {/* Toolbar */}
+        {/* Toolbar — desktop only, mobile uses breadcrumb + floating search */}
         <div
-          className="px-3 md:px-6 py-3 border-b border-zinc-800/80"
+          className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
           style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         >
           {/* Single row: Breadcrumb + controls */}
@@ -2632,13 +2747,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
         {/* Content area */}
         <div
-          className="flex-1 overflow-y-auto p-6 relative"
+          className="flex-1 overflow-y-auto p-3 md:p-6 relative"
           style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
           onDragEnter={canUpload ? handleDragEnter : undefined}
           onDragOver={canUpload ? handleDragOver : undefined}
           onDragLeave={canUpload ? handleDragLeave : undefined}
           onDrop={canUpload ? handleDrop : undefined}
           onContextMenu={isResourcesView ? handleEmptyAreaContextMenu : undefined}
+          onTouchStart={handleEmptyAreaTouchStart}
+          onTouchMove={touchDragState.isDragging ? handleTouchDragMove : handleEmptyAreaTouchMove}
+          onTouchEnd={touchDragState.isDragging ? handleTouchDragEnd : handleEmptyAreaTouchEnd}
           onClick={(e) => {
             // Click on empty area → deselect all
             const target = e.target as HTMLElement;
@@ -2674,6 +2792,25 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
               <Share2 size={48} className="text-zinc-600 mb-4" />
               <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
+            </div>
+          )}
+
+          {/* Recycle Bin — pinned at top of root on mobile */}
+          {!selectedFolderId && !selectedSmartFolderId && !selectedLibraryId && isResourcesView && !isRecycleView && (
+            <div className="md:hidden mb-3">
+              <button
+                onClick={() => navigate(resPath('/resources/recycle'))}
+                data-context-item
+                className="w-full flex items-center gap-3 px-4 py-3 bg-zinc-800/30 hover:bg-zinc-800/60 rounded-xl border border-zinc-700/30 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-lg bg-zinc-700/40 flex items-center justify-center">
+                  <Trash2 size={18} className="text-zinc-400" />
+                </div>
+                <div className="flex-1 text-left">
+                  <span className="text-sm text-zinc-300 font-medium">Recycle Bin</span>
+                </div>
+                <ChevronRight size={16} className="text-zinc-600" />
+              </button>
             </div>
           )}
 
@@ -2759,9 +2896,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     )}
                     {viewMode === 'grid' ? (
                       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
-                        {filteredFolders.map((folder) => (
-                          <FolderCard
+                        {filteredFolders.map((folder) => {
+                          const folderNavigate = () => {
+                            if (selectedLibraryId) {
+                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                            } else {
+                              navigate(resPath(`/resources/folder/${folder.id}`));
+                            }
+                          };
+                          return (
+                          <div
                             key={`folder-${folder.id}`}
+                            data-folder-id={String(folder.id)}
+                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
+                            {...getItemTouchHandlers('folder', folder)}
+                          >
+                          <FolderCard
                             folder={folder}
                             onClick={(e?: any) => {
                               handleCardClick(`folder:${folder.id}`, e);
@@ -2774,14 +2924,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                                   setShowInfoPanel(true);
                                 }
                               }
+                              handleTap(`folder:${folder.id}`, folderNavigate);
                             }}
-                            onDoubleClick={() => {
-                              if (selectedLibraryId) {
-                                navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                              } else {
-                                navigate(resPath(`/resources/folder/${folder.id}`));
-                              }
-                            }}
+                            onDoubleClick={folderNavigate}
                             viewMode="grid"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -2797,13 +2942,28 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
                             previewItems={folderPreviews[folder.id]}
                           />
-                        ))}
+                          </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="space-y-1.5">
-                        {filteredFolders.map((folder) => (
-                          <FolderCard
+                        {filteredFolders.map((folder) => {
+                          const folderNavigate = () => {
+                            if (selectedLibraryId) {
+                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
+                            } else {
+                              navigate(resPath(`/resources/folder/${folder.id}`));
+                            }
+                          };
+                          return (
+                          <div
                             key={`folder-${folder.id}`}
+                            data-folder-id={String(folder.id)}
+                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
+                            {...getItemTouchHandlers('folder', folder)}
+                          >
+                          <FolderCard
                             folder={folder}
                             onClick={(e?: any) => {
                               handleCardClick(`folder:${folder.id}`, e);
@@ -2816,14 +2976,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                                   setShowInfoPanel(true);
                                 }
                               }
+                              handleTap(`folder:${folder.id}`, folderNavigate);
                             }}
-                            onDoubleClick={() => {
-                              if (selectedLibraryId) {
-                                navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                              } else {
-                                navigate(resPath(`/resources/folder/${folder.id}`));
-                              }
-                            }}
+                            onDoubleClick={folderNavigate}
                             viewMode="list"
                             onContextMenu={(e) => handleFolderContextMenu(e, folder)}
                             renaming={renamingFolderId === folder.id}
@@ -2839,7 +2994,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
                             previewItems={folderPreviews[folder.id]}
                           />
-                        ))}
+                          </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2869,12 +3026,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     {viewMode === 'grid' ? (
                       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
                         {sortedItems.map((item) => (
+                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
                           <ResourceCard
-                            key={item.id}
                             item={item}
                             onClick={(e?: any) => {
                               handleCardClick(`item:${item.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
+                              handleTap(`item:${item.id}`, () => handleResourceDoubleClick(item));
                             }}
                             onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="grid"
@@ -2898,17 +3056,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             compositeId={`item:${item.id}`}
                             isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                           />
+                          </div>
                         ))}
                       </div>
                     ) : (
                       <div className="space-y-1.5">
                         {sortedItems.map((item) => (
+                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
                           <ResourceCard
-                            key={item.id}
                             item={item}
                             onClick={(e?: any) => {
                               handleCardClick(`item:${item.id}`, e);
                               if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
+                              handleTap(`item:${item.id}`, () => handleResourceDoubleClick(item));
                             }}
                             onDoubleClick={() => handleResourceDoubleClick(item)}
                             viewMode="list"
@@ -2932,6 +3092,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                             compositeId={`item:${item.id}`}
                             isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                           />
+                          </div>
                         ))}
                       </div>
                     )}
@@ -3285,6 +3446,79 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Mobile floating search button — portal to body ── */}
+      {isResourcesView && !isRecycleView && !isSharedView && !isDownloadsView && createPortal(
+        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end w-full">
+            {isMobileSearchOpen ? (
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200">
+                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                <input
+                  ref={mobileSearchInputRef}
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleResourceQueryChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim()) {
+                      handleResourceAISearch(searchQuery, 'hybrid');
+                    }
+                    if (e.key === 'Escape') {
+                      setIsMobileSearchOpen(false);
+                      handleResourceSearchClear();
+                    }
+                  }}
+                  placeholder={t('resources.searchFiles')}
+                  className="bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none w-full"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => handleResourceSearchClear()}
+                    className="ml-1 text-zinc-400 hover:text-zinc-200"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    if (!searchQuery) handleResourceSearchClear();
+                  }}
+                  className="ml-2 text-zinc-400 hover:text-zinc-200"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsMobileSearchOpen(true)}
+                className="p-3 bg-black/20 backdrop-blur-md rounded-full hover:bg-black/40 transition-colors"
+              >
+                <Search size={22} className="text-zinc-300" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* ── Touch drag preview — portal to body ── */}
+      {touchDragState.isDragging && touchDragState.dragPosition && createPortal(
+        <div
+          className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-zinc-800/90 backdrop-blur-sm border border-zinc-600 rounded-lg px-3 py-2 shadow-2xl"
+          style={{
+            left: touchDragState.dragPosition.x - 40,
+            top: touchDragState.dragPosition.y - 20,
+          }}
+        >
+          <Move size={14} className="text-indigo-400" />
+          <span className="text-sm text-zinc-200">
+            {touchDragState.dragIds.length === 1 ? 'Moving item' : `${touchDragState.dragIds.length} items`}
+          </span>
+        </div>,
+        document.body,
       )}
 
     </div>
