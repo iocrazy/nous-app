@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, User, FolderOpen,
+  Search, Library, User, FolderOpen, Download, Check,
   LayoutList, LayoutGrid, Smartphone,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -107,6 +107,7 @@ export function AppLayout() {
   });
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
+  const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -240,17 +241,17 @@ export function AppLayout() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Tab Bar — 4 tabs: Parser, Library, Resources, Me */}
+      {/* Mobile Tab Bar — 4 tabs: Parser, Downloads, Resources, Me */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
         {/* Backdrop to dismiss popups */}
-        {isMobileMenuOpen && (
+        {(isMobileMenuOpen || isResourcesMenuOpen) && (
           <div
             className="fixed inset-0 z-30"
-            onClick={() => setIsMobileMenuOpen(false)}
+            onClick={() => { setIsMobileMenuOpen(false); setIsResourcesMenuOpen(false); }}
           />
         )}
 
-        {/* Library view mode popup — positioned above tab bar */}
+        {/* Downloads view mode popup — positioned above tab bar */}
         {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
             <button
@@ -274,6 +275,43 @@ export function AppLayout() {
           </div>
         )}
 
+        {/* Resources team picker popup — positioned above tab bar */}
+        {isResourcesMenuOpen && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 rounded-xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 min-w-[180px] py-1">
+            {/* Personal workspace */}
+            {personalTeamId && (
+              <button
+                onClick={() => {
+                  navigate(`/team/${personalTeamId}/resources`);
+                  setIsResourcesMenuOpen(false);
+                }}
+                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${
+                  selectedTeamId === personalTeamId ? 'text-indigo-300' : 'text-zinc-300 hover:bg-zinc-700/50'
+                }`}
+              >
+                Personal
+                {selectedTeamId === personalTeamId && <Check size={14} className="ml-auto text-indigo-400" />}
+              </button>
+            )}
+            {/* Team workspaces */}
+            {teams.filter(t => String(t.id) !== personalTeamId).map(team => (
+              <button
+                key={team.id}
+                onClick={() => {
+                  navigate(`/team/${team.id}/resources`);
+                  setIsResourcesMenuOpen(false);
+                }}
+                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${
+                  selectedTeamId === String(team.id) ? 'text-indigo-300' : 'text-zinc-300 hover:bg-zinc-700/50'
+                }`}
+              >
+                {team.name}
+                {selectedTeamId === String(team.id) && <Check size={14} className="ml-auto text-indigo-400" />}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Tab buttons */}
         <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] relative z-40">
           {/* Parser */}
@@ -285,18 +323,26 @@ export function AppLayout() {
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
 
-          {/* Library */}
+          {/* Downloads (formerly Library) */}
           <button
             onClick={handleMobileLibraryClick}
             className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
-            <Library size={22} />
-            <span className="text-[10px] leading-tight">Library</span>
+            <Download size={22} />
+            <span className="text-[10px] leading-tight">Downloads</span>
           </button>
 
-          {/* Resources */}
+          {/* Resources — tap to navigate, tap again to show team picker */}
           <button
-            onClick={() => handleMobileNavClick('resources')}
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              if (view === 'resources') {
+                setIsResourcesMenuOpen(!isResourcesMenuOpen);
+              } else {
+                navigate(teamPath('/resources'));
+                setIsResourcesMenuOpen(false);
+              }
+            }}
             className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <FolderOpen size={22} />
