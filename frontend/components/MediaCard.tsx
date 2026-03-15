@@ -614,9 +614,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         {/* Info Section - Right Side */}
         <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
 
-          {/* Header Metadata */}
+          {/* Header Metadata — desktop: badges left + ID right; mobile: ID left + actions right */}
           <div className="flex justify-between items-start gap-2 mb-2 min-w-0">
-            <div className="flex gap-2 shrink-0">
+            {/* Desktop: type badge + resolution */}
+            <div className="hidden sm:flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
                 {getAwemeTypeLabel(data.media_type)}
                 </span>
@@ -626,8 +627,13 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 </span>
                 )}
             </div>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
+            {/* Mobile: ID on the left */}
+            <span className="sm:hidden text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
+            <div className="flex items-center gap-2 min-w-0 shrink-0">
+              {/* Desktop: ID */}
+              <span className="hidden sm:inline text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>
+              {/* Mobile: injected action buttons (Share + More) */}
+              {mobileActions && <div className="sm:hidden flex items-center gap-1">{mobileActions}</div>}
               {/* More actions (three-dots) — hidden when inside PlayerPage */}
               {!hidePreview && (
               <div className="relative shrink-0">
@@ -713,12 +719,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           </div>
 
-          {/* Mobile action buttons (injected by PlayerPage) */}
-          {mobileActions && (
-            <div className="sm:hidden flex items-center gap-2 mb-2">
-              {mobileActions}
-            </div>
-          )}
+          {/* Mobile action buttons — injected into header row on mobile, shown separately on sm+ if needed */}
 
           {/* Title */}
           <h2 className="text-2xl font-bold text-zinc-100 mb-3 leading-tight">
@@ -734,6 +735,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              <div className="flex items-center gap-2">
                 <Timer size={14} className="text-zinc-500"/>
                 <span>Video Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
+                {data.resolution && (
+                  <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
+                    {formatResolution(data.resolution)}
+                  </span>
+                )}
              </div>
           </div>
 
