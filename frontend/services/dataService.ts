@@ -153,13 +153,13 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return null;
 
     const { data, error } = await supabase
       .from('resources')
       .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
-      .eq('creator_id', user.id)
+      .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('parsed_media.platform_id', platformId)
       .maybeSingle();
@@ -190,13 +190,13 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return null;
 
     const { data, error } = await supabase
       .from('resources')
       .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
-      .eq('creator_id', user.id)
+      .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('parsed_media.id', displayId)
       .maybeSingle();
@@ -214,8 +214,8 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
   }
 };
 
-/** Pagination config */
-const PAGE_SIZE = 100;
+/** Pagination config — keep small for fast first paint, load more on scroll */
+const PAGE_SIZE = 20;
 const LOCAL_CACHE_SIZE = 500;
 
 export interface PaginatedResult<T> {
@@ -238,19 +238,20 @@ export const fetchLibraryPaginated = async (
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Use getSession (reads localStorage) instead of getUser (API call) for speed
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       throw new Error("User not authenticated");
     }
+    const userId = session.user.id;
 
     const from = page * pageSize;
-    const to = from + pageSize - 1;
 
     // Fetch pageSize + 1 to detect if more data exists (avoids slow count: 'exact')
     const { data, error } = await supabase
       .from('resources')
       .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
-      .eq('creator_id', user.id)
+      .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
@@ -283,15 +284,15 @@ export const fetchLibrary = async (): Promise<ParsedMedia[]> => {
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       throw new Error("User not authenticated");
     }
 
     const { data, error } = await supabase
       .from('resources')
       .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
-      .eq('creator_id', user.id)
+      .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
@@ -314,15 +315,15 @@ export const fetchLibraryCount = async (): Promise<number> => {
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       throw new Error("User not authenticated");
     }
 
     const { count, error } = await supabase
       .from('resources')
       .select('*', { count: 'exact', head: true })
-      .eq('creator_id', user.id)
+      .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('is_trashed', false);
 
