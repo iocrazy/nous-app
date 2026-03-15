@@ -2442,6 +2442,38 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           <DownloadsView />
         ) : (
         <>
+        {/* Hidden file inputs — must be outside toolbar so they work on mobile too */}
+        {canUpload && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  handleUpload(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
+              // @ts-ignore - webkitdirectory is non-standard but widely supported
+              webkitdirectory=""
+              directory=""
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  handleUpload(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+            />
+          </>
+        )}
         {/* Toolbar — desktop only, mobile uses breadcrumb + floating search */}
         <div
           className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
@@ -2574,33 +2606,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               {/* Upload button (only on resources view) */}
               {canUpload && (
                 <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.length) {
-                        handleUpload(e.target.files);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
-                  <input
-                    ref={folderInputRef}
-                    type="file"
-                    // @ts-ignore - webkitdirectory is non-standard but widely supported
-                    webkitdirectory=""
-                    directory=""
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.length) {
-                        handleUpload(e.target.files);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
                   {uploading ? (
                     <button
                       disabled
