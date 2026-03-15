@@ -104,11 +104,22 @@ export interface WsProgressPayload {
   error?: string;
 }
 
+/** download_started event from Redis WebSocket (published by backend after dispatching download) */
+export interface WsDownloadStartedPayload {
+  type: 'download_started';
+  unified_task_id?: string;
+  celery_task_id: string;
+  media_id: string;
+  status: string;
+  percent: number;
+}
+
 type Action =
   | { type: 'SET_TASKS'; tasks: UnifiedTask[] }
   | { type: 'INSERT'; task: UnifiedTask }
   | { type: 'UPDATE'; task: UnifiedTask }
   | { type: 'UPDATE_PROGRESS'; payload: WsProgressPayload }
+  | { type: 'DOWNLOAD_STARTED'; payload: WsDownloadStartedPayload }
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
@@ -148,6 +159,38 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
           };
         }),
       };
+    }
+    case 'DOWNLOAD_STARTED': {
+      const ds = action.payload;
+      // If task already exists (via Supabase Realtime), update its celery_task_id
+      const existing = state.tasks.find(t =>
+        (ds.unified_task_id && t.id === ds.unified_task_id) ||
+        (ds.celery_task_id && t.celery_task_id === ds.celery_task_id)
+      );
+      if (existing) {
+        return {
+          ...state,
+          tasks: state.tasks.map(t =>
+            t.id === existing.id
+              ? { ...t, celery_task_id: ds.celery_task_id, media_id: ds.media_id }
+              : t
+          ),
+        };
+      }
+      // Insert a placeholder task so useParser can discover it immediately
+      const placeholder: UnifiedTask = {
+        id: ds.unified_task_id || `ws-dl-${ds.celery_task_id}`,
+        user_id: '',
+        task_type: 'download',
+        status: 'pending',
+        title: '',
+        progress: 0,
+        media_id: ds.media_id,
+        celery_task_id: ds.celery_task_id,
+        metadata: {},
+        created_at: new Date().toISOString(),
+      };
+      return { ...state, tasks: [placeholder, ...state.tasks] };
     }
     case 'DELETE':
       return { ...state, tasks: state.tasks.filter(t => t.id !== action.id) };
@@ -352,8 +395,12 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
       ws.onmessage = (event) => {
         try {
-          const payload: WsProgressPayload = JSON.parse(event.data);
-          dispatch({ type: 'UPDATE_PROGRESS', payload });
+          const raw = JSON.parse(event.data);
+          if (raw.type === 'download_started') {
+            dispatch({ type: 'DOWNLOAD_STARTED', payload: raw as WsDownloadStartedPayload });
+          } else {
+            dispatch({ type: 'UPDATE_PROGRESS', payload: raw as WsProgressPayload });
+          }
         } catch (e) {
           console.warn('[TaskManager/WS] Bad message:', e);
         }
