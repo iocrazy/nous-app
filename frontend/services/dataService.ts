@@ -5,6 +5,22 @@ import { perfMark } from '../utils/perfLog';
 const TABLE_NAME = 'parsed_media';
 const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
 
+// Select only the columns needed for list/grid views — excludes large text fields
+// (description, video_download_urls, ai_extract_text, ai_rewrite_text, ai_analyze_text,
+//  summary_text, hashtags, hls_path, media_format) to reduce payload size.
+const PARSED_MEDIA_LIST_COLUMNS = `
+  id, platform_id, source_platform, title, author, media_type, duration,
+  published_at, original_url, like_count, comment_count, share_count, favorite_count,
+  cover_urls, dynamic_cover_url, cover_download_path, cover_download_status,
+  image_download_urls, image_download_status, image_download_path,
+  video_download_status, music_download_status, download_path, download_time,
+  tags, transcript_status, summary_status, visual_analysis_status,
+  resolution, datasize, datasize_bytes, music_name, music_download_path,
+  error_message, created_at, updated_at
+`.replace(/\s+/g, ' ').trim();
+
+const RESOURCE_LIST_SELECT = `id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(${PARSED_MEDIA_LIST_COLUMNS})`;
+
 const getApiUrl = (): string => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
@@ -254,7 +270,7 @@ export const fetchLibraryPaginated = async (
     perfMark('  supabase query start');
     const { data, error } = await supabase
       .from('resources')
-      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
+      .select(RESOURCE_LIST_SELECT)
       .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
@@ -298,7 +314,7 @@ export const fetchLibrary = async (): Promise<ParsedMedia[]> => {
 
     const { data, error } = await supabase
       .from('resources')
-      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
+      .select(RESOURCE_LIST_SELECT)
       .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
