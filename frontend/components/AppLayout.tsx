@@ -251,67 +251,6 @@ export function AppLayout() {
           />
         )}
 
-        {/* Downloads view mode popup — positioned above tab bar */}
-        {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-            <button
-              onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <LayoutList size={20} />
-            </button>
-            <button
-              onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <LayoutGrid size={20} />
-            </button>
-            <button
-              onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <Smartphone size={20} />
-            </button>
-          </div>
-        )}
-
-        {/* Resources team picker popup — positioned above tab bar */}
-        {isResourcesMenuOpen && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 rounded-xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 min-w-[180px] py-1">
-            {/* Personal workspace */}
-            {personalTeamId && (
-              <button
-                onClick={() => {
-                  navigate(`/team/${personalTeamId}/resources`);
-                  setIsResourcesMenuOpen(false);
-                }}
-                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${
-                  selectedTeamId === personalTeamId ? 'text-indigo-300' : 'text-zinc-300 hover:bg-zinc-700/50'
-                }`}
-              >
-                Personal
-                {selectedTeamId === personalTeamId && <Check size={14} className="ml-auto text-indigo-400" />}
-              </button>
-            )}
-            {/* Team workspaces */}
-            {teams.filter(t => String(t.id) !== personalTeamId).map(team => (
-              <button
-                key={team.id}
-                onClick={() => {
-                  navigate(`/team/${team.id}/resources`);
-                  setIsResourcesMenuOpen(false);
-                }}
-                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${
-                  selectedTeamId === String(team.id) ? 'text-indigo-300' : 'text-zinc-300 hover:bg-zinc-700/50'
-                }`}
-              >
-                {team.name}
-                {selectedTeamId === String(team.id) && <Check size={14} className="ml-auto text-indigo-400" />}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Tab buttons */}
         <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] relative z-40">
           {/* Parser */}
@@ -323,31 +262,102 @@ export function AppLayout() {
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
 
-          {/* Downloads (formerly Library) */}
-          <button
-            onClick={handleMobileLibraryClick}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
-          >
-            <Download size={22} />
-            <span className="text-[10px] leading-tight">Downloads</span>
-          </button>
+          {/* Downloads (formerly Library) — with view mode popup */}
+          <div className="relative">
+            {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                <button
+                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                >
+                  <LayoutList size={20} />
+                </button>
+                <button
+                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                >
+                  <LayoutGrid size={20} />
+                </button>
+                <button
+                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
+                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                >
+                  <Smartphone size={20} />
+                </button>
+              </div>
+            )}
+            <button
+              onClick={handleMobileLibraryClick}
+              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            >
+              <Download size={22} />
+              <span className="text-[10px] leading-tight">Downloads</span>
+            </button>
+          </div>
 
-          {/* Resources — tap to navigate, tap again to show team picker */}
-          <button
-            onClick={() => {
-              setIsMobileMenuOpen(false);
-              if (view === 'resources') {
-                setIsResourcesMenuOpen(!isResourcesMenuOpen);
-              } else {
-                navigate(teamPath('/resources'));
-                setIsResourcesMenuOpen(false);
-              }
-            }}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
-          >
-            <FolderOpen size={22} />
-            <span className="text-[10px] leading-tight">Resources</span>
-          </button>
+          {/* Resources — with team picker popup */}
+          <div className="relative">
+            {isResourcesMenuOpen && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-52 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+                <div className="px-4 pt-3 pb-2 border-b border-zinc-800/60">
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Workspace</span>
+                </div>
+                <div className="py-1 max-h-60 overflow-y-auto">
+                  {personalTeamId && (
+                    <button
+                      onClick={() => { navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
+                        selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
+                        selectedTeamId === personalTeamId ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
+                      }`}>
+                        {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
+                      </div>
+                      <span className={`text-sm flex-1 ${selectedTeamId === personalTeamId ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>Personal</span>
+                      {selectedTeamId === personalTeamId && <Check size={14} className="text-indigo-400" />}
+                    </button>
+                  )}
+                  {teams.filter(t => String(t.id) !== personalTeamId).map(team => {
+                    const isActive = selectedTeamId === String(team.id);
+                    return (
+                      <button
+                        key={team.id}
+                        onClick={() => { navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
+                          isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
+                        }`}
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
+                          isActive ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
+                        }`}>
+                          {team.name.charAt(0).toUpperCase()}
+                        </div>
+                        <span className={`text-sm flex-1 ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>{team.name}</span>
+                        {isActive && <Check size={14} className="text-indigo-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                if (view === 'resources') {
+                  setIsResourcesMenuOpen(!isResourcesMenuOpen);
+                } else {
+                  navigate(teamPath('/resources'));
+                  setIsResourcesMenuOpen(false);
+                }
+              }}
+              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            >
+              <FolderOpen size={22} />
+              <span className="text-[10px] leading-tight">Resources</span>
+            </button>
+          </div>
 
           {/* Profile */}
           <button
