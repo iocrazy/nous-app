@@ -120,7 +120,14 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     if (dlTask?.celery_task_id) {
       setDownloadCeleryId(dlTask.celery_task_id);
       setPendingDownloadMediaId(null);
+      return;
     }
+    // Timeout: if no download task discovered within 30s, clear pending state
+    const timeout = setTimeout(() => {
+      setPendingDownloadMediaId(null);
+      addLog('Download task not found within timeout', 'warning');
+    }, 30000);
+    return () => clearTimeout(timeout);
   }, [tasks, pendingDownloadMediaId, downloadCeleryId]);
 
   // React to download completion/failure from TaskManager

@@ -6,9 +6,12 @@ Parse Tasks Module
 Contains link parsing related Celery tasks.
 """
 
+import json
+
 from celery import group, shared_task
 from loguru import logger
 
+from app.celery_app import celery_app
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import log_user_action
 from app.services.classification_service import ClassificationService
@@ -476,8 +479,6 @@ def _dispatch_download_deduped(
 
     # Publish download_started event via Redis WebSocket (no Realtime dependency)
     try:
-        import json
-        from app.celery_app import celery_app
         redis_client = celery_app.backend.client
         channel = f"task_progress:{user_id}"
         redis_client.publish(channel, json.dumps({
