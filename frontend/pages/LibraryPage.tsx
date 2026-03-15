@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Loader2, LayoutGrid, LayoutList, Smartphone, Folder,
@@ -30,11 +30,20 @@ export function LibraryPage() {
   } = useLibraryContext();
 
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to top when opening a media detail
+  useEffect(() => {
+    if (selectedLibraryItem) {
+      window.scrollTo(0, 0);
+      detailRef.current?.scrollTo(0, 0);
+    }
+  }, [selectedLibraryItem]);
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
       {selectedLibraryItem ? (
-        <div className="flex flex-col h-full p-4 md:p-0">
+        <div ref={detailRef} className="flex flex-col h-full p-4 md:p-0">
            <div className="flex items-center gap-3 mb-4 shrink-0">
               <button
                 onClick={() => setSelectedLibraryItem(null)}
