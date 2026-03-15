@@ -30,7 +30,6 @@ import { router } from './router';
 import { AuthProvider } from './contexts/AuthContext';
 import { TeamProvider } from './contexts/TeamContext';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
-import { PerfOverlay } from './components/PerfOverlay';
 
 // Loading component for i18n lazy loading
 const LoadingFallback = () => (
@@ -57,7 +56,6 @@ root.render(
         </TeamProvider>
       </AuthProvider>
       <PWAUpdatePrompt />
-      <PerfOverlay />
     </Suspense>
   </React.StrictMode>
 );
