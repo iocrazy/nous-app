@@ -246,23 +246,25 @@ export const fetchLibraryPaginated = async (
     const from = page * pageSize;
     const to = from + pageSize - 1;
 
-    const { data, error, count } = await supabase
+    // Fetch pageSize + 1 to detect if more data exists (avoids slow count: 'exact')
+    const { data, error } = await supabase
       .from('resources')
-      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)', { count: 'exact' })
+      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)')
       .eq('creator_id', user.id)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
-      .range(from, to);
+      .range(from, from + pageSize);  // fetch one extra to check hasMore
 
     if (error) throw error;
 
-    const totalCount = count || 0;
-    const hasMore = (page + 1) * pageSize < totalCount;
+    const rows = data || [];
+    const hasMore = rows.length > pageSize;
+    const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
     return {
-      data: (data || []).map(flattenResourceMedia) as ParsedMedia[],
-      totalCount,
+      data: pageData.map(flattenResourceMedia) as ParsedMedia[],
+      totalCount: -1,  // no longer computed
       hasMore,
       page,
     };

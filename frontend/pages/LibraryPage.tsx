@@ -5,22 +5,15 @@ import {
   Video as VideoIcon, ArrowLeft, RefreshCw, CloudOff, Search, X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
-import { Video } from '../types';
 import { CompactMediaCard } from '../components/CompactMediaCard';
 import { LibraryTable } from '../components/LibraryTable';
 import { LibraryFeed } from '../components/LibraryFeed';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { SemanticSearchBar } from '../components/SemanticSearchBar';
-import { useAuth } from '../contexts/AuthContext';
-import { useTeamContext } from '../contexts/TeamContext';
-import { useLibrary } from '../hooks/useLibrary';
+import { useLibraryContext } from '../contexts/LibraryContext';
 
 export function LibraryPage() {
   const { t } = useTranslation();
-  const { selectedTeamId } = useTeamContext();
-
-  const [currentResult, setCurrentResult] = useState<Video | null>(null);
 
   const {
     library, setLibrary, isLoadingLibrary, libraryError,
@@ -34,13 +27,7 @@ export function LibraryPage() {
     selectedVideoCollectionIds, sharedVideoIds,
     loadLibraryData, handleCreateCollection, handleToggleVideoCollection,
     handleUpdateLibraryItem, handleDeleteLibraryItem,
-  } = useLibrary({
-    isAuthenticated: true,
-    selectedTeamId,
-    onVideoRealtimeUpdate: (video) => {
-      setCurrentResult(prev => prev?.platform_id === video.platform_id ? video : prev);
-    },
-  });
+  } = useLibraryContext();
 
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 

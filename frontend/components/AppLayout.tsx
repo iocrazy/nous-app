@@ -9,7 +9,7 @@ import { ViewState, PointPackage } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
-import { useLibrary } from '../hooks/useLibrary';
+import { LibraryProvider, useLibraryContext } from '../contexts/LibraryContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
@@ -48,6 +48,14 @@ export function pathnameToView(pathname: string): ViewState {
 // ---------------------------------------------------------------------------
 
 export function AppLayout() {
+  return (
+    <LibraryProvider>
+      <AppLayoutInner />
+    </LibraryProvider>
+  );
+}
+
+function AppLayoutInner() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
@@ -101,10 +109,7 @@ export function AppLayout() {
     libraryViewMode, setLibraryViewMode,
     selectedLibraryItem, setSelectedLibraryItem,
     loadLibraryData, handleCreateCollection,
-  } = useLibrary({
-    isAuthenticated: true,
-    selectedTeamId,
-  });
+  } = useLibraryContext();
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
