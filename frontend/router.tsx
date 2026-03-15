@@ -5,6 +5,7 @@ import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
 import { LoginPage } from './pages/LoginPage';
 import { ParserPage } from './pages/ParserPage';
+import { LibraryPage } from './pages/LibraryPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CleanupPage } from './pages/CleanupPage';
@@ -44,8 +45,8 @@ export const router = createBrowserRouter([
 
       // Legacy flat URLs → redirect to /team/:teamId/:view
       { path: 'parser', element: <RedirectToTeam view="parser" /> },
-      { path: 'library', element: <RedirectToTeam view="resources" /> },
-      { path: 'library/:itemId', element: <RedirectToTeam view="resources" /> },
+      { path: 'library', element: <RedirectToTeam view="library" /> },
+      { path: 'library/:itemId', element: <RedirectToTeam view="library" /> },
       { path: 'dashboard', element: <RedirectToTeam view="dashboard" /> },
       { path: 'dashboard/:subview', element: <RedirectToTeam view="dashboard" /> },
       { path: 'resources', element: <RedirectToTeam view="resources" /> },
@@ -74,8 +75,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
           { path: 'parser', element: <ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard> },
-          { path: 'library', element: <Navigate to="../resources" replace /> },
-          { path: 'library/:itemId', element: <Navigate to="../resources" replace /> },
+          { path: 'library', element: <ModuleGuard moduleKey="library"><LibraryPage /></ModuleGuard> },
           { path: 'dashboard', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'dashboard/:subview', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'resources', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
