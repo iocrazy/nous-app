@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, LayoutDashboard, User, FolderOpen,
-  LayoutList, LayoutGrid, Smartphone, ListTodo,
-  ScrollText, Activity, BarChart3,
+  Search, Library, User, FolderOpen,
+  LayoutList, LayoutGrid, Smartphone,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage } from '../types';
@@ -241,13 +240,13 @@ export function AppLayout() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Tab Bar — 5 tabs with labels, app-style */}
+      {/* Mobile Tab Bar — 4 tabs: Parser, Library, Resources, Me */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
         {/* Backdrop to dismiss popups */}
-        {(isMobileMenuOpen || isDashboardMenuOpen) && (
+        {isMobileMenuOpen && (
           <div
             className="fixed inset-0 z-30"
-            onClick={() => { setIsMobileMenuOpen(false); setIsDashboardMenuOpen(false); }}
+            onClick={() => setIsMobileMenuOpen(false)}
           />
         )}
 
@@ -275,44 +274,12 @@ export function AppLayout() {
           </div>
         )}
 
-        {/* Dashboard sub-view popup — positioned above tab bar */}
-        {isDashboardMenuOpen && view === 'dashboard' && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-            <button
-              onClick={() => { setDashboardSubView('overview'); setIsDashboardMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'overview' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <BarChart3 size={20} />
-            </button>
-            <button
-              onClick={() => { setDashboardSubView('tasks'); setIsDashboardMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'tasks' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <ListTodo size={20} />
-            </button>
-            <button
-              onClick={() => { setDashboardSubView('logs'); setIsDashboardMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'logs' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <ScrollText size={20} />
-            </button>
-            {userProfile.role === 'admin' && (
-            <button
-              onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
-              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-            >
-              <Activity size={20} />
-            </button>
-            )}
-          </div>
-        )}
-
         {/* Tab buttons */}
         <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] relative z-40">
           {/* Parser */}
           <button
             onClick={() => handleMobileNavClick('parser')}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <Search size={22} />
             <span className="text-[10px] leading-tight">Parser</span>
@@ -321,7 +288,7 @@ export function AppLayout() {
           {/* Library */}
           <button
             onClick={handleMobileLibraryClick}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <Library size={22} />
             <span className="text-[10px] leading-tight">Library</span>
@@ -330,25 +297,16 @@ export function AppLayout() {
           {/* Resources */}
           <button
             onClick={() => handleMobileNavClick('resources')}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <FolderOpen size={22} />
             <span className="text-[10px] leading-tight">Resources</span>
           </button>
 
-          {/* Dashboard */}
-          <button
-            onClick={handleMobileDashboardClick}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500'}`}
-          >
-            <LayoutDashboard size={22} />
-            <span className="text-[10px] leading-tight">Dashboard</span>
-          </button>
-
           {/* Profile */}
           <button
             onClick={() => setIsProfileModalOpen(true)}
-            className="flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors text-zinc-500"
+            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
           >
             {userProfile.avatarUrl ? (
                <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
