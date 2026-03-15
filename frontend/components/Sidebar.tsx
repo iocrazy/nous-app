@@ -19,7 +19,6 @@ import {
   CreditCard,
   Coins,
   Share2,
-  Download,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
@@ -184,7 +183,6 @@ const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" /
 
 const VIEW_PATH_MAP: Record<string, string> = {
   parser: '/parser',
-  library: '/library',
   dashboard: '/dashboard',
   settings: '/settings',
   cleanup: '/cleanup',
@@ -200,7 +198,7 @@ const VIEW_PATH_MAP: Record<string, string> = {
 function viewFromPathname(pathname: string): ViewState {
   // Strip /team/:teamId/ prefix if present
   const stripped = pathname.replace(/^\/team\/[^/]+/, '');
-  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/library')) return 'resources';
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
   if (stripped.startsWith('/cleanup')) return 'cleanup';
@@ -414,9 +412,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 space-y-2">
         {isViewEnabled('parser') && (
           <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
-        )}
-        {isViewEnabled('library') && (
-          <SidebarItem icon={Download} label={t('sidebar.downloads')} active={currentView === 'library'} onClick={() => handleNav('library')} collapsed={collapsed} />
         )}
         {isViewEnabled('resources') && (
           <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
