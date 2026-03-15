@@ -3,9 +3,9 @@
 
 # ============================================
 # Stage 1: Build Rust mediahub-core module
-# Use python:3.12 as base so maturin builds cp312 wheels
+# Use python:3.13 as base so maturin builds cp313 wheels
 # ============================================
-FROM python:3.12-slim AS rust-builder
+FROM python:3.13-slim AS rust-builder
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -25,7 +25,7 @@ RUN maturin build --release
 # ============================================
 # Stage 2: Final Python application
 # ============================================
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # Install Chrome, ffmpeg, build tools and dependencies
 RUN apt-get update && apt-get install -y \
