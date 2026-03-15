@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Loader2, LayoutGrid, LayoutList, Smartphone, Folder,
   Video as VideoIcon, ArrowLeft, RefreshCw, CloudOff, Search, X,
@@ -226,8 +227,8 @@ export function LibraryPage() {
           </div>
           )}
 
-          {/* Mobile Library Search */}
-          {!selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && (
+          {/* Mobile Library Search — portaled to body so fixed positioning works */}
+          {!selectedLibraryItem && (activeLibraryTab === 'my-library' || activeCollectionId) && createPortal(
             <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
               <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
                 {isMobileSearchOpen ? (
@@ -259,7 +260,8 @@ export function LibraryPage() {
                   </button>
                 )}
               </div>
-            </div>
+            </div>,
+            document.body,
           )}
         </>
       )}

@@ -473,16 +473,20 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
 
   return (
     <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
-      {/* Language Switcher */}
-      <LanguageSwitcher />
+      {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
+      <div className="hidden sm:block">
+        <LanguageSwitcher />
+      </div>
 
-      {/* Search */}
-      <IconButton
-        title={t('topbar.search')}
-        onClick={() => { /* Cmd+K search — Phase 2+ */ }}
-      >
-        <Search size={18} />
-      </IconButton>
+      {/* Search — desktop only (Phase 2+) */}
+      <div className="hidden sm:block">
+        <IconButton
+          title={t('topbar.search')}
+          onClick={() => { /* Cmd+K search — Phase 2+ */ }}
+        >
+          <Search size={18} />
+        </IconButton>
+      </div>
 
       {/* Task Center */}
       <div ref={taskCenterRef} className="relative">
@@ -510,8 +514,8 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         {openPanel === 'notifications' && <NotificationsPanel />}
       </div>
 
-      {/* Avatar Menu */}
-      <div ref={avatarRef} className="relative">
+      {/* Avatar Menu — desktop only (mobile: bottom tab "Me") */}
+      <div ref={avatarRef} className="relative hidden sm:block">
         <button
           title={t('topbar.account')}
           onClick={() => togglePanel('avatar')}
