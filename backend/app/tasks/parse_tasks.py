@@ -474,6 +474,23 @@ def _dispatch_download_deduped(
         except Exception:
             pass
 
+    # Publish download_started event via Redis WebSocket (no Realtime dependency)
+    try:
+        import json
+        from app.celery_app import celery_app
+        redis_client = celery_app.backend.client
+        channel = f"task_progress:{user_id}"
+        redis_client.publish(channel, json.dumps({
+            "type": "download_started",
+            "unified_task_id": unified_task_id,
+            "celery_task_id": celery_task.id,
+            "media_id": platform_id,
+            "status": "pending",
+            "percent": 0,
+        }))
+    except Exception as e:
+        logger.debug(f"[Parse/Download] Redis publish download_started failed: {e}")
+
     return celery_task.id
 
 
