@@ -85,6 +85,7 @@ import { fetchLibraries, createLibrary } from '../services/libraryService';
 import { fetchTags } from '../services/tagsService';
 import { createTag } from '../services/unifiedTagService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
+import { useTeamContext } from '../contexts/TeamContext';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
@@ -172,10 +173,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const { tasks: allUnifiedTasks } = useTaskManager();
+  const { teams, personalTeamId } = useTeamContext();
   const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const resPath = (path: string) => teamId ? `/team/${teamId}${path}` : path;
+  const [mobileTeamMenuOpen, setMobileTeamMenuOpen] = useState(false);
 
   // Auto-close mobile sidebar on navigation
   useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
@@ -2271,51 +2274,101 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       <div
         className="flex-1 min-w-0 flex flex-col"
       >
-        {/* Mobile section switcher — horizontal tabs replacing sidebar on mobile */}
-        <div className="md:hidden flex items-center gap-1 px-3 py-2 border-b border-zinc-800/60 overflow-x-auto no-scrollbar">
-          {scopeType === 'team' ? (
-            <>
-              {libraries.map((lib) => (
+        {/* Mobile: team switcher + section tabs */}
+        <div className="md:hidden border-b border-zinc-800/60">
+          {/* Team switcher row */}
+          <div className="relative px-3 pt-2 pb-1">
+            <button
+              onClick={() => setMobileTeamMenuOpen(!mobileTeamMenuOpen)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/80 text-xs font-medium text-zinc-200 transition-colors"
+            >
+              {(() => {
+                const isPersonal = !teamId || teamId === personalTeamId;
+                if (isPersonal) return 'Personal';
+                const team = teams.find(t => String(t.id) === teamId);
+                return team?.name || 'Team';
+              })()}
+              <ChevronDown size={12} className={`text-zinc-500 transition-transform ${mobileTeamMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {mobileTeamMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMobileTeamMenuOpen(false)} />
+                <div className="absolute left-3 top-full mt-1 z-40 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl py-1 min-w-[180px] animate-dropdown">
+                  {/* Personal workspace */}
+                  {personalTeamId && (
+                    <button
+                      onClick={() => { navigate(`/team/${personalTeamId}/resources`); setMobileTeamMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
+                        teamId === personalTeamId ? 'text-indigo-300 bg-indigo-500/10' : 'text-zinc-300 hover:bg-zinc-800'
+                      }`}
+                    >
+                      Personal
+                      {teamId === personalTeamId && <Check size={12} className="ml-auto text-indigo-400" />}
+                    </button>
+                  )}
+                  {/* Team workspaces */}
+                  {teams.filter(t => String(t.id) !== personalTeamId).map(team => (
+                    <button
+                      key={team.id}
+                      onClick={() => { navigate(`/team/${team.id}/resources`); setMobileTeamMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 ${
+                        teamId === String(team.id) ? 'text-indigo-300 bg-indigo-500/10' : 'text-zinc-300 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {team.name}
+                      {teamId === String(team.id) && <Check size={12} className="ml-auto text-indigo-400" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {/* Section tabs row */}
+          <div className="flex items-center gap-1 px-3 py-1.5 overflow-x-auto no-scrollbar">
+            {scopeType === 'team' ? (
+              <>
+                {libraries.map((lib) => (
+                  <button
+                    key={lib.id}
+                    onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
+                    className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      selectedLibraryId === String(lib.id) ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {lib.name}
+                  </button>
+                ))}
+              </>
+            ) : (
+              <>
                 <button
-                  key={lib.id}
-                  onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
+                  onClick={() => navigate(resPath('/resources/downloads'))}
                   className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    selectedLibraryId === String(lib.id) ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                    isDownloadsView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
                   }`}
                 >
-                  {lib.name}
+                  Downloads
                 </button>
-              ))}
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => navigate(resPath('/resources/downloads'))}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  isDownloadsView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-                }`}
-              >
-                Downloads
-              </button>
-              <button
-                onClick={() => navigate(resPath('/resources'))}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  isResourcesView && !selectedFolderId && !selectedSmartFolderId ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-                }`}
-              >
-                {t('resources.myResources')}
-              </button>
-            </>
-          )}
-          <button
-            onClick={() => navigate(resPath('/resources/recycle'))}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-              isRecycleView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
-            }`}
-          >
-            <Trash2 size={12} className="inline -mt-0.5 mr-1" />
-            {t('resources.recycleBin')}
-          </button>
+                <button
+                  onClick={() => navigate(resPath('/resources'))}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    isResourcesView && !selectedFolderId && !selectedSmartFolderId ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  {t('resources.myResources')}
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => navigate(resPath('/resources/recycle'))}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                isRecycleView ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-400'
+              }`}
+            >
+              <Trash2 size={12} className="inline -mt-0.5 mr-1" />
+              {t('resources.recycleBin')}
+            </button>
+          </div>
         </div>
 
         {isDownloadsView ? (
