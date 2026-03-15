@@ -172,6 +172,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   }, [isAuthenticated]);
 
   // Intersection Observer for infinite scroll
+  // library.length is in deps so the observer is recreated after the grid
+  // renders (loadMoreRef.current is set by a child component via context)
   useEffect(() => {
     if (!loadMoreRef.current) return;
     const observer = new IntersectionObserver(
@@ -185,7 +187,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     );
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
-  }, [hasMoreData, isLoadingMore, isSearchActive, currentPage]);
+  }, [hasMoreData, isLoadingMore, isSearchActive, currentPage, library.length]);
 
   // --- Collection Video Loading ---
   // NOTE: media_collections table has been dropped (076 migration).
