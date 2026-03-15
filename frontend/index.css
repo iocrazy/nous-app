@@ -54,6 +54,10 @@ body {
   border-radius: 3px;
 }
 
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Animation utilities */
 @keyframes fade-in {
   from { opacity: 0; }
@@ -85,6 +89,8 @@ body {
   animation-name: fade-in;
 }
 
+.slide-in-from-bottom,
+.slide-in-from-bottom-2,
 .slide-in-from-bottom-4 {
   animation-name: slide-in-from-bottom;
 }

@@ -242,117 +242,124 @@ export function AppLayout() {
       />
 
       {/* Mobile Tab Bar — 5 tabs with labels, app-style */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] z-40">
-        {/* Parser */}
-        <button
-          onClick={() => handleMobileNavClick('parser')}
-          className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
-        >
-          <Search size={22} />
-          <span className="text-[10px] leading-tight">Parser</span>
-        </button>
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
+        {/* Backdrop to dismiss popups */}
+        {(isMobileMenuOpen || isDashboardMenuOpen) && (
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => { setIsMobileMenuOpen(false); setIsDashboardMenuOpen(false); }}
+          />
+        )}
 
-        {/* Library */}
-        <div className="relative">
+        {/* Library view mode popup — positioned above tab bar */}
+        {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <button
+              onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <LayoutList size={20} />
+            </button>
+            <button
+              onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <LayoutGrid size={20} />
+            </button>
+            <button
+              onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <Smartphone size={20} />
+            </button>
+          </div>
+        )}
+
+        {/* Dashboard sub-view popup — positioned above tab bar */}
+        {isDashboardMenuOpen && view === 'dashboard' && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <button
+              onClick={() => { setDashboardSubView('overview'); setIsDashboardMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'overview' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <BarChart3 size={20} />
+            </button>
+            <button
+              onClick={() => { setDashboardSubView('tasks'); setIsDashboardMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'tasks' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <ListTodo size={20} />
+            </button>
+            <button
+              onClick={() => { setDashboardSubView('logs'); setIsDashboardMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'logs' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <ScrollText size={20} />
+            </button>
+            {userProfile.role === 'admin' && (
+            <button
+              onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
+              className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+            >
+              <Activity size={20} />
+            </button>
+            )}
+          </div>
+        )}
+
+        {/* Tab buttons */}
+        <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] relative z-40">
+          {/* Parser */}
+          <button
+            onClick={() => handleMobileNavClick('parser')}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
+          >
+            <Search size={22} />
+            <span className="text-[10px] leading-tight">Parser</span>
+          </button>
+
+          {/* Library */}
           <button
             onClick={handleMobileLibraryClick}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors relative ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <Library size={22} />
             <span className="text-[10px] leading-tight">Library</span>
           </button>
 
-          {isMobileMenuOpen && view === 'library' && !selectedLibraryItem && (
-             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-                <button
-                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutList size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <Smartphone size={20} />
-                </button>
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
-             </div>
-          )}
-        </div>
+          {/* Resources */}
+          <button
+            onClick={() => handleMobileNavClick('resources')}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
+          >
+            <FolderOpen size={22} />
+            <span className="text-[10px] leading-tight">Resources</span>
+          </button>
 
-        {/* Resources */}
-        <button
-          onClick={() => handleMobileNavClick('resources')}
-          className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
-        >
-          <FolderOpen size={22} />
-          <span className="text-[10px] leading-tight">Resources</span>
-        </button>
-
-        {/* Dashboard */}
-        <div className="relative">
+          {/* Dashboard */}
           <button
             onClick={handleMobileDashboardClick}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors relative ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500'}`}
+            className={`flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors ${view === 'dashboard' ? 'text-indigo-400' : 'text-zinc-500'}`}
           >
             <LayoutDashboard size={22} />
             <span className="text-[10px] leading-tight">Dashboard</span>
           </button>
 
-          {isDashboardMenuOpen && view === 'dashboard' && (
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-              <button
-                onClick={() => { setDashboardSubView('overview'); setIsDashboardMenuOpen(false); }}
-                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'overview' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-              >
-                <BarChart3 size={20} />
-              </button>
-              <button
-                onClick={() => { setDashboardSubView('tasks'); setIsDashboardMenuOpen(false); }}
-                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'tasks' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-              >
-                <ListTodo size={20} />
-              </button>
-              <button
-                onClick={() => { setDashboardSubView('logs'); setIsDashboardMenuOpen(false); }}
-                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'logs' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-              >
-                <ScrollText size={20} />
-              </button>
-              {userProfile.role === 'admin' && (
-              <button
-                onClick={() => { setDashboardSubView('monitor'); setIsDashboardMenuOpen(false); }}
-                className={`p-2.5 rounded-lg transition-all ${dashboardSubView === 'monitor' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-              >
-                <Activity size={20} />
-              </button>
-              )}
-              <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45 transform"></div>
-            </div>
-          )}
+          {/* Profile */}
+          <button
+            onClick={() => setIsProfileModalOpen(true)}
+            className="flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors text-zinc-500"
+          >
+            {userProfile.avatarUrl ? (
+               <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
+                  <img src={userProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+               </div>
+            ) : (
+               <User size={22} />
+            )}
+            <span className="text-[10px] leading-tight">Me</span>
+          </button>
         </div>
-
-        {/* Profile */}
-        <button
-          onClick={() => setIsProfileModalOpen(true)}
-          className="flex flex-col items-center gap-0.5 min-w-0 px-1 py-1 transition-colors text-zinc-500"
-        >
-          {userProfile.avatarUrl ? (
-             <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
-                <img src={userProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
-             </div>
-          ) : (
-             <User size={22} />
-          )}
-          <span className="text-[10px] leading-tight">Me</span>
-        </button>
       </div>
 
       {/* Sidebar */}
