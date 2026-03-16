@@ -62,6 +62,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showControls, setShowControls] = useState(true);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -199,6 +200,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!video) return;
 
     setIsLoading(true);
+    setLoadError(null);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -301,6 +303,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleEnded = () => setIsPlaying(false);
     const handleWaiting = () => setIsLoading(true);
     const handleCanPlay = () => setIsLoading(false);
+    const handleError = () => {
+      setIsLoading(false);
+      setLoadError('Video failed to load');
+    };
 
     const handleResize = () => {
       if (video.videoWidth && video.videoHeight) {
@@ -316,6 +322,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     video.addEventListener('ended', handleEnded);
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('error', handleError);
     video.addEventListener('resize', handleResize);
 
     return () => {
@@ -327,6 +334,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('error', handleError);
       video.removeEventListener('resize', handleResize);
     };
   }, [playerRef, onTimeUpdate, onDurationChange]);
@@ -522,9 +530,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       />
 
       {/* Loading spinner */}
-      {isLoading && (
+      {isLoading && !loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
           <div className="w-10 h-10 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Error overlay */}
+      {loadError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
+          <p className="text-zinc-400 text-sm">{loadError}</p>
         </div>
       )}
 
