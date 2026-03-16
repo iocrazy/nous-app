@@ -170,6 +170,14 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     }
   }, [isAuthenticated]);
 
+  // Refs to avoid stale closures in IntersectionObserver callback
+  const hasMoreDataRef = useRef(hasMoreData);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const isSearchActiveRef = useRef(isSearchActive);
+  hasMoreDataRef.current = hasMoreData;
+  isLoadingMoreRef.current = isLoadingMore;
+  isSearchActiveRef.current = isSearchActive;
+
   // Intersection Observer for infinite scroll
   // library.length is in deps so the observer is recreated after the grid
   // renders (loadMoreRef.current is set by a child component via context)
@@ -178,7 +186,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
-        if (entry.isIntersecting && hasMoreData && !isLoadingMore && !isSearchActive) {
+        if (entry.isIntersecting && hasMoreDataRef.current && !isLoadingMoreRef.current && !isSearchActiveRef.current) {
           loadMoreLibrary();
         }
       },

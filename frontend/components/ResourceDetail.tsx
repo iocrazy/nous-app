@@ -761,10 +761,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
         {/* Left: panel toggle + back */}
-        <div className="flex items-center gap-1.5 min-w-[140px]">
+        <div className="flex items-center gap-1.5 md:min-w-[140px]">
           <button
             onClick={() => setShowFileList(!showFileList)}
-            className={`p-1.5 rounded-lg transition-colors ${
+            className={`hidden md:block p-1.5 rounded-lg transition-colors ${
               showFileList ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
             }`}
             title={t('resources.fileListPanel')}
@@ -773,10 +773,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </button>
           <button
             onClick={handleBack}
-            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 md:p-0"
           >
-            <ArrowLeft size={16} />
-            <span>{t('common.back')}</span>
+            <ArrowLeft size={18} />
+            <span className="hidden md:inline">{t('common.back')}</span>
           </button>
         </div>
 
@@ -794,7 +794,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </button>
           <div className="flex items-center gap-2 px-2">
             <FileIcon size={14} className={iconColor} />
-            <span className="text-sm text-zinc-200 font-medium max-w-[300px] truncate">
+            <span className="text-sm text-zinc-200 font-medium max-w-[140px] md:max-w-[300px] truncate">
               {resource.filename}
             </span>
             {/* Version dropdown */}
@@ -934,22 +934,22 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         </div>
 
         {/* Right: download + more */}
-        <div className="flex items-center gap-1.5 min-w-[140px] justify-end">
+        <div className="flex items-center gap-1 md:gap-1.5 md:min-w-[140px] justify-end">
           <button
             onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+            className="flex items-center gap-1.5 p-2 md:px-3 md:py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
           >
             <Share2 size={14} />
-            <span>{t('resources.share')}</span>
+            <span className="hidden md:inline">{t('resources.share')}</span>
           </button>
           {fileUrl && (
             <a
               href={fileUrl}
               download
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 p-2 md:px-3 md:py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
             >
               <Download size={14} />
-              <span>{t('resources.download')}</span>
+              <span className="hidden md:inline">{t('resources.download')}</span>
             </a>
           )}
           <div className="relative">
@@ -985,10 +985,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* File list panel */}
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
+        {/* File list panel — desktop only */}
         {showFileList && (
-          <div className="w-64 border-r border-zinc-800/80 flex flex-col shrink-0">
+          <div className="hidden md:flex w-64 border-r border-zinc-800/80 flex-col shrink-0">
             {/* Header + search */}
             <div className="px-3 py-2.5 border-b border-zinc-800/60">
               <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">{t('resources.fileListPanel')}</p>
@@ -1050,7 +1050,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         )}
 
         {/* Preview area */}
-        <div className="flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden">
+        <div className="w-full h-64 sm:h-80 md:h-auto md:flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden shrink-0 md:shrink">
           {/* Version preview banner */}
           {selectedVersionId && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
@@ -1102,8 +1102,8 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </div>
         </div>
 
-        {/* Right: Inspector panel (Eagle style) */}
-        <div className="w-80 border-l border-zinc-800 flex flex-col shrink-0">
+        {/* Right: Inspector panel (Eagle style) — full-width card on mobile, fixed sidebar on desktop */}
+        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
