@@ -42,6 +42,7 @@ import {
   addResourceTag,
   removeResourceTag,
   getResourceFileUrl,
+  getResourceMediaUrl,
   getVersionFileUrl,
   getVersionHlsUrl,
   fetchResourceContext,
@@ -494,18 +495,39 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         ) {
           setFileUrl(getVersionHlsUrl(resourceId, viewingVersion.id, token || undefined));
           // Also provide direct file URL for "Original" quality option
-          setOriginalFileUrl(getVersionFileUrl(resourceId, viewingVersion.id, token || undefined));
+          const versionFilePath = viewingVersion.file_path;
+          setOriginalFileUrl(
+            versionFilePath
+              ? getResourceMediaUrl(versionFilePath)
+              : getVersionFileUrl(resourceId, viewingVersion.id, token || undefined)
+          );
         } else if (selectedVersionId) {
-          setFileUrl(getVersionFileUrl(resourceId, selectedVersionId, token || undefined));
+          const selVersion = versions.find((v) => v.id === selectedVersionId);
+          const selFilePath = selVersion?.file_path;
+          setFileUrl(
+            selFilePath
+              ? getResourceMediaUrl(selFilePath)
+              : getVersionFileUrl(resourceId, selectedVersionId, token || undefined)
+          );
           setOriginalFileUrl(null);
         } else {
-          setFileUrl(getResourceFileUrl(resourceId, token || undefined));
+          // Use direct /media/ URL (no auth, reliable Range support) when file_path exists
+          const filePath = resource?.file_path;
+          setFileUrl(
+            filePath
+              ? getResourceMediaUrl(filePath)
+              : getResourceFileUrl(resourceId, token || undefined)
+          );
           setOriginalFileUrl(null);
         }
       } catch {
         if (cancelled) return;
         setOriginalFileUrl(null);
-        if (selectedVersionId) {
+        // Fallback: use direct /media/ URL if possible
+        const filePath = resource?.file_path;
+        if (filePath) {
+          setFileUrl(getResourceMediaUrl(filePath));
+        } else if (selectedVersionId) {
           setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
         } else {
           setFileUrl(getResourceFileUrl(resourceId));
@@ -759,7 +781,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
+      <div className="hidden md:flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
         {/* Left: panel toggle + back */}
         <div className="flex items-center gap-1.5 md:min-w-[140px]">
           <button
