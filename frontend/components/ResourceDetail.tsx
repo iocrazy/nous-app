@@ -1159,10 +1159,11 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </div>
 
           {rightTab === 'info' ? (
-          <div className="overflow-y-auto flex-1">
+          <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3 md:p-0">
+          <div className="bg-zinc-900/80 border border-zinc-800/60 rounded-xl overflow-hidden md:bg-transparent md:border-0 md:rounded-none">
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
-            <span className="text-xs text-zinc-600 font-mono">{String(resource.id)}</span>
+            <span className="text-xs text-zinc-600 font-mono">ID: {String(resource.id)}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowShareModal(true)}
@@ -1380,6 +1381,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
           {/* Bottom spacing */}
           <div className="h-6" />
+          </div>{/* close card wrapper */}
           </div>
           ) : rightTab === 'review' ? (
             <ResourceReviewPanel
