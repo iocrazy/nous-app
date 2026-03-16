@@ -937,18 +937,18 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         <div className="flex items-center gap-1 md:gap-1.5 md:min-w-[140px] justify-end">
           <button
             onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 p-2 md:px-3 md:py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+            className="flex items-center gap-1.5 p-1.5 md:px-3 md:py-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 md:bg-purple-600 md:hover:bg-purple-500 md:text-white md:hover:text-white text-xs font-medium rounded-lg transition-colors"
           >
-            <Share2 size={14} />
+            <Share2 size={16} className="md:w-3.5 md:h-3.5" />
             <span className="hidden md:inline">{t('resources.share')}</span>
           </button>
           {fileUrl && (
             <a
               href={fileUrl}
               download
-              className="flex items-center gap-1.5 p-2 md:px-3 md:py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 p-1.5 md:px-3 md:py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
             >
-              <Download size={14} />
+              <Download size={16} className="md:w-3.5 md:h-3.5" />
               <span className="hidden md:inline">{t('resources.download')}</span>
             </a>
           )}
@@ -1108,20 +1108,20 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
               onClick={() => setRightTab('info')}
-              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 rightTab === 'info'
-                  ? 'text-zinc-200 border-b-2 border-indigo-500'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'border-indigo-500 text-indigo-400'
+                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
               Info
             </button>
             <button
               onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
-              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 rightTab === 'review'
-                  ? 'text-zinc-200 border-b-2 border-indigo-500'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'border-indigo-500 text-indigo-400'
+                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
               Review
@@ -1130,10 +1130,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
               <>
                 <button
                   onClick={() => setRightTab('transcript')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'transcript'
-                      ? 'text-zinc-200 border-b-2 border-indigo-500'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
                   Transcript
@@ -1141,10 +1141,10 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                 </button>
                 <button
                   onClick={() => setRightTab('analysis')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'analysis'
-                      ? 'text-zinc-200 border-b-2 border-indigo-500'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
                   Analysis
