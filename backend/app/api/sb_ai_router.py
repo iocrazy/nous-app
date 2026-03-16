@@ -19,6 +19,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
+from app.services.storyboard_service import StoryboardService
 from app.schemas.storyboard import (
     GenerateImageRequest,
     GenerateVideoRequest,
@@ -73,6 +74,8 @@ async def generate_image(
     task manager and delivered over the realtime channel.
     """
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -130,6 +133,8 @@ async def generate_video(
     Returns a task_id immediately.
     """
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -186,6 +191,8 @@ async def split_script(
     Returns a task_id immediately.
     """
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -232,6 +239,8 @@ async def analyze_video(
     Returns a task_id immediately.
     """
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -278,6 +287,8 @@ async def detect_scenes(
     worker. Returns a task_id immediately.
     """
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -329,6 +340,9 @@ async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
     latency is typically low enough to not require a task queue.
     """
     try:
+        sb_svc = StoryboardService()
+        await sb_svc.verify_project_access(body.project_id, auth.user_id)
+
         from app.services.storyboard_ai_service import StoryboardAIService
 
         svc = StoryboardAIService()

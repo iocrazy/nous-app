@@ -54,12 +54,12 @@ const ChatPanel = React.memo(function ChatPanel({
   }, []);
 
   return (
-    <div className="absolute right-0 top-0 h-full flex z-20">
+    <div className="shrink-0 h-full flex z-20">
       {/* Toggle button on the left edge */}
       <button
         onClick={onToggle}
         title={open ? 'Collapse AI panel' : 'Expand AI panel'}
-        className="self-center -translate-x-full flex items-center justify-center w-6 h-12 bg-gray-800 border border-gray-700 border-r-0 rounded-l-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors shadow-lg"
+        className="self-center flex items-center justify-center w-6 h-12 bg-gray-800 border border-gray-700 border-r-0 rounded-l-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors shadow-lg"
       >
         {open ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
       </button>

@@ -174,14 +174,13 @@ def generate_storyboard_image_batch(
         service = StoryboardAIService()
         results = run_async(
             service.generate_image_batch(
-                project_id=project_id,
                 requests=requests,
             )
         )
 
         # Separate successes from partial failures
-        succeeded = [r for r in results if r.get("status") == "success"]
-        failed = [r for r in results if r.get("status") != "success"]
+        succeeded = [r for r in results if r.get("success") is True]
+        failed = [r for r in results if r.get("success") is not True]
 
         if failed:
             logger.warning(
@@ -338,7 +337,6 @@ def split_script_to_storyboard(
         service = StoryboardAIService()
         scenes = run_async(
             service.split_script(
-                project_id=project_id,
                 script_text=script_text,
                 style_guide=style_guide,
             )
@@ -355,20 +353,18 @@ def split_script_to_storyboard(
 
             node_data = {
                 "project_id": project_id,
-                "type": "scene",
+                "node_type": "storyboard_split",
                 "position_x": position["x"],
                 "position_y": position["y"],
                 "width": _GRID_NODE_WIDTH,
                 "height": _GRID_NODE_HEIGHT,
-                "data": {
+                "data_json": {
                     "scene_number": idx + 1,
                     "title": scene.get("title", f"Scene {idx + 1}"),
                     "description": scene.get("description", ""),
                     "dialogue": scene.get("dialogue", ""),
                     "action": scene.get("action", ""),
                 },
-                "label": scene.get("title", f"Scene {idx + 1}"),
-                "order_index": idx,
             }
             node = run_async(node_repo.bulk_upsert(project_id, [node_data]))
             node_id = node[0]["id"] if node else None
@@ -442,7 +438,6 @@ def analyze_video_scenes(
         service = StoryboardAIService()
         scenes = run_async(
             service.analyze_video(
-                project_id=project_id,
                 video_path=video_path,
             )
         )
@@ -458,18 +453,16 @@ def analyze_video_scenes(
 
             node_data = {
                 "project_id": project_id,
-                "type": "scene",
+                "node_type": "storyboard_split",
                 "position_x": position["x"],
                 "position_y": position["y"],
                 "width": _GRID_NODE_WIDTH,
                 "height": _GRID_NODE_HEIGHT,
-                "data": {
+                "data_json": {
                     "scene_number": idx + 1,
                     "timestamp": scene.get("time", idx),
                     "description": scene.get("description", ""),
                 },
-                "label": f"Scene {idx + 1} ({scene.get('time', idx):.1f}s)",
-                "order_index": idx,
             }
             node = run_async(node_repo.bulk_upsert(project_id, [node_data]))
             node_id = node[0]["id"] if node else None
@@ -560,7 +553,7 @@ def export_storyboard(
             )
         elif format == "zip":
             result = run_async(
-                service.export_zip(project_id=project_id, options=resolved_options)
+                service.export_zip(project_id=project_id)
             )
         else:  # png
             result = run_async(

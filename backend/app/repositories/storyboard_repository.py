@@ -93,7 +93,7 @@ class StoryboardProjectRepository:
             client = await self._get_client()
             await (
                 client.table(self.TABLE_NAME)
-                .update({"viewport": viewport_json})
+                .update({"viewport_json": viewport_json})
                 .eq("id", project_id)
                 .execute()
             )
@@ -668,6 +668,30 @@ class StoryboardCharacterRepository:
         except Exception as e:
             logger.error(f"Failed to delete storyboard character {character_id}: {e}")
             raise
+
+    async def get_by_id(self, character_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single character by UUID.
+
+        Args:
+            character_id: UUID of the character.
+
+        Returns:
+            Character row dict, or None if not found.
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("id", character_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get character {character_id}: {e}")
+            return None
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
         """

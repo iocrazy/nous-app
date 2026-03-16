@@ -87,18 +87,21 @@ export function useStoryboardCanvas() {
         .map((c) => c.id);
 
       if (removedIds.length > 0) {
-        setEdges(edges.filter((e) => !removedIds.includes(e.id)));
+        const currentEdges = useStoryboardStore.getState().edges;
+        setEdges(currentEdges.filter((e) => !removedIds.includes(e.id)));
       }
     },
-    [edges, setEdges]
+    [setEdges]
   );
 
   // Handle new connections from React Flow
   const onConnect = useCallback(
     (connection: Connection) => {
+      const currentNodes = useStoryboardStore.getState().nodes;
+      const currentEdges = useStoryboardStore.getState().edges;
       const newEdge: StoryboardEdge = {
         id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
-        project_id: nodes[0]?.project_id ?? '',
+        project_id: currentNodes[0]?.project_id ?? '',
         source_node_id: connection.source,
         target_node_id: connection.target,
         source_handle: connection.sourceHandle ?? undefined,
@@ -107,9 +110,9 @@ export function useStoryboardCanvas() {
         created_at: new Date().toISOString(),
       };
       pushHistory();
-      setEdges([...edges, newEdge]);
+      setEdges([...currentEdges, newEdge]);
     },
-    [nodes, edges, setEdges, pushHistory]
+    [setEdges, pushHistory]
   );
 
   // Keyboard shortcut handler

@@ -16,6 +16,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
+from app.services.storyboard_service import StoryboardService
 from app.services.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/storyboard")
@@ -61,6 +62,8 @@ async def export_project(
         )
 
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,

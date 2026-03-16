@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { NodeProps, Position } from '@xyflow/react';
 import { ImageIcon, Wand2, Users } from 'lucide-react';
 import NodeWrapper from './shared/NodeWrapper';
@@ -38,6 +38,15 @@ const ImageEditNode = React.memo(function ImageEditNode({ id, selected, data }: 
     [id, nodeData, updateNodeData]
   );
 
+  const generateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (generateIntervalRef.current) clearInterval(generateIntervalRef.current);
+    };
+  }, []);
+
   const toggleCharacter = useCallback(
     (charId: string) => {
       const next = selectedChars.includes(charId)
@@ -52,10 +61,12 @@ const ImageEditNode = React.memo(function ImageEditNode({ id, selected, data }: 
     update({ progress: 0 });
     // Simulate progress — real implementation wires to API
     let p = 0;
-    const interval = setInterval(() => {
+    if (generateIntervalRef.current) clearInterval(generateIntervalRef.current);
+    generateIntervalRef.current = setInterval(() => {
       p += 10;
       if (p >= 100) {
-        clearInterval(interval);
+        if (generateIntervalRef.current) clearInterval(generateIntervalRef.current);
+        generateIntervalRef.current = null;
         update({ progress: 100 });
       } else {
         update({ progress: p });

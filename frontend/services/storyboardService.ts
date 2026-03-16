@@ -39,7 +39,7 @@ export async function fetchProjects(
 ): Promise<{ data: ProjectSummary[]; total: number }> {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects?${params}`, { headers });
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
   return handleResponse<{ data: ProjectSummary[]; total: number }>(res);
 }
 
@@ -51,7 +51,7 @@ export interface ProjectFull extends StoryboardProject {
 
 export async function fetchProject(projectId: string): Promise<ProjectFull> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}`, { headers });
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}`, { headers });
   return handleResponse<ProjectFull>(res);
 }
 
@@ -61,7 +61,7 @@ export async function createProject(data: {
   description?: string;
 }): Promise<StoryboardProject> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -74,7 +74,7 @@ export async function updateProject(
   data: Partial<Pick<StoryboardProject, 'name' | 'description' | 'cover_image_url' | 'settings_json' | 'status'>>
 ): Promise<StoryboardProject> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(data),
@@ -84,7 +84,7 @@ export async function updateProject(
 
 export async function deleteProject(projectId: string): Promise<void> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}`, {
     method: 'DELETE',
     headers,
   });
@@ -96,7 +96,7 @@ export async function updateViewport(
   viewport: { x: number; y: number; zoom: number }
 ): Promise<void> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/viewport`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/viewport`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({ viewport_json: viewport }),
@@ -125,7 +125,7 @@ export async function syncCanvas(
   syncData: CanvasSyncData
 ): Promise<SyncResult> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/sync`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/sync`, {
     method: 'POST',
     headers,
     body: JSON.stringify(syncData),
@@ -137,7 +137,7 @@ export async function syncCanvas(
 
 export async function fetchCharacters(projectId: string): Promise<StoryboardCharacter[]> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/characters`, { headers });
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/characters`, { headers });
   return handleResponse<StoryboardCharacter[]>(res);
 }
 
@@ -146,7 +146,7 @@ export async function createCharacter(
   data: { name: string; description?: string; visual_traits?: Record<string, string> }
 ): Promise<StoryboardCharacter> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/characters`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/characters`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -159,7 +159,7 @@ export async function updateCharacter(
   data: Partial<Pick<StoryboardCharacter, 'name' | 'description' | 'reference_image_url' | 'thumbnail_url' | 'visual_traits' | 'sort_order'>>
 ): Promise<StoryboardCharacter> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/characters/${characterId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/characters/${characterId}`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(data),
@@ -169,7 +169,7 @@ export async function updateCharacter(
 
 export async function deleteCharacter(characterId: string): Promise<void> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/characters/${characterId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/characters/${characterId}`, {
     method: 'DELETE',
     headers,
   });
@@ -183,7 +183,7 @@ export async function updateFrame(
   data: Partial<Pick<StoryboardFrame, 'note' | 'shot_type' | 'camera_angle' | 'camera_movement' | 'focal_length' | 'lighting' | 'duration_seconds' | 'transition_type' | 'annotations_json' | 'sort_order'>>
 ): Promise<StoryboardFrame> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/frames/${frameId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/frames/${frameId}`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(data),
@@ -193,7 +193,7 @@ export async function updateFrame(
 
 export async function reorderFrames(frameIds: string[]): Promise<void> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/frames/reorder`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/frames/reorder`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ frame_ids: frameIds }),
@@ -215,7 +215,7 @@ export interface GenerateImageParams {
 
 export async function generateImage(data: GenerateImageParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/ai/generate-image`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-image`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -234,7 +234,7 @@ export interface GenerateVideoParams {
 
 export async function generateVideo(data: GenerateVideoParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/ai/generate-video`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-video`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -251,7 +251,7 @@ export interface SplitScriptParams {
 
 export async function splitScript(data: SplitScriptParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/ai/split-script`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/split-script`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
@@ -265,7 +265,7 @@ export async function chatWithAI(
   frameId?: string
 ): Promise<{ response: string; actions: unknown[] }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/chat`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/chat`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ message, frame_id: frameId }),
@@ -275,7 +275,7 @@ export async function chatWithAI(
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-export type ExportFormat = 'pdf' | 'pptx' | 'video' | 'zip';
+export type ExportFormat = 'png' | 'pdf' | 'zip';
 
 export async function exportProject(
   projectId: string,
@@ -283,7 +283,7 @@ export async function exportProject(
   options?: Record<string, unknown>
 ): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/storyboard/projects/${projectId}/export`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/export`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ format, options: options ?? {} }),

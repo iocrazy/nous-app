@@ -12,10 +12,16 @@ export function useStoryboardPersist() {
 
   const nodesEdgesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialLoadRef = useRef(true);
 
   // Debounced sync for nodes & edges
   useEffect(() => {
     if (!currentProjectId) return;
+
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false;
+      return;
+    }
 
     if (nodesEdgesTimer.current) {
       clearTimeout(nodesEdgesTimer.current);
