@@ -408,14 +408,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [playerRef, isMuted]);
 
   const handleFullscreen = useCallback(() => {
+    const video = playerRef.current;
     const container = containerRef.current;
     if (!container) return;
+
+    // iOS Safari: use webkitEnterFullscreen on the video element
+    if (video && typeof (video as any).webkitEnterFullscreen === 'function') {
+      (video as any).webkitEnterFullscreen();
+      return;
+    }
+
+    // Standard Fullscreen API
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     } else {
       container.requestFullscreen().catch(() => {});
     }
-  }, []);
+  }, [playerRef]);
 
   // Comprehensive keyboard shortcuts
   useEffect(() => {
