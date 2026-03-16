@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Play,
   Pause,
@@ -56,6 +56,13 @@ const FrameTimeline = React.memo(function FrameTimeline({
 
   const dragIdRef = useRef<string | null>(null);
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+    };
+  }, []);
 
   const total = totalDuration(frames);
 

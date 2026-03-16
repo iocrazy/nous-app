@@ -45,6 +45,8 @@ async def create_nodes(
     if not body:
         raise HTTPException(status_code=422, detail="Node list must not be empty")
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         node_repo = StoryboardNodeRepository()
         nodes = await node_repo.bulk_upsert(
             project_id,
@@ -113,6 +115,7 @@ async def sync_canvas(
     """
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         result = await svc.sync_canvas(project_id, body)
         return {"success": True, "data": result}
     except Exception as exc:
@@ -135,6 +138,8 @@ async def create_edges(
     if not body:
         raise HTTPException(status_code=422, detail="Edge list must not be empty")
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         edge_repo = StoryboardEdgeRepository()
         edges = await edge_repo.bulk_upsert(project_id, body)
         return {"success": True, "data": edges}

@@ -12,6 +12,8 @@ import os
 import logging
 from typing import Any, Dict, List, Optional
 
+from fastapi import HTTPException
+
 from app.repositories.storyboard_repository import (
     StoryboardProjectRepository,
     StoryboardNodeRepository,
@@ -47,6 +49,43 @@ class StoryboardService:
         self.asset_repo = StoryboardAssetRepository()
 
     # ------------------------------------------------------------------ #
+    # Authorization
+    # ------------------------------------------------------------------ #
+
+    async def verify_project_access(self, project_id: str, user_id: str) -> None:
+        """
+        Verify that *user_id* belongs to the team that owns *project_id*.
+
+        Raises:
+            HTTPException(404): If the project does not exist.
+            HTTPException(403): If the user is not a member of the project's team.
+        """
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        team_id = project.get("team_id")
+        if not team_id:
+            raise HTTPException(status_code=403, detail="Project has no team association")
+
+        from app.db.supabase_client import get_async_supabase_admin
+
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("id")
+            .eq("team_id", team_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have access to this project",
+            )
+
+    # ------------------------------------------------------------------ #
     # Project operations
     # ------------------------------------------------------------------ #
 
@@ -72,7 +111,7 @@ class StoryboardService:
         try:
             project_data: Dict[str, Any] = {
                 "team_id": team_id,
-                "owner_id": user_id,
+                "created_by": user_id,
                 "name": name,
             }
             if description is not None:
@@ -442,17 +481,7 @@ class StoryboardService:
             ValueError: If the character cannot be found.
         """
         try:
-            from app.db.supabase_client import get_async_supabase_admin
-
-            client = await get_async_supabase_admin()
-            result = (
-                await client.table(StoryboardCharacterRepository.TABLE_NAME)
-                .select("*")
-                .eq("id", character_id)
-                .limit(1)
-                .execute()
-            )
-            character = result.data[0] if result.data else None
+            character = await self.character_repo.get_by_id(character_id)
         except Exception as exc:
             logger.error(
                 "Failed to fetch character %s for prompt: %s",

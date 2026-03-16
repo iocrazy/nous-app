@@ -107,6 +107,7 @@ async def get_project(auth: AuthDep, project_id: str) -> Dict[str, Any]:
     """Retrieve a single storyboard project with its full canvas data."""
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         project = await svc.get_project_full(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -130,6 +131,7 @@ async def update_project(
     """Update metadata for an existing storyboard project."""
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         updated = await svc.update_project(
             project_id,
             body.model_dump(exclude_none=True),
@@ -150,6 +152,7 @@ async def delete_project(auth: AuthDep, project_id: str) -> Dict[str, Any]:
     """Soft-delete a storyboard project (sets status to 'deleted')."""
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         await svc.soft_delete_project(project_id)
         return {"success": True}
     except Exception as exc:
@@ -169,6 +172,7 @@ async def update_viewport(
     """Persist the canvas viewport state (pan / zoom) for a project."""
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         updated = await svc.update_viewport(project_id, body)
         return {"success": True, "data": updated}
     except Exception as exc:

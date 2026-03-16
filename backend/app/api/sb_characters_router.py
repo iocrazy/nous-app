@@ -34,6 +34,7 @@ async def create_character(
     """Create a character entry for a storyboard project."""
     try:
         svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         character = await svc.create_character(
             project_id=project_id,
             name=body.name,
@@ -106,6 +107,8 @@ async def list_characters(
 ) -> Dict[str, Any]:
     """List all characters for a storyboard project."""
     try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
         character_repo = StoryboardCharacterRepository()
         characters = await character_repo.list_by_project(project_id)
         return {"success": True, "data": characters}

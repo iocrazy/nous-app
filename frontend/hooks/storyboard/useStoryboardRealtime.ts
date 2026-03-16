@@ -43,8 +43,12 @@ export function useStoryboardRealtime() {
           const nodeId = task.metadata?.node_id as string | undefined;
           if (!nodeId) return;
 
+          const currentNode = useStoryboardStore.getState().nodes.find(n => n.id === nodeId);
+          if (!currentNode) return;
+
           updateNodeData(nodeId, {
             data_json: {
+              ...currentNode.data_json,
               task_id: task.id,
               task_status: task.status,
               task_progress: task.progress ?? 0,

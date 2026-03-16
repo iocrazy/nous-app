@@ -39,7 +39,7 @@ class StoryboardProjectResponse(BaseModel):
     """API response for a single storyboard project."""
 
     id: str
-    owner_id: str
+    created_by: str
     name: str
     description: Optional[str] = None
     status: str

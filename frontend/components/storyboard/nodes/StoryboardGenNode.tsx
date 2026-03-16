@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { NodeProps, Position } from '@xyflow/react';
 import { Layers, Plus, Minus, Wand2 } from 'lucide-react';
 import NodeWrapper from './shared/NodeWrapper';
@@ -40,6 +40,18 @@ const StoryboardGenNode = React.memo(function StoryboardGenNode({ id, selected, 
   const provider = (nodeData.provider as string) ?? 'replicate';
   const locked = nodeData.locked as boolean | undefined;
 
+  const generateIntervalsRef = useRef<ReturnType<typeof setInterval>[]>([]);
+
+  // Clean up intervals on unmount
+  useEffect(() => {
+    return () => {
+      for (const interval of generateIntervalsRef.current) {
+        clearInterval(interval);
+      }
+      generateIntervalsRef.current = [];
+    };
+  }, []);
+
   const update = useCallback(
     (patch: Record<string, unknown>) => {
       updateNodeData(id, { data_json: { ...nodeData, ...patch } });
@@ -70,6 +82,12 @@ const StoryboardGenNode = React.memo(function StoryboardGenNode({ id, selected, 
   );
 
   const handleBatchGenerate = useCallback(() => {
+    // Clear any existing intervals
+    for (const interval of generateIntervalsRef.current) {
+      clearInterval(interval);
+    }
+    generateIntervalsRef.current = [];
+
     // Mark all frames as generating
     update({
       frames: frames.map((f) => ({ ...f, progress: 0 })),
@@ -81,6 +99,7 @@ const StoryboardGenNode = React.memo(function StoryboardGenNode({ id, selected, 
         p += 10;
         if (p >= 100) {
           clearInterval(interval);
+          generateIntervalsRef.current = generateIntervalsRef.current.filter((i) => i !== interval);
           update({
             frames: frames.map((f) =>
               f.id === frame.id ? { ...f, progress: 100 } : f
@@ -90,6 +109,7 @@ const StoryboardGenNode = React.memo(function StoryboardGenNode({ id, selected, 
           setTimeout(() => {}, idx * 500); // stagger
         }
       }, 200 + idx * 100);
+      generateIntervalsRef.current.push(interval);
     });
   }, [frames, update]);
 
