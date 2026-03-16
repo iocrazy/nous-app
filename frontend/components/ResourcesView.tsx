@@ -2411,30 +2411,73 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         {/* Mobile breadcrumb navigation — replaces horizontal tabs */}
         {!isDownloadsView && (
           <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
-            {(selectedFolderId || isRecycleView) && (
-              <button
-                onClick={() => {
-                  if (isRecycleView) {
-                    if (recycleFolderId) {
-                      setRecycleFolderId(null);
-                    } else {
-                      navigate(resPath('/resources'));
+            {isMobileSearchOpen ? (
+              <div className="flex items-center w-full gap-2 animate-in slide-in-from-right-4 duration-200">
+                <Search size={16} className="text-zinc-400 shrink-0" />
+                <input
+                  ref={mobileSearchInputRef}
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleResourceQueryChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim()) {
+                      handleResourceAISearch(searchQuery, 'hybrid');
                     }
-                  } else if (folderChain.length > 1) {
-                    const parentId = folderChain[folderChain.length - 2]?.id;
-                    navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
-                  } else {
-                    navigate(resPath('/resources'));
-                  }
-                }}
-                className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
-              >
-                <ChevronLeft size={22} />
-              </button>
+                    if (e.key === 'Escape') {
+                      setIsMobileSearchOpen(false);
+                      handleResourceSearchClear();
+                    }
+                  }}
+                  placeholder={t('resources.searchFiles')}
+                  className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
+                />
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    handleResourceSearchClear();
+                  }}
+                  className="p-1 text-zinc-400 hover:text-zinc-200"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <>
+                {(selectedFolderId || isRecycleView) && (
+                  <button
+                    onClick={() => {
+                      if (isRecycleView) {
+                        if (recycleFolderId) {
+                          setRecycleFolderId(null);
+                        } else {
+                          navigate(resPath('/resources'));
+                        }
+                      } else if (folderChain.length > 1) {
+                        const parentId = folderChain[folderChain.length - 2]?.id;
+                        navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
+                      } else {
+                        navigate(resPath('/resources'));
+                      }
+                    }}
+                    className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
+                  >
+                    <ChevronLeft size={22} />
+                  </button>
+                )}
+                <div className="flex-1 min-w-0">
+                  <Breadcrumb segments={breadcrumbSegments} />
+                </div>
+                {!isRecycleView && !isSharedView && (
+                  <button
+                    onClick={() => setIsMobileSearchOpen(true)}
+                    className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg transition-colors shrink-0"
+                  >
+                    <Search size={20} />
+                  </button>
+                )}
+              </>
             )}
-            <div className="flex-1 min-w-0">
-              <Breadcrumb segments={breadcrumbSegments} />
-            </div>
           </div>
         )}
 
@@ -3468,61 +3511,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         </div>
       )}
 
-      {/* ── Mobile floating search button — portal to body ── */}
-      {isResourcesView && !isRecycleView && !isSharedView && !isDownloadsView && createPortal(
-        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
-          <div className="pointer-events-auto flex items-center justify-end w-full">
-            {isMobileSearchOpen ? (
-              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200">
-                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
-                <input
-                  ref={mobileSearchInputRef}
-                  autoFocus
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleResourceQueryChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && searchQuery.trim()) {
-                      handleResourceAISearch(searchQuery, 'hybrid');
-                    }
-                    if (e.key === 'Escape') {
-                      setIsMobileSearchOpen(false);
-                      handleResourceSearchClear();
-                    }
-                  }}
-                  placeholder={t('resources.searchFiles')}
-                  className="bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none w-full"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => handleResourceSearchClear()}
-                    className="ml-1 text-zinc-400 hover:text-zinc-200"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    setIsMobileSearchOpen(false);
-                    if (!searchQuery) handleResourceSearchClear();
-                  }}
-                  className="ml-2 text-zinc-400 hover:text-zinc-200"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsMobileSearchOpen(true)}
-                className="p-3 bg-black/20 backdrop-blur-md rounded-full hover:bg-black/40 transition-colors"
-              >
-                <Search size={22} className="text-zinc-300" />
-              </button>
-            )}
-          </div>
-        </div>,
-        document.body,
-      )}
+      {/* Mobile floating search removed — now integrated into breadcrumb bar */}
 
       {/* ── Touch drag preview — portal to body ── */}
       {touchDragState.isDragging && touchDragState.dragPosition && createPortal(
