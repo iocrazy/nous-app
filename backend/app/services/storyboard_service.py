@@ -1,0 +1,514 @@
+# app/services/storyboard_service.py
+
+"""
+Storyboard Core Service
+
+Business logic for the Storyboard Workbench: project CRUD, canvas sync,
+and character management. Delegates data access to the repository layer.
+"""
+
+import asyncio
+import os
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import HTTPException
+
+from app.repositories.storyboard_repository import (
+    StoryboardProjectRepository,
+    StoryboardNodeRepository,
+    StoryboardEdgeRepository,
+    StoryboardFrameRepository,
+    StoryboardCharacterRepository,
+    StoryboardAssetRepository,
+)
+from app.schemas.storyboard import CanvasSyncRequest
+
+logger = logging.getLogger(__name__)
+
+# NAS directory sub-structure created for every new storyboard project
+_PROJECT_SUBDIRS = [
+    "frames",
+    "thumbnails",
+    "characters",
+    "videos",
+    "exports",
+    "temp",
+]
+
+
+class StoryboardService:
+    """Orchestrates storyboard business logic across all sub-repositories."""
+
+    def __init__(self) -> None:
+        self.project_repo = StoryboardProjectRepository()
+        self.node_repo = StoryboardNodeRepository()
+        self.edge_repo = StoryboardEdgeRepository()
+        self.frame_repo = StoryboardFrameRepository()
+        self.character_repo = StoryboardCharacterRepository()
+        self.asset_repo = StoryboardAssetRepository()
+
+    # ------------------------------------------------------------------ #
+    # Authorization
+    # ------------------------------------------------------------------ #
+
+    async def verify_project_access(self, project_id: str, user_id: str) -> None:
+        """
+        Verify that *user_id* belongs to the team that owns *project_id*.
+
+        Raises:
+            HTTPException(404): If the project does not exist.
+            HTTPException(403): If the user is not a member of the project's team.
+        """
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        team_id = project.get("team_id")
+        if not team_id:
+            raise HTTPException(status_code=403, detail="Project has no team association")
+
+        from app.db.supabase_client import get_async_supabase_admin
+
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("id")
+            .eq("team_id", team_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have access to this project",
+            )
+
+    # ------------------------------------------------------------------ #
+    # Project operations
+    # ------------------------------------------------------------------ #
+
+    async def create_project(
+        self,
+        team_id: str,
+        user_id: str,
+        name: str,
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a storyboard project and provision its NAS directory tree.
+
+        Args:
+            team_id: UUID of the owning team.
+            user_id: UUID of the creating user.
+            name: Human-readable project name.
+            description: Optional project description.
+
+        Returns:
+            Created project row dict.
+        """
+        try:
+            project_data: Dict[str, Any] = {
+                "team_id": team_id,
+                "created_by": user_id,
+                "name": name,
+            }
+            if description is not None:
+                project_data["description"] = description
+
+            project = await self.project_repo.create(project_data)
+            project_id = project.get("id", "")
+
+            if project_id:
+                self._ensure_nas_directories(team_id, project_id)
+
+            logger.info(
+                "Created storyboard project %s for team %s", project_id, team_id
+            )
+            return project
+        except Exception as exc:
+            logger.error("Failed to create storyboard project: %s", exc)
+            raise
+
+    def _ensure_nas_directories(self, team_id: str, project_id: str) -> None:
+        """
+        Create the NAS directory tree for a project if it does not exist.
+
+        Args:
+            team_id: UUID of the team (used as top-level folder).
+            project_id: UUID of the project.
+        """
+        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+        project_root = os.path.join(
+            nas_base, "teams", team_id, "storyboard", project_id
+        )
+        try:
+            os.makedirs(project_root, exist_ok=True)
+            for subdir in _PROJECT_SUBDIRS:
+                os.makedirs(os.path.join(project_root, subdir), exist_ok=True)
+            logger.info("Provisioned NAS directories at %s", project_root)
+        except OSError as exc:
+            logger.error(
+                "Failed to create NAS directories for project %s: %s",
+                project_id,
+                exc,
+            )
+
+    async def get_project_full(self, project_id: str) -> Dict[str, Any]:
+        """
+        Fetch project details together with all canvas entities in parallel.
+
+        Args:
+            project_id: UUID of the project.
+
+        Returns:
+            Dict with keys: project, nodes, edges, frames, characters.
+        """
+        try:
+            project, nodes, edges, frames, characters = await asyncio.gather(
+                self.project_repo.get_by_id(project_id),
+                self.node_repo.get_by_project(project_id),
+                self.edge_repo.get_by_project(project_id),
+                self.frame_repo.get_by_project(project_id),
+                self.character_repo.list_by_project(project_id),
+            )
+            return {
+                "project": project,
+                "nodes": nodes,
+                "edges": edges,
+                "frames": frames,
+                "characters": characters,
+            }
+        except Exception as exc:
+            logger.error(
+                "Failed to fetch full project data for %s: %s", project_id, exc
+            )
+            raise
+
+    async def list_projects(
+        self,
+        team_id: str,
+        page: int = 1,
+        limit: int = 20,
+        search: Optional[str] = None,
+        sort_by: str = "updated_at",
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
+        """
+        Paginated list of active storyboard projects for a team.
+
+        Deleted projects (status='deleted') are excluded by the repository.
+
+        Args:
+            team_id: UUID of the team.
+            page: 1-based page number.
+            limit: Rows per page.
+            search: Optional name substring filter.
+            sort_by: Column to sort by.
+            sort_order: 'asc' or 'desc'.
+
+        Returns:
+            Dict with keys: items, total, page, limit.
+        """
+        try:
+            return await self.project_repo.list_by_team(
+                team_id=team_id,
+                page=page,
+                limit=limit,
+                search=search,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to list projects for team %s: %s", team_id, exc
+            )
+            raise
+
+    async def update_project(
+        self, project_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update a storyboard project's metadata.
+
+        Args:
+            project_id: UUID of the project.
+            data: Fields to update.
+
+        Returns:
+            Updated project row dict.
+        """
+        try:
+            return await self.project_repo.update(project_id, data)
+        except Exception as exc:
+            logger.error(
+                "Failed to update storyboard project %s: %s", project_id, exc
+            )
+            raise
+
+    async def soft_delete_project(self, project_id: str) -> None:
+        """
+        Soft-delete a project by marking its status as 'deleted'.
+
+        Args:
+            project_id: UUID of the project.
+        """
+        try:
+            await self.project_repo.soft_delete(project_id)
+        except Exception as exc:
+            logger.error(
+                "Failed to soft-delete storyboard project %s: %s",
+                project_id,
+                exc,
+            )
+            raise
+
+    async def update_viewport(
+        self, project_id: str, viewport_json: Dict[str, Any]
+    ) -> None:
+        """
+        Persist the canvas viewport state without touching updated_at.
+
+        Args:
+            project_id: UUID of the project.
+            viewport_json: Serialisable viewport state (x, y, zoom, …).
+        """
+        try:
+            await self.project_repo.update_viewport(project_id, viewport_json)
+        except Exception as exc:
+            logger.error(
+                "Failed to update viewport for project %s: %s",
+                project_id,
+                exc,
+            )
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Canvas sync
+    # ------------------------------------------------------------------ #
+
+    async def sync_canvas(
+        self, project_id: str, sync_request: CanvasSyncRequest
+    ) -> Dict[str, Any]:
+        """
+        Apply an incremental canvas sync: upsert/delete nodes and edges.
+
+        Processing order:
+          1. added_nodes   → bulk upsert
+          2. updated_nodes → individual updates
+          3. deleted_node_ids → individual deletes
+          4. added_edges   → bulk upsert
+          5. deleted_edge_ids → individual deletes
+
+        Args:
+            project_id: UUID of the canvas project.
+            sync_request: Validated sync payload.
+
+        Returns:
+            Summary dict with counts for each operation.
+        """
+        added_nodes_count = 0
+        updated_nodes_count = 0
+        deleted_nodes_count = 0
+        added_edges_count = 0
+        deleted_edges_count = 0
+
+        try:
+            # --- nodes: add ---
+            if sync_request.added_nodes:
+                added_node_dicts: List[Dict[str, Any]] = [
+                    node.model_dump() for node in sync_request.added_nodes
+                ]
+                await self.node_repo.bulk_upsert(project_id, added_node_dicts)
+                added_nodes_count = len(added_node_dicts)
+
+            # --- nodes: update ---
+            if sync_request.updated_nodes:
+                update_tasks = [
+                    self.node_repo.update(node["id"], node)
+                    for node in sync_request.updated_nodes
+                    if "id" in node
+                ]
+                await asyncio.gather(*update_tasks)
+                updated_nodes_count = len(update_tasks)
+
+            # --- nodes: delete ---
+            if sync_request.deleted_node_ids:
+                delete_node_tasks = [
+                    self.node_repo.delete(node_id)
+                    for node_id in sync_request.deleted_node_ids
+                ]
+                await asyncio.gather(*delete_node_tasks)
+                deleted_nodes_count = len(delete_node_tasks)
+
+            # --- edges: add ---
+            if sync_request.added_edges:
+                await self.edge_repo.bulk_upsert(
+                    project_id, sync_request.added_edges
+                )
+                added_edges_count = len(sync_request.added_edges)
+
+            # --- edges: delete ---
+            if sync_request.deleted_edge_ids:
+                delete_edge_tasks = [
+                    self.edge_repo.delete(edge_id)
+                    for edge_id in sync_request.deleted_edge_ids
+                ]
+                await asyncio.gather(*delete_edge_tasks)
+                deleted_edges_count = len(delete_edge_tasks)
+
+            logger.info(
+                "Canvas sync for project %s: +%d nodes, ~%d nodes, -%d nodes, "
+                "+%d edges, -%d edges",
+                project_id,
+                added_nodes_count,
+                updated_nodes_count,
+                deleted_nodes_count,
+                added_edges_count,
+                deleted_edges_count,
+            )
+
+            return {
+                "added_nodes_count": added_nodes_count,
+                "updated_nodes_count": updated_nodes_count,
+                "deleted_nodes_count": deleted_nodes_count,
+                "added_edges_count": added_edges_count,
+                "deleted_edges_count": deleted_edges_count,
+            }
+        except Exception as exc:
+            logger.error(
+                "Canvas sync failed for project %s: %s", project_id, exc
+            )
+            raise
+
+    # ------------------------------------------------------------------ #
+    # Character operations
+    # ------------------------------------------------------------------ #
+
+    async def create_character(
+        self,
+        project_id: str,
+        name: str,
+        description: Optional[str] = None,
+        visual_traits: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a character entry for a storyboard project.
+
+        Args:
+            project_id: UUID of the owning project.
+            name: Character display name.
+            description: Optional narrative description.
+            visual_traits: Optional dict of visual attributes (age, hair, etc.).
+
+        Returns:
+            Created character row dict.
+        """
+        try:
+            character_data: Dict[str, Any] = {
+                "project_id": project_id,
+                "name": name,
+            }
+            if description is not None:
+                character_data["description"] = description
+            if visual_traits is not None:
+                character_data["visual_traits"] = visual_traits
+
+            character = await self.character_repo.create(character_data)
+            logger.info(
+                "Created character '%s' for project %s", name, project_id
+            )
+            return character
+        except Exception as exc:
+            logger.error(
+                "Failed to create character for project %s: %s",
+                project_id,
+                exc,
+            )
+            raise
+
+    async def update_character(
+        self, character_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update a character's attributes.
+
+        Args:
+            character_id: UUID of the character.
+            data: Fields to update.
+
+        Returns:
+            Updated character row dict.
+        """
+        try:
+            return await self.character_repo.update(character_id, data)
+        except Exception as exc:
+            logger.error(
+                "Failed to update character %s: %s", character_id, exc
+            )
+            raise
+
+    async def delete_character(self, character_id: str) -> None:
+        """
+        Hard-delete a character.
+
+        Args:
+            character_id: UUID of the character.
+        """
+        try:
+            await self.character_repo.delete(character_id)
+        except Exception as exc:
+            logger.error(
+                "Failed to delete character %s: %s", character_id, exc
+            )
+            raise
+
+    async def get_character_prompt_fragment(self, character_id: str) -> str:
+        """
+        Build an AI prompt fragment that describes a character's visual traits.
+
+        Trait keys used (all optional): age, body_type, hair, clothing.
+        Example output: "a 30s athletic person with long brown hair wearing a red jacket"
+
+        Args:
+            character_id: UUID of the character.
+
+        Returns:
+            Prompt fragment string describing the character's appearance.
+
+        Raises:
+            ValueError: If the character cannot be found.
+        """
+        try:
+            character = await self.character_repo.get_by_id(character_id)
+        except Exception as exc:
+            logger.error(
+                "Failed to fetch character %s for prompt: %s",
+                character_id,
+                exc,
+            )
+            raise
+
+        if not character:
+            raise ValueError(f"Character {character_id} not found")
+
+        visual_traits: Dict[str, Any] = character.get("visual_traits") or {}
+
+        age = visual_traits.get("age", "")
+        body_type = visual_traits.get("body_type", "")
+        hair = visual_traits.get("hair", "")
+        clothing = visual_traits.get("clothing", "")
+
+        parts: List[str] = ["a"]
+        if age:
+            parts.append(str(age))
+        if body_type:
+            parts.append(str(body_type))
+        parts.append("person")
+        if hair:
+            parts.append(f"with {hair}")
+        if clothing:
+            parts.append(f"wearing {clothing}")
+
+        return " ".join(parts)

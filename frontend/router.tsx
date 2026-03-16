@@ -20,6 +20,7 @@ import { ResourceDetailPage } from './pages/ResourceDetailPage';
 import { SharePage } from './pages/SharePage';
 import { SharedPage } from './pages/SharedPage';
 import { ShortcutsTagsPage } from './pages/ShortcutsTagsPage';
+import { StoryboardWorkbench } from './pages/StoryboardWorkbench';
 
 export const router = createBrowserRouter([
   // Public routes (no auth required)
@@ -97,6 +98,7 @@ export const router = createBrowserRouter([
           { path: 'todolist', element: <TodolistPage /> },
           { path: 'shared', element: <SharedPage /> },
           { path: 'player/:displayId', element: <PlayerPage /> },
+          { path: 'storyboard', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
         ],
       },
 
