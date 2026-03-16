@@ -412,17 +412,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
-    // iOS Safari: use webkitEnterFullscreen on the video element
-    if (video && typeof (video as any).webkitEnterFullscreen === 'function') {
-      (video as any).webkitEnterFullscreen();
+    // Standard Fullscreen API (desktop browsers including macOS Safari)
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (typeof container.requestFullscreen === 'function') {
+      container.requestFullscreen().catch(() => {});
       return;
     }
 
-    // Standard Fullscreen API
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else {
-      container.requestFullscreen().catch(() => {});
+    // iOS Safari fallback: doesn't support requestFullscreen, use native video fullscreen
+    if (video && typeof (video as any).webkitEnterFullscreen === 'function') {
+      (video as any).webkitEnterFullscreen();
     }
   }, [playerRef]);
 
