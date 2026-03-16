@@ -933,23 +933,23 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           </button>
         </div>
 
-        {/* Right: download + more */}
-        <div className="flex items-center gap-1 md:gap-1.5 md:min-w-[140px] justify-end">
+        {/* Right: download + more — desktop only in top bar, mobile shows in card */}
+        <div className="hidden md:flex items-center gap-1.5 min-w-[140px] justify-end">
           <button
             onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 p-1.5 md:px-3 md:py-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 md:bg-purple-600 md:hover:bg-purple-500 md:text-white md:hover:text-white text-xs font-medium rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
           >
-            <Share2 size={16} className="md:w-3.5 md:h-3.5" />
-            <span className="hidden md:inline">{t('resources.share')}</span>
+            <Share2 size={14} />
+            <span>{t('resources.share')}</span>
           </button>
           {fileUrl && (
             <a
               href={fileUrl}
               download
-              className="flex items-center gap-1.5 p-1.5 md:px-3 md:py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
             >
-              <Download size={16} className="md:w-3.5 md:h-3.5" />
-              <span className="hidden md:inline">{t('resources.download')}</span>
+              <Download size={14} />
+              <span>{t('resources.download')}</span>
             </a>
           )}
           <div className="relative">
@@ -1114,6 +1114,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                   : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
+              <Eye size={16} className="md:hidden" />
               Info
             </button>
             <button
@@ -1124,6 +1125,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                   : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
+              <Pencil size={16} className="md:hidden" />
               Review
             </button>
             {(isVideo || isAudio) && (
@@ -1136,6 +1138,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                       : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
+                  <FileText size={16} className="md:hidden" />
                   Transcript
                   {getAIStatusIndicator(resource.transcript_status)}
                 </button>
@@ -1147,6 +1150,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                       : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
+                  <Sparkles size={16} className="md:hidden" />
                   Analysis
                   {getAIStatusIndicator(resource.summary_status || resource.visual_analysis_status)}
                 </button>
@@ -1156,8 +1160,61 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
 
           {rightTab === 'info' ? (
           <div className="overflow-y-auto flex-1">
+          {/* Mobile: ID row with share + more (like Downloads) */}
+          <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
+            <span className="text-xs text-zinc-600 font-mono">{String(resource.id)}</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowShareModal(true)}
+                className="p-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 rounded-lg transition-colors"
+              >
+                <Share2 size={16} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowMoreMenu(!showMoreMenu)}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+                {showMoreMenu && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                      {fileUrl && (
+                        <a
+                          href={fileUrl}
+                          download
+                          className="flex items-center gap-2 w-full px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                          onClick={() => setShowMoreMenu(false)}
+                        >
+                          <Download size={14} />
+                          {t('resources.download')}
+                        </a>
+                      )}
+                      {fileUrl && (
+                        <button
+                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            downloadFile(fileUrl, resource.filename || 'download', {
+                              onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
+                              onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
+                            });
+                          }}
+                        >
+                          <Download size={14} />
+                          {t('resources.downloadOriginal')}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
           {/* Editable Filename */}
-          <div className="px-4 pt-4">
+          <div className="px-4 pt-1 md:pt-4">
             {editingName ? (
               <input
                 ref={nameInputRef}
