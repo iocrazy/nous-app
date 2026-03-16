@@ -259,7 +259,7 @@ function AppLayoutInner() {
         )}
 
         {/* Tab buttons */}
-        <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-1.5 pb-[env(safe-area-inset-bottom,6px)] relative z-40">
+        <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-2 pb-[calc(env(safe-area-inset-bottom,8px)+4px)] relative z-40">
           {/* Parser */}
           <button
             onClick={() => handleMobileNavClick('parser')}
