@@ -483,8 +483,8 @@ async def serve_resource_file(
 
         return FileResponse(
             path=str(full_path),
-            filename=resource.get("filename", "download"),
             media_type=resource.get("mime_type", "application/octet-stream"),
+            content_disposition_type="inline",
         )
     except HTTPException:
         raise
