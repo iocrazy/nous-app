@@ -21,7 +21,7 @@ import hmac
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, HTTPException, Header, Query, Request
+from fastapi import APIRouter, HTTPException, Header, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -86,17 +86,6 @@ def validate_media_cookie(cookie_value: str) -> Optional[str]:
     return user_id
 
 
-def _cookie_domain(request: Request) -> Optional[str]:
-    """Return cookie domain for cross-origin sharing, or None for same-origin."""
-    host = request.headers.get("origin", "")
-    # If both frontend and backend share a parent domain, set cookie on parent
-    # e.g. mediahub.heygo.cn and mediahubserver.heygo.cn:88 → .heygo.cn
-    if "heygo.cn" in host:
-        return ".heygo.cn"
-    # localhost / dev — no domain restriction
-    return None
-
-
 @router.post("/media-session")
 async def create_media_session(
     request: Request,
@@ -125,16 +114,14 @@ async def create_media_session(
 
         response = JSONResponse(content={"success": True})
 
-        domain = _cookie_domain(request)
         response.set_cookie(
             key=COOKIE_NAME,
             value=cookie_value,
             max_age=COOKIE_MAX_AGE,
             httponly=True,
             secure=True,
-            samesite="none",  # Required for cross-origin <video>/<img>
+            samesite="lax",
             path="/media",  # Only sent for /media/ requests
-            domain=domain,
         )
 
         logger.info(f"Media session created for user {user_id}")
@@ -151,13 +138,11 @@ async def create_media_session(
 async def delete_media_session(request: Request):
     """Clear the media session cookie on logout."""
     response = JSONResponse(content={"success": True})
-    domain = _cookie_domain(request)
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/media",
-        domain=domain,
         secure=True,
-        samesite="none",
+        samesite="lax",
     )
     logger.info("Media session cleared")
     return response

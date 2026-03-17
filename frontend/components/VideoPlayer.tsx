@@ -209,9 +209,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setCurrentHlsLevel(-1);
     setIsAutoQuality(true);
 
-    // Send cookies for /media/ auth (cross-origin)
-    video.crossOrigin = 'use-credentials';
-
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
       if (authToken) {
