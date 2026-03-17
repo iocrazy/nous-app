@@ -8,7 +8,7 @@ import { getAuthHeaders } from './parserService';
 
 const getApiUrl = (): string => {
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    return import.meta.env.VITE_API_URL || '';
+    return (import.meta.env.VITE_API_URL || '').trim();
   }
   return 'http://localhost:8080';
 };
