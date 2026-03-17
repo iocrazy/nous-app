@@ -49,7 +49,7 @@ function SkeletonCard() {
 
 export function ProjectListPage() {
   const { t } = useTranslation();
-  const { setCurrentProject, setProjectList, projectList } = useStoryboardStore();
+  const { setCurrentProject, setProjectList, projectList = [] } = useStoryboardStore();
   const { selectedTeamId } = useTeamContext();
 
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ export function ProjectListPage() {
     setError(null);
     try {
       const result = await fetchProjects(selectedTeamId);
-      setProjectList(result.data);
+      setProjectList(Array.isArray(result?.data) ? result.data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -81,7 +81,7 @@ export function ProjectListPage() {
 
   // ─── Derived state ─────────────────────────────────────────────────────────
 
-  const filtered = projectList.filter((p) =>
+  const filtered = (projectList ?? []).filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase())
   );
   const sorted = sortProjects(filtered, sortField);
