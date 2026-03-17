@@ -4,6 +4,7 @@ import { Video } from '../types';
 import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { getPreviewSpriteUrl } from '../services/resourceService';
+import { useAuth } from '../contexts/AuthContext';
 
 const getPlatformLabel = (platform?: string): string => {
   if (!platform) return '';
@@ -62,6 +63,7 @@ const getTagColor = (tag: string) => {
 };
 
 export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId }) => {
+  const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -73,10 +75,10 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   // 封面 URL: 如果是图集则使用当前索引，否则使用封面
   const coverUrl = isAlbum && images.length > 0
     ? images[currentImageIndex]
-    : (getCoverUrl(data) || "https://picsum.photos/400/600");
+    : (getCoverUrl(data, mediaToken ?? undefined) || "https://picsum.photos/400/600");
 
   // --- Video seek scrub (universal fallback for any video) ---
-  const videoUrl = isVideo ? getVideoUrl(data) : undefined;
+  const videoUrl = isVideo ? getVideoUrl(data, mediaToken ?? undefined) : undefined;
   const [isVideoScrubbing, setIsVideoScrubbing] = useState(false);
   const videoScrubRef = useRef<HTMLVideoElement>(null);
 

@@ -47,6 +47,7 @@ import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { EagleTagPicker } from './EagleTagPicker';
+import { useAuth } from '../contexts/AuthContext';
 
 // ─── AI Status Badge ──────────────────────────────────
 const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
@@ -85,6 +86,7 @@ export const DownloadsView: React.FC = () => {
   const navigate = useNavigate();
   const { selectedTeamId } = useTeamContext();
   const { addToast } = useToast();
+  const { mediaToken } = useAuth();
 
   // ─── Tag search map (media_id → space-joined tag names) ───
   const [tagSearchMap, setTagSearchMap] = useState<Record<string, string>>({});
@@ -545,7 +547,7 @@ export const DownloadsView: React.FC = () => {
       });
       if (ok) return;
     }
-    const videoUrl = getVideoUrl(v);
+    const videoUrl = getVideoUrl(v, mediaToken ?? undefined);
     if (videoUrl) {
       await downloadFile(videoUrl, `${baseName}.mp4`, callbacks);
     } else {
@@ -815,9 +817,9 @@ export const DownloadsView: React.FC = () => {
 
             {/* Cover */}
             <div className="relative w-full aspect-video bg-black">
-              {getCoverUrl(selectedVideo) ? (
+              {getCoverUrl(selectedVideo, mediaToken ?? undefined) ? (
                 <img
-                  src={getCoverUrl(selectedVideo)!}
+                  src={getCoverUrl(selectedVideo, mediaToken ?? undefined)!}
                   alt={selectedVideo.title || ''}
                   className="w-full h-full object-contain"
                   referrerPolicy="no-referrer"

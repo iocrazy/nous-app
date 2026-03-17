@@ -15,6 +15,7 @@ import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
 import { updateResource, getVersionHlsUrl } from '../services/resourceService';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
 import { getSupabaseClient, isSupabaseConfigured, getSupabaseAccessToken } from '../supabaseClient';
 
 const MIN_PANEL_WIDTH = 380;
@@ -44,6 +45,7 @@ export function PlayerPage() {
     typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
   );
   const { addToast } = useToast();
+  const { mediaToken } = useAuth();
   const isDragging = useRef(false);
 
   // Track mobile breakpoint for responsive layout
@@ -526,10 +528,10 @@ export function PlayerPage() {
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div className="w-full h-56 sm:h-64 md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
-            {(hlsUrl || getVideoUrl(video)) ? (
+            {(hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
-                src={hlsUrl || getVideoUrl(video)!}
-                originalSrc={hlsUrl ? getVideoUrl(video) || undefined : undefined}
+                src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
+                originalSrc={hlsUrl ? getVideoUrl(video, mediaToken ?? undefined) || undefined : undefined}
                 authToken={authToken || undefined}
                 playerRef={playerRef}
                 onTimeUpdate={handleTimeUpdate}
