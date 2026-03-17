@@ -2,6 +2,7 @@ import { supabase } from '../supabaseClient';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { buildMediaUrl } from '../utils/mediaUrl';
 
 // ─── Folders ────────────────────────────────────────────
 
@@ -538,9 +539,8 @@ export async function deleteVersion(
  * Build a direct /media/ URL for a resource's file_path.
  * This bypasses auth (same as Downloads) and supports Range requests reliably.
  */
-export function getResourceMediaUrl(filePath: string): string {
-  const apiUrl = getApiUrl();
-  return `${apiUrl}/media/${filePath}`;
+export function getResourceMediaUrl(filePath: string, token?: string): string {
+  return buildMediaUrl(filePath, token);
 }
 
 export function getResourceFileUrl(resourceId: string, token?: string): string {
