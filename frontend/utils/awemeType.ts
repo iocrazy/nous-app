@@ -67,103 +67,36 @@ export const formatResolution = (resolution?: string): string => {
   return resolution.replace(/:/g, 'x');
 };
 
-// API base URL
-import { getApiUrl } from './apiConfig';
+// --- Delegated to mediaUrl.ts ---
+import {
+  buildStreamUrl,
+  getPlaybackUrl,
+  getCoverImageUrl,
+  isPlayableUrl,
+} from './mediaUrl';
+
+// Re-export for backward compatibility
+export { buildStreamUrl as getStreamUrl, isPlayableUrl };
 
 /**
- * Convert file path to backend static file URL
- *
- * Supports two formats:
- * 1. Relative path (new format): 2026-01/xxx.mp4 -> http://localhost:8080/media/2026-01/xxx.mp4
- * 2. Absolute path (legacy compat): /path/to/base/2026-01/xxx.mp4 -> http://localhost:8080/media/2026-01/xxx.mp4
- */
-const convertPathToUrl = (path: string): string => {
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path;
-  }
-
-  if (!path.startsWith('/')) {
-    return `${getApiUrl()}/media/${path}`;
-  }
-
-  const yearMonthMatch = path.match(/(\d{4}-\d{2}\/[^/]+)$/);
-  if (yearMonthMatch) {
-    return `${getApiUrl()}/media/${yearMonthMatch[1]}`;
-  }
-
-  return `${getApiUrl()}/media${path}`;
-};
-
-/**
- * Get stream URL for HLS content
- */
-export const getStreamUrl = (hlsPath: string): string => {
-  return `${getApiUrl()}/stream/${hlsPath}`;
-};
-
-/**
- * Check if a URL is a direct playable media URL (not a webpage).
- * Webpage URLs from platforms like bilibili/youtube can't be used as <video src>.
- */
-export const isPlayableUrl = (url: string): boolean => {
-  try {
-    const host = new URL(url).hostname;
-    const pageHosts = [
-      'www.bilibili.com', 'bilibili.com',
-      'www.youtube.com', 'youtube.com', 'youtu.be',
-      'www.douyin.com', 'douyin.com',
-      'www.tiktok.com', 'tiktok.com',
-      'www.xiaohongshu.com', 'xiaohongshu.com',
-      'twitter.com', 'x.com',
-    ];
-    return !pageHosts.includes(host);
-  } catch {
-    // Not a valid URL (likely a relative path) — treat as playable
-    return true;
-  }
-};
-
-/**
- * Get video playback URL
- * Priority: HLS > download_path > video_download_urls[0] (if playable) > undefined
- * Note: original_url is NOT used as video src — it's typically a webpage URL.
+ * Get video playback URL (backward-compatible wrapper).
  */
 export const getVideoUrl = (data: {
   media_format?: string;
   hls_path?: string;
   download_path?: string;
-}): string | undefined => {
-  // HLS format: return stream URL
-  if (data.media_format === 'hls' && data.hls_path) {
-    return getStreamUrl(data.hls_path);
-  }
-  // download_path (convert to backend static file URL)
-  if (data.download_path && data.download_path !== '#') {
-    return convertPathToUrl(data.download_path);
-  }
-  // Only play verified local files (HLS or download_path).
-  // CDN URLs (video_download_urls) are not used — can't confirm download succeeded.
-  return undefined;
+}, token?: string): string | undefined => {
+  return getPlaybackUrl(data, token);
 };
 
 /**
- * Get cover image URL
- * Priority: cover_download_path > cover_urls[0] > dynamic_cover_url > image_download_urls[0]
+ * Get cover image URL (backward-compatible wrapper).
  */
 export const getCoverUrl = (data: {
   cover_download_path?: string;
   cover_urls?: string[];
   dynamic_cover_url?: string;
   image_download_urls?: string[];
-}): string | undefined => {
-  if (data.cover_download_path && data.cover_download_path !== '#') {
-    return convertPathToUrl(data.cover_download_path);
-  }
-  if (data.cover_urls?.[0] && data.cover_urls[0] !== '#') {
-    return data.cover_urls[0];
-  }
-  if (data.dynamic_cover_url && data.dynamic_cover_url !== '#') {
-    return data.dynamic_cover_url;
-  }
-  return data.image_download_urls?.[0];
+}, token?: string): string | undefined => {
+  return getCoverImageUrl(data, token);
 };
