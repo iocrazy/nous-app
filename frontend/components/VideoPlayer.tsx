@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
 import Hls from 'hls.js';
+import ErrorPage from './ErrorPage';
 
 interface HlsLevel {
   height: number;
@@ -72,6 +73,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isAutoQuality, setIsAutoQuality] = useState(true);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isOriginalMode, setIsOriginalMode] = useState(false); // Playing original file directly
+  const [authError, setAuthError] = useState<401 | 403 | null>(null);
 
   const effectiveFps = fps || 30;
   const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
@@ -201,6 +203,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     setIsLoading(true);
     setLoadError(null);
+    setAuthError(null);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -305,7 +308,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleCanPlay = () => setIsLoading(false);
     const handleError = () => {
       setIsLoading(false);
-      setLoadError('Video failed to load');
+      // Check if error is auth-related via HEAD request
+      if (src) {
+        fetch(src, { method: 'HEAD' })
+          .then((res) => {
+            if (res.status === 401 || res.status === 403) {
+              setAuthError(res.status as 401 | 403);
+            } else {
+              setLoadError('Video failed to load');
+            }
+          })
+          .catch(() => {
+            setLoadError('Video failed to load');
+          });
+      } else {
+        setLoadError('Video failed to load');
+      }
     };
 
     const handleResize = () => {
@@ -510,6 +528,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const seekProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const frameNumber = Math.floor((currentTime || 0) * effectiveFps);
+
+  if (authError) {
+    return <ErrorPage code={authError} className="bg-zinc-950 rounded-lg" />;
+  }
 
   return (
     <div
