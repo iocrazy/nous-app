@@ -33,6 +33,7 @@ router = APIRouter(prefix="/auth", tags=["Media Auth"])
 # Cookie config
 COOKIE_NAME = "media_session"
 COOKIE_MAX_AGE = 7 * 24 * 3600  # 7 days (matches Supabase refresh token lifetime)
+MEDIA_TOKEN_MAX_AGE = 4 * 3600  # 4 hours (refreshed on every Supabase TOKEN_REFRESHED event)
 
 
 def _get_secret() -> str:
@@ -146,3 +147,37 @@ async def delete_media_session(request: Request):
     )
     logger.info("Media session cleared")
     return response
+
+
+@router.post("/media-token")
+async def create_media_token(
+    authorization: str = Header(...),
+):
+    """
+    Generate a short-lived signed media token for URL-based auth.
+
+    Used as ?token= query parameter on /media/ URLs.
+    Enables <video>/<img> tags to authenticate without cookies.
+    """
+    try:
+        token = authorization.replace("Bearer ", "")
+        auth_service = SupabaseAuthService()
+        user = await auth_service.get_user(token)
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        user_id = user.get("id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid user")
+
+        expires_at = int(time.time()) + MEDIA_TOKEN_MAX_AGE
+        media_token = _sign_cookie(user_id, expires_at)
+
+        return {"token": media_token, "expires_at": expires_at}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create media token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create media token")
