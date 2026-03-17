@@ -8,12 +8,7 @@
  * can't send Authorization headers).
  */
 
-const getApiUrl = (): string => {
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    return (import.meta.env.VITE_API_URL || '').trim();
-  }
-  return '';
-};
+import { getApiUrl } from '../utils/apiConfig';
 
 /**
  * Create a media session cookie by sending the JWT to the backend.

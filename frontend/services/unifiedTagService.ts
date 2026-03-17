@@ -7,15 +7,7 @@
 
 import { getAuthHeaders } from './parserService';
 import type { Tag } from '../types';
-
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return (import.meta.env.VITE_API_URL || '').trim();
-  }
-  return 'http://localhost:8080';
-};
+import { getApiUrl } from '../utils/apiConfig';
 
 // ─── Global tag CRUD ──────────────────────────────────────
 

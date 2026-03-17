@@ -8,14 +8,7 @@ const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
 // on self-hosted PostgREST. The payload difference is negligible for 20 rows.
 const RESOURCE_LIST_SELECT = 'id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)';
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return (import.meta.env.VITE_API_URL || '').trim();
-  }
-  return 'http://localhost:8080';
-};
+import { getApiUrl } from '../utils/apiConfig';
 
 /**
  * Frontend config interface (for Supabase URL and Anon Key)
