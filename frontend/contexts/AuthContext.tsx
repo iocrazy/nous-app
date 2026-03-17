@@ -152,12 +152,18 @@ export function AuthProvider({
           email: session.user.email || '',
         }));
         setCurrentUserId(session.user.id);
-        setIsAuthenticated(true);
 
-        // Set media session cookie for /media/ route authentication
+        // Set media session cookie BEFORE enabling auth state,
+        // so video/image loads already have the cookie when components render
         if (session.access_token) {
-          createMediaSession(session.access_token);
+          try {
+            await createMediaSession(session.access_token);
+          } catch (err) {
+            console.error('Failed to create media session:', err);
+          }
         }
+
+        setIsAuthenticated(true);
 
         // Load profile and settings in background — don't block data loading
         supabase
@@ -188,8 +194,8 @@ export function AuthProvider({
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      handleSession(session);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      await handleSession(session);
       setIsAuthLoading(false);
     });
 
@@ -201,7 +207,7 @@ export function AuthProvider({
           setCurrentUserId(null);
           onLogout?.();
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          handleSession(session);
+          await handleSession(session);
         }
       }
     );
