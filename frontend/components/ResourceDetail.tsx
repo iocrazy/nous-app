@@ -58,6 +58,7 @@ import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
 import { useToast } from './Toast';
+import { useAuth } from '../contexts/AuthContext';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
@@ -292,6 +293,7 @@ interface ResourceDetailProps {
 export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
+  const { mediaToken } = useAuth();
   const navigate = useNavigate();
   const { teamId } = useParams();
 
@@ -498,7 +500,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           const versionFilePath = viewingVersion.file_path;
           setOriginalFileUrl(
             versionFilePath
-              ? getResourceMediaUrl(versionFilePath)
+              ? getResourceMediaUrl(versionFilePath, mediaToken ?? undefined)
               : getVersionFileUrl(resourceId, viewingVersion.id, token || undefined)
           );
         } else if (selectedVersionId) {
@@ -506,7 +508,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           const selFilePath = selVersion?.file_path;
           setFileUrl(
             selFilePath
-              ? getResourceMediaUrl(selFilePath)
+              ? getResourceMediaUrl(selFilePath, mediaToken ?? undefined)
               : getVersionFileUrl(resourceId, selectedVersionId, token || undefined)
           );
           setOriginalFileUrl(null);
@@ -515,7 +517,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
           const filePath = resource?.file_path;
           setFileUrl(
             filePath
-              ? getResourceMediaUrl(filePath)
+              ? getResourceMediaUrl(filePath, mediaToken ?? undefined)
               : getResourceFileUrl(resourceId, token || undefined)
           );
           setOriginalFileUrl(null);
@@ -526,7 +528,7 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         // Fallback: use direct /media/ URL if possible
         const filePath = resource?.file_path;
         if (filePath) {
-          setFileUrl(getResourceMediaUrl(filePath));
+          setFileUrl(getResourceMediaUrl(filePath, mediaToken ?? undefined));
         } else if (selectedVersionId) {
           setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
         } else {

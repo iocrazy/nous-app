@@ -9,6 +9,7 @@ import {
   FileText, Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LibraryTableProps {
   data: Video[];
@@ -59,6 +60,7 @@ const getAIStatusClass = (status?: string): string => {
 };
 
 export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick }) => {
+  const { mediaToken } = useAuth();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
@@ -141,7 +143,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
   const handleMediaClick = (item: Video) => {
     if (isVideoType(item.media_type)) {
-       const url = getVideoUrl(item);
+       const url = getVideoUrl(item, mediaToken ?? undefined);
        if (url && url !== '#') {
          setActiveMedia({ type: 'video', url });
        } else {
@@ -233,7 +235,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
           className="w-20 h-20 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700"
         >
           <img
-            src={getCoverUrl(item) || "https://picsum.photos/400/600"}
+            src={getCoverUrl(item, mediaToken ?? undefined) || "https://picsum.photos/400/600"}
             alt="Preview"
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
@@ -409,7 +411,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                     className="w-16 h-16 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700 hover:border-zinc-500 transition-colors"
                   >
                      <img
-                      src={getCoverUrl(item) || "https://picsum.photos/400/600"}
+                      src={getCoverUrl(item, mediaToken ?? undefined) || "https://picsum.photos/400/600"}
                       alt="Preview"
                       className="w-full h-full object-cover opacity-80 group-hover:opacity-60 transition-all"
                       referrerPolicy="no-referrer"

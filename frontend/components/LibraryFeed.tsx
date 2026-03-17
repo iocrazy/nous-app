@@ -5,6 +5,7 @@ import {
   Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LibraryFeedProps {
   data: Video[];
@@ -105,6 +106,7 @@ const FeedItem = ({
   onToggleMute: (e: React.MouseEvent) => void;
   formatNumber: (n?: number) => string;
 }) => {
+  const { mediaToken } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const descRef = useRef<HTMLParagraphElement>(null);
@@ -126,9 +128,9 @@ const FeedItem = ({
     setDescExpanded(prev => !prev);
   }, []);
   // 视频 URL: 优先使用 download_path
-  const videoUrl = getVideoUrl(item);
+  const videoUrl = getVideoUrl(item, mediaToken ?? undefined);
   // 封面 URL
-  const coverUrl = getCoverUrl(item);
+  const coverUrl = getCoverUrl(item, mediaToken ?? undefined);
   const isHlsUrl = videoUrl?.endsWith('.m3u8') ?? false;
 
   const imageUrl = item.image_download_urls?.[0] || "https://picsum.photos/400/800";
