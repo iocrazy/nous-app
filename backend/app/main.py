@@ -211,41 +211,57 @@ try:
     async def serve_media_file(
         file_path: str,
         request: Request,
+        token: str | None = None,
         share_token: str | None = None,
         review_token: str | None = None,
     ):
-        """Serve media files with cookie-based auth.
+        """Serve media files with signed URL or cookie-based auth.
 
         Authentication order:
-        1. share_token query param (future: validate sharing link)
-        2. review_token query param (future: validate review access)
-        3. media_session httpOnly cookie (signed, set after JWT login)
+        1. token query param (signed media token, preferred)
+        2. share_token query param (future: validate sharing link)
+        3. review_token query param (future: validate review access)
+        4. media_session httpOnly cookie (legacy fallback)
         """
         import mimetypes
 
         from app.api.media_auth import COOKIE_NAME, validate_media_cookie
 
         # --- Auth check ---
-        # Future: validate share/review tokens against DB
-        if share_token:
+        user_id = None
+
+        # 1. Signed media token (preferred)
+        if token:
+            user_id = validate_media_cookie(token)
+
+        # 2. Future: share/review tokens
+        if not user_id and share_token:
             pass  # TODO: validate share token
-        elif review_token:
+        if not user_id and review_token:
             pass  # TODO: validate review token
-        else:
+
+        # 3. Cookie fallback
+        if not user_id:
             cookie_value = request.cookies.get(COOKIE_NAME, "")
-            user_id = validate_media_cookie(cookie_value)
-            if not user_id:
-                raise HTTPException(status_code=401, detail="Authentication required")
+            if cookie_value:
+                user_id = validate_media_cookie(cookie_value)
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
 
         # --- Serve file ---
         full_path = (_media_base_path / file_path).resolve()
-        # Security: prevent path traversal
         if not str(full_path).startswith(str(_media_base_path)):
             raise HTTPException(status_code=403, detail="Access denied")
         if not full_path.exists() or not full_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
+
         mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
-        return FileResponse(str(full_path), media_type=mime_type)
+        return FileResponse(
+            str(full_path),
+            media_type=mime_type,
+            headers={"Referrer-Policy": "no-referrer"},
+        )
 
 except ValueError:
     logger.warning(
