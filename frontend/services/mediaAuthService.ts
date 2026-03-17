@@ -51,3 +51,22 @@ export async function deleteMediaSession(): Promise<void> {
     console.error('Failed to delete media session:', err);
   }
 }
+
+/**
+ * Fetch a signed media token for URL-based auth.
+ * Returns the token string, or null on failure.
+ */
+export async function fetchMediaToken(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/v1/auth/media-token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.token || null;
+  } catch (err) {
+    console.error('Failed to fetch media token:', err);
+    return null;
+  }
+}

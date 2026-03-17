@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from '../supabaseClient';
 import { UserProfile, UserSettings, AISettings as AISettingsType } from '../types';
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
-import { createMediaSession, deleteMediaSession } from '../services/mediaAuthService';
+import { createMediaSession, deleteMediaSession, fetchMediaToken } from '../services/mediaAuthService';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -14,6 +14,7 @@ interface AuthState {
   userSettings: UserSettings;
   aiSettings: AISettingsType;
   isProfileModalOpen: boolean;
+  mediaToken: string | null;
 }
 
 interface AuthActions {
@@ -72,6 +73,7 @@ export function AuthProvider({
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [aiSettings, setAISettings] = useState<AISettingsType>(DEFAULT_AI_SETTINGS);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [mediaToken, setMediaToken] = useState<string | null>(null);
 
   // Load frontend config from backend YAML on mount.
   // If Supabase is already configured via env vars, mark config as loaded
@@ -165,6 +167,13 @@ export function AuthProvider({
 
         setIsAuthenticated(true);
 
+        // Fetch signed media token for URL-based auth (non-blocking)
+        if (session.access_token) {
+          fetchMediaToken(session.access_token).then(tok => {
+            if (tok) setMediaToken(tok);
+          });
+        }
+
         // Load profile and settings in background — don't block data loading
         supabase
           .from('user_profiles')
@@ -240,6 +249,7 @@ export function AuthProvider({
     setIsProfileModalOpen(false);
     setUserProfile(DEFAULT_PROFILE);
     setCurrentUserId(null);
+    setMediaToken(null);
     setShowAuthModal(false);
     onLogout?.();
   };
@@ -296,6 +306,7 @@ export function AuthProvider({
     userSettings,
     aiSettings,
     isProfileModalOpen,
+    mediaToken,
     setShowAuthModal,
     setIsProfileModalOpen,
     setUserProfile,
