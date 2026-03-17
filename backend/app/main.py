@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse
@@ -208,10 +208,36 @@ try:
     logger.info(f"媒体文件路由已注册: /media -> {_media_base_path}")
 
     @app.get("/media/{file_path:path}")
-    async def serve_media_file(file_path: str):
-        """Serve media files with CORS support."""
+    async def serve_media_file(
+        file_path: str,
+        request: Request,
+        share_token: str | None = None,
+        review_token: str | None = None,
+    ):
+        """Serve media files with cookie-based auth.
+
+        Authentication order:
+        1. share_token query param (future: validate sharing link)
+        2. review_token query param (future: validate review access)
+        3. media_session httpOnly cookie (signed, set after JWT login)
+        """
         import mimetypes
 
+        from app.api.media_auth import COOKIE_NAME, validate_media_cookie
+
+        # --- Auth check ---
+        # Future: validate share/review tokens against DB
+        if share_token:
+            pass  # TODO: validate share token
+        elif review_token:
+            pass  # TODO: validate review token
+        else:
+            cookie_value = request.cookies.get(COOKIE_NAME, "")
+            user_id = validate_media_cookie(cookie_value)
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Authentication required")
+
+        # --- Serve file ---
         full_path = (_media_base_path / file_path).resolve()
         # Security: prevent path traversal
         if not str(full_path).startswith(str(_media_base_path)):

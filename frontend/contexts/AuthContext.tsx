@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from '../supabaseClient';
 import { UserProfile, UserSettings, AISettings as AISettingsType } from '../types';
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
+import { createMediaSession, deleteMediaSession } from '../services/mediaAuthService';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -137,7 +138,7 @@ export function AuthProvider({
       supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
     }));
 
-    const handleSession = async (session: { user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
+    const handleSession = async (session: { access_token?: string; user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
       if (session?.user) {
         const displayName =
           (session.user.user_metadata?.display_name as string) ||
@@ -152,6 +153,11 @@ export function AuthProvider({
         }));
         setCurrentUserId(session.user.id);
         setIsAuthenticated(true);
+
+        // Set media session cookie for /media/ route authentication
+        if (session.access_token) {
+          createMediaSession(session.access_token);
+        }
 
         // Load profile and settings in background — don't block data loading
         supabase
@@ -217,6 +223,9 @@ export function AuthProvider({
   };
 
   const handleLogout = async () => {
+    // Clear media session cookie before signing out
+    await deleteMediaSession();
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       await supabase.auth.signOut();
