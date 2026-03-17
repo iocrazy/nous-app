@@ -188,7 +188,6 @@ const FilePreview: React.FC<{
       <video
         src={fileUrl}
         controls
-        crossOrigin="use-credentials"
         className="max-w-full max-h-[calc(100vh-13rem)] rounded-lg object-contain"
         poster={resource.thumbnail_path || undefined}
       />
@@ -210,7 +209,6 @@ const FilePreview: React.FC<{
       <img
         src={fileUrl}
         alt={resource.filename}
-        crossOrigin="use-credentials"
         className="max-w-full max-h-[calc(100vh-13rem)] object-contain rounded-lg"
       />
     );
@@ -1052,7 +1050,6 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
                       <img
                         src={thumb}
                         alt=""
-                        crossOrigin="use-credentials"
                         className={`w-8 h-8 rounded object-cover shrink-0 ${isActive ? 'ring-1 ring-indigo-400/50' : ''}`}
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
