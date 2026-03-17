@@ -40,10 +40,13 @@ from app.api.notifications_router import router as notifications_router
 from app.api.realtime_router import router as realtime_router
 from app.api.error_report_router import router as error_report_router
 from app.api.admin import admin_router
+from app.api.media_auth import router as media_auth_router
 
 api_router = APIRouter()
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
+
+api_router.include_router(router=media_auth_router, tags=["Media Auth"])
 
 api_router.include_router(router=temp_token_router, tags=["Temp Token"])
 
