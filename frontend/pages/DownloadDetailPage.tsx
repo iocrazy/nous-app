@@ -22,12 +22,12 @@ const MIN_PANEL_WIDTH = 380;
 const MAX_PANEL_WIDTH = 800;
 const DEFAULT_PANEL_WIDTH = 560;
 
-interface PlayerPageProps {
+interface DownloadDetailPageProps {
   resourceId?: string;
   mediaId?: string;
 }
 
-export function PlayerPage({ resourceId: propResourceId, mediaId: propMediaId }: PlayerPageProps = {}) {
+export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId }: DownloadDetailPageProps = {}) {
   const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
