@@ -290,7 +290,7 @@ export function PlayerPage() {
 
   const handleBack = () => {
     if (from === 'downloads' && teamId) {
-      navigate(`/team/${teamId}/library`);
+      navigate(`/team/${teamId}/resources/downloads`);
     } else {
       navigate(-1);
     }

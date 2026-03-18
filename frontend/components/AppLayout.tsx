@@ -34,11 +34,11 @@ export function pathnameToView(pathname: string, search?: string): ViewState {
   if (stripped.startsWith('/player/')) {
     const params = new URLSearchParams(search || '');
     const from = params.get('from');
-    if (from === 'downloads') return 'library';
+    if (from === 'downloads') return 'resources';
     if (from === 'resources') return 'resources';
-    return 'library';
+    return 'resources';
   }
-  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/library')) return 'resources'; // legacy
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
   if (stripped.startsWith('/cleanup')) return 'cleanup';
@@ -140,11 +140,9 @@ function AppLayoutInner() {
 
   // Main content padding — mobile: clear TopBar (pt-14) + Tab Bar (pb-20)
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
-    view === 'library'
+    view === 'resources'
       ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-      : view === 'resources'
-        ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-        : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
+      : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -157,7 +155,7 @@ function AppLayoutInner() {
   const handleMobileNavClick = (targetView: ViewState) => {
     const viewToPath: Record<string, string> = {
       parser: '/parser',
-      library: '/library',
+      library: '/resources/downloads',
       dashboard: '/dashboard',
       resources: '/resources',
       mediatrack: '/projects',
@@ -175,12 +173,8 @@ function AppLayoutInner() {
 
   const handleMobileLibraryClick = () => {
     setIsDashboardMenuOpen(false);
-    if (view === 'library') {
-      setIsMobileMenuOpen(!isMobileMenuOpen);
-    } else {
-      navigate(teamPath('/library'));
-      setIsMobileMenuOpen(false);
-    }
+    navigate(teamPath('/resources/downloads'));
+    setIsMobileMenuOpen(false);
   };
 
   const handleMobileDashboardClick = () => {
@@ -269,38 +263,14 @@ function AppLayoutInner() {
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
 
-          {/* Downloads (formerly Library) — with view mode popup */}
-          <div className="relative">
-            {isMobileMenuOpen && view === 'library' && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-                <button
-                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutList size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <Smartphone size={20} />
-                </button>
-              </div>
-            )}
-            <button
-              onClick={handleMobileLibraryClick}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
-            >
-              <Download size={22} />
-              <span className="text-[10px] leading-tight">Downloads</span>
-            </button>
-          </div>
+          {/* Downloads — navigates to /resources/downloads */}
+          <button
+            onClick={handleMobileLibraryClick}
+            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
+          >
+            <Download size={22} />
+            <span className="text-[10px] leading-tight">Downloads</span>
+          </button>
 
           {/* Resources — with team picker popup */}
           <div className="relative">
@@ -421,7 +391,7 @@ function AppLayoutInner() {
           setSearchResults([]);
           setSearchQueryText('');
           setActiveSmartCollectionId(collection?.id || null);
-          navigate(teamPath('/library'));
+          navigate(teamPath('/resources/downloads'));
           setActiveCollectionId(null);
           setActiveLibraryTab('my-library');
         }}

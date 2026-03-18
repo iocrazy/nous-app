@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   RefreshCw,
   LayoutGrid,
@@ -28,6 +29,7 @@ import {
   Music,
   Pencil,
   Link,
+  Search,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -267,6 +269,8 @@ export const DownloadsView: React.FC = () => {
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [selectedVideoTags, setSelectedVideoTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
 
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
@@ -1103,6 +1107,47 @@ export const DownloadsView: React.FC = () => {
             Delete
           </button>
         </div>
+      )}
+
+      {/* ── Mobile Search Overlay ── */}
+      {createPortal(
+        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
+            {isMobileSearchOpen ? (
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                <input
+                  autoFocus
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                  placeholder="Search downloads..."
+                  value={mobileSearchQuery}
+                  onChange={(e) => {
+                    setMobileSearchQuery(e.target.value);
+                    handleSearchQueryChange(e.target.value);
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    setMobileSearchQuery('');
+                    handleSearchQueryChange('');
+                  }}
+                  className="ml-2 text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsMobileSearchOpen(true)}
+                className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+              >
+                <Search size={22} className="drop-shadow-md" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
       )}
 
       {/* ── Rename Dialog ── */}

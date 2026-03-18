@@ -183,7 +183,7 @@ const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" /
 
 const VIEW_PATH_MAP: Record<string, string> = {
   parser: '/parser',
-  library: '/library',
+  library: '/resources/downloads',
   dashboard: '/dashboard',
   settings: '/settings',
   cleanup: '/cleanup',
@@ -199,7 +199,7 @@ const VIEW_PATH_MAP: Record<string, string> = {
 function viewFromPathname(pathname: string): ViewState {
   // Strip /team/:teamId/ prefix if present
   const stripped = pathname.replace(/^\/team\/[^/]+/, '');
-  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/library')) return 'resources'; // legacy /library → resources
   if (stripped.startsWith('/dashboard')) return 'dashboard';
   if (stripped.startsWith('/settings')) return 'settings';
   if (stripped.startsWith('/cleanup')) return 'cleanup';
