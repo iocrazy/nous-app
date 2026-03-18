@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { Video } from '../types';
 import {
-  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp
+  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp, Loader2
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { useAuth } from '../contexts/AuthContext';
@@ -127,13 +127,15 @@ const FeedItem = ({
     e.stopPropagation();
     setDescExpanded(prev => !prev);
   }, []);
+  const [isBuffering, setIsBuffering] = useState(true);
+
   // 视频 URL: 优先使用 download_path
   const videoUrl = getVideoUrl(item, mediaToken ?? undefined);
   // 封面 URL
   const coverUrl = getCoverUrl(item, mediaToken ?? undefined);
   const isHlsUrl = videoUrl?.endsWith('.m3u8') ?? false;
 
-  const imageUrl = item.image_download_urls?.[0] || "https://picsum.photos/400/800";
+  const imageUrl = item.image_download_urls?.[0] || coverUrl || null;
 
   // Setup HLS.js for .m3u8 video playback
   useEffect(() => {
@@ -177,21 +179,38 @@ const FeedItem = ({
       className="feed-item w-full h-full snap-center relative bg-black overflow-hidden shrink-0 group flex items-center justify-center"
       onClick={onTogglePlay}
     >
-      {/* Media Layer */}
+      {/* Loading spinner — shown while buffering */}
+      {isVideo && isBuffering && (
+        <div className="absolute inset-0 flex items-center justify-center z-10 bg-black">
+          {coverUrl ? (
+            <img src={coverUrl} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
+          ) : null}
+          <Loader2 className="w-10 h-10 text-white/60 animate-spin" />
+        </div>
+      )}
+
+      {/* Media Layer — only mount video for current/adjacent items */}
       {isVideo ? (
         <video
           ref={videoRef}
           src={isHlsUrl ? undefined : videoUrl}
-          // UPDATED: object-contain to ensure full video visibility
           className="w-full h-full object-contain cursor-pointer bg-black"
           loop
           muted={isMuted}
           playsInline
-          poster={imageUrl}
+          onCanPlay={() => setIsBuffering(false)}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => setIsBuffering(false)}
         />
       ) : (
         <div className="w-full h-full relative flex items-center justify-center bg-black">
-            <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" />
+            {imageUrl ? (
+              <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" />
+            ) : (
+              <div className="flex items-center justify-center">
+                <ImageIcon size={48} className="text-zinc-700" />
+              </div>
+            )}
             <div className="absolute top-4 right-4 bg-black/50 px-3 py-1 rounded-full text-xs flex items-center gap-1 backdrop-blur-md">
                 <ImageIcon size={12} />
                 Image Mode
