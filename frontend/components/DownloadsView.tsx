@@ -712,7 +712,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
-        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 pb-5 ${libraryViewMode === 'feed' ? 'px-0 pt-0' : 'px-3 pt-3'}`}
+        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0' : 'px-3 pt-3 pb-5'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
@@ -1144,8 +1144,8 @@ export const DownloadsView: React.FC = () => {
         </div>
       )}
 
-      {/* ── Mobile Search Overlay ── */}
-      {createPortal(
+      {/* ── Mobile Search Overlay (hidden in feed view) ── */}
+      {libraryViewMode !== 'feed' && createPortal(
         <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
           <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
             {isMobileSearchOpen ? (

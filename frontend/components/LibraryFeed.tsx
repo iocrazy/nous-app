@@ -62,8 +62,8 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
   };
 
   return (
-    // Height adjusted: On mobile it takes full screen height minus bottom nav
-    <div className="flex justify-center w-full h-[calc(100vh-180px)] md:h-[calc(100vh-180px)] bg-black">
+    // Height: viewport minus TopBar (56px) + tab bar (~80px) on mobile, minus header on desktop
+    <div className="flex justify-center w-full h-[calc(100vh-136px)] md:h-[calc(100vh-180px)] bg-black">
       <div 
         ref={containerRef}
         className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-zinc-800 shadow-2xl"
