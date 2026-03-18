@@ -245,139 +245,109 @@ function AppLayoutInner() {
           />
         )}
 
-        {/* Tab buttons */}
-        <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-2 pb-[calc(env(safe-area-inset-bottom,8px)+4px)] relative z-40">
-          {/* Parser */}
-          <button
-            onClick={() => handleMobileNavClick('parser')}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
-          >
-            <Search size={22} />
-            <span className="text-[10px] leading-tight">Parser</span>
-          </button>
+        {/* Figma-style floating pill tab bar */}
+        <div className="flex justify-center pb-[calc(env(safe-area-inset-bottom,6px)+6px)] relative z-40">
+          <div className="bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/60 rounded-full flex items-center px-2 py-1.5 gap-0.5 shadow-2xl">
+            {/* Parser */}
+            <button
+              onClick={() => handleMobileNavClick('parser')}
+              className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                view === 'parser' ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+              }`}
+            >
+              <Search size={20} />
+              <span className="text-[9px] leading-tight font-medium">Parser</span>
+            </button>
 
-          {/* Downloads — only visible in personal workspace */}
-          {isPersonalWorkspace && (
+            {/* Downloads — personal workspace only */}
+            {isPersonalWorkspace && (
+              <div className="relative">
+                {isDownloadsMenuOpen && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+                    <div className="flex p-1.5 gap-1">
+                      <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutGrid size={18} /></button>
+                      <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutList size={18} /></button>
+                      <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><Smartphone size={18} /></button>
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    if (isDownloadsRoute) {
+                      setIsDownloadsMenuOpen(!isDownloadsMenuOpen);
+                    } else {
+                      handleMobileLibraryClick();
+                      setIsDownloadsMenuOpen(false);
+                    }
+                  }}
+                  className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                    isDownloadsRoute ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+                  }`}
+                >
+                  <Download size={20} />
+                  <span className="text-[9px] leading-tight font-medium">Downloads</span>
+                </button>
+              </div>
+            )}
+
+            {/* Resources */}
             <div className="relative">
-              {isDownloadsMenuOpen && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
-                  <div className="flex p-1.5 gap-1">
-                    <button
-                      onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }}
-                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <LayoutGrid size={18} />
-                    </button>
-                    <button
-                      onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }}
-                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <LayoutList size={18} />
-                    </button>
-                    <button
-                      onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }}
-                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <Smartphone size={18} />
-                    </button>
+              {isResourcesMenuOpen && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-52 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+                  <div className="px-4 pt-3 pb-2 border-b border-zinc-800/60">
+                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Workspace</span>
+                  </div>
+                  <div className="py-1 max-h-60 overflow-y-auto">
+                    {personalTeamId && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'}`}
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${selectedTeamId === personalTeamId ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'}`}>
+                          {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
+                        </div>
+                        <span className={`text-sm flex-1 ${selectedTeamId === personalTeamId ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>Personal</span>
+                        {selectedTeamId === personalTeamId && <Check size={14} className="text-indigo-400" />}
+                      </button>
+                    )}
+                    {teams.filter(t => String(t.id) !== personalTeamId).map(team => {
+                      const isActive = selectedTeamId === String(team.id);
+                      return (
+                        <button
+                          key={team.id}
+                          onClick={(e) => { e.stopPropagation(); navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'}`}
+                        >
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${isActive ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'}`}>
+                            {team.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span className={`text-sm flex-1 ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>{team.name}</span>
+                          {isActive && <Check size={14} className="text-indigo-400" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
               <button
                 onClick={() => {
-                  if (isDownloadsRoute) {
-                    setIsDownloadsMenuOpen(!isDownloadsMenuOpen);
+                  setIsMobileMenuOpen(false);
+                  if (view === 'resources' && !isDownloadsRoute) {
+                    setIsResourcesMenuOpen(!isResourcesMenuOpen);
                   } else {
-                    handleMobileLibraryClick();
-                    setIsDownloadsMenuOpen(false);
+                    navigate(teamPath('/resources'));
+                    setIsResourcesMenuOpen(false);
                   }
                 }}
-                className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${isDownloadsRoute ? 'text-indigo-400' : 'text-zinc-500'}`}
+                className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                  view === 'resources' && !isDownloadsRoute ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+                }`}
               >
-                <Download size={22} />
-                <span className="text-[10px] leading-tight">Downloads</span>
+                <FolderOpen size={20} />
+                <span className="text-[9px] leading-tight font-medium">Resources</span>
               </button>
             </div>
-          )}
-
-          {/* Resources — with team picker popup */}
-          <div className="relative">
-            {isResourcesMenuOpen && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-52 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
-                <div className="px-4 pt-3 pb-2 border-b border-zinc-800/60">
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Workspace</span>
-                </div>
-                <div className="py-1 max-h-60 overflow-y-auto">
-                  {personalTeamId && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
-                      className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
-                        selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
-                      }`}
-                    >
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                        selectedTeamId === personalTeamId ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
-                      }`}>
-                        {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
-                      </div>
-                      <span className={`text-sm flex-1 ${selectedTeamId === personalTeamId ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>Personal</span>
-                      {selectedTeamId === personalTeamId && <Check size={14} className="text-indigo-400" />}
-                    </button>
-                  )}
-                  {teams.filter(t => String(t.id) !== personalTeamId).map(team => {
-                    const isActive = selectedTeamId === String(team.id);
-                    return (
-                      <button
-                        key={team.id}
-                        onClick={(e) => { e.stopPropagation(); navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
-                          isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
-                        }`}
-                      >
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                          isActive ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
-                        }`}>
-                          {team.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className={`text-sm flex-1 ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>{team.name}</span>
-                        {isActive && <Check size={14} className="text-indigo-400" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                if (view === 'resources') {
-                  setIsResourcesMenuOpen(!isResourcesMenuOpen);
-                } else {
-                  navigate(teamPath('/resources'));
-                  setIsResourcesMenuOpen(false);
-                }
-              }}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' && !isDownloadsRoute ? 'text-indigo-400' : 'text-zinc-500'}`}
-            >
-              <FolderOpen size={22} />
-              <span className="text-[10px] leading-tight">Resources</span>
-            </button>
           </div>
-
-          {/* Profile */}
-          <button
-            onClick={() => setIsMobileProfileOpen(true)}
-            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
-          >
-            {userProfile.avatarUrl ? (
-               <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
-                  <img src={userProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
-               </div>
-            ) : (
-               <User size={22} />
-            )}
-            <span className="text-[10px] leading-tight">Me</span>
-          </button>
         </div>
       </div>
 
@@ -438,24 +408,20 @@ function AppLayoutInner() {
         sidebarCollapsed={sidebarCollapsed}
       />
 
-      {/* Mobile workspace avatar — top-right, opens MobileProfilePage */}
+      {/* Mobile workspace avatar — Figma-style glowing circle, top-right */}
       <button
-        className="sm:hidden fixed top-3 right-14 z-30 w-8 h-8 rounded-full overflow-hidden border-2 border-zinc-700 hover:border-indigo-500 transition-colors"
+        className="sm:hidden fixed top-2.5 right-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95"
         onClick={() => setIsMobileProfileOpen(true)}
       >
-        {currentTeam ? (
-          <div className={`w-full h-full flex items-center justify-center text-xs font-bold ${
-            selectedTeamId === personalTeamId ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'
-          }`}>
-            {selectedTeamId === personalTeamId
-              ? (userProfile?.name?.charAt(0)?.toUpperCase() || 'P')
-              : (currentTeam.name?.charAt(0)?.toUpperCase() || 'T')}
-          </div>
-        ) : (
-          <div className="w-full h-full bg-zinc-700 flex items-center justify-center">
-            <User size={14} className="text-zinc-400" />
-          </div>
-        )}
+        <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-zinc-950 ${
+          selectedTeamId === personalTeamId
+            ? 'bg-indigo-600 text-white ring-indigo-500/50'
+            : 'bg-emerald-600 text-white ring-emerald-500/50'
+        }`}>
+          {selectedTeamId === personalTeamId
+            ? (userProfile?.name?.charAt(0)?.toUpperCase() || 'P')
+            : (currentTeam?.name?.charAt(0)?.toUpperCase() || 'T')}
+        </div>
       </button>
 
       {/* Main Content */}
