@@ -141,7 +141,7 @@ class StoryboardService:
         """
         nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
         project_root = os.path.join(
-            nas_base, "teams", team_id, "storyboard", project_id
+            nas_base, "teams", str(team_id), "storyboard", str(project_id)
         )
         try:
             os.makedirs(project_root, exist_ok=True)
