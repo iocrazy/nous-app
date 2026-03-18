@@ -711,7 +711,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
-        className="flex-1 md:min-h-0 md:overflow-y-auto px-3 md:px-5 pt-3 md:pt-4 pb-5"
+        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 pb-5 ${libraryViewMode === 'feed' ? 'px-0 pt-0' : 'px-3 pt-3'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
@@ -725,8 +725,8 @@ export const DownloadsView: React.FC = () => {
           }
         }}
       >
-        {/* Mobile header — visible only on small screens */}
-        <div className="md:hidden flex items-center justify-between mb-3">
+        {/* Mobile header — hidden on feed view and desktop */}
+        <div className={`md:hidden flex items-center justify-between mb-3 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
           <div className="flex items-center gap-2">
             <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
             {!isLoadingLibrary && (
