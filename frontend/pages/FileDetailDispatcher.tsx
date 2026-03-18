@@ -1,19 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { ResourceDetail } from '../components/ResourceDetail';
+import { ResourceDetailPage } from '../components/ResourceDetailPage';
 import { DownloadDetailPage } from './DownloadDetailPage';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 /**
- * Unified resource detail page.
+ * Unified resource detail dispatcher.
  * Routes: /resources/file/{resourceId}
  *
  * Detects the resource's source_type:
  * - 'web' (downloaded from platform) → DownloadDetailPage (download detail view)
- * - other (uploaded/imported) → ResourceDetail (resource management view)
+ * - other (uploaded/imported) → ResourceDetailPage (resource management view)
  */
-export function ResourceDetailPage() {
+export function FileDetailDispatcher() {
   const { resourceId } = useParams<{ resourceId: string }>();
   const [sourceType, setSourceType] = useState<string | null>(null);
   const [mediaId, setMediaId] = useState<string | null>(null);
@@ -64,6 +64,6 @@ export function ResourceDetailPage() {
     return <DownloadDetailPage resourceId={resourceId} mediaId={mediaId} />;
   }
 
-  // Uploaded/imported → ResourceDetail (resource management view)
-  return <ResourceDetail resourceId={resourceId} />;
+  // Uploaded/imported → ResourceDetailPage (resource management view)
+  return <ResourceDetailPage resourceId={resourceId} />;
 }
