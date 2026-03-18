@@ -69,17 +69,22 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
         className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-zinc-800 shadow-2xl"
         style={{ scrollBehavior: 'smooth' }}
       >
-        {data.map((item) => (
-          <FeedItem 
-            key={item.platform_id} 
-            item={item} 
-            isPlaying={playingId === item.platform_id}
-            isMuted={isMuted}
-            onTogglePlay={(e) => togglePlay(e, item.platform_id)}
-            onToggleMute={toggleMute}
-            formatNumber={formatNumber}
-          />
-        ))}
+        {data.map((item, idx) => {
+          const playingIdx = data.findIndex(d => d.platform_id === playingId);
+          const shouldLoadVideo = Math.abs(idx - playingIdx) <= 1;
+          return (
+            <FeedItem
+              key={item.platform_id}
+              item={item}
+              isPlaying={playingId === item.platform_id}
+              shouldLoadVideo={shouldLoadVideo}
+              isMuted={isMuted}
+              onTogglePlay={(e) => togglePlay(e, item.platform_id)}
+              onToggleMute={toggleMute}
+              formatNumber={formatNumber}
+            />
+          );
+        })}
         {data.length === 0 && (
            <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
              <p>No videos found in this feed.</p>
@@ -94,6 +99,7 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
 const FeedItem = ({
   item,
   isPlaying,
+  shouldLoadVideo,
   isMuted,
   onTogglePlay,
   onToggleMute,
@@ -101,6 +107,7 @@ const FeedItem = ({
 }: {
   item: Video;
   isPlaying: boolean;
+  shouldLoadVideo: boolean;
   isMuted: boolean;
   onTogglePlay: (e: React.MouseEvent) => void;
   onToggleMute: (e: React.MouseEvent) => void;
@@ -179,29 +186,39 @@ const FeedItem = ({
       className="feed-item w-full h-full snap-center relative bg-black overflow-hidden shrink-0 group flex items-center justify-center"
       onClick={onTogglePlay}
     >
-      {/* Loading spinner — shown while buffering */}
-      {isVideo && isBuffering && (
-        <div className="absolute inset-0 flex items-center justify-center z-10 bg-black">
+      {/* Media Layer — only mount <video> for current ± 1 items */}
+      {isVideo && shouldLoadVideo ? (
+        <>
+          {/* Buffering spinner */}
+          {isBuffering && (
+            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black">
+              {coverUrl ? (
+                <img src={coverUrl} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
+              ) : null}
+              <Loader2 className="w-10 h-10 text-white/60 animate-spin" />
+            </div>
+          )}
+          <video
+            ref={videoRef}
+            src={isHlsUrl ? undefined : videoUrl}
+            className="w-full h-full object-contain cursor-pointer bg-black"
+            loop
+            muted={isMuted}
+            playsInline
+            onCanPlay={() => setIsBuffering(false)}
+            onWaiting={() => setIsBuffering(true)}
+            onPlaying={() => setIsBuffering(false)}
+          />
+        </>
+      ) : isVideo ? (
+        // Not loaded yet — show cover placeholder
+        <div className="w-full h-full flex items-center justify-center bg-black">
           {coverUrl ? (
-            <img src={coverUrl} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
-          ) : null}
-          <Loader2 className="w-10 h-10 text-white/60 animate-spin" />
+            <img src={coverUrl} alt="" className="w-full h-full object-contain" />
+          ) : (
+            <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
+          )}
         </div>
-      )}
-
-      {/* Media Layer — only mount video for current/adjacent items */}
-      {isVideo ? (
-        <video
-          ref={videoRef}
-          src={isHlsUrl ? undefined : videoUrl}
-          className="w-full h-full object-contain cursor-pointer bg-black"
-          loop
-          muted={isMuted}
-          playsInline
-          onCanPlay={() => setIsBuffering(false)}
-          onWaiting={() => setIsBuffering(true)}
-          onPlaying={() => setIsBuffering(false)}
-        />
       ) : (
         <div className="w-full h-full relative flex items-center justify-center bg-black">
             {imageUrl ? (
