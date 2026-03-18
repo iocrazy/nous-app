@@ -310,9 +310,16 @@ export const DownloadsView: React.FC = () => {
   }, [lastClickedId, filteredLibrary]);
 
   // ─── Single click: select ─────────────────────────
+  const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
+
   const handleVideoClick = useCallback((item: Video, e?: React.MouseEvent) => {
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) {
       handleToggleSelect(item.platform_id, e);
+      return;
+    }
+    // Mobile: single tap navigates to detail (no double-click on touch)
+    if (isMobileDevice) {
+      handleNavigateToDetail(item);
       return;
     }
     if (selectedVideo?.platform_id === item.platform_id) {
@@ -324,7 +331,7 @@ export const DownloadsView: React.FC = () => {
       setSelectedIds(new Set([item.platform_id]));
       setLastClickedId(item.platform_id);
     }
-  }, [selectedVideo, handleToggleSelect]);
+  }, [selectedVideo, handleToggleSelect, isMobileDevice, handleNavigateToDetail]);
 
   // ─── Double click: navigate to detail ─────────────
   const handleVideoDoubleClick = useCallback((item: Video) => {
@@ -808,10 +815,10 @@ export const DownloadsView: React.FC = () => {
         )}
       </div>
 
-      {/* ── Right Info Panel: Video details (Eagle style) ── */}
+      {/* ── Right Info Panel: Video details (Eagle style, desktop only) ── */}
       {selectedVideo && (
         <div
-          className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
+          className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
           }`}
           style={{ width: `${infoPanelWidth}px` }}
@@ -1026,11 +1033,11 @@ export const DownloadsView: React.FC = () => {
         </div>
       )}
 
-      {/* Expand tab — visible when panel is closed */}
+      {/* Expand tab — visible when panel is closed (desktop only) */}
       {selectedVideo && !showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
-          className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
+          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
         >
           <ChevronLeft size={20} />
         </button>
