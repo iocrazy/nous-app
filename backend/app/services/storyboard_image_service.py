@@ -94,6 +94,121 @@ class StoryboardImageService:
         return frame_paths
 
     # ------------------------------------------------------------------ #
+    # 1b. split_image_to_grid (rich output with previews)
+    # ------------------------------------------------------------------ #
+
+    def split_image_to_grid(
+        self,
+        image_path: str,
+        rows: int,
+        cols: int,
+        output_dir: str,
+        preview_dir: str,
+        file_prefix: str = "cell",
+        preview_max_size: int = 512,
+    ) -> list[dict]:
+        """
+        Split a sprite-sheet image into a grid of cells with preview thumbnails.
+
+        Each cell is saved as a PNG in *output_dir* and a JPEG preview in
+        *preview_dir*.  Returns rich metadata for each cell including
+        dimensions, row/col position, and file paths.
+
+        Args:
+            image_path: Absolute path to the source image.
+            rows: Number of rows in the grid.
+            cols: Number of columns in the grid.
+            output_dir: Directory to save full-resolution cell PNGs.
+            preview_dir: Directory to save preview JPEGs.
+            file_prefix: Filename prefix for saved cells.
+            preview_max_size: Max pixel dimension for preview thumbnails.
+
+        Returns:
+            List of dicts with keys: file_path, preview_path, width, height,
+            row, col, index.
+        """
+        src = Path(image_path)
+        out = Path(output_dir)
+        prev = Path(preview_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        prev.mkdir(parents=True, exist_ok=True)
+
+        try:
+            img = Image.open(src).convert("RGB")
+        except Exception as exc:
+            logger.error(
+                "split_image_to_grid: cannot open %s – %s", image_path, exc
+            )
+            raise
+
+        img_w, img_h = img.size
+        cell_w = img_w // cols
+        cell_h = img_h // rows
+
+        if cell_w < 1 or cell_h < 1:
+            raise ValueError(
+                f"Image {img_w}x{img_h} too small for {rows}x{cols} grid"
+            )
+
+        results: list[dict] = []
+        index = 0
+
+        for row in range(rows):
+            for col in range(cols):
+                left = col * cell_w
+                upper = row * cell_h
+                right = left + cell_w
+                lower = upper + cell_h
+
+                cell = img.crop((left, upper, right, lower))
+
+                # Save full-resolution cell
+                cell_filename = f"{file_prefix}_{row}_{col}.png"
+                cell_path = out / cell_filename
+                cell.save(str(cell_path), format="PNG")
+
+                # Generate preview thumbnail
+                preview_filename = f"{file_prefix}_{row}_{col}_thumb.jpg"
+                preview_path = prev / preview_filename
+                scale = min(
+                    preview_max_size / max(cell_w, 1),
+                    preview_max_size / max(cell_h, 1),
+                    1.0,
+                )
+                if scale < 1.0:
+                    thumb = cell.resize(
+                        (max(1, int(cell_w * scale)), max(1, int(cell_h * scale))),
+                        Image.LANCZOS,
+                    )
+                else:
+                    thumb = cell
+                thumb.save(str(preview_path), format="JPEG", quality=PREVIEW_QUALITY)
+
+                results.append(
+                    {
+                        "file_path": str(cell_path),
+                        "preview_path": str(preview_path),
+                        "width": cell_w,
+                        "height": cell_h,
+                        "row": row,
+                        "col": col,
+                        "index": index,
+                    }
+                )
+                index += 1
+
+        logger.info(
+            "split_image_to_grid: split %s into %d cells (%d×%d, cell %dx%d)",
+            image_path,
+            len(results),
+            rows,
+            cols,
+            cell_w,
+            cell_h,
+        )
+        return results
+
+    # ------------------------------------------------------------------ #
     # 2. detect_scenes
     # ------------------------------------------------------------------ #
 

@@ -250,6 +250,69 @@ async def reorder_frames(
 
 
 # ---------------------------------------------------------------------------
+# POST /projects/{project_id}/split-image
+# ---------------------------------------------------------------------------
+
+
+@router.post("/projects/{project_id}/split-image")
+async def split_image(
+    auth: AuthDep,
+    project_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Split an uploaded image asset into a grid of individual frames.
+
+    Request body:
+        asset_id (str): ID of the source storyboard asset.
+        rows (int): Number of rows in the grid (1–10).
+        cols (int): Number of columns in the grid (1–10).
+        node_id (str, optional): Canvas node ID to attach the frames to.
+
+    Returns:
+        Dict with frames list, source_asset_id, rows, cols.
+    """
+    asset_id = body.get("asset_id")
+    rows = body.get("rows")
+    cols = body.get("cols")
+    node_id = body.get("node_id")
+
+    if not asset_id:
+        raise HTTPException(status_code=422, detail="asset_id is required")
+    if not isinstance(rows, int) or not isinstance(cols, int):
+        raise HTTPException(status_code=422, detail="rows and cols must be integers")
+    if rows < 1 or rows > 10 or cols < 1 or cols > 10:
+        raise HTTPException(
+            status_code=422,
+            detail="rows and cols must be between 1 and 10",
+        )
+
+    try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
+        result = await svc.split_image_asset(
+            project_id=project_id,
+            asset_id=str(asset_id),
+            rows=rows,
+            cols=cols,
+            node_id=str(node_id) if node_id else None,
+        )
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "[SBCanvas] split_image project=%s asset=%s failed: %s",
+            project_id,
+            asset_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to split image: {exc}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # POST /projects/{project_id}/upload
 # ---------------------------------------------------------------------------
 

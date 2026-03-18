@@ -37,6 +37,7 @@ _PROJECT_SUBDIRS = [
     "videos",
     "exports",
     "temp",
+    "splits",
 ]
 
 
@@ -660,6 +661,175 @@ class StoryboardService:
             "width": asset.get("width", 0),
             "height": asset.get("height", 0),
             "file_hash": asset.get("file_hash", ""),
+        }
+
+    async def split_image_asset(
+        self,
+        project_id: str,
+        asset_id: str,
+        rows: int,
+        cols: int,
+        node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Split an uploaded image asset into a grid of frames.
+
+        For each cell in the grid:
+          1. Crop and save as a separate image + preview
+          2. Create a storyboard_asset record
+          3. Create a storyboard_frame record
+
+        Args:
+            project_id: UUID of the storyboard project.
+            asset_id: UUID of the source asset to split.
+            rows: Number of rows in the grid.
+            cols: Number of columns in the grid.
+            node_id: Optional UUID of the canvas node to attach frames to.
+
+        Returns:
+            Dict with keys: frames (list of frame records), source_asset_id,
+            rows, cols.
+        """
+        from app.services.storyboard_image_service import StoryboardImageService
+
+        # Validate grid dimensions
+        if rows < 1 or rows > 10:
+            raise HTTPException(status_code=422, detail="rows must be between 1 and 10")
+        if cols < 1 or cols > 10:
+            raise HTTPException(status_code=422, detail="cols must be between 1 and 10")
+
+        # 1. Get source asset
+        source_asset = await self.get_asset(asset_id)
+        if not source_asset:
+            raise HTTPException(status_code=404, detail="Source asset not found")
+
+        if str(source_asset.get("project_id")) != str(project_id):
+            raise HTTPException(status_code=403, detail="Asset does not belong to this project")
+
+        # 2. Resolve paths
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        team_id = str(project.get("team_id", "unknown"))
+        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+
+        source_file_path = Path(nas_base) / source_asset["file_path"]
+        if not source_file_path.exists():
+            raise HTTPException(status_code=404, detail="Source image file not found on disk")
+
+        # Compute a hash prefix for output filenames
+        source_hash = source_asset.get("file_hash", "unknown")[:12]
+
+        # Output directories (relative to NAS_BASE_PATH)
+        rel_split_dir = f"teams/{team_id}/storyboard/{project_id}/splits"
+        rel_preview_dir = f"teams/{team_id}/storyboard/{project_id}/previews"
+        abs_split_dir = Path(nas_base) / rel_split_dir
+        abs_preview_dir = Path(nas_base) / rel_preview_dir
+
+        # 3. Split the image
+        image_service = StoryboardImageService()
+        try:
+            cells = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: image_service.split_image_to_grid(
+                    image_path=str(source_file_path),
+                    rows=rows,
+                    cols=cols,
+                    output_dir=str(abs_split_dir),
+                    preview_dir=str(abs_preview_dir),
+                    file_prefix=source_hash,
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:
+            logger.error(
+                "split_image_asset: image processing failed for asset %s: %s",
+                asset_id, exc,
+            )
+            raise HTTPException(
+                status_code=500, detail=f"Image splitting failed: {exc}"
+            )
+
+        # 4. Create asset + frame records for each cell
+        created_frames: List[Dict[str, Any]] = []
+
+        for cell in cells:
+            # Compute relative paths (stored in DB)
+            cell_abs_path = Path(cell["file_path"])
+            cell_rel_path = str(cell_abs_path.relative_to(nas_base))
+            preview_abs_path = Path(cell["preview_path"])
+            preview_rel_path = str(preview_abs_path.relative_to(nas_base))
+
+            # Compute hash for the cell image
+            cell_hash = hashlib.sha256(cell_abs_path.read_bytes()).hexdigest()
+
+            # Create asset record
+            cell_asset_data: Dict[str, Any] = {
+                "project_id": project_id,
+                "file_path": cell_rel_path,
+                "file_hash": cell_hash,
+                "file_size": cell_abs_path.stat().st_size,
+                "mime_type": "image/png",
+                "width": cell["width"],
+                "height": cell["height"],
+                "preview_path": preview_rel_path,
+                "metadata_json": {
+                    "source_asset_id": asset_id,
+                    "split_row": cell["row"],
+                    "split_col": cell["col"],
+                    "grid_rows": rows,
+                    "grid_cols": cols,
+                },
+                "source_type": "split",
+            }
+            cell_asset = await self.asset_repo.create(cell_asset_data)
+            cell_asset_id = str(cell_asset.get("id", ""))
+
+            # Build image URLs
+            image_url = f"/api/v1/storyboard/assets/{cell_asset_id}/file"
+            preview_url = f"/api/v1/storyboard/assets/{cell_asset_id}/file?preview=true"
+
+            # Create frame record
+            frame_data: Dict[str, Any] = {
+                "project_id": project_id,
+                "frame_index": cell["index"],
+                "image_url": image_url,
+                "thumbnail_url": preview_url,
+                "sort_order": cell["index"],
+                "note": "",
+                "duration_seconds": 2.0,
+                "transition_type": "cut",
+            }
+            if node_id:
+                frame_data["node_id"] = node_id
+
+            frame = await self.frame_repo.create(frame_data)
+
+            created_frames.append(
+                {
+                    **frame,
+                    "asset_id": cell_asset_id,
+                    "image_url": image_url,
+                    "preview_url": preview_url,
+                    "width": cell["width"],
+                    "height": cell["height"],
+                    "row": cell["row"],
+                    "col": cell["col"],
+                }
+            )
+
+        logger.info(
+            "split_image_asset: created %d frames from asset %s in project %s (%dx%d grid)",
+            len(created_frames), asset_id, project_id, rows, cols,
+        )
+
+        return {
+            "frames": created_frames,
+            "source_asset_id": asset_id,
+            "rows": rows,
+            "cols": cols,
         }
 
     async def get_asset(self, asset_id: str) -> Optional[Dict[str, Any]]:
