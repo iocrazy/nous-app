@@ -66,6 +66,7 @@ function AppLayoutInner() {
 
   const view = pathnameToView(location.pathname);
   const isDownloadsRoute = location.pathname.includes('/resources/downloads');
+  const isDetailPage = location.pathname.includes('/resources/file/') || location.pathname.includes('/player/');
 
   const isPersonalWorkspace = !selectedTeamId || selectedTeamId === personalTeamId;
 
@@ -237,8 +238,8 @@ function AppLayoutInner() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Tab Bar — 4 tabs: Parser, Downloads, Resources, Me */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
+      {/* Mobile Tab Bar — hidden on detail pages for immersive experience */}
+      <div className={`sm:hidden fixed bottom-0 left-0 right-0 z-40 ${isDetailPage ? 'hidden' : ''}`}>
         {/* Backdrop to dismiss popups */}
         {(isMobileMenuOpen || isResourcesMenuOpen || isDownloadsMenuOpen) && (
           <div
@@ -410,9 +411,9 @@ function AppLayoutInner() {
         sidebarCollapsed={sidebarCollapsed}
       />
 
-      {/* Mobile workspace avatar — Figma-style glowing circle, top-right */}
+      {/* Mobile workspace avatar — hidden on detail pages */}
       <button
-        className="sm:hidden fixed top-2.5 right-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95"
+        className={`sm:hidden fixed top-2.5 right-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
         onClick={() => setIsMobileProfileOpen(true)}
       >
         <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-zinc-950 ${
