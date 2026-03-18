@@ -146,7 +146,7 @@ export function CanvasEditorPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
+    <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-800 flex-shrink-0 bg-gray-900">
         <button

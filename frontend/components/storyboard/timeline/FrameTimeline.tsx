@@ -125,11 +125,11 @@ const FrameTimeline = React.memo(function FrameTimeline({
 
   return (
     <>
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-gray-900 border-t border-gray-700 shadow-2xl">
+      <div className="flex-shrink-0 bg-gray-900 border-t border-gray-700 relative">
         {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed((v) => !v)}
-          className="absolute -top-6 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-0.5 bg-gray-800 border border-gray-700 rounded-t-lg text-[11px] text-gray-400 hover:text-gray-200 transition-colors"
+          className="absolute -top-5 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-0.5 bg-gray-800 border border-gray-700 border-b-0 rounded-t-md text-[10px] text-gray-400 hover:text-gray-200 transition-colors z-10"
         >
           {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           Timeline
