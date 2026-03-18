@@ -757,7 +757,7 @@ export interface StoryboardProject {
 export interface StoryboardNode {
   id: string;
   project_id: string;
-  node_type: 'upload' | 'image_edit' | 'storyboard_split' | 'storyboard_gen' | 'text_annotation' | 'group' | 'export' | 'image_to_video';
+  node_type: 'upload' | 'image' | 'image_edit' | 'storyboard_split' | 'storyboard_gen' | 'text_annotation' | 'group' | 'export' | 'image_to_video';
   position_x: number;
   position_y: number;
   width?: number;

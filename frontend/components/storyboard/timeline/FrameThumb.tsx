@@ -1,5 +1,5 @@
-import React, { useCallback } from 'react';
-import { ArrowRight, Image } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import { Image } from 'lucide-react';
 import { StoryboardFrame } from '../../../types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -48,27 +48,74 @@ const FrameThumb = React.memo(function FrameThumb({
   onDragOver,
   onDrop,
 }: FrameThumbProps) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
   const handleClick = useCallback(() => {
     onSelect(frame.id);
   }, [frame.id, onSelect]);
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      setIsDragging(true);
+      onDragStart(e, frame.id);
+    },
+    [frame.id, onDragStart],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      setIsDragOver(true);
+      onDragOver(e);
+    },
+    [onDragOver],
+  );
+
+  const handleDragLeave = useCallback(() => {
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      setIsDragOver(false);
+      onDrop(e, frame.id);
+    },
+    [frame.id, onDrop],
+  );
 
   const shotAbbr = abbreviateShotType(frame.shot_type);
   const transitionIcon = TRANSITION_ICONS[frame.transition_type] ?? '|';
 
   return (
     <div className="relative flex items-center flex-shrink-0">
+      {/* Drop indicator line */}
+      {isDragOver && (
+        <div className="absolute -left-0.5 top-0 bottom-0 w-0.5 bg-blue-400 rounded-full z-10" />
+      )}
+
       {/* Thumbnail card */}
       <div
         draggable
         onClick={handleClick}
-        onDragStart={(e) => onDragStart(e, frame.id)}
-        onDragOver={onDragOver}
-        onDrop={(e) => onDrop(e, frame.id)}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         className={[
           'relative w-20 h-14 rounded-lg overflow-hidden cursor-pointer border-2 transition-all select-none',
-          selected
+          isDragging ? 'opacity-40 border-blue-400' : '',
+          isDragOver ? 'border-blue-400 scale-105' : '',
+          !isDragging && !isDragOver && selected
             ? 'border-blue-500 shadow-[0_0_0_1px_#3b82f6]'
-            : 'border-gray-700 hover:border-gray-500',
+            : '',
+          !isDragging && !isDragOver && !selected
+            ? 'border-gray-700 hover:border-gray-500'
+            : '',
         ].join(' ')}
       >
         {/* Image or placeholder */}

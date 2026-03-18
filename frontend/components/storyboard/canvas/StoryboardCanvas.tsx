@@ -23,6 +23,7 @@ import TextAnnotationNode from '../nodes/TextAnnotationNode';
 import GroupNode from '../nodes/GroupNode';
 import ExportNode from '../nodes/ExportNode';
 import ImageToVideoNode from '../nodes/ImageToVideoNode';
+import ImageNode from '../nodes/ImageNode';
 
 // Canvas components
 import CanvasToolbar from './CanvasToolbar';
@@ -35,6 +36,7 @@ import SmartEdge from './edges/SmartEdge';
 
 const NODE_TYPES = {
   upload: UploadNode,
+  image: ImageNode,
   image_edit: ImageEditNode,
   storyboard_split: StoryboardSplitNode,
   storyboard_gen: StoryboardGenNode,

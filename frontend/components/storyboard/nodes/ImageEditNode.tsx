@@ -5,6 +5,7 @@ import NodeWrapper from './shared/NodeWrapper';
 import NodeImagePreview from './shared/NodeImagePreview';
 import { nodeControlStyles as s } from './shared/NodeControlStyles';
 import { useStoryboardStore } from '../../../stores/storyboardStore';
+import { formatDimensionsWithRatio } from '../shared/imageUtils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,8 @@ const ImageEditNode = React.memo(function ImageEditNode({ id, selected, data }: 
   const resultImageUrl = nodeData.resultImageUrl as string | undefined;
   const progress = nodeData.progress as number | undefined;
   const locked = nodeData.locked as boolean | undefined;
+  const inputWidth = nodeData.inputWidth as number | undefined;
+  const inputHeight = nodeData.inputHeight as number | undefined;
 
   const update = useCallback(
     (patch: Record<string, unknown>) => {
@@ -88,6 +91,13 @@ const ImageEditNode = React.memo(function ImageEditNode({ id, selected, data }: 
       ]}
     >
       <NodeImagePreview imageUrl={resultImageUrl} progress={progress} />
+
+      {/* Detected input dimensions */}
+      {inputWidth && inputHeight && (
+        <p className="text-[10px] text-gray-500 text-center truncate px-1 -mt-1">
+          Input: {formatDimensionsWithRatio(inputWidth, inputHeight)}
+        </p>
+      )}
 
       <div className={s.section}>
         <label className={s.label}>Prompt</label>
