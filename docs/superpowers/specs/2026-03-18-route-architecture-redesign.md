@@ -199,9 +199,57 @@ When user switches from personal to team workspace (via Me tab workspace switche
 - If on any other view → navigate to `/team/{newTeamId}/{currentView}`
 - Tab bar immediately renders 3-tab layout (no flash of 4 tabs)
 
-### 11. Implementation Phases
+### 11. ResourcesView Shell Refactor
 
-**Phase A (Frontend)**: Decisions 1, 2, 3, 5, 6, 7, 8, 9, 10 — all frontend changes, low risk
+**Current problem**: `ResourcesView.tsx` is 3000+ lines handling layout, routing, content rendering, state management, drag-drop, context menus, and info panel all in one file. Mobile/desktop differences are scattered across conditional rendering.
+
+**Pattern**: Responsive Shell — industry standard (Notion, Linear, Figma):
+
+```
+ResourcesContext (Layer 2: shared domain state)
+  │
+  └─ ResourcesShell (responsive layout adapter)
+      ├─ Desktop: ResourcesSidebar + ContentArea + ResourcesInfoPanel
+      └─ Mobile: ContentArea full-screen + floating actions
+          │
+          ContentArea (selected by URL section):
+          ├─ /resources/downloads → DownloadsView
+          ├─ /resources (default) → ResourceGrid
+          ├─ /resources/shared → SharedView
+          └─ /resources/recycle → RecycleView
+```
+
+**Three-layer state management** (big-company standard):
+- **Layer 1 — URL**: navigation state (`sidebarView`, `folderId`, `libraryId`) — already URL-driven, no change
+- **Layer 2 — ResourcesContext**: shared business data (`resources`, `folders`, `libraries`, `selectedResource`, `selectedIds`) + actions (`loadResources`, `handleDelete`, `handleMove`)
+- **Layer 3 — Component useState**: pure UI state (dropdown open, dragging, panel width)
+
+**File split target:**
+
+| New File | Lines | Responsibility |
+|----------|-------|---------------|
+| `contexts/ResourcesContext.tsx` | ~200 | Shared state provider: data, selection, actions |
+| `components/ResourcesShell.tsx` | ~150 | Responsive layout: sidebar/content/panel arrangement |
+| `components/ResourcesSidebar.tsx` | ~300 | Desktop sidebar: shared/recycle/downloads/libraries/smart-folders |
+| `components/ResourceGrid.tsx` | ~600 | File/folder grid with context menus, drag-drop, multi-select |
+| `components/SharedView.tsx` | ~200 | Shared resources view |
+| `components/RecycleView.tsx` | ~200 | Recycle bin view |
+| `components/ResourcesInfoPanel.tsx` | ~300 | Right-side info panel (tags, notes, properties) |
+| `components/DownloadsView.tsx` | ~1100 | Already exists, no change |
+
+**What does NOT change:**
+- All URLs/routes stay the same
+- Desktop UI looks identical
+- Mobile UI looks identical
+- All features (upload, drag-drop, multi-select, tags, batch operations) preserved
+- API calls unchanged
+- Other pages unaffected
+
+**Refactor strategy**: Extract one piece at a time, verify build + visual after each. Start with Context (state), then Shell (layout), then Sidebar, then content views.
+
+### 12. Implementation Phases
+
+**Phase A (Frontend)**: Decisions 1-3, 5-11 — route cleanup, tab bar, Me tab, Shell refactor
 **Phase B (Backend)**: Decision 4 — permission checks, needs `media_permissions.py`, DB index for file_path
 
 Phase A can ship independently. Phase B requires more design detail for edge cases.
@@ -216,3 +264,5 @@ Phase A can ship independently. Phase B requires more design detail for edge cas
 - All detail pages use `/resources/file/{resourceId}` route
 - No `/player/` routes exist
 - `pathnameToView()` defined in one place, imported everywhere
+- `ResourcesView.tsx` split into 7+ focused modules (no file > 800 lines)
+- ResourcesContext provides shared state to all resource sub-components
