@@ -191,6 +191,13 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
 
+  // Redirect team workspace away from downloads (downloads is personal-only)
+  useEffect(() => {
+    if (sidebarView === 'downloads' && scopeType === 'team') {
+      navigate(resPath('/resources'), { replace: true });
+    }
+  }, [sidebarView, scopeType]);
+
   // Data
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);

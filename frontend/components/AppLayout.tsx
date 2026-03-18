@@ -65,6 +65,8 @@ function AppLayoutInner() {
 
   const view = pathnameToView(location.pathname);
 
+  const isPersonalWorkspace = !selectedTeamId || selectedTeamId === personalTeamId;
+
   const {
     settingsTab, setSettingsTab,
     selectedProject, setSelectedProject,
@@ -132,7 +134,8 @@ function AppLayoutInner() {
 
   const handleMobileLibraryClick = () => {
     setIsDashboardMenuOpen(false);
-    navigate(teamPath('/resources/downloads'));
+    const pid = personalTeamId || selectedTeamId;
+    navigate(`/team/${pid}/resources/downloads`);
     setIsMobileMenuOpen(false);
   };
 
@@ -222,14 +225,16 @@ function AppLayoutInner() {
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
 
-          {/* Downloads — navigates to /resources/downloads */}
-          <button
-            onClick={handleMobileLibraryClick}
-            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
-          >
-            <Download size={22} />
-            <span className="text-[10px] leading-tight">Downloads</span>
-          </button>
+          {/* Downloads — only visible in personal workspace */}
+          {isPersonalWorkspace && (
+            <button
+              onClick={handleMobileLibraryClick}
+              className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
+            >
+              <Download size={22} />
+              <span className="text-[10px] leading-tight">Downloads</span>
+            </button>
+          )}
 
           {/* Resources — with team picker popup */}
           <div className="relative">
