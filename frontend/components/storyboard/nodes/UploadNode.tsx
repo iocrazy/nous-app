@@ -142,6 +142,7 @@ const UploadNode = React.memo(function UploadNode({ id, selected, data }: NodePr
       locked={locked}
       accentColor="#3b82f6"
       handles={[{ type: 'source', position: Position.Right }]}
+      imageUrl={imageUrl}
     >
       {displayUrl && !uploading ? (
         <NodeImagePreview imageUrl={displayUrl} alt="Uploaded image" />

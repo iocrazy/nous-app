@@ -77,6 +77,7 @@ interface StoryboardState {
   addNode: (node: StoryboardNode) => void;
   updateNodeData: (nodeId: string, data: Partial<StoryboardNode>) => void;
   deleteNode: (nodeId: string) => void;
+  duplicateNode: (nodeId: string, offset?: { x: number; y: number }) => string | null;
 
   setEdges: (edges: StoryboardEdge[]) => void;
 
@@ -158,6 +159,32 @@ export const useStoryboardStore = create<StoryboardState>((set, get) => ({
       ),
       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
     })),
+
+  duplicateNode: (nodeId, offset = { x: 50, y: 50 }) => {
+    const state = get();
+    const original = state.nodes.find((n) => n.id === nodeId);
+    if (!original) return null;
+
+    const newId = `node-${Date.now()}`;
+    const duplicated: StoryboardNode = {
+      ...original,
+      id: newId,
+      position_x: original.position_x + offset.x,
+      position_y: original.position_y + offset.y,
+      data_json: { ...original.data_json },
+      sort_order: state.nodes.length,
+      locked: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    set({
+      nodes: [...state.nodes, duplicated],
+      selectedNodeId: newId,
+    });
+
+    return newId;
+  },
 
   // ─── Edges ────────────────────────────────────────────────────────────────
 
