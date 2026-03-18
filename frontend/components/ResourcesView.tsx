@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import {
   AlertTriangle,
   Clock,
@@ -43,25 +43,11 @@ import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
 import { ToolbarSearch } from './ToolbarSearch';
 import { semanticSearch, hybridSearch } from '../services/searchService';
-import { usePermission } from '../hooks/usePermission';
 import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
-  fetchFolders,
-  fetchChildFolders,
   fetchResources,
   createFolder,
   uploadResource,
-  trashResource,
-  restoreResource,
-  permanentDeleteResource,
-  permanentDeleteFolder,
-  fetchTrashedResources,
-  fetchDownloadedResources,
-  fetchResourceTags,
-  addResourceTag,
-  removeResourceTag,
-  fetchSmartFolders,
-  fetchSmartFolderResults,
   createSmartFolder,
   updateSmartFolder,
   deleteSmartFolder,
@@ -72,21 +58,16 @@ import {
   moveFolder,
   trashResources,
   renameResource,
-  getFolderPreview,
   uploadNewVersion,
   checkDuplicate,
   linkExistingResource,
-  updateResource,
   getFolderContentCount,
-  fetchTrashedFolders,
   restoreFolder,
-  fetchFolderContents,
+  restoreResource,
+  fetchSmartFolders,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
-import { fetchLibraries, createLibrary } from '../services/libraryService';
-import { fetchTags } from '../services/tagsService';
-import { createTag } from '../services/unifiedTagService';
-import { useTaskManager } from '../contexts/TaskManagerContext';
+import { createLibrary } from '../services/libraryService';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
@@ -96,16 +77,16 @@ import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
-import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useTouchDragDrop } from '../hooks/useTouchDragDrop';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
 import { downloadWithAuth } from '../utils/download';
-import { getSupabaseClient } from '../supabaseClient';
 import { getResourceFileUrl } from '../services/resourceService';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
+import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesContext';
+import type { SortBy } from '../contexts/ResourcesContext';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -133,9 +114,6 @@ interface ResourcesViewProps {
   scopeType: 'personal' | 'team';
   scopeId: string;
 }
-
-type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
-type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 
 // ─── Skeleton ─────────────────────────────────────────
@@ -167,44 +145,49 @@ const SkeletonList: React.FC = () => (
   </div>
 );
 
-// ─── Main Component ────────────────────────────────────
+// ─── Main Component (wrapper with context provider) ───
 
-export const ResourcesView: React.FC<ResourcesViewProps> = ({
-  scopeType,
-  scopeId,
-}) => {
+export const ResourcesView: React.FC<ResourcesViewProps> = ({ scopeType, scopeId }) => {
+  return (
+    <ResourcesProvider scopeType={scopeType} scopeId={scopeId}>
+      <ResourcesViewInner />
+    </ResourcesProvider>
+  );
+};
+
+// ─── Inner Component (consumes context) ───────────────
+
+const ResourcesViewInner: React.FC = () => {
+  const ctx = useResourcesContext();
+  const {
+    scopeType, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
+    resPath, navigate,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
+    resources, setResources, folders, childFolders, folderPreviews,
+    trashedResources, trashedFolders, downloadedResources,
+    libraries, setLibraries, smartFolders, setSmartFolders,
+    allTags, setAllTags, resourceTagNamesMap, loading, setLoading, folderChain,
+    recycleFolderId, setRecycleFolderId, recycleFolderItems,
+    pendingPermanentDelete, setPendingPermanentDelete,
+    pendingBatchPermanentDelete, setPendingBatchPermanentDelete,
+    pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders,
+    selectedResource, setSelectedResource, selectedFolder, setSelectedFolder,
+    selectedResourceTags, selectedIds, setSelectedIds,
+    lastClickedId, setLastClickedId, multiSelectMode, setMultiSelectMode,
+    viewMode, setViewMode, sortBy, setSortBy,
+    searchQuery, setSearchQuery, debouncedSearch, setDebouncedSearch,
+    showInfoPanel, setShowInfoPanel, infoPanelWidth, setInfoPanelWidth,
+    loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
+    handleTrashResource: handleTrash, handleRestoreResource: handleRestore,
+    handlePermanentDelete, confirmPermanentDelete,
+    handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,
+    canDo, addToast, transcodingResourceIds,
+  } = ctx;
+
   const { t } = useTranslation();
-  const { tasks: allUnifiedTasks } = useTaskManager();
-  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
-  const navigate = useNavigate();
   const location = useLocation();
-  const resPath = (path: string) => teamId ? `/team/${teamId}${path}` : path;
 
-  // Auto-close mobile sidebar on navigation
-  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
-
-  // URL-driven state
-  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
-    ? 'resources'
-    : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
-  const selectedFolderId = urlFolderId ?? null;
-  const selectedSmartFolderId = urlSmartFolderId ?? null;
-  const selectedLibraryId = urlLibraryId ?? null;
-
-  // Redirect team workspace away from downloads (downloads is personal-only)
-  useEffect(() => {
-    if (sidebarView === 'downloads' && scopeType === 'team') {
-      navigate(resPath('/resources'), { replace: true });
-    }
-  }, [sidebarView, scopeType]);
-
-  // Data
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [childFolders, setChildFolders] = useState<Folder[]>([]);
-  const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>>({});
-  const [resources, setResources] = useState<ResourceItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ─── UI-only state (stays in ResourcesView) ──────────
 
   // New folder inline input
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -218,45 +201,19 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
-  // Recycle bin
-  const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
-  const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
-  const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
-  const [recycleFolderItems, setRecycleFolderItems] = useState<ResourceItem[]>([]);
-  const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
-  const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
-  const [pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders] = useState<string[] | null>(null);
-
-  // Downloads (parser-created resources)
-  const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
-
-  // Tags
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-  // Bulk tag names for search: resource_id → space-joined tag names
-  const [resourceTagNamesMap, setResourceTagNamesMap] = useState<Record<string, string>>({});
-
-  // Libraries (team mode)
-  const [libraries, setLibraries] = useState<Library[]>([]);
+  // Libraries (team mode) — creation UI only
   const [creatingLibrary, setCreatingLibrary] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState('');
   const [savingLibrary, setSavingLibrary] = useState(false);
   const newLibraryInputRef = useRef<HTMLInputElement>(null);
 
-  // Smart folders
-  const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState<SortBy>('newest');
+  // Sort / filter UI
   const [showSortMenu, setShowSortMenu] = useState(false);
-
-  // Filter state
   type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
   const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AI search state
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
 
@@ -264,21 +221,14 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
 
   // Mobile-specific state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
 
-  // Detail panel
-  const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
-  const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
-  const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
-  const [showInfoPanel, setShowInfoPanel] = useState(true);
-  const [infoPanelWidth, setInfoPanelWidth] = useState(320);
+  // Info panel resize
   const isResizingPanelRef = useRef(false);
   const resizeStartRef = useRef({ x: 0, width: 0 });
-
-  // Multi-select mode (triggered by checkbox click)
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
 
   // Upload dropdown
   const [showUploadDropdown, setShowUploadDropdown] = useState(false);
@@ -330,27 +280,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     libraryId?: string;
   } | null>(null);
 
-  // Batch selection
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
-
   // Copy/Move operations
   const [folderPickerMode, setFolderPickerMode] = useState<'copy' | 'move' | null>(null);
   const [operationTargetItems, setOperationTargetItems] = useState<ResourceItem[]>([]);
   const [operationTargetFolders, setOperationTargetFolders] = useState<Folder[]>([]);
-
-  // ─── Permission check ────────────────────────────────
-
-  const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
-  const permObjectId = selectedLibraryId ?? selectedFolderId ?? null;
-  const { canDo } = usePermission(
-    scopeType === 'team' ? permObjectType : null,
-    scopeType === 'team' ? permObjectId : null,
-    scopeType === 'team' ? (teamId ?? null) : null,
-  );
-
-  // ─── Toast ────────────────────────────────────────────
-  const { addToast } = useToast();
 
   // ─── Clipboard state for keyboard shortcuts ──────────
   const [clipboardItems, setClipboardItems] = useState<ResourceItem[]>([]);
@@ -359,286 +292,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Folder upload ref ───────────────────────────────
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Folder breadcrumb chain (independent of full folders array) ──
-  const [folderChain, setFolderChain] = useState<Folder[]>([]);
-
-  // ─── Derived view flags ──────────────────────────────
-
-  const isResourcesView = sidebarView === 'resources';
-  const isRecycleView = sidebarView === 'recycle';
-  const isSharedView = sidebarView === 'shared';
-  const isDownloadsView = sidebarView === 'downloads';
-  const canUpload = isResourcesView && canDo('upload');
-
-  // ─── Load folders on scope change ────────────────────
-
-  const loadFolders = useCallback(async () => {
-    try {
-      const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
-      setFolders(allFolders);
-    } catch {
-      setFolders([]);
-    }
-  }, [scopeType, scopeId, selectedLibraryId]);
-
-  const loadChildFolders = useCallback(async () => {
-    if (!isResourcesView) {
-      setChildFolders([]);
-      return;
-    }
-    try {
-      const children = await fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-      setChildFolders(children);
-    } catch (err) {
-      console.error('[ResourcesView] loadChildFolders failed:', err);
-      setChildFolders([]);
-    }
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
-
-  useEffect(() => {
-    // State resets for folder/view/smart folder handled by URL navigation
-    setSelectedResource(null);
-    setSmartFolders([]);
-    loadFolders();
-    fetchTags().then(setAllTags).catch(() => {});
-    fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
-    // Load libraries in team mode
-    if (scopeType === 'team') {
-      fetchLibraries(scopeId).then((libs) => {
-        setLibraries(libs);
-        // Auto-redirect to first library if none selected (avoids empty state)
-        if (libs.length > 0 && !urlLibraryId && !section) {
-          navigate(resPath(`/resources/library/${libs[0].id}`), { replace: true });
-        }
-      }).catch(() => setLibraries([]));
-    } else {
-      setLibraries([]);
-    }
-  }, [loadFolders, scopeType, scopeId]);
-
-  // Load folder previews when child folders change
-  useEffect(() => {
-    if (childFolders.length === 0) {
-      setFolderPreviews({});
-      return;
-    }
-    const loadPreviews = async () => {
-      const previews: Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>> = {};
-      await Promise.all(
-        childFolders.map(async (f) => {
-          try {
-            previews[f.id] = await getFolderPreview(f.id);
-          } catch {
-            previews[f.id] = [];
-          }
-        })
-      );
-      setFolderPreviews(previews);
-    };
-    loadPreviews();
-  }, [childFolders]);
-
-  // ─── Build folder breadcrumb chain ────────────────────
-
-  useEffect(() => {
-    if (!selectedFolderId) {
-      setFolderChain([]);
-      return;
-    }
-
-    // Try to build chain from the already-loaded folders array
-    const buildChainFromFolders = (allFolders: Folder[]): Folder[] | null => {
-      const folder = allFolders.find((f) => f.id === selectedFolderId);
-      if (!folder) return null;
-      const chain: Folder[] = [];
-      let current: Folder | undefined = folder;
-      while (current) {
-        chain.unshift(current);
-        current = current.parent_id ? allFolders.find((f) => f.id === current!.parent_id) : undefined;
-      }
-      return chain;
-    };
-
-    const chain = buildChainFromFolders(folders);
-    if (chain && chain.length > 0) {
-      setFolderChain(chain);
-      return;
-    }
-
-    // Fallback: fetch folder chain directly from Supabase
-    let cancelled = false;
-    const fetchChain = async () => {
-      try {
-        const { supabase } = await import('../supabaseClient');
-        const result: Folder[] = [];
-        let currentId: string | null = selectedFolderId;
-        while (currentId) {
-          const { data, error } = await supabase
-            .from('folders')
-            .select('*')
-            .eq('id', currentId)
-            .single();
-          if (error || !data || cancelled) break;
-          result.unshift(data);
-          currentId = data.parent_id;
-        }
-        if (!cancelled) setFolderChain(result);
-      } catch {
-        // ignore
-      }
-    };
-    fetchChain();
-    return () => { cancelled = true; };
-  }, [selectedFolderId, folders]);
-
-  // ─── Load resources + child folders together ──────────
-  // Combined into a single effect so skeleton stays until BOTH complete.
-  // Prevents flash of files-without-folders when folders load slower.
-
-  useEffect(() => {
-    if (sidebarView !== 'resources') {
-      setChildFolders([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-
-    const loadAll = async () => {
-      try {
-        const [items, folders] = await Promise.all([
-          selectedSmartFolderId
-            ? fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId)
-            : fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId),
-          fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId),
-        ]);
-        if (!cancelled) {
-          setResources(items);
-          setChildFolders(folders);
-        }
-      } catch (err) {
-        console.error('[ResourcesView] Failed to load resources/folders:', err);
-        if (!cancelled) {
-          setResources([]);
-          setChildFolders([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    loadAll();
-    return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
-
-  // ─── Bulk load tag names for search ──────────────────
-  useEffect(() => {
-    const allItems = [...resources, ...downloadedResources];
-    const resourceIds = allItems
-      .map((item) => item.resource?.id)
-      .filter((id): id is string => !!id)
-      .map(String);
-    if (resourceIds.length === 0) {
-      setResourceTagNamesMap({});
-      return;
-    }
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    supabase
-      .from('resource_tags')
-      .select('resource_id, tag:tags(name)')
-      .in('resource_id', resourceIds)
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const map: Record<string, string> = {};
-        for (const row of data) {
-          const rid = String(row.resource_id);
-          const tag = row.tag as { name: string } | { name: string }[] | null;
-          const tagName = Array.isArray(tag) ? tag[0]?.name : tag?.name;
-          if (tagName) {
-            map[rid] = map[rid] ? `${map[rid]} ${tagName}` : tagName;
-          }
-        }
-        setResourceTagNamesMap(map);
-      });
-  }, [resources, downloadedResources]);
-
-  // ─── Load trashed resources ──────────────────────────
-
-  const loadTrashedResources = useCallback(async () => {
-    try {
-      const [items, folders] = await Promise.all([
-        fetchTrashedResources(scopeType, scopeId),
-        fetchTrashedFolders(scopeType, scopeId),
-      ]);
-      setTrashedResources(items);
-      setTrashedFolders(folders);
-    } catch {
-      setTrashedResources([]);
-      setTrashedFolders([]);
-    }
-  }, [scopeType, scopeId]);
-
-  useEffect(() => {
-    if (sidebarView !== 'recycle') return;
-    let cancelled = false;
-    setRecycleFolderId(null);
-    setLoading(true);
-    Promise.all([
-      fetchTrashedResources(scopeType, scopeId),
-      fetchTrashedFolders(scopeType, scopeId),
-    ])
-      .then(([items, folders]) => {
-        if (!cancelled) {
-          setTrashedResources(items);
-          setTrashedFolders(folders);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTrashedResources([]);
-          setTrashedFolders([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [sidebarView, scopeType, scopeId]);
-
-  // Load resource_items inside a trashed folder when navigating into it
-  useEffect(() => {
-    if (!recycleFolderId) {
-      setRecycleFolderItems([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    fetchFolderContents(recycleFolderId, true)
-      .then((items) => { if (!cancelled) setRecycleFolderItems(items); })
-      .catch((err) => { console.error('Failed to load trashed folder contents', err); if (!cancelled) setRecycleFolderItems([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [recycleFolderId]);
-
-  // ─── Load downloaded resources ─────────────────────
-
-  const loadDownloadedResources = useCallback(async () => {
-    try {
-      const items = await fetchDownloadedResources(scopeType, scopeId);
-      setDownloadedResources(items);
-    } catch {
-      setDownloadedResources([]);
-    }
-  }, [scopeType, scopeId]);
-
-  useEffect(() => {
-    if (sidebarView === 'downloads') {
-      setSelectedIds(new Set());
-      setLoading(true);
-      loadDownloadedResources().finally(() => setLoading(false));
-    }
-  }, [sidebarView, loadDownloadedResources]);
+  // Auto-close mobile sidebar on navigation
+  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
 
   // ─── Focus new folder/library input ─────────────────
 
@@ -916,60 +571,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files);
   }, [handleUpload]);
 
-  // ─── Trash handlers ──────────────────────────────────
-
-  const handleTrash = useCallback(async (resourceId: string) => {
-    try {
-      const rid = String(resourceId);
-      const item = resources.find((r) => String(r.resource?.id) === rid);
-      await trashResource(rid, scopeType, scopeId, selectedFolderId);
-      // Optimistic removal
-      setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
-      if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
-      const filename = item?.resource?.filename || '';
-      addToast(t('resources.trashedNotification', { name: filename }), 'success');
-    } catch (err) { console.error('Failed to trash resource:', err); }
-  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t]);
-
-  const handleRestore = useCallback(async (resourceId: string) => {
-    try {
-      const rid = String(resourceId);
-      await restoreResource(rid);
-      setTrashedResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
-    } catch { /* ignore */ }
-  }, []);
-
-  const handlePermanentDelete = useCallback((resourceId: string) => {
-    setPendingPermanentDelete(resourceId);
-  }, []);
-
-  const confirmPermanentDelete = useCallback(async () => {
-    const ids = pendingBatchPermanentDelete || (pendingPermanentDelete ? [pendingPermanentDelete] : []);
-    const folderIds = pendingBatchPermanentDeleteFolders || [];
-    if (ids.length === 0 && folderIds.length === 0) return;
-    try {
-      for (const id of ids) {
-        await permanentDeleteResource(id);
-      }
-      for (const fid of folderIds) {
-        await permanentDeleteFolder(fid);
-      }
-      // Folder cascade deletes resources inside, so re-fetch trash to get accurate state
-      if (folderIds.length > 0) {
-        await loadTrashedResources();
-      } else {
-        setTrashedResources((prev) => prev.filter((r) => !ids.includes(String(r.resource?.id))));
-      }
-      setSelectedIds(new Set());
-      addToast(t('resources.permanentDeleteSuccess'), 'success');
-    } catch {
-      addToast(t('resources.permanentDeleteFailed'), 'error');
-    }
-    setPendingPermanentDelete(null);
-    setPendingBatchPermanentDelete(null);
-    setPendingBatchPermanentDeleteFolders(null);
-  }, [pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders, loadTrashedResources, addToast, t]);
-
   // ─── Resource selection & detail panel ───────────────
 
   const handleResourceClick = useCallback((item: ResourceItem) => {
@@ -981,7 +582,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedResource(item);
       setSelectedFolder(null);
     }
-  }, [selectedResource]);
+  }, [selectedResource, setSelectedResource, setSelectedIds, setSelectedFolder]);
 
   // Double click: navigate to detail page
   const handleResourceDoubleClick = useCallback((item: ResourceItem) => {
@@ -989,40 +590,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       navigate(resPath(`/resources/file/${item.resource.id}`));
     }
   }, [navigate, resPath]);
-
-  // Load tags when selected resource changes
-  useEffect(() => {
-    if (!selectedResource?.resource?.id) {
-      setSelectedResourceTags([]);
-      return;
-    }
-    setSelectedResourceTags([]);
-    fetchResourceTags(selectedResource.resource.id)
-      .then(setSelectedResourceTags)
-      .catch(() => setSelectedResourceTags([]));
-  }, [selectedResource?.resource?.id]);
-
-  // ESC to close panel / exit multi-select
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (multiSelectMode) {
-          setMultiSelectMode(false);
-          setSelectedIds(new Set());
-        }
-        setSelectedResource(null);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [multiSelectMode]);
-
-  // Auto-exit multi-select when no items selected
-  useEffect(() => {
-    if (multiSelectMode && selectedIds.size === 0) {
-      setMultiSelectMode(false);
-    }
-  }, [multiSelectMode, selectedIds.size]);
 
   // Click outside to close upload dropdown
   useEffect(() => {
@@ -1075,20 +642,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     document.body.style.userSelect = 'none';
   }, [infoPanelWidth]);
 
-  // Debounce search
-  useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 300);
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery]);
-
   // ToolbarSearch callbacks for resources
   const handleResourceQueryChange = useCallback((q: string) => {
     setAiSearchMatchedMediaIds(null);
     setSearchQuery(q);
-  }, []);
+  }, [setSearchQuery]);
 
   const handleResourceAISearch = useCallback(async (q: string, mode: 'hybrid' | 'semantic') => {
     setIsAISearching(true);
@@ -1105,73 +663,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } finally {
       setIsAISearching(false);
     }
-  }, []);
+  }, [setSearchQuery, setDebouncedSearch]);
 
   const handleResourceSearchClear = useCallback(() => {
     setSearchQuery('');
     setDebouncedSearch('');
     setAiSearchMatchedMediaIds(null);
-  }, []);
+  }, [setSearchQuery, setDebouncedSearch]);
 
-  // Clear search/filter on view/folder change
+  // Clear AI search filter on view/folder change
   useEffect(() => {
-    setSearchQuery('');
-    setDebouncedSearch('');
     setAiSearchMatchedMediaIds(null);
   }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
-
-  // Clear selection on view/folder/library change
-  useEffect(() => {
-    setSelectedResource(null);
-  }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
-
-  const handleAddTag = useCallback(async (tagId: string) => {
-    if (!selectedResource?.resource?.id) return;
-    try {
-      await addResourceTag(selectedResource.resource.id, tagId);
-      const updated = await fetchResourceTags(selectedResource.resource.id);
-      setSelectedResourceTags(updated);
-    } catch { /* ignore */ }
-  }, [selectedResource]);
-
-  const handleRemoveTag = useCallback(async (tagId: string) => {
-    if (!selectedResource?.resource?.id) return;
-    try {
-      await removeResourceTag(selectedResource.resource.id, tagId);
-      setSelectedResourceTags((prev) => prev.filter((t) => String(t.tag?.id) !== tagId));
-    } catch { /* ignore */ }
-  }, [selectedResource]);
-
-  const handleCreateTag = useCallback(async (name: string, color: string): Promise<Tag | null> => {
-    try {
-      const tag = await createTag({ name, color, type: 'user' });
-      setAllTags(prev => [...prev, tag]);
-      return tag;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
-    if (!selectedResource?.resource?.id) return;
-    const rid = String(selectedResource.resource.id);
-    try {
-      await updateResource(rid, data as Record<string, unknown>);
-      // Update selected resource panel
-      setSelectedResource(prev => prev ? {
-        ...prev,
-        resource: { ...prev.resource, ...data } as Resource,
-      } : null);
-      // Sync the main resources list so re-selecting shows fresh data
-      setResources(prev => prev.map(item =>
-        String(item.resource?.id) === rid
-          ? { ...item, resource: { ...item.resource!, ...data } as Resource }
-          : item
-      ));
-    } catch (err) {
-      console.error('Failed to update resource:', err);
-    }
-  }, [selectedResource]);
 
   // ─── Context menu handlers ─────────────────────────
 
@@ -1978,17 +1481,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
     return items;
   }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds, resourceTagNamesMap]);
-
-  // Set of resource IDs currently being transcoded (active transcode tasks)
-  const transcodingResourceIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const task of allUnifiedTasks) {
-      if (task.task_type === 'transcode' && (task.status === 'pending' || task.status === 'processing') && task.resource_id) {
-        ids.add(task.resource_id);
-      }
-    }
-    return ids;
-  }, [allUnifiedTasks]);
 
   const sortedItems = useMemo(() => {
     const items = [...filteredItems];
