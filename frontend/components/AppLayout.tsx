@@ -310,7 +310,7 @@ function AppLayoutInner() {
                 <div className="py-1 max-h-60 overflow-y-auto">
                   {personalTeamId && (
                     <button
-                      onClick={() => { navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
+                      onClick={(e) => { e.stopPropagation(); navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
                       className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
                         selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
                       }`}
@@ -329,7 +329,7 @@ function AppLayoutInner() {
                     return (
                       <button
                         key={team.id}
-                        onClick={() => { navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
+                        onClick={(e) => { e.stopPropagation(); navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
                         className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
                           isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
                         }`}
