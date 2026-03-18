@@ -73,7 +73,7 @@ class StoryboardService:
         client = await get_async_supabase_admin()
         result = (
             await client.table("team_members")
-            .select("id")
+            .select("team_id")
             .eq("team_id", team_id)
             .eq("user_id", user_id)
             .limit(1)
