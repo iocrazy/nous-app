@@ -86,9 +86,14 @@ const ProjectCard = React.memo(function ProjectCard({
 
       {/* Info */}
       <div className="px-4 py-3">
-        <p className="text-sm font-semibold text-gray-100 truncate" title={project.name}>
-          {project.name}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-gray-100 truncate flex-1" title={project.name}>
+            {project.name}
+          </p>
+          <span className="text-[10px] text-gray-500 font-mono shrink-0">
+            #{String(project.id).slice(-6)}
+          </span>
+        </div>
         <p className="text-xs text-gray-500 mt-0.5">
           {project.frame_count ?? 0} frames · {project.character_count ?? 0} characters
         </p>

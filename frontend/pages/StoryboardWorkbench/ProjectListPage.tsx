@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Loader2, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { useTeamContext } from '../../contexts/TeamContext';
 import {
@@ -49,6 +50,8 @@ function SkeletonCard() {
 
 export function ProjectListPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { teamId } = useParams<{ teamId: string }>();
   const { setCurrentProject, setProjectList, projectList = [] } = useStoryboardStore();
   const { selectedTeamId } = useTeamContext();
 
@@ -90,9 +93,9 @@ export function ProjectListPage() {
 
   const handleCardClick = useCallback(
     (id: string) => {
-      setCurrentProject(id);
+      navigate(`/team/${teamId}/storyboard/${id}`);
     },
-    [setCurrentProject]
+    [navigate, teamId]
   );
 
   const handleDelete = useCallback(
@@ -154,7 +157,7 @@ export function ProjectListPage() {
         const project = await createProject({ team_id: selectedTeamId, name });
         setShowNewDialog(false);
         await loadProjects();
-        setCurrentProject(project.id);
+        navigate(`/team/${teamId}/storyboard/${project.id}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setError(message);

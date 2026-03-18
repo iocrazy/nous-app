@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, Pencil, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { fetchProject, updateProject } from '../../services/storyboardService';
 import { useStoryboardPersist } from '../../hooks/storyboard/useStoryboardPersist';
@@ -88,9 +89,13 @@ export function CanvasEditorPage() {
   }, [nodes]);
 
   // ─── Navigation ────────────────────────────────────────────────────────────
+  const navigate = useNavigate();
+  const { teamId } = useParams<{ teamId: string }>();
+
   const handleBack = useCallback(() => {
     setCurrentProject(null);
-  }, [setCurrentProject]);
+    navigate(`/team/${teamId}/storyboard`);
+  }, [setCurrentProject, navigate, teamId]);
 
   // ─── Project name editing ──────────────────────────────────────────────────
   const handleNameSubmit = useCallback(async () => {
