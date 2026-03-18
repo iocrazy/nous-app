@@ -40,7 +40,8 @@ export async function fetchProjects(
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
-  return handleResponse<{ data: ProjectSummary[]; total: number }>(res);
+  const body = await handleResponse<{ success: boolean; data: { items: ProjectSummary[]; total: number } }>(res);
+  return { data: body.data?.items ?? [], total: body.data?.total ?? 0 };
 }
 
 export interface ProjectFull extends StoryboardProject {

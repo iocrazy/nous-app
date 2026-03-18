@@ -66,8 +66,7 @@ export function ProjectListPage() {
     setError(null);
     try {
       const result = await fetchProjects(selectedTeamId);
-      const items = result?.data?.items ?? result?.data ?? [];
-      setProjectList(Array.isArray(items) ? items : []);
+      setProjectList(result.data ?? []);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
