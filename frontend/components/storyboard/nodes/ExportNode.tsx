@@ -159,7 +159,7 @@ function CheckboxRow({ label, checked, onChange }: CheckboxRowProps) {
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+        className="w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-indigo-500 cursor-pointer"
       />
       <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
         {label}
