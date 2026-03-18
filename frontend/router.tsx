@@ -14,8 +14,7 @@ import { BillingPage } from './pages/BillingPage';
 import { MembersPage } from './pages/MembersPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { TodolistPage } from './pages/TodolistPage';
-import { DownloadDetailPage } from './pages/DownloadDetailPage';
-import { ResourceDetailPage } from './pages/ResourceDetailPage';
+import { FileDetailDispatcher } from './pages/FileDetailDispatcher';
 import { SharePage } from './pages/SharePage';
 import { SharedPage } from './pages/SharedPage';
 import { ShortcutsTagsPage } from './pages/ShortcutsTagsPage';
@@ -60,7 +59,6 @@ export const router = createBrowserRouter([
       { path: 'billing', element: <RedirectToTeam view="billing" /> },
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
-      { path: 'player/:displayId', element: <RedirectToTeam view="player" /> },
       { path: 'shared', element: <RedirectToTeam view="shared" /> },
 
       // Settings is account-level (no team scope)
@@ -81,7 +79,7 @@ export const router = createBrowserRouter([
           { path: 'dashboard', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'dashboard/:subview', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'resources', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/file/:resourceId', element: <ModuleGuard moduleKey="resources"><ResourceDetailPage /></ModuleGuard> },
+          { path: 'resources/file/:resourceId', element: <ModuleGuard moduleKey="resources"><FileDetailDispatcher /></ModuleGuard> },
           { path: 'resources/:section', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
           { path: 'resources/folder/:folderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
           { path: 'resources/smart/:smartFolderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
@@ -97,7 +95,7 @@ export const router = createBrowserRouter([
           { path: 'billing', element: <BillingPage /> },
           { path: 'todolist', element: <TodolistPage /> },
           { path: 'shared', element: <SharedPage /> },
-          { path: 'player/:displayId', element: <DownloadDetailPage /> },
+          { path: 'downloads', element: <Navigate to="resources/downloads" replace /> },
         ],
       },
 

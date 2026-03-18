@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage } from '../types';
+import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
@@ -16,40 +17,12 @@ import { ToastProvider } from './Toast';
 import { UploadProvider } from '../contexts/UploadContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
+import { MobileProfilePage } from './MobileProfilePage';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
-
-// ---------------------------------------------------------------------------
-// Map URL pathname → ViewState
-// Supports both /team/:teamId/:view and legacy /:view patterns
-// ---------------------------------------------------------------------------
-
-export function pathnameToView(pathname: string, search?: string): ViewState {
-  // Strip /team/:teamId/ prefix if present
-  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
-  // PlayerPage: derive view from ?from= query param
-  if (stripped.startsWith('/player/')) {
-    const params = new URLSearchParams(search || '');
-    const from = params.get('from');
-    if (from === 'downloads') return 'resources';
-    if (from === 'resources') return 'resources';
-    return 'resources';
-  }
-  if (stripped.startsWith('/library')) return 'resources'; // legacy
-  if (stripped.startsWith('/dashboard')) return 'dashboard';
-  if (stripped.startsWith('/settings')) return 'settings';
-  if (stripped.startsWith('/cleanup')) return 'cleanup';
-  if (stripped.startsWith('/projects')) return 'mediatrack';
-  if (stripped.startsWith('/points')) return 'points';
-  if (stripped.startsWith('/billing')) return 'billing';
-  if (stripped.startsWith('/members')) return 'members';
-  if (stripped.startsWith('/resources')) return 'resources';
-  if (stripped.startsWith('/todolist')) return 'todolist';
-  return 'parser';
-}
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -91,7 +64,9 @@ function AppLayoutInner() {
     }
   }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
-  const view = pathnameToView(location.pathname, location.search);
+  const view = pathnameToView(location.pathname);
+
+  const isPersonalWorkspace = !selectedTeamId || selectedTeamId === personalTeamId;
 
   const {
     settingsTab, setSettingsTab,
@@ -120,6 +95,17 @@ function AppLayoutInner() {
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
+  const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
+
+  // Mobile workspace switch — navigates to new team, respecting current view
+  const handleWorkspaceSwitch = (newTeamId: string) => {
+    if (view === 'resources' && location.pathname.includes('/downloads')) {
+      navigate(`/team/${newTeamId}/resources`);
+    } else {
+      navigate(`/team/${newTeamId}/${VIEW_PATH_MAP[view].slice(1)}`);
+    }
+    setIsMobileProfileOpen(false);
+  };
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -153,27 +139,15 @@ function AppLayoutInner() {
 
   // Mobile nav handlers
   const handleMobileNavClick = (targetView: ViewState) => {
-    const viewToPath: Record<string, string> = {
-      parser: '/parser',
-      library: '/resources/downloads',
-      dashboard: '/dashboard',
-      resources: '/resources',
-      mediatrack: '/projects',
-      settings: '/settings',
-      cleanup: '/cleanup',
-      points: '/points',
-      billing: '/billing',
-      members: '/members',
-      todolist: '/todolist',
-    };
-    navigate(teamPath(viewToPath[targetView] || '/parser'));
+    navigate(teamPath(VIEW_PATH_MAP[targetView]));
     setIsMobileMenuOpen(false);
     setIsDashboardMenuOpen(false);
   };
 
   const handleMobileLibraryClick = () => {
     setIsDashboardMenuOpen(false);
-    navigate(teamPath('/resources/downloads'));
+    const pid = personalTeamId || selectedTeamId;
+    navigate(`/team/${pid}/resources/downloads`);
     setIsMobileMenuOpen(false);
   };
 
@@ -199,6 +173,23 @@ function AppLayoutInner() {
         onClose={() => setIsProfileModalOpen(false)}
         user={userProfile}
         onSave={(updated) => setUserProfile(updated)}
+        onLogout={handleAuthLogout}
+      />
+
+      {/* Mobile Profile Page — full-screen overlay, Me tab */}
+      <MobileProfilePage
+        isOpen={isMobileProfileOpen}
+        onClose={() => setIsMobileProfileOpen(false)}
+        userProfile={userProfile}
+        teams={teams}
+        personalTeamId={personalTeamId}
+        selectedTeamId={selectedTeamId}
+        currentView={view}
+        onSwitchTeam={handleWorkspaceSwitch}
+        onSettings={() => {
+          setSettingsModalInitialTab('personal');
+          setIsSettingsModalOpen(true);
+        }}
         onLogout={handleAuthLogout}
       />
 
@@ -263,14 +254,16 @@ function AppLayoutInner() {
             <span className="text-[10px] leading-tight">Parser</span>
           </button>
 
-          {/* Downloads — navigates to /resources/downloads */}
-          <button
-            onClick={handleMobileLibraryClick}
-            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
-          >
-            <Download size={22} />
-            <span className="text-[10px] leading-tight">Downloads</span>
-          </button>
+          {/* Downloads — only visible in personal workspace */}
+          {isPersonalWorkspace && (
+            <button
+              onClick={handleMobileLibraryClick}
+              className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
+            >
+              <Download size={22} />
+              <span className="text-[10px] leading-tight">Downloads</span>
+            </button>
+          )}
 
           {/* Resources — with team picker popup */}
           <div className="relative">
@@ -338,7 +331,7 @@ function AppLayoutInner() {
 
           {/* Profile */}
           <button
-            onClick={() => setIsProfileModalOpen(true)}
+            onClick={() => setIsMobileProfileOpen(true)}
             className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
           >
             {userProfile.avatarUrl ? (

@@ -290,7 +290,7 @@ interface ResourceDetailProps {
   resourceId: string;
 }
 
-export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) => {
+export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
