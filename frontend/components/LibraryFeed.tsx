@@ -208,17 +208,7 @@ const FeedItem = ({
         )}
       </div>
 
-      {/* Mute Button */}
-      {isVideo && (
-        <button 
-            onClick={onToggleMute}
-            className="absolute top-12 right-4 p-2 bg-black/20 hover:bg-black/40 rounded-full backdrop-blur-md text-white transition-all z-20 mt-4 md:mt-0"
-        >
-            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-        </button>
-      )}
-
-      {/* Right Sidebar Actions — bottom-36 on mobile to clear tab bar + text area */}
+      {/* Right Sidebar Actions — Douyin style */}
       <div className="absolute bottom-36 sm:bottom-20 right-2 flex flex-col items-center gap-4 z-20">
         <div className="relative">
           <div className="w-10 h-10 rounded-full border border-white bg-zinc-800 overflow-hidden">
@@ -266,6 +256,16 @@ const FeedItem = ({
            </button>
            <span className="text-white text-xs font-semibold drop-shadow-md">{copiedShare ? 'Copied!' : formatNumber(item.share_count)}</span>
         </div>
+
+        {/* Mute — bottom of sidebar, Douyin style */}
+        {isVideo && (
+          <button
+            onClick={onToggleMute}
+            className="p-2 rounded-full bg-black/20 hover:bg-black/40 backdrop-blur-sm transition-colors"
+          >
+            {isMuted ? <VolumeX className="w-7 h-7 text-white drop-shadow-md" /> : <Volume2 className="w-7 h-7 text-white drop-shadow-md" />}
+          </button>
+        )}
       </div>
 
       {/* Bottom Content Info — pb-16 on mobile to clear tab bar */}
