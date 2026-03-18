@@ -101,6 +101,7 @@ export const DownloadsView: React.FC = () => {
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    loadMoreLibrary,
     libraryViewMode,
     setLibraryViewMode,
     sharedVideoIds,
@@ -799,13 +800,18 @@ export const DownloadsView: React.FC = () => {
               <LibraryFeed data={filteredLibrary} />
             )}
 
-            {/* Load more sentinel */}
+            {/* Load more sentinel + tap fallback */}
             {!isSearchActive && libraryViewMode !== 'feed' && (
-              <div ref={loadMoreRef} className="w-full py-8 flex justify-center">
+              <div ref={loadMoreRef} className="w-full py-6 flex justify-center">
                 {isLoadingMore ? (
                   <Loader2 size={20} className="animate-spin text-zinc-500" />
                 ) : hasMoreData ? (
-                  <span className="text-zinc-600 text-xs">Scroll to load more</span>
+                  <button
+                    onClick={() => loadMoreLibrary()}
+                    className="px-6 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors"
+                  >
+                    Load More
+                  </button>
                 ) : library.length > 0 ? (
                   <span className="text-zinc-600 text-xs">All {library.length} items loaded</span>
                 ) : null}
