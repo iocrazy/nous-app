@@ -30,6 +30,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Unwrap the backend envelope `{ success, data: T }` → `T`.
+ * All storyboard API endpoints return this envelope format.
+ */
+async function unwrapResponse<T>(res: Response): Promise<T> {
+  const body = await handleResponse<{ success: boolean; data: T }>(res);
+  return body.data;
+}
+
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 export async function fetchProjects(
@@ -40,8 +49,8 @@ export async function fetchProjects(
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
-  const body = await handleResponse<{ success: boolean; data: { items: ProjectSummary[]; total: number } }>(res);
-  return { data: body.data?.items ?? [], total: body.data?.total ?? 0 };
+  const result = await unwrapResponse<{ items: ProjectSummary[]; total: number }>(res);
+  return { data: result?.items ?? [], total: result?.total ?? 0 };
 }
 
 export interface ProjectFull extends StoryboardProject {
@@ -53,7 +62,13 @@ export interface ProjectFull extends StoryboardProject {
 export async function fetchProject(projectId: string): Promise<ProjectFull> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}`, { headers });
-  return handleResponse<ProjectFull>(res);
+  const raw = await unwrapResponse<{ project: StoryboardProject; nodes: StoryboardNode[]; edges: StoryboardEdge[]; characters: StoryboardCharacter[] }>(res);
+  return {
+    ...raw.project,
+    nodes: raw.nodes ?? [],
+    edges: raw.edges ?? [],
+    characters: raw.characters ?? [],
+  };
 }
 
 export async function createProject(data: {
@@ -67,7 +82,7 @@ export async function createProject(data: {
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardProject>(res);
+  return unwrapResponse<StoryboardProject>(res);
 }
 
 export async function updateProject(
@@ -80,7 +95,7 @@ export async function updateProject(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardProject>(res);
+  return unwrapResponse<StoryboardProject>(res);
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
@@ -89,7 +104,7 @@ export async function deleteProject(projectId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 export async function updateViewport(
@@ -102,7 +117,7 @@ export async function updateViewport(
     headers,
     body: JSON.stringify({ viewport_json: viewport }),
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── Canvas Sync ──────────────────────────────────────────────────────────────
@@ -131,7 +146,7 @@ export async function syncCanvas(
     headers,
     body: JSON.stringify(syncData),
   });
-  return handleResponse<SyncResult>(res);
+  return unwrapResponse<SyncResult>(res);
 }
 
 // ─── Characters ───────────────────────────────────────────────────────────────
@@ -139,7 +154,7 @@ export async function syncCanvas(
 export async function fetchCharacters(projectId: string): Promise<StoryboardCharacter[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/characters`, { headers });
-  return handleResponse<StoryboardCharacter[]>(res);
+  return unwrapResponse<StoryboardCharacter[]>(res);
 }
 
 export async function createCharacter(
@@ -152,7 +167,7 @@ export async function createCharacter(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardCharacter>(res);
+  return unwrapResponse<StoryboardCharacter>(res);
 }
 
 export async function updateCharacter(
@@ -165,7 +180,7 @@ export async function updateCharacter(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardCharacter>(res);
+  return unwrapResponse<StoryboardCharacter>(res);
 }
 
 export async function deleteCharacter(characterId: string): Promise<void> {
@@ -174,7 +189,7 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── Frames ───────────────────────────────────────────────────────────────────
@@ -189,7 +204,7 @@ export async function updateFrame(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardFrame>(res);
+  return unwrapResponse<StoryboardFrame>(res);
 }
 
 export async function reorderFrames(frameIds: string[]): Promise<void> {
@@ -199,7 +214,7 @@ export async function reorderFrames(frameIds: string[]): Promise<void> {
     headers,
     body: JSON.stringify({ frame_ids: frameIds }),
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
@@ -221,7 +236,7 @@ export async function generateImage(data: GenerateImageParams): Promise<{ task_i
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export interface GenerateVideoParams {
@@ -240,7 +255,7 @@ export async function generateVideo(data: GenerateVideoParams): Promise<{ task_i
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export interface SplitScriptParams {
@@ -257,7 +272,7 @@ export async function splitScript(data: SplitScriptParams): Promise<{ task_id: s
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export async function chatWithAI(
@@ -271,7 +286,7 @@ export async function chatWithAI(
     headers,
     body: JSON.stringify({ message, frame_id: frameId }),
   });
-  return handleResponse<{ response: string; actions: unknown[] }>(res);
+  return unwrapResponse<{ response: string; actions: unknown[] }>(res);
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -289,5 +304,5 @@ export async function exportProject(
     headers,
     body: JSON.stringify({ format, options: options ?? {} }),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
