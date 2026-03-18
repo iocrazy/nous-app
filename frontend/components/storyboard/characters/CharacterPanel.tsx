@@ -1,7 +1,13 @@
-import React, { useState, useCallback } from 'react';
-import { X, Plus, Users } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { X, Plus, Users, Loader2, AlertCircle } from 'lucide-react';
 import { useStoryboardStore } from '../../../stores/storyboardStore';
 import { StoryboardCharacter } from '../../../types';
+import {
+  fetchCharacters,
+  createCharacter as apiCreateCharacter,
+  updateCharacter as apiUpdateCharacter,
+  deleteCharacter as apiDeleteCharacter,
+} from '../../../services/storyboardService';
 import CharacterCard from './CharacterCard';
 import CharacterEditor, { CharacterFormData } from './CharacterEditor';
 
@@ -18,11 +24,49 @@ const CharacterPanel = React.memo(function CharacterPanel({
   open,
   onClose,
 }: CharacterPanelProps) {
-  const { characters, addCharacter, updateCharacter, removeCharacter, currentProjectId } =
-    useStoryboardStore();
+  const {
+    characters,
+    setCharacters,
+    addCharacter,
+    updateCharacter,
+    removeCharacter,
+    currentProjectId,
+  } = useStoryboardStore();
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<StoryboardCharacter | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Fetch characters on panel open
+  useEffect(() => {
+    if (!open || !currentProjectId) return;
+
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await fetchCharacters(currentProjectId!);
+        if (!cancelled) {
+          setCharacters(result ?? []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(message);
+          console.error('Failed to fetch characters:', err);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, [open, currentProjectId, setCharacters]);
 
   const handleNewCharacter = useCallback(() => {
     setEditingCharacter(null);
@@ -35,40 +79,51 @@ const CharacterPanel = React.memo(function CharacterPanel({
   }, []);
 
   const handleDelete = useCallback(
-    (id: string) => {
-      removeCharacter(id);
+    async (id: string) => {
+      try {
+        await apiDeleteCharacter(id);
+        removeCharacter(id);
+      } catch (err) {
+        console.error('Failed to delete character:', err);
+        setError(err instanceof Error ? err.message : 'Failed to delete character');
+      }
     },
     [removeCharacter]
   );
 
   const handleSave = useCallback(
-    (data: CharacterFormData) => {
-      if (editingCharacter) {
-        updateCharacter(editingCharacter.id, {
-          name: data.name,
-          description: data.description,
-          visual_traits: data.visual_traits,
-          reference_image_url: data.reference_image_url,
-          updated_at: new Date().toISOString(),
-        });
-      } else {
-        const newChar: StoryboardCharacter = {
-          id: `char-${Date.now()}`,
-          project_id: currentProjectId ?? '',
-          name: data.name,
-          description: data.description,
-          visual_traits: data.visual_traits,
-          reference_image_url: data.reference_image_url,
-          sort_order: characters.length,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        addCharacter(newChar);
+    async (data: CharacterFormData) => {
+      if (!currentProjectId) return;
+
+      setSaving(true);
+      setError(null);
+      try {
+        if (editingCharacter) {
+          const updated = await apiUpdateCharacter(editingCharacter.id, {
+            name: data.name,
+            description: data.description,
+            visual_traits: data.visual_traits,
+            reference_image_url: data.reference_image_url,
+          });
+          updateCharacter(editingCharacter.id, updated);
+        } else {
+          const created = await apiCreateCharacter(currentProjectId, {
+            name: data.name,
+            description: data.description,
+            visual_traits: data.visual_traits,
+          });
+          addCharacter(created);
+        }
+        setEditorOpen(false);
+        setEditingCharacter(null);
+      } catch (err) {
+        console.error('Failed to save character:', err);
+        setError(err instanceof Error ? err.message : 'Failed to save character');
+      } finally {
+        setSaving(false);
       }
-      setEditorOpen(false);
-      setEditingCharacter(null);
     },
-    [editingCharacter, updateCharacter, addCharacter, characters.length, currentProjectId]
+    [editingCharacter, updateCharacter, addCharacter, currentProjectId]
   );
 
   const handleCancelEditor = useCallback(() => {
@@ -81,10 +136,7 @@ const CharacterPanel = React.memo(function CharacterPanel({
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-10 bg-black/30"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-10 bg-black/30" onClick={onClose} />
 
       {/* Panel */}
       <div className="absolute left-0 top-0 h-full w-72 z-20 bg-gray-900 border-r border-gray-700 flex flex-col shadow-2xl">
@@ -113,9 +165,25 @@ const CharacterPanel = React.memo(function CharacterPanel({
           </div>
         </div>
 
+        {/* Error banner */}
+        {error && (
+          <div className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 bg-red-900/30 border border-red-800 rounded-lg">
+            <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+            <p className="text-xs text-red-300 line-clamp-2">{error}</p>
+            <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
         {/* Character list */}
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-          {characters.length === 0 ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center h-40">
+              <Loader2 size={24} className="animate-spin text-blue-400 mb-2" />
+              <p className="text-sm text-gray-500">Loading characters...</p>
+            </div>
+          ) : characters.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <Users size={32} className="text-gray-700 mb-2" />
               <p className="text-sm text-gray-500">No characters yet</p>
@@ -143,6 +211,7 @@ const CharacterPanel = React.memo(function CharacterPanel({
           character={editingCharacter}
           onSave={handleSave}
           onCancel={handleCancelEditor}
+          saving={saving}
         />
       )}
     </>

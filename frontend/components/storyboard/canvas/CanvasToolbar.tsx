@@ -20,6 +20,7 @@ import {
   Square,
   Video,
   FileOutput,
+  Spline,
 } from 'lucide-react';
 import { useStoryboardStore } from '../../../stores/storyboardStore';
 import { StoryboardNode } from '../../../types';
@@ -57,6 +58,13 @@ const NODE_TYPE_OPTIONS: NodeTypeOption[] = [
   { type: 'export', label: 'Export', icon: <FileOutput size={14} /> },
 ];
 
+const EDGE_STYLE_CYCLE: Array<'default' | 'straight' | 'step'> = ['default', 'straight', 'step'];
+const EDGE_STYLE_LABELS: Record<string, string> = {
+  default: 'Bezier',
+  straight: 'Straight',
+  step: 'Step',
+};
+
 const EXPORT_OPTIONS: ExportOption[] = [
   { label: 'Export as PNG', format: 'png' },
   { label: 'Export as PDF', format: 'pdf' },
@@ -71,7 +79,7 @@ const CanvasToolbar = React.memo(function CanvasToolbar({
   onCharactersToggle,
 }: CanvasToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
-  const { nodes, addNode, undo, redo, history, currentProjectId } = useStoryboardStore();
+  const { nodes, addNode, undo, redo, history, currentProjectId, edgeStyle, setEdgeStyle } = useStoryboardStore();
 
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -112,6 +120,12 @@ const CanvasToolbar = React.memo(function CanvasToolbar({
     },
     [nodes.length, currentProjectId, addNode]
   );
+
+  const handleCycleEdgeStyle = useCallback(() => {
+    const idx = EDGE_STYLE_CYCLE.indexOf(edgeStyle);
+    const next = EDGE_STYLE_CYCLE[(idx + 1) % EDGE_STYLE_CYCLE.length];
+    setEdgeStyle(next);
+  }, [edgeStyle, setEdgeStyle]);
 
   const canUndo = history.past.length > 0;
   const canRedo = history.future.length > 0;
@@ -171,6 +185,15 @@ const CanvasToolbar = React.memo(function CanvasToolbar({
         active={locked}
       >
         {locked ? <Lock size={16} /> : <Unlock size={16} />}
+      </ToolbarButton>
+
+      {/* Edge Style */}
+      <ToolbarButton
+        onClick={handleCycleEdgeStyle}
+        title={`Edge Style: ${EDGE_STYLE_LABELS[edgeStyle]} (click to cycle)`}
+      >
+        <Spline size={16} />
+        <span className="text-[10px] ml-0.5 text-gray-400">{EDGE_STYLE_LABELS[edgeStyle]}</span>
       </ToolbarButton>
 
       <Divider />

@@ -5,17 +5,25 @@ import ExportPreview from './ExportPreview';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ExportFormat = 'png' | 'pdf' | 'zip';
+type PaperSize = 'a4' | 'letter' | 'custom';
+type ImageQuality = 'low' | 'medium' | 'high';
 
-interface ExportOptions {
+export interface ExportOptions {
   format: ExportFormat;
-  // PNG options
-  columns: number;
+  // Overlay toggles
   includeFrameNumbers: boolean;
   includeAnnotations: boolean;
-  // PDF options
-  includeMetadataTable: boolean;
+  includeCameraOverlays: boolean;
+  includeNotes: boolean;
+  includeMetadata: boolean;
+  // Layout
+  columns: number;
+  // PDF-specific
+  paperSize: PaperSize;
   includeCharacterPage: boolean;
-  // ZIP options
+  // Quality
+  quality: ImageQuality;
+  // ZIP-specific
   includeAllAssets: boolean;
 }
 
@@ -34,6 +42,20 @@ const FORMAT_OPTIONS: { value: ExportFormat; label: string; description: string 
   { value: 'zip', label: 'ZIP Bundle', description: 'All assets in a compressed archive' },
 ];
 
+const PAPER_SIZES: { value: PaperSize; label: string }[] = [
+  { value: 'a4', label: 'A4' },
+  { value: 'letter', label: 'Letter' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const QUALITY_OPTIONS: { value: ImageQuality; label: string }[] = [
+  { value: 'low', label: 'Low (72 DPI)' },
+  { value: 'medium', label: 'Medium (150 DPI)' },
+  { value: 'high', label: 'High (300 DPI)' },
+];
+
+const COLUMN_OPTIONS = [1, 2, 3, 4, 5, 6];
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const ExportDialog = React.memo(function ExportDialog({
@@ -44,11 +66,15 @@ const ExportDialog = React.memo(function ExportDialog({
 }: ExportDialogProps) {
   const [options, setOptions] = useState<ExportOptions>({
     format: 'png',
-    columns: 3,
     includeFrameNumbers: true,
     includeAnnotations: true,
-    includeMetadataTable: true,
+    includeCameraOverlays: true,
+    includeNotes: true,
+    includeMetadata: true,
+    columns: 3,
+    paperSize: 'a4',
     includeCharacterPage: false,
+    quality: 'medium',
     includeAllAssets: true,
   });
 
@@ -87,8 +113,7 @@ const ExportDialog = React.memo(function ExportDialog({
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {/* Format */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-gray-400">Format</p>
+          <Section title="Format">
             {FORMAT_OPTIONS.map((opt) => (
               <label
                 key={opt.value}
@@ -113,63 +138,84 @@ const ExportDialog = React.memo(function ExportDialog({
                 </div>
               </label>
             ))}
-          </div>
+          </Section>
 
-          {/* PNG Options */}
-          {options.format === 'png' && (
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-gray-400">PNG Options</p>
+          {/* Overlay Toggles (shared) */}
+          <Section title="Content">
+            <ToggleSwitch label="Frame numbers" checked={options.includeFrameNumbers} onChange={(v) => updateOption('includeFrameNumbers', v)} />
+            <ToggleSwitch label="Annotations" checked={options.includeAnnotations} onChange={(v) => updateOption('includeAnnotations', v)} />
+            <ToggleSwitch label="Camera overlays" checked={options.includeCameraOverlays} onChange={(v) => updateOption('includeCameraOverlays', v)} />
+            <ToggleSwitch label="Notes / descriptions" checked={options.includeNotes} onChange={(v) => updateOption('includeNotes', v)} />
+            <ToggleSwitch label="Embed metadata" checked={options.includeMetadata} onChange={(v) => updateOption('includeMetadata', v)} />
+          </Section>
+
+          {/* Layout — PNG & PDF */}
+          {(options.format === 'png' || options.format === 'pdf') && (
+            <Section title="Layout">
               <div className="flex items-center gap-3">
-                <label className="text-xs text-gray-400 w-20">Columns</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={options.columns}
-                  onChange={(e) => updateOption('columns', Number(e.target.value))}
-                  className="w-16 px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 text-center focus:outline-none focus:border-blue-500"
-                />
+                <span className="text-xs text-gray-400 w-20">Columns</span>
+                <div className="flex gap-1">
+                  {COLUMN_OPTIONS.map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => updateOption('columns', n)}
+                      className={[
+                        'w-8 h-8 rounded-lg text-xs font-medium transition-colors',
+                        options.columns === n
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-800 text-gray-400 hover:bg-gray-700',
+                      ].join(' ')}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <CheckboxOption
-                label="Include frame numbers"
-                checked={options.includeFrameNumbers}
-                onChange={(v) => updateOption('includeFrameNumbers', v)}
-              />
-              <CheckboxOption
-                label="Include annotations"
-                checked={options.includeAnnotations}
-                onChange={(v) => updateOption('includeAnnotations', v)}
-              />
-            </div>
+            </Section>
           )}
 
-          {/* PDF Options */}
+          {/* PDF-specific */}
           {options.format === 'pdf' && (
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-gray-400">PDF Options</p>
-              <CheckboxOption
-                label="Include metadata table"
-                checked={options.includeMetadataTable}
-                onChange={(v) => updateOption('includeMetadataTable', v)}
-              />
-              <CheckboxOption
-                label="Include character page"
-                checked={options.includeCharacterPage}
-                onChange={(v) => updateOption('includeCharacterPage', v)}
-              />
-            </div>
+            <Section title="PDF Options">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 w-20">Paper size</span>
+                <select
+                  value={options.paperSize}
+                  onChange={(e) => updateOption('paperSize', e.target.value as PaperSize)}
+                  className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+                >
+                  {PAPER_SIZES.map((ps) => (
+                    <option key={ps.value} value={ps.value}>{ps.label}</option>
+                  ))}
+                </select>
+              </div>
+              <ToggleSwitch label="Include character page" checked={options.includeCharacterPage} onChange={(v) => updateOption('includeCharacterPage', v)} />
+            </Section>
           )}
 
-          {/* ZIP Options */}
+          {/* Quality — PNG & PDF */}
+          {(options.format === 'png' || options.format === 'pdf') && (
+            <Section title="Quality">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 w-20">Output</span>
+                <select
+                  value={options.quality}
+                  onChange={(e) => updateOption('quality', e.target.value as ImageQuality)}
+                  className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 focus:outline-none focus:border-blue-500"
+                >
+                  {QUALITY_OPTIONS.map((q) => (
+                    <option key={q.value} value={q.value}>{q.label}</option>
+                  ))}
+                </select>
+              </div>
+            </Section>
+          )}
+
+          {/* ZIP-specific */}
           {options.format === 'zip' && (
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-gray-400">ZIP Options</p>
-              <CheckboxOption
-                label="Include all assets"
-                checked={options.includeAllAssets}
-                onChange={(v) => updateOption('includeAllAssets', v)}
-              />
-            </div>
+            <Section title="ZIP Options">
+              <ToggleSwitch label="Include all assets" checked={options.includeAllAssets} onChange={(v) => updateOption('includeAllAssets', v)} />
+            </Section>
           )}
 
           {/* Preview */}
@@ -216,24 +262,23 @@ const ExportDialog = React.memo(function ExportDialog({
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function CheckboxOption({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="w-3.5 h-3.5 accent-blue-500"
-      />
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-gray-400">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function ToggleSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-2 cursor-pointer py-0.5">
       <span className="text-xs text-gray-300">{label}</span>
+      <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+        className={['relative w-9 h-5 rounded-full transition-colors', checked ? 'bg-blue-600' : 'bg-gray-700'].join(' ')}>
+        <span className={['absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-4' : 'translate-x-0'].join(' ')} />
+      </button>
     </label>
   );
 }

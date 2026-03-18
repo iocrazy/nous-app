@@ -1,11 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   BaseEdge,
   EdgeProps,
   getBezierPath,
+  getStraightPath,
+  getSmoothStepPath,
   useReactFlow,
 } from '@xyflow/react';
 import { X } from 'lucide-react';
+import { useStoryboardStore } from '../../../../stores/storyboardStore';
 
 // ─── SmartEdge ────────────────────────────────────────────────────────────────
 
@@ -22,15 +25,19 @@ const SmartEdge = React.memo(function SmartEdge({
 }: EdgeProps) {
   const [hovered, setHovered] = useState(false);
   const { setEdges } = useReactFlow();
+  const edgeStyle = useStoryboardStore((s) => s.edgeStyle);
 
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  });
+  const [edgePath, labelX, labelY] = useMemo(() => {
+    const params = { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition };
+
+    if (edgeStyle === 'straight') {
+      return getStraightPath(params);
+    }
+    if (edgeStyle === 'step') {
+      return getSmoothStepPath({ ...params, borderRadius: 8 });
+    }
+    return getBezierPath(params);
+  }, [edgeStyle, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition]);
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
