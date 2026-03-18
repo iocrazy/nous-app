@@ -65,6 +65,7 @@ function AppLayoutInner() {
   }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
   const view = pathnameToView(location.pathname);
+  const isDownloadsRoute = location.pathname.includes('/resources/downloads');
 
   const isPersonalWorkspace = !selectedTeamId || selectedTeamId === personalTeamId;
 
@@ -96,6 +97,7 @@ function AppLayoutInner() {
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
+  const [isDownloadsMenuOpen, setIsDownloadsMenuOpen] = useState(false);
 
   // Mobile workspace switch — navigates to new team, respecting current view
   const handleWorkspaceSwitch = (newTeamId: string) => {
@@ -236,10 +238,10 @@ function AppLayoutInner() {
       {/* Mobile Tab Bar — 4 tabs: Parser, Downloads, Resources, Me */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
         {/* Backdrop to dismiss popups */}
-        {(isMobileMenuOpen || isResourcesMenuOpen) && (
+        {(isMobileMenuOpen || isResourcesMenuOpen || isDownloadsMenuOpen) && (
           <div
             className="fixed inset-0 z-30"
-            onClick={() => { setIsMobileMenuOpen(false); setIsResourcesMenuOpen(false); }}
+            onClick={() => { setIsMobileMenuOpen(false); setIsResourcesMenuOpen(false); setIsDownloadsMenuOpen(false); }}
           />
         )}
 
@@ -256,13 +258,46 @@ function AppLayoutInner() {
 
           {/* Downloads — only visible in personal workspace */}
           {isPersonalWorkspace && (
-            <button
-              onClick={handleMobileLibraryClick}
-              className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
-            >
-              <Download size={22} />
-              <span className="text-[10px] leading-tight">Downloads</span>
-            </button>
+            <div className="relative">
+              {isDownloadsMenuOpen && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+                  <div className="flex p-1.5 gap-1">
+                    <button
+                      onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }}
+                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <LayoutGrid size={18} />
+                    </button>
+                    <button
+                      onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }}
+                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <LayoutList size={18} />
+                    </button>
+                    <button
+                      onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }}
+                      className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Smartphone size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  if (isDownloadsRoute) {
+                    setIsDownloadsMenuOpen(!isDownloadsMenuOpen);
+                  } else {
+                    handleMobileLibraryClick();
+                    setIsDownloadsMenuOpen(false);
+                  }
+                }}
+                className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${isDownloadsRoute ? 'text-indigo-400' : 'text-zinc-500'}`}
+              >
+                <Download size={22} />
+                <span className="text-[10px] leading-tight">Downloads</span>
+              </button>
+            </div>
           )}
 
           {/* Resources — with team picker popup */}
@@ -322,7 +357,7 @@ function AppLayoutInner() {
                   setIsResourcesMenuOpen(false);
                 }
               }}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
+              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' && !isDownloadsRoute ? 'text-indigo-400' : 'text-zinc-500'}`}
             >
               <FolderOpen size={22} />
               <span className="text-[10px] leading-tight">Resources</span>
