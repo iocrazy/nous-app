@@ -101,6 +101,8 @@ function AppLayoutInner() {
 
   // Mobile workspace switch — navigates to new team, respecting current view
   const handleWorkspaceSwitch = (newTeamId: string) => {
+    // Eagerly update team context so data loads immediately
+    setSelectedTeamId(newTeamId);
     if (view === 'resources' && location.pathname.includes('/downloads')) {
       navigate(`/team/${newTeamId}/resources`);
     } else {
