@@ -168,12 +168,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
 
-  // Redirect team workspace away from downloads (downloads is personal-only)
-  useEffect(() => {
-    if (sidebarView === 'downloads' && scopeType === 'team') {
-      navigate(resPath('/resources'), { replace: true });
-    }
-  }, [sidebarView, scopeType, navigate, resPath]);
 
   // ── Data state ──
   const [folders, setFolders] = useState<Folder[]>([]);

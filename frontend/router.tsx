@@ -43,9 +43,6 @@ export const router = createBrowserRouter([
 
       // Legacy flat URLs → redirect to /team/:teamId/:view
       { path: 'parser', element: <RedirectToTeam view="parser" /> },
-      // Legacy /library → redirect to /resources/downloads
-      { path: 'library', element: <RedirectToTeam view="resources/downloads" /> },
-      { path: 'library/:itemId', element: <RedirectToTeam view="resources/downloads" /> },
       { path: 'dashboard', element: <RedirectToTeam view="dashboard" /> },
       { path: 'dashboard/:subview', element: <RedirectToTeam view="dashboard" /> },
       { path: 'resources', element: <RedirectToTeam view="resources" /> },
@@ -73,9 +70,6 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
           { path: 'parser', element: <ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard> },
-          // /library → redirect to /resources/downloads (backward compat)
-          { path: 'library', element: <Navigate to="../resources/downloads" replace /> },
-          { path: 'library/:itemId', element: <Navigate to="../resources/downloads" replace /> },
           { path: 'dashboard', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'dashboard/:subview', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
           { path: 'resources', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
@@ -95,7 +89,6 @@ export const router = createBrowserRouter([
           { path: 'billing', element: <BillingPage /> },
           { path: 'todolist', element: <TodolistPage /> },
           { path: 'shared', element: <SharedPage /> },
-          { path: 'downloads', element: <Navigate to="resources/downloads" replace /> },
         ],
       },
 
