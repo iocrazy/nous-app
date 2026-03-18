@@ -17,14 +17,12 @@ import {
   Share2,
   Download,
   Plus,
-  Zap,
   FolderPlus,
   FolderSearch,
   Search,
   Check,
   X,
   UploadCloud,
-  BookOpen,
   ExternalLink,
   Pencil,
   Copy,
@@ -87,6 +85,7 @@ import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
 import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
+import { ResourcesSidebar } from './ResourcesSidebar';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -201,11 +200,6 @@ const ResourcesViewInner: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
-  // Libraries (team mode) — creation UI only
-  const [creatingLibrary, setCreatingLibrary] = useState(false);
-  const [newLibraryName, setNewLibraryName] = useState('');
-  const [savingLibrary, setSavingLibrary] = useState(false);
-  const newLibraryInputRef = useRef<HTMLInputElement>(null);
 
   // Sort / filter UI
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -270,8 +264,6 @@ const ResourcesViewInner: React.FC = () => {
   // Smart folder editor
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartCollection | null>(null);
-  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(true);
-  const [librariesExpanded, setLibrariesExpanded] = useState(true);
 
   // Share target (for ShareModal)
   const [shareTarget, setShareTarget] = useState<{
@@ -303,11 +295,6 @@ const ResourcesViewInner: React.FC = () => {
     }
   }, [creatingFolder]);
 
-  useEffect(() => {
-    if (creatingLibrary && newLibraryInputRef.current) {
-      newLibraryInputRef.current.focus();
-    }
-  }, [creatingLibrary]);
 
   // ─── Create folder handler ───────────────────────────
 
@@ -335,21 +322,10 @@ const ResourcesViewInner: React.FC = () => {
 
   // ─── Create library handler ─────────────────────────
 
-  const handleCreateLibrary = async () => {
-    const trimmed = newLibraryName.trim();
-    if (!trimmed || savingLibrary) return;
-    setSavingLibrary(true);
-    try {
-      const lib = await createLibrary({ name: trimmed, scope_id: scopeId });
-      setNewLibraryName('');
-      setCreatingLibrary(false);
-      setLibraries((prev) => [...prev, lib]);
-      navigate(resPath(`/resources/library/${lib.id}`));
-    } catch {
-      // Keep input open on error
-    } finally {
-      setSavingLibrary(false);
-    }
+  const handleCreateLibrary = async (name: string) => {
+    const lib = await createLibrary({ name, scope_id: scopeId });
+    setLibraries((prev) => [...prev, lib]);
+    navigate(resPath(`/resources/library/${lib.id}`));
   };
 
   // ─── Upload handler ──────────────────────────────────
@@ -1683,225 +1659,22 @@ const ResourcesViewInner: React.FC = () => {
 
   // ─── Render ──────────────────────────────────────────
 
-  const sidebarItemClass = (active: boolean) =>
-    `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
-      active ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-    }`;
 
   return (
     <div className="flex h-full animate-in fade-in duration-300">
       {/* ── Left panel: Desktop sidebar navigation (hidden on mobile — replaced by horizontal tabs) ── */}
-      <div className="hidden md:flex md:static w-56 shrink-0 border-r border-zinc-800/80 flex-col">
-        {/* Navigation */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {/* ── Top section: Shared / Recycle Bin ── */}
-          <button
-            onClick={() => navigate(resPath('/resources/shared'))}
-            className={sidebarItemClass(isSharedView)}
-          >
-            <Share2 size={15} className="shrink-0 opacity-70" />
-            <span>{t('resources.sharedManagement')}</span>
-          </button>
-
-          <button
-            onClick={() => navigate(resPath('/resources/recycle'))}
-            className={sidebarItemClass(isRecycleView)}
-          >
-            <Trash2 size={15} className="shrink-0 opacity-70" />
-            <span>{t('resources.recycleBin')}</span>
-          </button>
-
-          {/* ── Divider ── */}
-          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
-
-          {/* ── Main section: Team Libraries / Personal Resources ── */}
-          {scopeType === 'team' ? (
-            <>
-              {/* ── Library — collapsible parent item ── */}
-              <div className="flex items-center justify-between pr-1">
-                <button
-                  onClick={() => setLibrariesExpanded(!librariesExpanded)}
-                  className={sidebarItemClass(isResourcesView && !!selectedLibraryId && !librariesExpanded)}
-                >
-                  <BookOpen size={15} className="shrink-0 opacity-70" />
-                  <span className="flex-1 truncate">{t('resources.library')}</span>
-                  <ChevronDown
-                    size={12}
-                    className={`shrink-0 text-zinc-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
-                  />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setCreatingLibrary(true); setLibrariesExpanded(true); }}
-                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-                  title={t('resources.newLibrary')}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-
-              {/* Library children (indented with left border) */}
-              {librariesExpanded && (
-                <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
-                  {libraries.map((lib) => (
-                    <button
-                      key={lib.id}
-                      onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
-                      className={`group ${sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}`}
-                    >
-                      <BookOpen size={14} className="shrink-0 opacity-60" />
-                      <span className="truncate flex-1">{lib.name}</span>
-                    </button>
-                  ))}
-
-                  {/* Inline new library input */}
-                  {creatingLibrary && (
-                    <div className="flex items-center gap-1.5 px-2 py-1">
-                      <input
-                        ref={newLibraryInputRef}
-                        type="text"
-                        value={newLibraryName}
-                        onChange={(e) => setNewLibraryName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleCreateLibrary();
-                          if (e.key === 'Escape') {
-                            setCreatingLibrary(false);
-                            setNewLibraryName('');
-                          }
-                        }}
-                        onBlur={() => {
-                          if (!newLibraryName.trim()) {
-                            setCreatingLibrary(false);
-                            setNewLibraryName('');
-                          }
-                        }}
-                        placeholder={t('resources.libraryName')}
-                        disabled={savingLibrary}
-                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                      />
-                      {savingLibrary && (
-                        <Loader2 size={12} className="animate-spin text-zinc-400" />
-                      )}
-                    </div>
-                  )}
-
-                  {/* Create library button */}
-                  {!creatingLibrary && (
-                    <button
-                      onClick={() => setCreatingLibrary(true)}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
-                    >
-                      <Plus size={14} className="shrink-0 opacity-70" />
-                      <span>{t('resources.newLibrary')}</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              {/* Personal mode: My Downloads + My Resources */}
-              <button
-                onClick={() => navigate(resPath('/resources/downloads'))}
-                className={sidebarItemClass(isDownloadsView)}
-              >
-                <Download size={15} className="shrink-0 opacity-70" />
-                <span>{t('resources.downloads')}</span>
-              </button>
-
-              {/* My Resources with ➕ */}
-              <div className="flex items-center justify-between pr-1">
-                <button
-                  onClick={() => navigate(resPath('/resources'))}
-                  onDragOver={handleSidebarDragOver}
-                  onDrop={(e) => handleSidebarDrop(e, null)}
-                  className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
-                >
-                  <FolderOpen size={15} className="shrink-0 opacity-70" />
-                  <span>{t('resources.myResources')}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    navigate(resPath('/resources'));
-                    setCreatingFolder(true);
-                  }}
-                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-                  title={t('resources.newFolder')}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-
-
-            </>
-          )}
-
-          {/* ── Divider ── */}
-          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
-
-          {/* ── Smart Folders — collapsible parent item ── */}
-          <div className="flex items-center justify-between pr-1">
-            <button
-              onClick={() => setSmartFoldersExpanded(!smartFoldersExpanded)}
-              className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId && !smartFoldersExpanded)}
-            >
-              <Zap size={15} className="shrink-0 opacity-70" />
-              <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
-              <ChevronDown
-                size={12}
-                className={`shrink-0 text-zinc-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
-              />
-            </button>
-            <button
-              className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-              title={t('smartFolder.createTitle')}
-              onClick={(e) => { e.stopPropagation(); setShowSmartFolderEditor(true); }}
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-
-          {/* Smart folder children (indented with left border) */}
-          {smartFoldersExpanded && (
-            <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
-              {smartFolders.map((sf) => (
-                <button
-                  key={sf.id}
-                  onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
-                  }}
-                  className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
-                >
-                  <Zap size={14} className="shrink-0 opacity-60" />
-                  <span className="truncate flex-1">{sf.name}</span>
-                  <span
-                    className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingSmartFolder(sf);
-                    }}
-                    title={t('smartFolder.editSmartFolder')}
-                  >
-                    <Pencil size={12} />
-                  </span>
-                </button>
-              ))}
-
-              {smartFolders.length === 0 && (
-                <button
-                  onClick={() => setShowSmartFolderEditor(true)}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
-                >
-                  <Plus size={14} className="shrink-0 opacity-70" />
-                  <span>{t('smartFolder.createTitle')}</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <ResourcesSidebar
+        onSidebarDragOver={handleSidebarDragOver}
+        onSidebarDrop={handleSidebarDrop}
+        onCreateSmartFolder={() => setShowSmartFolderEditor(true)}
+        onEditSmartFolder={(sf) => setEditingSmartFolder(sf)}
+        onDeleteSmartFolder={(id) => handleDeleteSmartFolder({ id } as any)}
+        onCreateLibrary={handleCreateLibrary}
+        onNewFolder={() => setCreatingFolder(true)}
+        onSmartFolderContextMenu={(e, sf) => {
+          setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
+        }}
+      />
 
       {/* ── Center panel: Main content ── */}
       <div
