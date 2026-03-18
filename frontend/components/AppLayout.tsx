@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Library, User, FolderOpen, Download, Check,
-  LayoutList, LayoutGrid, Smartphone,
+  LayoutList, LayoutGrid, Smartphone, Trash2, Share2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage } from '../types';
@@ -293,43 +293,37 @@ function AppLayoutInner() {
               </div>
             )}
 
-            {/* Resources */}
+            {/* Resources — sub-view navigation (My Resources / Shared / Recycle Bin) */}
             <div className="relative">
               {isResourcesMenuOpen && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-52 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
-                  <div className="px-4 pt-3 pb-2 border-b border-zinc-800/60">
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Workspace</span>
-                  </div>
-                  <div className="py-1 max-h-60 overflow-y-auto">
-                    {personalTeamId && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'}`}
-                      >
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${selectedTeamId === personalTeamId ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'}`}>
-                          {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
-                        </div>
-                        <span className={`text-sm flex-1 ${selectedTeamId === personalTeamId ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>Personal</span>
-                        {selectedTeamId === personalTeamId && <Check size={14} className="text-indigo-400" />}
-                      </button>
-                    )}
-                    {teams.filter(t => String(t.id) !== personalTeamId).map(team => {
-                      const isActive = selectedTeamId === String(team.id);
-                      return (
-                        <button
-                          key={team.id}
-                          onClick={(e) => { e.stopPropagation(); navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
-                          className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'}`}
-                        >
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${isActive ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'}`}>
-                            {team.name.charAt(0).toUpperCase()}
-                          </div>
-                          <span className={`text-sm flex-1 ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>{team.name}</span>
-                          {isActive && <Check size={14} className="text-indigo-400" />}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden py-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
+                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
+                      view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    <FolderOpen size={16} />
+                    <span className="text-sm">My Resources</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
+                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
+                      location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    <Share2 size={16} />
+                    <span className="text-sm">Shared</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
+                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
+                      location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    <Trash2 size={16} />
+                    <span className="text-sm">Recycle Bin</span>
+                  </button>
                 </div>
               )}
               <button
