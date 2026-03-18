@@ -638,9 +638,9 @@ export const DownloadsView: React.FC = () => {
   // ─── Render ────────────────────────────────────────
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full">
-      {/* Toolbar — matches ResourcesView style */}
+      {/* Toolbar — matches ResourcesView style (hidden on mobile, search via overlay) */}
       <div
-        className="px-6 py-3 border-b border-zinc-800/80"
+        className="hidden md:block px-6 py-3 border-b border-zinc-800/80"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
@@ -704,7 +704,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
-        className="flex-1 overflow-y-auto px-5 pt-4 pb-5"
+        className="flex-1 overflow-y-auto px-3 md:px-5 pt-3 md:pt-4 pb-5"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
@@ -718,6 +718,25 @@ export const DownloadsView: React.FC = () => {
           }
         }}
       >
+        {/* Mobile header — visible only on small screens */}
+        <div className="md:hidden flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
+            {!isLoadingLibrary && (
+              <span className="text-[11px] text-zinc-600 tabular-nums">
+                {filteredLibrary.length} {filteredLibrary.length === 1 ? 'item' : 'items'}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={loadLibraryData}
+            disabled={isLoadingLibrary}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
+          >
+            <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
             {libraryError}
@@ -739,7 +758,7 @@ export const DownloadsView: React.FC = () => {
           <>
             {/* Grid view */}
             {libraryViewMode === 'grid' && (
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                 {filteredLibrary.map((item) => (
                   <CompactMediaCard
                     key={item.platform_id}
