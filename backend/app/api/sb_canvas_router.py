@@ -101,6 +101,7 @@ async def delete_node(auth: AuthDep, node_id: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@router.post("/projects/{project_id}/sync")
 @router.post("/projects/{project_id}/nodes/batch")
 async def sync_canvas(
     auth: AuthDep,
