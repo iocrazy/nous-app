@@ -76,7 +76,7 @@ const ChatPanel = React.memo(function ChatPanel({
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
               <div className="flex items-center gap-2">
-                <Bot size={16} className="text-blue-400" />
+                <Bot size={16} className="text-indigo-400" />
                 <h2 className="text-sm font-semibold text-gray-100">AI Assistant</h2>
               </div>
               <button
@@ -90,8 +90,8 @@ const ChatPanel = React.memo(function ChatPanel({
 
             {/* Selected frame indicator */}
             {selectedNodeId && (
-              <div className="px-4 py-2 bg-blue-900/30 border-b border-blue-800/40">
-                <p className="text-xs text-blue-300">
+              <div className="px-4 py-2 bg-indigo-900/30 border-b border-indigo-800/40">
+                <p className="text-xs text-indigo-300">
                   Selected: Frame {String(selectedNodeId).slice(-6)}
                 </p>
               </div>

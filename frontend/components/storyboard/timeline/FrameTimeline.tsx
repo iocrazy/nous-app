@@ -129,7 +129,7 @@ const FrameTimeline = React.memo(function FrameTimeline({
         {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed((v) => !v)}
-          className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1 px-3 py-1 bg-gray-800 border border-gray-700 rounded-t-lg text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          className="absolute -top-6 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-0.5 bg-gray-800 border border-gray-700 rounded-t-lg text-[11px] text-gray-400 hover:text-gray-200 transition-colors"
         >
           {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           Timeline
@@ -140,36 +140,36 @@ const FrameTimeline = React.memo(function FrameTimeline({
 
         {!collapsed && (
           <>
-            {/* Controls row */}
-            <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-800">
+            {/* Controls row + thumbnail strip combined for compact layout */}
+            <div className="flex items-center gap-2 px-3 py-1.5">
               {/* Play/Pause */}
               <button
                 onClick={handlePlayPause}
                 disabled={frames.length === 0}
-                className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40"
+                className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40"
               >
-                {playing ? <Pause size={14} /> : <Play size={14} />}
+                {playing ? <Pause size={13} /> : <Play size={13} />}
               </button>
 
               {/* Stop */}
               <button
                 onClick={handleStop}
                 disabled={frames.length === 0}
-                className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40"
+                className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40"
               >
-                <Square size={14} />
+                <Square size={13} />
               </button>
 
               {/* Speed selector */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 {SPEED_OPTIONS.map((s) => (
                   <button
                     key={s}
                     onClick={() => setSpeed(s)}
                     className={[
-                      'px-1.5 py-0.5 rounded text-xs font-mono transition-colors',
+                      'px-1.5 py-0.5 rounded text-[11px] font-mono transition-colors',
                       speed === s
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-indigo-600 text-white'
                         : 'bg-gray-800 text-gray-400 hover:text-gray-200',
                     ].join(' ')}
                   >
@@ -179,7 +179,7 @@ const FrameTimeline = React.memo(function FrameTimeline({
               </div>
 
               {/* Time display */}
-              <span className="text-xs font-mono text-gray-400 ml-auto">
+              <span className="text-[11px] font-mono text-gray-400 ml-auto">
                 {formatTime(currentTime)} / {formatTime(total)}
               </span>
 
@@ -188,20 +188,20 @@ const FrameTimeline = React.memo(function FrameTimeline({
                 onClick={() => setShowAnimatic(true)}
                 disabled={frames.length === 0}
                 title="Open Animatic Player"
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-[11px] text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
               >
-                <Film size={12} /> Preview
+                <Film size={11} /> Preview
               </button>
             </div>
 
             {/* Thumbnail strip */}
-            <div className="overflow-x-auto px-4 py-2">
+            <div className="overflow-x-auto px-3 pb-1.5 max-h-[80px]">
               {frames.length === 0 ? (
-                <p className="text-xs text-gray-600 py-2 text-center">
+                <p className="text-[11px] text-gray-600 text-center py-1">
                   No frames yet — generate or upload frames to see them here
                 </p>
               ) : (
-                <div className="flex items-center min-w-max">
+                <div className="flex items-center min-w-max gap-0.5">
                   {frames.map((frame, i) => (
                     <FrameThumb
                       key={frame.id}
@@ -219,9 +219,9 @@ const FrameTimeline = React.memo(function FrameTimeline({
             </div>
 
             {/* Progress bar */}
-            <div className="h-1 bg-gray-800 mx-4 mb-2 rounded-full overflow-hidden">
+            <div className="h-0.5 bg-gray-800 mx-3 mb-1 rounded-full overflow-hidden">
               <div
-                className="h-full bg-blue-500 transition-all"
+                className="h-full bg-indigo-500 transition-all"
                 style={{ width: `${progressPct}%` }}
               />
             </div>

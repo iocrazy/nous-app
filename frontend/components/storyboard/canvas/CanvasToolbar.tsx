@@ -121,7 +121,7 @@ const CanvasToolbar = React.memo(function CanvasToolbar({
       <div className="relative" ref={addMenuRef}>
         <button
           onClick={() => setShowAddMenu((v) => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
           title="Add Node"
         >
           <Plus size={15} />
@@ -237,8 +237,8 @@ function ToolbarButton({ onClick, title, children, disabled, active }: ToolbarBu
       className={[
         'flex items-center justify-center gap-0.5 p-2 rounded-lg text-sm transition-colors',
         active
-          ? 'bg-blue-600 text-white'
-          : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+          ? 'bg-indigo-600 text-white'
+          : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white',
         disabled ? 'opacity-40 cursor-not-allowed' : '',
       ].join(' ')}
     >

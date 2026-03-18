@@ -68,9 +68,9 @@ const NodeWrapper = React.memo(function NodeWrapper({
   return (
     <div
       className={[
-        'relative bg-gray-900 rounded-xl shadow-xl border transition-all duration-150',
+        'relative bg-gray-800 rounded-xl shadow-xl border transition-all duration-150',
         'min-w-[220px] max-w-[320px]',
-        selected ? 'border-blue-500 shadow-blue-500/20 shadow-lg' : 'border-gray-700',
+        selected ? 'border-indigo-500 shadow-indigo-500/20 shadow-lg' : 'border-gray-700',
         hovered && !selected ? 'border-gray-600' : '',
       ].join(' ')}
       onMouseEnter={() => setHovered(true)}
@@ -83,7 +83,7 @@ const NodeWrapper = React.memo(function NodeWrapper({
       />
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-gray-800">
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-gray-700/50">
         <span style={{ color: accentColor }}>{icon}</span>
         <span className="flex-1 text-sm font-semibold text-gray-100 truncate">{title}</span>
         {locked && <Lock size={12} className="text-gray-500" />}
@@ -126,7 +126,7 @@ const NodeWrapper = React.memo(function NodeWrapper({
           type={h.type}
           position={h.position}
           id={h.id}
-          className="!w-3 !h-3 !bg-gray-600 !border-2 !border-gray-400 hover:!bg-blue-500 hover:!border-blue-400 transition-colors"
+          className="!w-3 !h-3 !bg-gray-600 !border-2 !border-gray-400 hover:!bg-indigo-500 hover:!border-indigo-400 transition-colors"
         />
       ))}
     </div>
