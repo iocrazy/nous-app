@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, User, FolderOpen, Download, Check,
-  LayoutList, LayoutGrid, Smartphone, Trash2, Share2,
+  Search, Library as LibraryIcon, User, FolderOpen, Download, Check,
+  LayoutList, LayoutGrid, Smartphone, Trash2, Share2, Zap, BookOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ViewState, PointPackage } from '../types';
+import { ViewState, PointPackage, Library, SmartCollection } from '../types';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
+import { fetchLibraries } from '../services/libraryService';
+import { fetchSmartFolders } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
@@ -99,6 +101,8 @@ function AppLayoutInner() {
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
   const [isDownloadsMenuOpen, setIsDownloadsMenuOpen] = useState(false);
+  const [mobileLibraries, setMobileLibraries] = useState<Library[]>([]);
+  const [mobileSmartFolders, setMobileSmartFolders] = useState<SmartCollection[]>([]);
 
   // Mobile workspace switch — navigates to new team, respecting current view
   const handleWorkspaceSwitch = (newTeamId: string) => {
@@ -111,6 +115,15 @@ function AppLayoutInner() {
     }
     setIsMobileProfileOpen(false);
   };
+
+  // Load libraries + smart folders for mobile Resources popup
+  useEffect(() => {
+    if (!isResourcesMenuOpen || !selectedTeamId) return;
+    const scopeId = selectedTeamId === personalTeamId ? (currentUserId || '') : selectedTeamId;
+    const scopeType = selectedTeamId === personalTeamId ? 'personal' : 'team';
+    fetchLibraries(scopeId).then(setMobileLibraries).catch(() => setMobileLibraries([]));
+    fetchSmartFolders(scopeType, scopeId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
+  }, [isResourcesMenuOpen, selectedTeamId, personalTeamId, currentUserId]);
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -293,37 +306,88 @@ function AppLayoutInner() {
               </div>
             )}
 
-            {/* Resources — sub-view navigation (My Resources / Shared / Recycle Bin) */}
+            {/* Resources — full sidebar navigation (replaces desktop sidebar on mobile) */}
             <div className="relative">
               {isResourcesMenuOpen && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden py-1">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
-                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
-                      view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
-                    }`}
-                  >
-                    <FolderOpen size={16} />
-                    <span className="text-sm">My Resources</span>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
-                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
-                      location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
-                    }`}
-                  >
-                    <Share2 size={16} />
-                    <span className="text-sm">Shared</span>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
-                    className={`w-full text-left px-3.5 py-2.5 transition-colors flex items-center gap-2.5 ${
-                      location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
-                    }`}
-                  >
-                    <Trash2 size={16} />
-                    <span className="text-sm">Recycle Bin</span>
-                  </button>
+                <div className="absolute bottom-full right-0 mb-3 w-56 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden max-h-[60vh] overflow-y-auto">
+                  {/* Main views */}
+                  <div className="py-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <FolderOpen size={16} className="shrink-0" />
+                      <span className="text-sm">My Resources</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <Share2 size={16} className="shrink-0" />
+                      <span className="text-sm">Shared</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <Trash2 size={16} className="shrink-0" />
+                      <span className="text-sm">Recycle Bin</span>
+                    </button>
+                  </div>
+
+                  {/* Libraries (team workspace) */}
+                  {mobileLibraries.length > 0 && (
+                    <>
+                      <div className="h-px bg-zinc-800/60 mx-3" />
+                      <div className="py-1.5">
+                        <div className="px-3.5 py-1.5">
+                          <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Libraries</span>
+                        </div>
+                        {mobileLibraries.map(lib => (
+                          <button
+                            key={lib.id}
+                            onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/library/${lib.id}`)); setIsResourcesMenuOpen(false); }}
+                            className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                              location.pathname.includes(`/library/${lib.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                            }`}
+                          >
+                            <BookOpen size={16} className="shrink-0" />
+                            <span className="text-sm truncate">{lib.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Smart Folders */}
+                  {mobileSmartFolders.length > 0 && (
+                    <>
+                      <div className="h-px bg-zinc-800/60 mx-3" />
+                      <div className="py-1.5">
+                        <div className="px-3.5 py-1.5">
+                          <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Smart Folders</span>
+                        </div>
+                        {mobileSmartFolders.map(sf => (
+                          <button
+                            key={sf.id}
+                            onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/smart/${sf.id}`)); setIsResourcesMenuOpen(false); }}
+                            className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                              location.pathname.includes(`/smart/${sf.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                            }`}
+                          >
+                            <Zap size={16} className="shrink-0" />
+                            <span className="text-sm truncate">{sf.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
               <button
