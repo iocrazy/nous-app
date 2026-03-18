@@ -240,6 +240,12 @@ try:
             raise HTTPException(status_code=401, detail="Authentication required")
         return user_id
 
+    # In-memory cache for media ID → file path lookups (avoids DB hit on every request)
+    import time as _time
+
+    _media_path_cache: dict[tuple[str, str], tuple[str, float]] = {}
+    _CACHE_TTL = 300  # 5 minutes
+
     async def _resolve_file_path(media_id: str, file_type: str = "file") -> str:
         """Resolve a resource/media ID to a file path on disk.
 
@@ -247,8 +253,17 @@ try:
         1. resources table (by id) → file_path / cover_image_path
         2. parsed_media table (by id) → download_path / cover_download_path
 
+        Uses a 5-minute in-memory cache to avoid DB queries on every media request.
         Returns the relative file path or raises 404.
         """
+        cache_key = (media_id, file_type)
+        cached = _media_path_cache.get(cache_key)
+        if cached:
+            path, ts = cached
+            if _time.time() - ts < _CACHE_TTL:
+                return path
+            del _media_path_cache[cache_key]
+
         from app.db.supabase_client import get_async_supabase_admin
 
         supabase = await get_async_supabase_admin()
@@ -261,22 +276,26 @@ try:
         try:
             res = await supabase.table("resources").select(resource_col).eq("id", media_id).maybe_single().execute()
             if res.data:
+                result = None
                 if file_type == "file" and res.data.get("file_path"):
-                    return res.data["file_path"]
+                    result = res.data["file_path"]
                 elif file_type == "cover":
-                    path = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
-                    if path:
-                        return path
-        except Exception:
-            pass  # ID format mismatch or DB error, try parsed_media
+                    result = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
+                if result:
+                    _media_path_cache[cache_key] = (result, _time.time())
+                    return result
+        except Exception as e:
+            logger.warning(f"Resource lookup failed for {media_id}: {e}")
 
         # 2. Try parsed_media table
         try:
             res = await supabase.table("parsed_media").select(media_col).eq("id", media_id).maybe_single().execute()
             if res.data and res.data.get(media_col):
-                return res.data[media_col]
-        except Exception:
-            pass
+                result = res.data[media_col]
+                _media_path_cache[cache_key] = (result, _time.time())
+                return result
+        except Exception as e:
+            logger.warning(f"ParsedMedia lookup failed for {media_id}: {e}")
 
         raise HTTPException(status_code=404, detail="Media not found")
 

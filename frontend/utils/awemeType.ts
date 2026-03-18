@@ -82,6 +82,7 @@ export { buildStreamUrl as getStreamUrl, isPlayableUrl };
  * Get video playback URL (backward-compatible wrapper).
  */
 export const getVideoUrl = (data: {
+  id?: string;
   media_format?: string;
   hls_path?: string;
   download_path?: string;
@@ -93,6 +94,7 @@ export const getVideoUrl = (data: {
  * Get cover image URL (backward-compatible wrapper).
  */
 export const getCoverUrl = (data: {
+  id?: string;
   cover_download_path?: string;
   cover_urls?: string[];
   dynamic_cover_url?: string;

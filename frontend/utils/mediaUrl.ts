@@ -32,6 +32,7 @@ export function buildMediaUrl(id: string, token?: string): string {
  * URL pattern: /media/{id}/cover?token=signed_token
  */
 export function buildMediaCoverUrl(id: string, token?: string): string {
+  if (isAbsoluteUrl(id)) return id;
   return appendToken(`${getApiUrl()}/media/${id}/cover`, token);
 }
 
