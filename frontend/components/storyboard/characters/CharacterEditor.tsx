@@ -13,6 +13,7 @@ interface CharacterEditorProps {
   character?: StoryboardCharacter | null;
   onSave: (data: CharacterFormData) => void;
   onCancel: () => void;
+  saving?: boolean;
 }
 
 export interface CharacterFormData {
@@ -45,6 +46,7 @@ const CharacterEditor = React.memo(function CharacterEditor({
   character,
   onSave,
   onCancel,
+  saving = false,
 }: CharacterEditorProps) {
   const [name, setName] = useState(character?.name ?? '');
   const [description, setDescription] = useState(character?.description ?? '');
@@ -251,10 +253,17 @@ const CharacterEditor = React.memo(function CharacterEditor({
           </button>
           <button
             onClick={handleSave}
-            disabled={!name.trim()}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={!name.trim() || saving}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {isNew ? 'Create' : 'Save Changes'}
+            {saving ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Saving...
+              </>
+            ) : (
+              isNew ? 'Create' : 'Save Changes'
+            )}
           </button>
         </div>
       </div>

@@ -377,10 +377,23 @@ export async function splitImage(
 
 export type ExportFormat = 'png' | 'pdf' | 'zip';
 
+export interface ExportProjectOptions {
+  includeFrameNumbers?: boolean;
+  includeAnnotations?: boolean;
+  includeCameraOverlays?: boolean;
+  includeNotes?: boolean;
+  includeMetadata?: boolean;
+  columns?: number;
+  paperSize?: 'a4' | 'letter' | 'custom';
+  includeCharacterPage?: boolean;
+  quality?: 'low' | 'medium' | 'high';
+  includeAllAssets?: boolean;
+}
+
 export async function exportProject(
   projectId: string,
   format: ExportFormat,
-  options?: Record<string, unknown>
+  options?: ExportProjectOptions
 ): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/export`, {

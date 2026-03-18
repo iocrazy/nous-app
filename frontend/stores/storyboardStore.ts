@@ -62,6 +62,9 @@ interface StoryboardState {
   // Chat
   chatMessages: ChatMessage[];
 
+  // Edge style
+  edgeStyle: 'default' | 'straight' | 'step';
+
   // Timeline ordering (node IDs in sequence)
   timelineOrder: string[];
 
@@ -96,6 +99,8 @@ interface StoryboardState {
   addChatMessage: (msg: ChatMessage) => void;
   clearChat: () => void;
 
+  setEdgeStyle: (style: 'default' | 'straight' | 'step') => void;
+
   setTimelineOrder: (order: string[]) => void;
 
   addToPool: (key: string, entry: ImagePoolEntry) => void;
@@ -117,6 +122,7 @@ export const useStoryboardStore = create<StoryboardState>((set, get) => ({
   characters: [],
   history: { past: [], future: [] },
   chatMessages: [],
+  edgeStyle: 'default',
   timelineOrder: [],
   imagePool: {},
 
@@ -270,6 +276,10 @@ export const useStoryboardStore = create<StoryboardState>((set, get) => ({
     set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
 
   clearChat: () => set({ chatMessages: [] }),
+
+  // ─── Edge style ──────────────────────────────────────────────────────────
+
+  setEdgeStyle: (style) => set({ edgeStyle: style }),
 
   // ─── Timeline ─────────────────────────────────────────────────────────────
 
