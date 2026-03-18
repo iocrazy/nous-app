@@ -92,7 +92,7 @@ const ChatPanel = React.memo(function ChatPanel({
             {selectedNodeId && (
               <div className="px-4 py-2 bg-blue-900/30 border-b border-blue-800/40">
                 <p className="text-xs text-blue-300">
-                  Selected: Frame {selectedNodeId.slice(-6)}
+                  Selected: Frame {String(selectedNodeId).slice(-6)}
                 </p>
               </div>
             )}
