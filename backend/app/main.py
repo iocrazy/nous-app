@@ -352,6 +352,22 @@ try:
         file_path = await _resolve_file_path(media_id, "cover")
         return _serve_file(file_path)
 
+    @app.get("/media/{file_path:path}")
+    async def serve_media_by_path(
+        file_path: str,
+        request: Request,
+        token: str | None = None,
+        share_token: str | None = None,
+        review_token: str | None = None,
+    ):
+        """Legacy fallback: serve media files by file path.
+
+        Handles old cached frontends that still use /media/{file_path} URLs.
+        New frontends should use /media/{id} instead.
+        """
+        await _authenticate_media_request(request, token, share_token, review_token)
+        return _serve_file(file_path)
+
 except ValueError:
     logger.warning(
         "未配置下载路径，媒体文件路由未注册。请在设置中配置 Default Download Path。"
