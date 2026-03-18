@@ -438,6 +438,26 @@ function AppLayoutInner() {
         sidebarCollapsed={sidebarCollapsed}
       />
 
+      {/* Mobile workspace avatar — top-right, opens MobileProfilePage */}
+      <button
+        className="sm:hidden fixed top-3 right-14 z-30 w-8 h-8 rounded-full overflow-hidden border-2 border-zinc-700 hover:border-indigo-500 transition-colors"
+        onClick={() => setIsMobileProfileOpen(true)}
+      >
+        {currentTeam ? (
+          <div className={`w-full h-full flex items-center justify-center text-xs font-bold ${
+            selectedTeamId === personalTeamId ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'
+          }`}>
+            {selectedTeamId === personalTeamId
+              ? (userProfile?.name?.charAt(0)?.toUpperCase() || 'P')
+              : (currentTeam.name?.charAt(0)?.toUpperCase() || 'T')}
+          </div>
+        ) : (
+          <div className="w-full h-full bg-zinc-700 flex items-center justify-center">
+            <User size={14} className="text-zinc-400" />
+          </div>
+        )}
+      </button>
+
       {/* Main Content */}
       <main className={mainContentClass}>
         {/* Routed content */}
