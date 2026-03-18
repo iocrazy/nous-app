@@ -62,8 +62,7 @@ import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
 import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
-import { ResourcesSidebar } from './ResourcesSidebar';
-import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
+import { ResourcesShell } from './ResourcesShell';
 import { ResourceGrid } from './ResourceGrid';
 
 // ─── Upload constants ────────────────────────────────────
@@ -1541,144 +1540,147 @@ const ResourcesViewInner: React.FC = () => {
   // ─── Render ──────────────────────────────────────────
 
 
+  // ─── Shell props (sidebar + info panel) ─────────────
+
+  const sidebarProps = useMemo(() => ({
+    onSidebarDragOver: handleSidebarDragOver,
+    onSidebarDrop: handleSidebarDrop,
+    onCreateSmartFolder: () => setShowSmartFolderEditor(true),
+    onEditSmartFolder: (sf: SmartCollection) => setEditingSmartFolder(sf),
+    onDeleteSmartFolder: (id: string) => handleDeleteSmartFolder({ id } as any),
+    onCreateLibrary: handleCreateLibrary,
+    onNewFolder: () => setCreatingFolder(true),
+    onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => {
+      setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
+    },
+  }), [handleSidebarDragOver, handleSidebarDrop, handleDeleteSmartFolder, handleCreateLibrary]);
+
+  const infoPanelProps = useMemo(() => ({
+    trashedFolderPreviews,
+    onRenameFolder: async (folderId: string | number, name: string) => {
+      try {
+        await renameFolder(folderId, name);
+        setSelectedFolder(prev => prev ? { ...prev, name } : null);
+        await Promise.all([loadFolders(), loadChildFolders()]);
+      } catch (err) {
+        console.error('Failed to rename folder:', err);
+      }
+    },
+  }), [trashedFolderPreviews, loadFolders, loadChildFolders]);
+
+  // ─── Render ──────────────────────────────────────────
+
   return (
-    <div className="flex h-full animate-in fade-in duration-300">
-      {/* ── Left panel: Desktop sidebar navigation (hidden on mobile — replaced by horizontal tabs) ── */}
-      <ResourcesSidebar
-        onSidebarDragOver={handleSidebarDragOver}
-        onSidebarDrop={handleSidebarDrop}
-        onCreateSmartFolder={() => setShowSmartFolderEditor(true)}
-        onEditSmartFolder={(sf) => setEditingSmartFolder(sf)}
-        onDeleteSmartFolder={(id) => handleDeleteSmartFolder({ id } as any)}
-        onCreateLibrary={handleCreateLibrary}
-        onNewFolder={() => setCreatingFolder(true)}
-        onSmartFolderContextMenu={(e, sf) => {
-          setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
-        }}
-      />
-
-      {/* ── Center panel: Main content ── */}
-      {isDownloadsView ? (
-        <div className="flex-1 min-w-0 flex flex-col">
+    <>
+      <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
+        {isDownloadsView ? (
           <DownloadsView />
-        </div>
-      ) : (
-        <>
-          {/* Hidden file inputs — must be outside ResourceGrid so they persist */}
-          {canUpload && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.length) {
-                    handleUpload(e.target.files);
-                    e.target.value = '';
-                  }
-                }}
-              />
-              <input
-                ref={folderInputRef}
-                type="file"
-                // @ts-ignore - webkitdirectory is non-standard but widely supported
-                webkitdirectory=""
-                directory=""
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.length) {
-                    handleUpload(e.target.files);
-                    e.target.value = '';
-                  }
-                }}
-              />
-            </>
-          )}
-          <ResourceGrid
-            breadcrumbSegments={breadcrumbSegments}
-            filteredFolders={filteredFolders}
-            sortedItems={sortedItems}
-            recycleSubFolders={recycleSubFolders}
-            trashedFolderPreviews={trashedFolderPreviews}
-            allSelectableIds={allSelectableIds}
-            filterOptions={filterOptions}
-            sortOptions={sortOptions}
-            activeFilters={activeFilters}
-            toggleFilter={toggleFilter}
-            clearFilters={() => setActiveFilters(new Set())}
-            currentSortLabel={currentSortLabel}
-            onQueryChange={handleResourceQueryChange}
-            onAISearch={handleResourceAISearch}
-            onSearchClear={handleResourceSearchClear}
-            isAISearching={isAISearching}
-            uploading={uploading}
-            overallProgress={upload.overallProgress}
-            fileInputRef={fileInputRef}
-            folderInputRef={folderInputRef}
-            canUploadDrop={canUpload}
-            dragOver={dragOver}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onResourceClick={handleResourceClick}
-            onResourceDoubleClick={handleResourceDoubleClick}
-            onFileContextMenu={handleFileContextMenu}
-            onFolderContextMenu={handleFolderContextMenu}
-            onEmptyAreaContextMenu={handleEmptyAreaContextMenu}
-            onCardClick={handleCardClick}
-            onToggleSelect={handleToggleSelect}
-            onDropOnFolder={handleDropOnFolder}
-            renamingResourceId={renamingResourceId}
-            renameValue={renameValue}
-            onRenameChange={setRenameValue}
-            onRenameResourceConfirm={handleRenameResourceConfirm}
-            onRenameResourceCancel={() => setRenamingResourceId(null)}
-            onStartRenameResource={(id, name) => { setRenamingResourceId(id); setRenameValue(name); }}
-            renamingFolderId={renamingFolderId}
-            renameFolderValue={renameFolderValue}
-            onRenameFolderChange={setRenameFolderValue}
-            onRenameFolderConfirm={handleRenameFolderConfirm}
-            onRenameFolderCancel={() => setRenamingFolderId(null)}
-            onStartRenameFolder={(id, name) => { setRenamingFolderId(id); setRenameFolderValue(name); }}
-            creatingFolder={creatingFolder}
-            newFolderName={newFolderName}
-            savingFolder={savingFolder}
-            newFolderInputRef={newFolderInputRef}
-            onNewFolderNameChange={setNewFolderName}
-            onCreateFolder={handleCreateFolder}
-            onCancelCreateFolder={() => { setCreatingFolder(false); setNewFolderName(''); }}
-            onStartCreateFolder={() => setCreatingFolder(true)}
-            onShowSmartFolderEditor={() => setShowSmartFolderEditor(true)}
-            getItemTouchHandlers={getItemTouchHandlers}
-            isTouchDropTarget={isTouchDropTarget}
-            touchDragState={touchDragState}
-            onEmptyAreaTouchStart={handleEmptyAreaTouchStart}
-            onEmptyAreaTouchMove={handleEmptyAreaTouchMove}
-            onEmptyAreaTouchEnd={handleEmptyAreaTouchEnd}
-            onTouchDragMove={handleTouchDragMove}
-            onTouchDragEnd={handleTouchDragEnd}
-          />
-        </>
-      )}
+        ) : (
+          <>
+            {/* Hidden file inputs — must be outside ResourceGrid so they persist */}
+            {canUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      handleUpload(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // @ts-ignore - webkitdirectory is non-standard but widely supported
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      handleUpload(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </>
+            )}
+            <ResourceGrid
+              breadcrumbSegments={breadcrumbSegments}
+              filteredFolders={filteredFolders}
+              sortedItems={sortedItems}
+              recycleSubFolders={recycleSubFolders}
+              trashedFolderPreviews={trashedFolderPreviews}
+              allSelectableIds={allSelectableIds}
+              filterOptions={filterOptions}
+              sortOptions={sortOptions}
+              activeFilters={activeFilters}
+              toggleFilter={toggleFilter}
+              clearFilters={() => setActiveFilters(new Set())}
+              currentSortLabel={currentSortLabel}
+              onQueryChange={handleResourceQueryChange}
+              onAISearch={handleResourceAISearch}
+              onSearchClear={handleResourceSearchClear}
+              isAISearching={isAISearching}
+              uploading={uploading}
+              overallProgress={upload.overallProgress}
+              fileInputRef={fileInputRef}
+              folderInputRef={folderInputRef}
+              canUploadDrop={canUpload}
+              dragOver={dragOver}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onResourceClick={handleResourceClick}
+              onResourceDoubleClick={handleResourceDoubleClick}
+              onFileContextMenu={handleFileContextMenu}
+              onFolderContextMenu={handleFolderContextMenu}
+              onEmptyAreaContextMenu={handleEmptyAreaContextMenu}
+              onCardClick={handleCardClick}
+              onToggleSelect={handleToggleSelect}
+              onDropOnFolder={handleDropOnFolder}
+              renamingResourceId={renamingResourceId}
+              renameValue={renameValue}
+              onRenameChange={setRenameValue}
+              onRenameResourceConfirm={handleRenameResourceConfirm}
+              onRenameResourceCancel={() => setRenamingResourceId(null)}
+              onStartRenameResource={(id, name) => { setRenamingResourceId(id); setRenameValue(name); }}
+              renamingFolderId={renamingFolderId}
+              renameFolderValue={renameFolderValue}
+              onRenameFolderChange={setRenameFolderValue}
+              onRenameFolderConfirm={handleRenameFolderConfirm}
+              onRenameFolderCancel={() => setRenamingFolderId(null)}
+              onStartRenameFolder={(id, name) => { setRenamingFolderId(id); setRenameFolderValue(name); }}
+              creatingFolder={creatingFolder}
+              newFolderName={newFolderName}
+              savingFolder={savingFolder}
+              newFolderInputRef={newFolderInputRef}
+              onNewFolderNameChange={setNewFolderName}
+              onCreateFolder={handleCreateFolder}
+              onCancelCreateFolder={() => { setCreatingFolder(false); setNewFolderName(''); }}
+              onStartCreateFolder={() => setCreatingFolder(true)}
+              onShowSmartFolderEditor={() => setShowSmartFolderEditor(true)}
+              getItemTouchHandlers={getItemTouchHandlers}
+              isTouchDropTarget={isTouchDropTarget}
+              touchDragState={touchDragState}
+              onEmptyAreaTouchStart={handleEmptyAreaTouchStart}
+              onEmptyAreaTouchMove={handleEmptyAreaTouchMove}
+              onEmptyAreaTouchEnd={handleEmptyAreaTouchEnd}
+              onTouchDragMove={handleTouchDragMove}
+              onTouchDragEnd={handleTouchDragEnd}
+            />
+          </>
+        )}
+      </ResourcesShell>
 
-      {/* ── Right panel (info panel wrapper) ── */}
-      <ResourcesInfoPanelWrapper
-        trashedFolderPreviews={trashedFolderPreviews}
-        onRenameFolder={async (folderId, name) => {
-          try {
-            await renameFolder(folderId, name);
-            setSelectedFolder(prev => prev ? { ...prev, name } : null);
-            await Promise.all([loadFolders(), loadChildFolders()]);
-          } catch (err) {
-            console.error('Failed to rename folder:', err);
-          }
-        }}
-      />
+      {/* ── Overlays (outside Shell — rendered as portals / fixed elements) ── */}
 
-      {/* ── Batch Selection Toolbar ── */}
+      {/* Batch Selection Toolbar */}
       {selectedIds.size > 0 && !isDownloadsView && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
           <span className="text-sm text-zinc-300 font-medium">
@@ -1804,7 +1806,7 @@ const ResourcesViewInner: React.FC = () => {
         </div>
       )}
 
-      {/* ── Context Menu ── */}
+      {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
@@ -1822,7 +1824,7 @@ const ResourcesViewInner: React.FC = () => {
         onChange={handleVersionFileSelected}
       />
 
-      {/* ── Smart Folder Editor (Create) ── */}
+      {/* Smart Folder Editor (Create) */}
       {showSmartFolderEditor && (
         <SmartFolderEditor
           onSave={handleCreateSmartFolder}
@@ -1830,7 +1832,7 @@ const ResourcesViewInner: React.FC = () => {
         />
       )}
 
-      {/* ── Smart Folder Editor (Edit) ── */}
+      {/* Smart Folder Editor (Edit) */}
       {editingSmartFolder && (
         <SmartFolderEditor
           initialName={editingSmartFolder.name}
@@ -1840,7 +1842,7 @@ const ResourcesViewInner: React.FC = () => {
         />
       )}
 
-      {/* ── Share Modal ── */}
+      {/* Share Modal */}
       {shareTarget && (
         <ShareModal
           isOpen={true}
@@ -1850,7 +1852,7 @@ const ResourcesViewInner: React.FC = () => {
         />
       )}
 
-      {/* ── Folder Picker Modal (Copy/Move) ── */}
+      {/* Folder Picker Modal (Copy/Move) */}
       {folderPickerMode && (
         <FolderPickerModal
           isOpen={true}
@@ -1879,7 +1881,7 @@ const ResourcesViewInner: React.FC = () => {
         />
       )}
 
-      {/* ── Duplicate File Alert ── */}
+      {/* Duplicate File Alert */}
       {duplicateAlert && (
         <DuplicateFileAlert
           file={duplicateAlert.file}
@@ -1895,7 +1897,7 @@ const ResourcesViewInner: React.FC = () => {
         />
       )}
 
-      {/* ── Permanent Delete Confirmation Dialog ── */}
+      {/* Permanent Delete Confirmation Dialog */}
       {(pendingPermanentDelete || pendingBatchPermanentDelete || pendingBatchPermanentDeleteFolders) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -1932,9 +1934,7 @@ const ResourcesViewInner: React.FC = () => {
         </div>
       )}
 
-      {/* Mobile floating search removed — now integrated into breadcrumb bar */}
-
-      {/* ── Touch drag preview — portal to body ── */}
+      {/* Touch drag preview — portal to body */}
       {touchDragState.isDragging && touchDragState.dragPosition && createPortal(
         <div
           className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-zinc-800/90 backdrop-blur-sm border border-zinc-600 rounded-lg px-3 py-2 shadow-2xl"
@@ -1950,7 +1950,6 @@ const ResourcesViewInner: React.FC = () => {
         </div>,
         document.body,
       )}
-
-    </div>
+    </>
   );
 };
