@@ -99,6 +99,7 @@ export const router = createBrowserRouter([
           { path: 'shared', element: <SharedPage /> },
           { path: 'player/:displayId', element: <PlayerPage /> },
           { path: 'storyboard', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
+          { path: 'storyboard/:projectId', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
         ],
       },
 
