@@ -476,6 +476,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    loadMoreLibrary,
 
     // View
     libraryViewMode,
