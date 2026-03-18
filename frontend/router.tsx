@@ -14,7 +14,7 @@ import { BillingPage } from './pages/BillingPage';
 import { MembersPage } from './pages/MembersPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { TodolistPage } from './pages/TodolistPage';
-import { PlayerPage } from './pages/PlayerPage';
+import { DownloadDetailPage } from './pages/DownloadDetailPage';
 import { ResourceDetailPage } from './pages/ResourceDetailPage';
 import { SharePage } from './pages/SharePage';
 import { SharedPage } from './pages/SharedPage';
@@ -97,7 +97,7 @@ export const router = createBrowserRouter([
           { path: 'billing', element: <BillingPage /> },
           { path: 'todolist', element: <TodolistPage /> },
           { path: 'shared', element: <SharedPage /> },
-          { path: 'player/:displayId', element: <PlayerPage /> },
+          { path: 'player/:displayId', element: <DownloadDetailPage /> },
         ],
       },
 

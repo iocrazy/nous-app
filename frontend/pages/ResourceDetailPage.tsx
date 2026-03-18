@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { ResourceDetail } from '../components/ResourceDetail';
-import { PlayerPage } from './PlayerPage';
+import { DownloadDetailPage } from './DownloadDetailPage';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 
 /**
@@ -10,7 +10,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
  * Routes: /resources/file/{resourceId}
  *
  * Detects the resource's source_type:
- * - 'web' (downloaded from platform) → PlayerPage (download detail view)
+ * - 'web' (downloaded from platform) → DownloadDetailPage (download detail view)
  * - other (uploaded/imported) → ResourceDetail (resource management view)
  */
 export function ResourceDetailPage() {
@@ -59,9 +59,9 @@ export function ResourceDetailPage() {
     );
   }
 
-  // Downloaded from platform → PlayerPage (download detail view)
+  // Downloaded from platform → DownloadDetailPage (download detail view)
   if (sourceType === 'web' && mediaId) {
-    return <PlayerPage resourceId={resourceId} mediaId={mediaId} />;
+    return <DownloadDetailPage resourceId={resourceId} mediaId={mediaId} />;
   }
 
   // Uploaded/imported → ResourceDetail (resource management view)
