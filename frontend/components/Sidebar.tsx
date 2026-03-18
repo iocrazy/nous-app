@@ -8,6 +8,7 @@ import {
   Layers,
   Users,
   Sparkles,
+  Clapperboard,
   ChevronDown,
   FolderOpen,
   ListTodo,
@@ -194,6 +195,7 @@ const VIEW_PATH_MAP: Record<string, string> = {
   resources: '/resources',
   todolist: '/todolist',
   shared: '/shared',
+  storyboard: '/storyboard',
 };
 
 function viewFromPathname(pathname: string): ViewState {
@@ -210,6 +212,7 @@ function viewFromPathname(pathname: string): ViewState {
   if (stripped.startsWith('/resources')) return 'resources';
   if (stripped.startsWith('/todolist')) return 'todolist';
   if (stripped.startsWith('/shared')) return 'shared';
+  if (stripped.startsWith('/storyboard')) return 'storyboard';
   if (stripped.startsWith('/player')) return 'resources';
   return 'parser';
 }
@@ -420,6 +423,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {isViewEnabled('mediatrack') && (
           <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
         )}
+        <SidebarItem icon={Clapperboard} label={t('sidebar.storyboard')} active={currentView === 'storyboard'} onClick={() => handleNav('storyboard')} collapsed={collapsed} />
         <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
         <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
 
