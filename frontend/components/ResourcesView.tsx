@@ -41,7 +41,7 @@ import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
 import { ToolbarSearch } from './ToolbarSearch';
 import { semanticSearch, hybridSearch } from '../services/searchService';
-import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
+import { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import {
   fetchResources,
   createFolder,
@@ -68,8 +68,6 @@ import type { SmartFolderRules } from '../services/resourceService';
 import { createLibrary } from '../services/libraryService';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
-import { ResourceInfoPanel } from './ResourceInfoPanel';
-import { FolderInfoPanel } from './FolderInfoPanel';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
@@ -86,6 +84,7 @@ import { Resource } from '../types';
 import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
 import { ResourcesSidebar } from './ResourcesSidebar';
+import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -165,13 +164,13 @@ const ResourcesViewInner: React.FC = () => {
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
-    allTags, setAllTags, resourceTagNamesMap, loading, setLoading, folderChain,
+    resourceTagNamesMap, loading, setLoading, folderChain,
     recycleFolderId, setRecycleFolderId, recycleFolderItems,
     pendingPermanentDelete, setPendingPermanentDelete,
     pendingBatchPermanentDelete, setPendingBatchPermanentDelete,
     pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders,
     selectedResource, setSelectedResource, selectedFolder, setSelectedFolder,
-    selectedResourceTags, selectedIds, setSelectedIds,
+    selectedIds, setSelectedIds,
     lastClickedId, setLastClickedId, multiSelectMode, setMultiSelectMode,
     viewMode, setViewMode, sortBy, setSortBy,
     searchQuery, setSearchQuery, debouncedSearch, setDebouncedSearch,
@@ -179,7 +178,6 @@ const ResourcesViewInner: React.FC = () => {
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
     handleTrashResource: handleTrash, handleRestoreResource: handleRestore,
     handlePermanentDelete, confirmPermanentDelete,
-    handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,
     canDo, addToast, transcodingResourceIds,
   } = ctx;
 
@@ -219,10 +217,6 @@ const ResourcesViewInner: React.FC = () => {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
-
-  // Info panel resize
-  const isResizingPanelRef = useRef(false);
-  const resizeStartRef = useRef({ x: 0, width: 0 });
 
   // Upload dropdown
   const [showUploadDropdown, setShowUploadDropdown] = useState(false);
@@ -590,33 +584,6 @@ const ResourcesViewInner: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showNewDropdown]);
-
-  // Resize info panel handler
-  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingPanelRef.current = true;
-    resizeStartRef.current = { x: e.clientX, width: infoPanelWidth };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isResizingPanelRef.current) return;
-      const delta = resizeStartRef.current.x - ev.clientX;
-      const newWidth = Math.max(240, Math.min(600, resizeStartRef.current.width + delta));
-      setInfoPanelWidth(newWidth);
-    };
-
-    const onMouseUp = () => {
-      isResizingPanelRef.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [infoPanelWidth]);
 
   // ToolbarSearch callbacks for resources
   const handleResourceQueryChange = useCallback((q: string) => {
@@ -2457,77 +2424,19 @@ const ResourcesViewInner: React.FC = () => {
         )}
       </div>
 
-      {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
-      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && (
-        <div
-          className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
-            showInfoPanel ? 'translate-x-0' : 'translate-x-full'
-          }`}
-          style={{ width: `min(100vw, ${infoPanelWidth}px)` }}
-        >
-          {/* Collapse tab — attached to left edge of panel */}
-          <button
-            onClick={() => setShowInfoPanel(false)}
-            className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
-            title={t('resources.toggleInfoPanel')}
-          >
-            <ChevronRight size={20} />
-          </button>
-
-          {/* Resize handle — left edge blue line on hover */}
-          <div
-            onMouseDown={handlePanelResizeStart}
-            className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
-          />
-
-          {/* Panel content */}
-          {selectedFolder ? (
-            <FolderInfoPanel
-              folder={selectedFolder}
-              previewItems={
-                isRecycleView
-                  ? trashedFolderPreviews[String(selectedFolder.id)]
-                  : folderPreviews[selectedFolder.id]
-              }
-              readOnly={isRecycleView}
-              onClose={() => setSelectedFolder(null)}
-              onRename={async (name) => {
-                try {
-                  await renameFolder(selectedFolder.id, name);
-                  setSelectedFolder(prev => prev ? { ...prev, name } : null);
-                  await Promise.all([loadFolders(), loadChildFolders()]);
-                } catch (err) {
-                  console.error('Failed to rename folder:', err);
-                }
-              }}
-            />
-          ) : selectedResource?.resource ? (
-            <ResourceInfoPanel
-              resource={selectedResource.resource}
-              allTags={allTags}
-              assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
-              folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
-              readOnly={isRecycleView}
-              onClose={() => setSelectedResource(null)}
-              onAddTag={handleAddTag}
-              onRemoveTag={handleRemoveTag}
-              onCreate={handleCreateTag}
-              onUpdate={handleResourceUpdate}
-            />
-          ) : null}
-        </div>
-      )}
-
-      {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
-      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && !showInfoPanel && (
-        <button
-          onClick={() => setShowInfoPanel(true)}
-          className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
-          title={t('resources.toggleInfoPanel')}
-        >
-          <ChevronLeft size={20} />
-        </button>
-      )}
+      {/* ── Right panel (info panel wrapper) ── */}
+      <ResourcesInfoPanelWrapper
+        trashedFolderPreviews={trashedFolderPreviews}
+        onRenameFolder={async (folderId, name) => {
+          try {
+            await renameFolder(folderId, name);
+            setSelectedFolder(prev => prev ? { ...prev, name } : null);
+            await Promise.all([loadFolders(), loadChildFolders()]);
+          } catch (err) {
+            console.error('Failed to rename folder:', err);
+          }
+        }}
+      />
 
       {/* ── Batch Selection Toolbar ── */}
       {selectedIds.size > 0 && !isDownloadsView && (
