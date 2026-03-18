@@ -22,11 +22,19 @@ const MIN_PANEL_WIDTH = 380;
 const MAX_PANEL_WIDTH = 800;
 const DEFAULT_PANEL_WIDTH = 560;
 
-export function PlayerPage() {
+interface PlayerPageProps {
+  resourceId?: string;
+  mediaId?: string;
+}
+
+export function PlayerPage({ resourceId: propResourceId, mediaId: propMediaId }: PlayerPageProps = {}) {
   const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const from = searchParams.get('from');
+
+  // Support both: direct URL params (legacy /player/:displayId) and props (from ResourceDetailPage)
+  const effectiveDisplayId = propMediaId || displayId;
 
   const [video, setVideo] = useState<Video | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,12 +109,12 @@ export function PlayerPage() {
   }, [panelWidth]);
 
   useEffect(() => {
-    if (!displayId) return;
+    if (!effectiveDisplayId) return;
 
     setIsLoading(true);
     setNotFound(false);
 
-    fetchVideoByDisplayId(displayId).then((data) => {
+    fetchVideoByDisplayId(effectiveDisplayId).then((data) => {
       if (data) {
         setVideo(data);
       } else {
@@ -114,7 +122,7 @@ export function PlayerPage() {
       }
       setIsLoading(false);
     });
-  }, [displayId]);
+  }, [effectiveDisplayId]);
 
   // Realtime: auto-refresh when this parsed_media record is updated (e.g. download completes)
   useEffect(() => {
@@ -288,12 +296,11 @@ export function PlayerPage() {
     }
   };
 
+  // When embedded from ResourceDetailPage, use browser back; otherwise navigate explicitly
+  const isEmbedded = !!propResourceId;
+
   const handleBack = () => {
-    if (from === 'downloads' && teamId) {
-      navigate(`/team/${teamId}/resources/downloads`);
-    } else {
-      navigate(-1);
-    }
+    navigate(-1);
   };
 
   const handleUpdate = async (id: string, updates: Partial<Video>) => {
