@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage } from '../types';
+import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
@@ -21,35 +22,6 @@ import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
-
-// ---------------------------------------------------------------------------
-// Map URL pathname → ViewState
-// Supports both /team/:teamId/:view and legacy /:view patterns
-// ---------------------------------------------------------------------------
-
-export function pathnameToView(pathname: string, search?: string): ViewState {
-  // Strip /team/:teamId/ prefix if present
-  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
-  // PlayerPage: derive view from ?from= query param
-  if (stripped.startsWith('/player/')) {
-    const params = new URLSearchParams(search || '');
-    const from = params.get('from');
-    if (from === 'downloads') return 'resources';
-    if (from === 'resources') return 'resources';
-    return 'resources';
-  }
-  if (stripped.startsWith('/library')) return 'resources'; // legacy
-  if (stripped.startsWith('/dashboard')) return 'dashboard';
-  if (stripped.startsWith('/settings')) return 'settings';
-  if (stripped.startsWith('/cleanup')) return 'cleanup';
-  if (stripped.startsWith('/projects')) return 'mediatrack';
-  if (stripped.startsWith('/points')) return 'points';
-  if (stripped.startsWith('/billing')) return 'billing';
-  if (stripped.startsWith('/members')) return 'members';
-  if (stripped.startsWith('/resources')) return 'resources';
-  if (stripped.startsWith('/todolist')) return 'todolist';
-  return 'parser';
-}
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -91,7 +63,7 @@ function AppLayoutInner() {
     }
   }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
-  const view = pathnameToView(location.pathname, location.search);
+  const view = pathnameToView(location.pathname);
 
   const {
     settingsTab, setSettingsTab,
@@ -153,20 +125,7 @@ function AppLayoutInner() {
 
   // Mobile nav handlers
   const handleMobileNavClick = (targetView: ViewState) => {
-    const viewToPath: Record<string, string> = {
-      parser: '/parser',
-      library: '/resources/downloads',
-      dashboard: '/dashboard',
-      resources: '/resources',
-      mediatrack: '/projects',
-      settings: '/settings',
-      cleanup: '/cleanup',
-      points: '/points',
-      billing: '/billing',
-      members: '/members',
-      todolist: '/todolist',
-    };
-    navigate(teamPath(viewToPath[targetView] || '/parser'));
+    navigate(teamPath(VIEW_PATH_MAP[targetView]));
     setIsMobileMenuOpen(false);
     setIsDashboardMenuOpen(false);
   };
