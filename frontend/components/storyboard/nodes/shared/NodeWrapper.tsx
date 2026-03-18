@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Trash2, Lock, Copy } from 'lucide-react';
-import { useStoryboardStore } from '../../../../stores/storyboardStore';
+import { Lock } from 'lucide-react';
+import NodeActionToolbar from '../../canvas/NodeActionToolbar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +20,7 @@ interface NodeWrapperProps {
   locked?: boolean;
   handles?: HandleConfig[];
   accentColor?: string;
+  imageUrl?: string;
 }
 
 // ─── Default handles ──────────────────────────────────────────────────────────
@@ -40,30 +41,9 @@ const NodeWrapper = React.memo(function NodeWrapper({
   locked = false,
   handles = DEFAULT_HANDLES,
   accentColor = '#3b82f6',
+  imageUrl,
 }: NodeWrapperProps) {
   const [hovered, setHovered] = useState(false);
-  const { deleteNode, pushHistory, addNode, nodes, currentProjectId } = useStoryboardStore();
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    pushHistory();
-    deleteNode(nodeId);
-  };
-
-  const handleDuplicate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const original = nodes.find((n) => n.id === nodeId);
-    if (!original) return;
-    pushHistory();
-    addNode({
-      ...original,
-      id: `node-${Date.now()}`,
-      position_x: original.position_x + 30,
-      position_y: original.position_y + 30,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-  };
 
   return (
     <div
@@ -76,6 +56,15 @@ const NodeWrapper = React.memo(function NodeWrapper({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Node Action Toolbar (appears on select) */}
+      <NodeActionToolbar
+        nodeId={nodeId}
+        isVisible={selected || hovered}
+        locked={locked}
+        hasImage={Boolean(imageUrl)}
+        imageUrl={imageUrl}
+      />
+
       {/* Accent bar */}
       <div
         className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
@@ -98,26 +87,6 @@ const NodeWrapper = React.memo(function NodeWrapper({
       >
         {children}
       </div>
-
-      {/* Floating toolbar on hover */}
-      {hovered && !locked && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-lg px-1.5 py-1 shadow-xl z-10">
-          <button
-            onClick={handleDuplicate}
-            className="p-1 text-gray-400 hover:text-white transition-colors rounded"
-            title="Duplicate node"
-          >
-            <Copy size={13} />
-          </button>
-          <button
-            onClick={handleDelete}
-            className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded"
-            title="Delete node"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      )}
 
       {/* Handles */}
       {handles.map((h, idx) => (

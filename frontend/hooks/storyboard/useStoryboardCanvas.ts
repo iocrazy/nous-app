@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { StoryboardNode, StoryboardEdge } from '../../types';
 
@@ -25,6 +25,12 @@ export interface Connection {
   targetHandle?: string | null;
 }
 
+// ─── Clipboard types ──────────────────────────────────────────────────────────
+
+interface ClipboardSnapshot {
+  nodes: StoryboardNode[];
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useStoryboardCanvas() {
@@ -36,11 +42,59 @@ export function useStoryboardCanvas() {
     setEdges,
     updateNodeData,
     deleteNode,
+    addNode,
+    duplicateNode,
     setSelectedNodeId,
     pushHistory,
     undo,
     redo,
+    currentProjectId,
   } = useStoryboardStore();
+
+  // ─── Clipboard ref ────────────────────────────────────────────────────
+  const clipboardRef = useRef<ClipboardSnapshot | null>(null);
+  const pasteCountRef = useRef(0);
+
+  // ─── Copy selected nodes ─────────────────────────────────────────────
+  const copySelectedNodes = useCallback(() => {
+    if (!selectedNodeId) return;
+    const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+    if (!selectedNode) return;
+
+    clipboardRef.current = { nodes: [selectedNode] };
+    pasteCountRef.current = 0;
+  }, [selectedNodeId, nodes]);
+
+  // ─── Paste from clipboard ────────────────────────────────────────────
+  const pasteNodes = useCallback(() => {
+    const snapshot = clipboardRef.current;
+    if (!snapshot || snapshot.nodes.length === 0) return;
+
+    pushHistory();
+    pasteCountRef.current += 1;
+    const offset = pasteCountRef.current * 50;
+
+    for (const original of snapshot.nodes) {
+      const newId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const duplicated: StoryboardNode = {
+        ...original,
+        id: newId,
+        project_id: currentProjectId ?? original.project_id,
+        position_x: original.position_x + offset,
+        position_y: original.position_y + offset,
+        data_json: { ...original.data_json },
+        sort_order: nodes.length,
+        locked: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      addNode(duplicated);
+      setSelectedNodeId(newId);
+    }
+  }, [nodes.length, currentProjectId, pushHistory, addNode, setSelectedNodeId]);
+
+  // ─── Check if clipboard has content ───────────────────────────────────
+  const canPaste = clipboardRef.current !== null && clipboardRef.current.nodes.length > 0;
 
   // Handle node changes from React Flow
   const onNodesChange = useCallback(
@@ -126,8 +180,25 @@ export function useStoryboardCanvas() {
 
       if (isInputFocused) return;
 
+      const commandPressed = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+
+      // Cmd/Ctrl+C → copy
+      if (commandPressed && key === 'c' && !e.shiftKey) {
+        e.preventDefault();
+        copySelectedNodes();
+        return;
+      }
+
+      // Cmd/Ctrl+V → paste
+      if (commandPressed && key === 'v' && !e.shiftKey) {
+        e.preventDefault();
+        pasteNodes();
+        return;
+      }
+
       // Cmd/Ctrl+Z → undo
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      if (commandPressed && key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
         return;
@@ -135,8 +206,8 @@ export function useStoryboardCanvas() {
 
       // Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y → redo
       if (
-        ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') ||
-        ((e.metaKey || e.ctrlKey) && e.key === 'y')
+        (commandPressed && e.shiftKey && key === 'z') ||
+        (commandPressed && key === 'y')
       ) {
         e.preventDefault();
         redo();
@@ -159,7 +230,16 @@ export function useStoryboardCanvas() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId, undo, redo, deleteNode, setSelectedNodeId, pushHistory]);
+  }, [
+    selectedNodeId,
+    undo,
+    redo,
+    deleteNode,
+    setSelectedNodeId,
+    pushHistory,
+    copySelectedNodes,
+    pasteNodes,
+  ]);
 
   return {
     nodes,
@@ -168,5 +248,8 @@ export function useStoryboardCanvas() {
     onNodesChange,
     onEdgesChange,
     onConnect,
+    copySelectedNodes,
+    pasteNodes,
+    canPaste,
   };
 }

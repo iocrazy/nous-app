@@ -28,6 +28,7 @@ import ImageToVideoNode from '../nodes/ImageToVideoNode';
 import CanvasToolbar from './CanvasToolbar';
 import CanvasMiniMap from './CanvasMiniMap';
 import NodeSelectionMenu from './NodeSelectionMenu';
+import CanvasContextMenu, { ContextMenuState } from './CanvasContextMenu';
 import SmartEdge from './edges/SmartEdge';
 
 // ─── Node / Edge type registries ──────────────────────────────────────────────
@@ -47,12 +48,27 @@ const EDGE_TYPES = {
   smart: SmartEdge,
 } as const;
 
+// ─── Initial context menu state ───────────────────────────────────────────────
+
+const INITIAL_CONTEXT_MENU: ContextMenuState = {
+  visible: false,
+  x: 0,
+  y: 0,
+  targetNodeId: null,
+};
+
 // ─── Inner canvas (needs ReactFlow context) ───────────────────────────────────
 
 function StoryboardCanvasInner() {
   const { nodes, edges, viewport, setViewport } = useStoryboardStore();
-  const { onNodesChange, onEdgesChange, onConnect } = useStoryboardCanvas();
-  const { screenToFlowPosition } = useReactFlow();
+  const {
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    pasteNodes,
+    canPaste,
+  } = useStoryboardCanvas();
+  const { screenToFlowPosition, fitView } = useReactFlow();
 
   const [locked, setLocked] = useState(false);
   const [showCharacters, setShowCharacters] = useState(false);
@@ -61,6 +77,10 @@ function StoryboardCanvasInner() {
     position: { x: number; y: number };
     connectingNodeId: string | null;
   }>({ visible: false, position: { x: 0, y: 0 }, connectingNodeId: null });
+
+  // ─── Context menu state ───────────────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(INITIAL_CONTEXT_MENU);
+  const [contextFlowPos, setContextFlowPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Convert store nodes to ReactFlow node format
   const rfNodes = useMemo(
@@ -152,6 +172,40 @@ function StoryboardCanvasInner() {
     [setViewport]
   );
 
+  // ─── Context menu handler ─────────────────────────────────────────────
+
+  const handleContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+
+      const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      setContextFlowPos(flowPos);
+
+      // Determine if the right-click is on a node
+      const target = event.target as HTMLElement;
+      const nodeElement = target.closest('.react-flow__node');
+      const targetNodeId = nodeElement
+        ? nodeElement.getAttribute('data-id')
+        : null;
+
+      setContextMenu({
+        visible: true,
+        x: event.clientX,
+        y: event.clientY,
+        targetNodeId,
+      });
+    },
+    [screenToFlowPosition]
+  );
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(INITIAL_CONTEXT_MENU);
+  }, []);
+
+  const handleFitView = useCallback(() => {
+    fitView({ padding: 0.1 });
+  }, [fitView]);
+
   const isEmpty = nodes.length === 0;
 
   return (
@@ -166,6 +220,7 @@ function StoryboardCanvasInner() {
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
         onMoveEnd={handleMoveEnd}
+        onContextMenu={handleContextMenu}
         defaultViewport={viewport}
         nodesDraggable={!locked}
         nodesConnectable={!locked}
@@ -199,6 +254,15 @@ function StoryboardCanvasInner() {
         position={selectionMenu.position}
         connectingNodeId={selectionMenu.connectingNodeId}
         onClose={handleCloseSelectionMenu}
+      />
+
+      <CanvasContextMenu
+        menu={contextMenu}
+        onClose={handleCloseContextMenu}
+        flowPosition={contextFlowPos}
+        onFitView={handleFitView}
+        onPaste={pasteNodes}
+        canPaste={canPaste}
       />
 
       {isEmpty && (
