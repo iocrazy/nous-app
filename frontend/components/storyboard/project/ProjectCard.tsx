@@ -33,8 +33,9 @@ const GRADIENT_COLORS = [
   'from-orange-900 to-red-900',
 ];
 
-function coverGradient(id: string): string {
-  const idx = id.charCodeAt(0) % GRADIENT_COLORS.length;
+function coverGradient(id: string | number): string {
+  const s = String(id);
+  const idx = s.charCodeAt(0) % GRADIENT_COLORS.length;
   return GRADIENT_COLORS[idx];
 }
 
