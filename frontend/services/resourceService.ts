@@ -536,11 +536,11 @@ export async function deleteVersion(
 // ─── File URL ───────────────────────────────────────────
 
 /**
- * Build a direct /media/ URL for a resource's file_path.
- * This bypasses auth (same as Downloads) and supports Range requests reliably.
+ * Build a /media/{id} URL for a resource.
+ * Backend resolves the file path from DB — the URL never exposes filenames.
  */
-export function getResourceMediaUrl(filePath: string, token?: string): string {
-  return buildMediaUrl(filePath, token);
+export function getResourceMediaUrl(resourceId: string, token?: string): string {
+  return buildMediaUrl(resourceId, token);
 }
 
 export function getResourceFileUrl(resourceId: string, token?: string): string {

@@ -207,15 +207,13 @@ try:
     _media_base_path.mkdir(parents=True, exist_ok=True)
     logger.info(f"媒体文件路由已注册: /media -> {_media_base_path}")
 
-    @app.get("/media/{file_path:path}")
-    async def serve_media_file(
-        file_path: str,
+    async def _authenticate_media_request(
         request: Request,
         token: str | None = None,
         share_token: str | None = None,
         review_token: str | None = None,
-    ):
-        """Serve media files with signed URL or cookie-based auth.
+    ) -> str:
+        """Authenticate a media request. Returns user_id or raises 401.
 
         Authentication order:
         1. token query param (signed media token, preferred)
@@ -223,24 +221,16 @@ try:
         3. review_token query param (future: validate review access)
         4. media_session httpOnly cookie (legacy fallback)
         """
-        import mimetypes
-
         from app.api.media_auth import COOKIE_NAME, validate_media_cookie
 
-        # --- Auth check ---
         user_id = None
 
-        # 1. Signed media token (preferred)
         if token:
             user_id = validate_media_cookie(token)
-
-        # 2. Future: share/review tokens
         if not user_id and share_token:
             pass  # TODO: validate share token
         if not user_id and review_token:
             pass  # TODO: validate review token
-
-        # 3. Cookie fallback
         if not user_id:
             cookie_value = request.cookies.get(COOKIE_NAME, "")
             if cookie_value:
@@ -248,8 +238,52 @@ try:
 
         if not user_id:
             raise HTTPException(status_code=401, detail="Authentication required")
+        return user_id
 
-        # --- Serve file ---
+    async def _resolve_file_path(media_id: str, file_type: str = "file") -> str:
+        """Resolve a resource/media ID to a file path on disk.
+
+        Lookup order:
+        1. resources table (by id) → file_path / cover_image_path
+        2. parsed_media table (by id) → download_path / cover_download_path
+
+        Returns the relative file path or raises 404.
+        """
+        from app.db.supabase_client import get_async_supabase_admin
+
+        supabase = await get_async_supabase_admin()
+
+        # Determine which column to query based on file_type
+        resource_col = "file_path" if file_type == "file" else "cover_image_path,thumbnail_path"
+        media_col = "download_path" if file_type == "file" else "cover_download_path"
+
+        # 1. Try resources table
+        try:
+            res = await supabase.table("resources").select(resource_col).eq("id", media_id).maybe_single().execute()
+            if res.data:
+                if file_type == "file" and res.data.get("file_path"):
+                    return res.data["file_path"]
+                elif file_type == "cover":
+                    path = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
+                    if path:
+                        return path
+        except Exception:
+            pass  # ID format mismatch or DB error, try parsed_media
+
+        # 2. Try parsed_media table
+        try:
+            res = await supabase.table("parsed_media").select(media_col).eq("id", media_id).maybe_single().execute()
+            if res.data and res.data.get(media_col):
+                return res.data[media_col]
+        except Exception:
+            pass
+
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    def _serve_file(file_path: str) -> FileResponse:
+        """Resolve a relative file path and return a FileResponse."""
+        import mimetypes
+
         full_path = (_media_base_path / file_path).resolve()
         if not str(full_path).startswith(str(_media_base_path)):
             raise HTTPException(status_code=403, detail="Access denied")
@@ -260,8 +294,44 @@ try:
         return FileResponse(
             str(full_path),
             media_type=mime_type,
-            headers={"Referrer-Policy": "no-referrer"},
+            headers={
+                "Referrer-Policy": "no-referrer",
+                "Content-Disposition": "inline",
+            },
         )
+
+    @app.get("/media/{media_id}")
+    async def serve_media_by_id(
+        media_id: str,
+        request: Request,
+        token: str | None = None,
+        share_token: str | None = None,
+        review_token: str | None = None,
+    ):
+        """Serve media file by resource or parsed_media ID.
+
+        URL pattern: /media/{id}?token=signed_token
+        The actual file path is resolved from the database, never exposed in the URL.
+        """
+        await _authenticate_media_request(request, token, share_token, review_token)
+        file_path = await _resolve_file_path(media_id, "file")
+        return _serve_file(file_path)
+
+    @app.get("/media/{media_id}/cover")
+    async def serve_media_cover_by_id(
+        media_id: str,
+        request: Request,
+        token: str | None = None,
+        share_token: str | None = None,
+        review_token: str | None = None,
+    ):
+        """Serve cover image by resource or parsed_media ID.
+
+        URL pattern: /media/{id}/cover?token=signed_token
+        """
+        await _authenticate_media_request(request, token, share_token, review_token)
+        file_path = await _resolve_file_path(media_id, "cover")
+        return _serve_file(file_path)
 
 except ValueError:
     logger.warning(

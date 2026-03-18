@@ -17,27 +17,22 @@ const appendToken = (url: string, token?: string): string => {
 };
 
 /**
- * Convert a relative or absolute file path to a backend /media/ URL.
+ * Build a media URL by resource/media ID.
+ * Backend resolves ID → file path internally; the URL never exposes filenames.
  *
- * Supports:
- * - Already-absolute URLs (returned as-is)
- * - Relative paths: "2026-01/video.mp4" → "{apiUrl}/media/2026-01/video.mp4"
- * - Absolute paths: "/data/media/2026-01/video.mp4" → "{apiUrl}/media/2026-01/video.mp4"
+ * URL pattern: /media/{id}?token=signed_token
  */
-export function buildMediaUrl(path: string, token?: string): string {
-  if (isAbsoluteUrl(path)) return path;
+export function buildMediaUrl(id: string, token?: string): string {
+  if (isAbsoluteUrl(id)) return id;
+  return appendToken(`${getApiUrl()}/media/${id}`, token);
+}
 
-  const base = getApiUrl();
-  let url: string;
-
-  if (!path.startsWith('/')) {
-    url = `${base}/media/${path}`;
-  } else {
-    const match = path.match(/(\d{4}-\d{2}\/.+)$/);
-    url = match ? `${base}/media/${match[1]}` : `${base}/media${path}`;
-  }
-
-  return appendToken(url, token);
+/**
+ * Build a cover image URL by resource/media ID.
+ * URL pattern: /media/{id}/cover?token=signed_token
+ */
+export function buildMediaCoverUrl(id: string, token?: string): string {
+  return appendToken(`${getApiUrl()}/media/${id}/cover`, token);
 }
 
 /**
@@ -48,11 +43,12 @@ export function buildStreamUrl(hlsPath: string): string {
 }
 
 /**
- * Get video playback URL.
- * Priority: HLS > download_path > undefined
+ * Get video playback URL by media/resource ID.
+ * Priority: HLS > ID-based /media/ URL > undefined
  */
 export function getPlaybackUrl(
   data: {
+    id?: string;
     media_format?: string;
     hls_path?: string;
     download_path?: string;
@@ -62,18 +58,20 @@ export function getPlaybackUrl(
   if (data.media_format === 'hls' && data.hls_path) {
     return buildStreamUrl(data.hls_path);
   }
-  if (data.download_path && data.download_path !== '#') {
-    return buildMediaUrl(data.download_path, token);
+  // Use ID-based URL (preferred) — backend resolves file path from DB
+  if (data.id && data.download_path && data.download_path !== '#') {
+    return buildMediaUrl(String(data.id), token);
   }
   return undefined;
 }
 
 /**
  * Get cover image URL.
- * Priority: cover_download_path > cover_urls[0] > dynamic_cover_url > image_download_urls[0]
+ * Priority: ID-based cover URL > cover_urls[0] > dynamic_cover_url > image_download_urls[0]
  */
 export function getCoverImageUrl(
   data: {
+    id?: string;
     cover_download_path?: string;
     cover_urls?: string[];
     dynamic_cover_url?: string;
@@ -81,9 +79,11 @@ export function getCoverImageUrl(
   },
   token?: string,
 ): string | undefined {
-  if (data.cover_download_path && data.cover_download_path !== '#') {
-    return buildMediaUrl(data.cover_download_path, token);
+  // Local cover via ID-based route
+  if (data.id && data.cover_download_path && data.cover_download_path !== '#') {
+    return buildMediaCoverUrl(String(data.id), token);
   }
+  // External CDN URLs (no auth needed)
   if (data.cover_urls?.[0] && data.cover_urls[0] !== '#') {
     return data.cover_urls[0];
   }

@@ -497,39 +497,28 @@ export const ResourceDetail: React.FC<ResourceDetailProps> = ({ resourceId }) =>
         ) {
           setFileUrl(getVersionHlsUrl(resourceId, viewingVersion.id, token || undefined));
           // Also provide direct file URL for "Original" quality option
-          const versionFilePath = viewingVersion.file_path;
+          // Provide direct /media/{id} URL for "Original" quality option
           setOriginalFileUrl(
-            versionFilePath
-              ? getResourceMediaUrl(versionFilePath, mediaToken ?? undefined)
-              : getVersionFileUrl(resourceId, viewingVersion.id, token || undefined)
+            getResourceMediaUrl(resourceId, mediaToken ?? undefined)
           );
         } else if (selectedVersionId) {
-          const selVersion = versions.find((v) => v.id === selectedVersionId);
-          const selFilePath = selVersion?.file_path;
           setFileUrl(
-            selFilePath
-              ? getResourceMediaUrl(selFilePath, mediaToken ?? undefined)
-              : getVersionFileUrl(resourceId, selectedVersionId, token || undefined)
+            getResourceMediaUrl(resourceId, mediaToken ?? undefined)
           );
           setOriginalFileUrl(null);
         } else {
-          // Use direct /media/ URL (no auth, reliable Range support) when file_path exists
-          const filePath = resource?.file_path;
+          // Use /media/{id} URL — backend resolves file path from DB
           setFileUrl(
-            filePath
-              ? getResourceMediaUrl(filePath, mediaToken ?? undefined)
-              : getResourceFileUrl(resourceId, token || undefined)
+            getResourceMediaUrl(resourceId, mediaToken ?? undefined)
           );
           setOriginalFileUrl(null);
         }
       } catch {
         if (cancelled) return;
         setOriginalFileUrl(null);
-        // Fallback: use direct /media/ URL if possible
-        const filePath = resource?.file_path;
-        if (filePath) {
-          setFileUrl(getResourceMediaUrl(filePath, mediaToken ?? undefined));
-        } else if (selectedVersionId) {
+        // Fallback: use /media/{id} URL
+        setFileUrl(getResourceMediaUrl(resourceId, mediaToken ?? undefined));
+        if (selectedVersionId) {
           setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
         } else {
           setFileUrl(getResourceFileUrl(resourceId));
