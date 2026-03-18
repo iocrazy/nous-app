@@ -534,7 +534,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         </div>
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
-          <div className="w-full h-56 sm:h-64 md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
+          <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
             {(hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
                 src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
