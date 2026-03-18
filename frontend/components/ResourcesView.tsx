@@ -3,43 +3,23 @@ import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import {
   AlertTriangle,
-  Clock,
   FolderOpen,
-  Loader2,
   Upload,
   Trash2,
-  LayoutGrid,
-  LayoutList,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Share2,
   Download,
-  Plus,
   FolderPlus,
-  FolderSearch,
-  Search,
   Check,
   X,
-  UploadCloud,
   ExternalLink,
   Pencil,
   Copy,
   Move,
   RefreshCw,
-  Filter,
-  FileText,
-  Table2,
-  Presentation,
-  Globe,
-  Sparkles,
   Eye,
-  Menu,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
-import { ToolbarSearch } from './ToolbarSearch';
 import { semanticSearch, hybridSearch } from '../services/searchService';
 import { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import {
@@ -66,8 +46,7 @@ import {
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
 import { createLibrary } from '../services/libraryService';
-import { ResourceCard } from './ResourceCard';
-import { FolderCard } from './FolderCard';
+// ResourceCard and FolderCard are now rendered by ResourceGrid
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
@@ -85,6 +64,7 @@ import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesCon
 import type { SortBy } from '../contexts/ResourcesContext';
 import { ResourcesSidebar } from './ResourcesSidebar';
 import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
+import { ResourceGrid } from './ResourceGrid';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -114,34 +94,7 @@ interface ResourcesViewProps {
 }
 
 
-// ─── Skeleton ─────────────────────────────────────────
-
-const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-    {Array.from({ length: 8 }).map((_, i) => (
-      <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
-        <div className="h-32 bg-zinc-800" />
-        <div className="p-3 space-y-2">
-          <div className="h-4 bg-zinc-700 rounded w-3/4" />
-          <div className="h-3 bg-zinc-700 rounded w-1/2" />
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
-const SkeletonList: React.FC = () => (
-  <div className="space-y-2">
-    {Array.from({ length: 6 }).map((_, i) => (
-      <div key={i} className="flex items-center gap-4 px-4 py-3 bg-zinc-800/60 border border-zinc-700/30 rounded-xl animate-pulse">
-        <div className="w-10 h-10 bg-zinc-700 rounded-lg" />
-        <div className="flex-1 h-4 bg-zinc-700 rounded w-1/3" />
-        <div className="w-16 h-3 bg-zinc-700 rounded" />
-        <div className="w-20 h-3 bg-zinc-700 rounded" />
-      </div>
-    ))}
-  </div>
-);
+// Skeletons moved to ResourceGrid.tsx
 
 // ─── Main Component (wrapper with context provider) ───
 
@@ -200,31 +153,16 @@ const ResourcesViewInner: React.FC = () => {
 
 
   // Sort / filter UI
-  const [showSortMenu, setShowSortMenu] = useState(false);
   type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
   const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // AI search state
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
 
-  // Mobile detection (matches Tailwind md: breakpoint at 768px)
-  const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
-
   // Mobile-specific state
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
-
-  // Upload dropdown
-  const [showUploadDropdown, setShowUploadDropdown] = useState(false);
-  const uploadDropdownRef = useRef<HTMLDivElement>(null);
-
-  // New dropdown
-  const [showNewDropdown, setShowNewDropdown] = useState(false);
-  const newDropdownRef = useRef<HTMLDivElement>(null);
 
   // Version upload via context menu
   const versionInputRef = useRef<HTMLInputElement>(null);
@@ -560,30 +498,6 @@ const ResourcesViewInner: React.FC = () => {
       navigate(resPath(`/resources/file/${item.resource.id}`));
     }
   }, [navigate, resPath]);
-
-  // Click outside to close upload dropdown
-  useEffect(() => {
-    if (!showUploadDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(e.target as Node)) {
-        setShowUploadDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showUploadDropdown]);
-
-  // Click outside to close new dropdown
-  useEffect(() => {
-    if (!showNewDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (newDropdownRef.current && !newDropdownRef.current.contains(e.target as Node)) {
-        setShowNewDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showNewDropdown]);
 
   // ToolbarSearch callbacks for resources
   const handleResourceQueryChange = useCallback((q: string) => {
@@ -1644,785 +1558,111 @@ const ResourcesViewInner: React.FC = () => {
       />
 
       {/* ── Center panel: Main content ── */}
-      <div
-        className="flex-1 min-w-0 flex flex-col"
-      >
-        {/* Mobile breadcrumb navigation — replaces horizontal tabs */}
-        {!isDownloadsView && (
-          <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
-            {isMobileSearchOpen ? (
-              <div className="flex items-center w-full gap-2 animate-in slide-in-from-right-4 duration-200">
-                <Search size={16} className="text-zinc-400 shrink-0" />
-                <input
-                  ref={mobileSearchInputRef}
-                  autoFocus
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleResourceQueryChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && searchQuery.trim()) {
-                      handleResourceAISearch(searchQuery, 'hybrid');
-                    }
-                    if (e.key === 'Escape') {
-                      setIsMobileSearchOpen(false);
-                      handleResourceSearchClear();
-                    }
-                  }}
-                  placeholder={t('resources.searchFiles')}
-                  className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
-                />
-                <button
-                  onClick={() => {
-                    setIsMobileSearchOpen(false);
-                    handleResourceSearchClear();
-                  }}
-                  className="p-1 text-zinc-400 hover:text-zinc-200"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ) : (
-              <>
-                {(selectedFolderId || isRecycleView) && (
-                  <button
-                    onClick={() => {
-                      if (isRecycleView) {
-                        if (recycleFolderId) {
-                          setRecycleFolderId(null);
-                        } else {
-                          navigate(resPath('/resources'));
-                        }
-                      } else if (folderChain.length > 1) {
-                        const parentId = folderChain[folderChain.length - 2]?.id;
-                        navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
-                      } else {
-                        navigate(resPath('/resources'));
-                      }
-                    }}
-                    className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
-                  >
-                    <ChevronLeft size={22} />
-                  </button>
-                )}
-                <div className="flex-1 min-w-0">
-                  <Breadcrumb segments={breadcrumbSegments} />
-                </div>
-                {!isRecycleView && !isSharedView && (
-                  <button
-                    onClick={() => setIsMobileSearchOpen(true)}
-                    className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg transition-colors shrink-0"
-                  >
-                    <Search size={20} />
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {isDownloadsView ? (
+      {isDownloadsView ? (
+        <div className="flex-1 min-w-0 flex flex-col">
           <DownloadsView />
-        ) : (
+        </div>
+      ) : (
         <>
-        {/* Hidden file inputs — must be outside toolbar so they work on mobile too */}
-        {canUpload && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) {
-                  handleUpload(e.target.files);
-                  e.target.value = '';
-                }
-              }}
-            />
-            <input
-              ref={folderInputRef}
-              type="file"
-              // @ts-ignore - webkitdirectory is non-standard but widely supported
-              webkitdirectory=""
-              directory=""
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) {
-                  handleUpload(e.target.files);
-                  e.target.value = '';
-                }
-              }}
-            />
-          </>
-        )}
-        {/* Toolbar — desktop only, mobile uses breadcrumb + floating search */}
-        <div
-          className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
-          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
-        >
-          {/* Single row: Breadcrumb + controls */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              {/* Mobile sidebar toggle — hidden, replaced by horizontal tabs */}
-              <Breadcrumb segments={breadcrumbSegments} />
-              {!loading && (
-                <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                  {filteredFolders.length + sortedItems.length} {t('resources.items')}
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Search box */}
-              <ToolbarSearch
-                onQueryChange={handleResourceQueryChange}
-                onAISearch={handleResourceAISearch}
-                onClear={handleResourceSearchClear}
-                isSearching={isAISearching}
-                placeholder={t('resources.searchFiles')}
-                className="w-48"
-              />
-
-              {/* Filter button */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowFilterPanel(!showFilterPanel)}
-                  className={`relative p-1.5 rounded-lg transition-colors ${
-                    activeFilters.size > 0
-                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                  }`}
-                  title={t('resources.filter')}
-                >
-                  <Filter size={14} />
-                  {activeFilters.size > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[9px] font-bold bg-indigo-500 text-white rounded-full px-0.5">
-                      {activeFilters.size}
-                    </span>
-                  )}
-                </button>
-                {showFilterPanel && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowFilterPanel(false)} />
-                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
-                      {filterOptions.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => toggleFilter(opt.value)}
-                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                            activeFilters.has(opt.value)
-                              ? 'bg-indigo-500/10 text-indigo-400'
-                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          {activeFilters.has(opt.value) && (
-                            <Check size={12} className="text-indigo-400" />
-                          )}
-                        </button>
-                      ))}
-                      {activeFilters.size > 0 && (
-                        <>
-                          <div className="mx-2.5 my-1.5 border-t border-zinc-700/60" />
-                          <button
-                            onClick={() => { setActiveFilters(new Set()); setShowFilterPanel(false); }}
-                            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                          >
-                            {t('resources.clearFilters')}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Sort dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSortMenu(!showSortMenu)}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    sortBy !== 'newest'
-                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                  }`}
-                  title={currentSortLabel}
-                >
-                  <ArrowUpDown size={14} />
-                </button>
-                {showSortMenu && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
-                      {sortOptions.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                            sortBy === opt.value
-                              ? 'bg-indigo-500/10 text-indigo-400'
-                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          {sortBy === opt.value && (
-                            <Check size={12} className="text-indigo-400" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* View toggle */}
-              <button
-                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                title={viewMode === 'grid' ? t('resources.listView') : t('resources.gridView')}
-              >
-                {viewMode === 'grid' ? <LayoutList size={14} /> : <LayoutGrid size={14} />}
-              </button>
-
-              {/* Upload button (only on resources view) */}
-              {canUpload && (
-                <>
-                  {uploading ? (
-                    <button
-                      disabled
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
-                    >
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>{upload.overallProgress}%</span>
-                    </button>
-                  ) : (
-                    <div className="relative" ref={uploadDropdownRef}>
-                      <div className="flex">
-                        <button
-                          onClick={() => fileInputRef.current?.click()}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
-                        >
-                          <Upload size={14} />
-                          <span>{t('resources.upload')}</span>
-                        </button>
-                        <button
-                          onClick={() => setShowUploadDropdown(prev => !prev)}
-                          className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
-                        >
-                          <ChevronDown size={12} />
-                        </button>
-                      </div>
-                      {showUploadDropdown && (
-                        <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
-                          <button
-                            onClick={() => { fileInputRef.current?.click(); setShowUploadDropdown(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
-                          >
-                            <Upload size={12} />
-                            {t('resources.uploadFile')}
-                          </button>
-                          <button
-                            onClick={() => { folderInputRef.current?.click(); setShowUploadDropdown(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
-                          >
-                            <FolderOpen size={12} />
-                            {t('resources.uploadFolder')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* New dropdown button */}
-                  <div className="relative" ref={newDropdownRef}>
-                    <button
-                      onClick={() => setShowNewDropdown(prev => !prev)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
-                    >
-                      <Sparkles size={14} />
-                      <span>{t('resources.new')}</span>
-                      <ChevronDown size={12} />
-                    </button>
-                    {showNewDropdown && (
-                      <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
-                        {/* Group 1 — Containers */}
-                        <button
-                          onClick={() => { setCreatingFolder(true); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FolderPlus size={14} className="text-amber-400" />
-                          {t('resources.newFolder')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <LayoutGrid size={14} className="text-blue-400" />
-                          {t('resources.newProject')}
-                        </button>
-                        <button
-                          onClick={() => { setShowSmartFolderEditor(true); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FolderSearch size={14} className="text-purple-400" />
-                          {t('resources.newSmartFolder')}
-                        </button>
-                        {/* Divider */}
-                        <div className="border-t border-zinc-800 my-1" />
-                        {/* Group 2 — Documents */}
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FileText size={14} className="text-emerald-400" />
-                          {t('resources.newDocument')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Table2 size={14} className="text-cyan-400" />
-                          {t('resources.newSpreadsheet')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Presentation size={14} className="text-orange-400" />
-                          {t('resources.newPresentation')}
-                        </button>
-                        {/* Divider */}
-                        <div className="border-t border-zinc-800 my-1" />
-                        {/* Group 3 — Other */}
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Globe size={14} className="text-indigo-400" />
-                          {t('resources.newWebUrl')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Multi-select mode toolbar */}
-        {multiSelectMode && (
-          <div className="px-6 py-2 border-b border-zinc-800/80 bg-zinc-900/80 flex items-center gap-3">
-            <button
-              onClick={() => setSelectedIds(new Set(allSelectableIds))}
-              className="px-3 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-            >
-              {t('resources.selectAll')}
-            </button>
-            <button
-              onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); setSelectedResource(null); }}
-              className="px-3 py-1 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-            <span className="text-xs text-zinc-500">
-              {t('resources.multiSelectCount', {
-                total: filteredFolders.length + sortedItems.length,
-                selected: selectedIds.size,
-              })}
-            </span>
-          </div>
-        )}
-
-        {/* Content area */}
-        <div
-          className="flex-1 overflow-y-auto p-3 md:p-6 relative"
-          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
-          onDragEnter={canUpload ? handleDragEnter : undefined}
-          onDragOver={canUpload ? handleDragOver : undefined}
-          onDragLeave={canUpload ? handleDragLeave : undefined}
-          onDrop={canUpload ? handleDrop : undefined}
-          onContextMenu={isResourcesView ? handleEmptyAreaContextMenu : undefined}
-          onTouchStart={handleEmptyAreaTouchStart}
-          onTouchMove={touchDragState.isDragging ? handleTouchDragMove : handleEmptyAreaTouchMove}
-          onTouchEnd={touchDragState.isDragging ? handleTouchDragEnd : handleEmptyAreaTouchEnd}
-          onClick={(e) => {
-            // Click on empty area → deselect all
-            const target = e.target as HTMLElement;
-            if (!target.closest('[data-context-item]')) {
-              if (selectedIds.size > 0 || multiSelectMode) {
-                setSelectedIds(new Set());
-                setMultiSelectMode(false);
-              }
-              setSelectedResource(null);
-              setSelectedFolder(null);
-            }
-          }}
-        >
-          {/* ── Drag-and-drop overlay ── */}
-          {dragOver && canUpload && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
-              <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
-              <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
-              <p className="text-sm text-zinc-400 mt-1">{t('resources.dropToUploadHint')}</p>
-            </div>
-          )}
-
-          {/* Recycle bin auto-cleanup notice */}
-          {isRecycleView && (
-            <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-zinc-800/50 border border-zinc-700/50 rounded-lg text-xs text-zinc-400">
-              <Clock size={14} className="shrink-0 text-zinc-500" />
-              <span>{t('resources.recycleBinAutoCleanup')}</span>
-            </div>
-          )}
-
-          {/* Shared view placeholder */}
-          {isSharedView && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-              <Share2 size={48} className="text-zinc-600 mb-4" />
-              <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
-            </div>
-          )}
-
-          {/* Recycle Bin — pinned at top of root on mobile */}
-          {!selectedFolderId && !selectedSmartFolderId && !selectedLibraryId && isResourcesView && !isRecycleView && (
-            <div className="md:hidden mb-3">
-              <button
-                onClick={() => navigate(resPath('/resources/recycle'))}
-                data-context-item
-                className="w-full flex items-center gap-3 px-4 py-3 bg-zinc-800/30 hover:bg-zinc-800/60 rounded-xl border border-zinc-700/30 transition-colors"
-              >
-                <div className="w-10 h-10 rounded-lg bg-zinc-700/40 flex items-center justify-center">
-                  <Trash2 size={18} className="text-zinc-400" />
-                </div>
-                <div className="flex-1 text-left">
-                  <span className="text-sm text-zinc-300 font-medium">Recycle Bin</span>
-                </div>
-                <ChevronRight size={16} className="text-zinc-600" />
-              </button>
-            </div>
-          )}
-
-          {/* Inline new folder input (content area) */}
-          {creatingFolder && !isSharedView && !isRecycleView && (
-            <div className="mb-4 flex items-center gap-2 max-w-sm">
-              <FolderPlus size={16} className="text-amber-400 shrink-0" />
+          {/* Hidden file inputs — must be outside ResourceGrid so they persist */}
+          {canUpload && (
+            <>
               <input
-                ref={newFolderInputRef}
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateFolder();
-                  if (e.key === 'Escape') {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    handleUpload(e.target.files);
+                    e.target.value = '';
                   }
                 }}
-                onBlur={() => {
-                  if (!newFolderName.trim()) {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                placeholder={t('resources.folderName')}
-                disabled={savingFolder}
-                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
               />
-              {savingFolder && (
-                <Loader2 size={14} className="animate-spin text-zinc-400" />
-              )}
-            </div>
+              <input
+                ref={folderInputRef}
+                type="file"
+                // @ts-ignore - webkitdirectory is non-standard but widely supported
+                webkitdirectory=""
+                directory=""
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    handleUpload(e.target.files);
+                    e.target.value = '';
+                  }
+                }}
+              />
+            </>
           )}
-
-          {/* Resources / Recycle / Downloads content */}
-          {!isSharedView && (
-            loading ? (
-              viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-            ) : (filteredFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
-              <div className="space-y-5">
-                {/* Trashed folders in recycle bin */}
-                {isRecycleView && recycleSubFolders.length > 0 && (
-                  <div>
-                    {sortedItems.length > 0 && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
-                    )}
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                      {recycleSubFolders.map((folder) => (
-                        <FolderCard
-                          key={`trashed-folder-${folder.id}`}
-                          folder={folder}
-                          viewMode="grid"
-                          onClick={(e?: any) => {
-                            handleCardClick(`folder:${folder.id}`, e);
-                            if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                              setSelectedResource(null);
-                              if (selectedFolder?.id === folder.id) {
-                                setSelectedFolder(null);
-                              } else {
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
-                              }
-                            }
-                          }}
-                          onDoubleClick={() => setRecycleFolderId(String(folder.id))}
-                          previewItems={trashedFolderPreviews[String(folder.id)]}
-                          selectable
-                          isChecked={selectedIds.has(`folder:${folder.id}`)}
-                          onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                          forceShowCheckbox={multiSelectMode}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Folders section */}
-                {filteredFolders.length > 0 && (
-                  <div>
-                    {sortedItems.length > 0 && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
-                    )}
-                    {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                        {filteredFolders.map((folder) => {
-                          const folderNavigate = () => {
-                            if (selectedLibraryId) {
-                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                            } else {
-                              navigate(resPath(`/resources/folder/${folder.id}`));
-                            }
-                          };
-                          return (
-                          <div
-                            key={`folder-${folder.id}`}
-                            data-folder-id={String(folder.id)}
-                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
-                            {...getItemTouchHandlers('folder', folder)}
-                          >
-                          <FolderCard
-                            folder={folder}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                folderNavigate();
-                                return;
-                              }
-                              handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                                setSelectedResource(null);
-                                if (selectedFolder?.id === folder.id) {
-                                  setSelectedFolder(null);
-                                } else {
-                                  setSelectedFolder(folder);
-                                  setShowInfoPanel(true);
-                                }
-                              }
-                            }}
-                            onDoubleClick={folderNavigate}
-                            viewMode="grid"
-                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                            renaming={renamingFolderId === folder.id}
-                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                            onRenameChange={setRenameFolderValue}
-                            onRenameConfirm={handleRenameFolderConfirm}
-                            onRenameCancel={() => setRenamingFolderId(null)}
-                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
-                            selectable
-                            isChecked={selectedIds.has(`folder:${folder.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
-                            previewItems={folderPreviews[folder.id]}
-                          />
-                          </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {filteredFolders.map((folder) => {
-                          const folderNavigate = () => {
-                            if (selectedLibraryId) {
-                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                            } else {
-                              navigate(resPath(`/resources/folder/${folder.id}`));
-                            }
-                          };
-                          return (
-                          <div
-                            key={`folder-${folder.id}`}
-                            data-folder-id={String(folder.id)}
-                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
-                            {...getItemTouchHandlers('folder', folder)}
-                          >
-                          <FolderCard
-                            folder={folder}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                folderNavigate();
-                                return;
-                              }
-                              handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                                setSelectedResource(null);
-                                if (selectedFolder?.id === folder.id) {
-                                  setSelectedFolder(null);
-                                } else {
-                                  setSelectedFolder(folder);
-                                  setShowInfoPanel(true);
-                                }
-                              }
-                            }}
-                            onDoubleClick={folderNavigate}
-                            viewMode="list"
-                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                            renaming={renamingFolderId === folder.id}
-                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                            onRenameChange={setRenameFolderValue}
-                            onRenameConfirm={handleRenameFolderConfirm}
-                            onRenameCancel={() => setRenamingFolderId(null)}
-                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
-                            selectable
-                            isChecked={selectedIds.has(`folder:${folder.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
-                            previewItems={folderPreviews[folder.id]}
-                          />
-                          </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Files section */}
-                {sortedItems.length > 0 && (
-                  <div>
-                    {(filteredFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
-                    )}
-                    {viewMode === 'list' && (
-                      <div className="flex items-center gap-4 px-4 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/60 mb-1">
-                        <div className="w-10" /> {/* thumbnail spacer */}
-                        <button onClick={() => setSortBy(sortBy === 'name-az' ? 'name-za' : 'name-az')} className="flex-1 text-left hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.listHeaderName')} {sortBy === 'name-az' ? '↑' : sortBy === 'name-za' ? '↓' : ''}
-                        </button>
-                        <span className="w-24 text-left">{t('resources.listHeaderType')}</span>
-                        <button onClick={() => setSortBy(sortBy === 'largest' ? 'smallest' : 'largest')} className="w-20 text-right hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.listHeaderSize')} {sortBy === 'largest' ? '↓' : sortBy === 'smallest' ? '↑' : ''}
-                        </button>
-                        <button onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')} className="w-28 text-right hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.modifiedAt')} {sortBy === 'newest' ? '↓' : sortBy === 'oldest' ? '↑' : ''}
-                        </button>
-                      </div>
-                    )}
-                    {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                        {sortedItems.map((item) => (
-                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
-                          <ResourceCard
-                            item={item}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                handleResourceDoubleClick(item);
-                                return;
-                              }
-                              handleCardClick(`item:${item.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                            }}
-                            onDoubleClick={() => handleResourceDoubleClick(item)}
-                            viewMode="grid"
-                            isSelected={selectedResource?.id === item.id}
-                            showRestoreAction={isRecycleView}
-                            onTrash={isRecycleView ? undefined : handleTrash}
-                            onRestore={isRecycleView ? handleRestore : undefined}
-                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                            renaming={renamingResourceId === item.id}
-                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                            onRenameChange={setRenameValue}
-                            onRenameConfirm={handleRenameResourceConfirm}
-                            onRenameCancel={() => setRenamingResourceId(null)}
-                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable
-                            isChecked={selectedIds.has(`item:${item.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            selectedIds={selectedIds}
-                            compositeId={`item:${item.id}`}
-                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
-                          />
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {sortedItems.map((item) => (
-                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
-                          <ResourceCard
-                            item={item}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                handleResourceDoubleClick(item);
-                                return;
-                              }
-                              handleCardClick(`item:${item.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                            }}
-                            onDoubleClick={() => handleResourceDoubleClick(item)}
-                            viewMode="list"
-                            isSelected={selectedResource?.id === item.id}
-                            showRestoreAction={isRecycleView}
-                            onTrash={isRecycleView ? undefined : handleTrash}
-                            onRestore={isRecycleView ? handleRestore : undefined}
-                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                            renaming={renamingResourceId === item.id}
-                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                            onRenameChange={setRenameValue}
-                            onRenameConfirm={handleRenameResourceConfirm}
-                            onRenameCancel={() => setRenamingResourceId(null)}
-                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable
-                            isChecked={selectedIds.has(`item:${item.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            selectedIds={selectedIds}
-                            compositeId={`item:${item.id}`}
-                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
-                          />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* Empty states */
-              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                {isRecycleView ? (
-                  <>
-                    <Trash2 size={48} className="text-zinc-700 mb-4" />
-                    <p className="text-zinc-500 text-sm">{t('resources.recycleBinEmpty')}</p>
-                  </>
-                ) : (
-                  <>
-                    <FolderOpen size={48} className="text-zinc-700 mb-4" />
-                    <p className="text-zinc-500 text-sm">{t('resources.noResources')}</p>
-                    <p className="text-zinc-600 text-xs mt-1">{t('resources.noResourcesHint')}</p>
-                  </>
-                )}
-              </div>
-            )
-          )}
-        </div>
+          <ResourceGrid
+            breadcrumbSegments={breadcrumbSegments}
+            filteredFolders={filteredFolders}
+            sortedItems={sortedItems}
+            recycleSubFolders={recycleSubFolders}
+            trashedFolderPreviews={trashedFolderPreviews}
+            allSelectableIds={allSelectableIds}
+            filterOptions={filterOptions}
+            sortOptions={sortOptions}
+            activeFilters={activeFilters}
+            toggleFilter={toggleFilter}
+            clearFilters={() => setActiveFilters(new Set())}
+            currentSortLabel={currentSortLabel}
+            onQueryChange={handleResourceQueryChange}
+            onAISearch={handleResourceAISearch}
+            onSearchClear={handleResourceSearchClear}
+            isAISearching={isAISearching}
+            uploading={uploading}
+            overallProgress={upload.overallProgress}
+            fileInputRef={fileInputRef}
+            folderInputRef={folderInputRef}
+            canUploadDrop={canUpload}
+            dragOver={dragOver}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onResourceClick={handleResourceClick}
+            onResourceDoubleClick={handleResourceDoubleClick}
+            onFileContextMenu={handleFileContextMenu}
+            onFolderContextMenu={handleFolderContextMenu}
+            onEmptyAreaContextMenu={handleEmptyAreaContextMenu}
+            onCardClick={handleCardClick}
+            onToggleSelect={handleToggleSelect}
+            onDropOnFolder={handleDropOnFolder}
+            renamingResourceId={renamingResourceId}
+            renameValue={renameValue}
+            onRenameChange={setRenameValue}
+            onRenameResourceConfirm={handleRenameResourceConfirm}
+            onRenameResourceCancel={() => setRenamingResourceId(null)}
+            onStartRenameResource={(id, name) => { setRenamingResourceId(id); setRenameValue(name); }}
+            renamingFolderId={renamingFolderId}
+            renameFolderValue={renameFolderValue}
+            onRenameFolderChange={setRenameFolderValue}
+            onRenameFolderConfirm={handleRenameFolderConfirm}
+            onRenameFolderCancel={() => setRenamingFolderId(null)}
+            onStartRenameFolder={(id, name) => { setRenamingFolderId(id); setRenameFolderValue(name); }}
+            creatingFolder={creatingFolder}
+            newFolderName={newFolderName}
+            savingFolder={savingFolder}
+            newFolderInputRef={newFolderInputRef}
+            onNewFolderNameChange={setNewFolderName}
+            onCreateFolder={handleCreateFolder}
+            onCancelCreateFolder={() => { setCreatingFolder(false); setNewFolderName(''); }}
+            onStartCreateFolder={() => setCreatingFolder(true)}
+            onShowSmartFolderEditor={() => setShowSmartFolderEditor(true)}
+            getItemTouchHandlers={getItemTouchHandlers}
+            isTouchDropTarget={isTouchDropTarget}
+            touchDragState={touchDragState}
+            onEmptyAreaTouchStart={handleEmptyAreaTouchStart}
+            onEmptyAreaTouchMove={handleEmptyAreaTouchMove}
+            onEmptyAreaTouchEnd={handleEmptyAreaTouchEnd}
+            onTouchDragMove={handleTouchDragMove}
+            onTouchDragEnd={handleTouchDragEnd}
+          />
         </>
-        )}
-      </div>
+      )}
 
       {/* ── Right panel (info panel wrapper) ── */}
       <ResourcesInfoPanelWrapper
