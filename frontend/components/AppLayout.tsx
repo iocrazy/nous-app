@@ -17,6 +17,7 @@ import { ToastProvider } from './Toast';
 import { UploadProvider } from '../contexts/UploadContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
+import { MobileProfilePage } from './MobileProfilePage';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
@@ -94,6 +95,17 @@ function AppLayoutInner() {
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
+  const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
+
+  // Mobile workspace switch — navigates to new team, respecting current view
+  const handleWorkspaceSwitch = (newTeamId: string) => {
+    if (view === 'resources' && location.pathname.includes('/downloads')) {
+      navigate(`/team/${newTeamId}/resources`);
+    } else {
+      navigate(`/team/${newTeamId}/${VIEW_PATH_MAP[view].slice(1)}`);
+    }
+    setIsMobileProfileOpen(false);
+  };
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -161,6 +173,23 @@ function AppLayoutInner() {
         onClose={() => setIsProfileModalOpen(false)}
         user={userProfile}
         onSave={(updated) => setUserProfile(updated)}
+        onLogout={handleAuthLogout}
+      />
+
+      {/* Mobile Profile Page — full-screen overlay, Me tab */}
+      <MobileProfilePage
+        isOpen={isMobileProfileOpen}
+        onClose={() => setIsMobileProfileOpen(false)}
+        userProfile={userProfile}
+        teams={teams}
+        personalTeamId={personalTeamId}
+        selectedTeamId={selectedTeamId}
+        currentView={view}
+        onSwitchTeam={handleWorkspaceSwitch}
+        onSettings={() => {
+          setSettingsModalInitialTab('personal');
+          setIsSettingsModalOpen(true);
+        }}
         onLogout={handleAuthLogout}
       />
 
@@ -302,7 +331,7 @@ function AppLayoutInner() {
 
           {/* Profile */}
           <button
-            onClick={() => setIsProfileModalOpen(true)}
+            onClick={() => setIsMobileProfileOpen(true)}
             className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
           >
             {userProfile.avatarUrl ? (
