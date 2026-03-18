@@ -463,6 +463,25 @@ class StoryboardFrameRepository:
     async def _get_client(self):
         return await get_async_supabase_admin()
 
+    async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert a single frame record.
+
+        Args:
+            data: Column values for the new row.
+
+        Returns:
+            Created frame row dict.
+        """
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_NAME).insert(data).execute()
+            logger.info(f"Created storyboard frame: index={data.get('frame_index')}")
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create storyboard frame: {e}")
+            raise
+
     async def bulk_upsert(self, node_id: str, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Insert or update multiple frames for a node atomically.

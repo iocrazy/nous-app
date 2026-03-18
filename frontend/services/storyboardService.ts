@@ -326,6 +326,53 @@ export async function uploadImage(
   return unwrapResponse<UploadImageResult>(res);
 }
 
+// ─── Image Split ──────────────────────────────────────────────────────────────
+
+export interface SplitImageFrame {
+  id: string;
+  asset_id: string;
+  frame_index: number;
+  image_url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+  row: number;
+  col: number;
+  node_id?: string;
+  sort_order: number;
+}
+
+export interface SplitImageResult {
+  frames: SplitImageFrame[];
+  source_asset_id: string;
+  rows: number;
+  cols: number;
+}
+
+export async function splitImage(
+  projectId: string,
+  assetId: string,
+  rows: number,
+  cols: number,
+  nodeId?: string,
+): Promise<SplitImageResult> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/storyboard/projects/${projectId}/split-image`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        asset_id: assetId,
+        rows,
+        cols,
+        node_id: nodeId,
+      }),
+    },
+  );
+  return unwrapResponse<SplitImageResult>(res);
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export type ExportFormat = 'png' | 'pdf' | 'zip';

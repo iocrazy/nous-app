@@ -1,16 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { X } from 'lucide-react';
+import { X, Loader2, AlertCircle } from 'lucide-react';
+import { splitImage, SplitImageResult } from '../../../services/storyboardService';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-interface SplitResult {
-  rows: number;
-  cols: number;
-}
-
 interface SplitToolProps {
   imageUrl: string;
-  onApply: (result: SplitResult) => void;
+  projectId: string;
+  assetId: string;
+  nodeId?: string;
+  onComplete: (result: SplitImageResult) => void;
   onCancel: () => void;
 }
 
@@ -18,15 +17,37 @@ interface SplitToolProps {
 
 const SplitTool = React.memo(function SplitTool({
   imageUrl,
-  onApply,
+  projectId,
+  assetId,
+  nodeId,
+  onComplete,
   onCancel,
 }: SplitToolProps) {
   const [rows, setRows] = useState(2);
   const [cols, setCols] = useState(2);
+  const [splitting, setSplitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleApply = useCallback(() => {
-    onApply({ rows, cols });
-  }, [rows, cols, onApply]);
+  const handleApply = useCallback(async () => {
+    if (!projectId || !assetId) {
+      setError('Missing project or asset information.');
+      return;
+    }
+
+    setSplitting(true);
+    setError(null);
+
+    try {
+      const result = await splitImage(projectId, assetId, rows, cols, nodeId);
+      onComplete(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Split failed';
+      setError(message);
+      console.error('[SplitTool] split failed:', err);
+    } finally {
+      setSplitting(false);
+    }
+  }, [projectId, assetId, rows, cols, nodeId, onComplete]);
 
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
@@ -38,7 +59,11 @@ const SplitTool = React.memo(function SplitTool({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
           <h2 className="text-sm font-semibold text-gray-100">Split Image into Frames</h2>
-          <button onClick={onCancel} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+          <button
+            onClick={onCancel}
+            disabled={splitting}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
             <X size={16} />
           </button>
         </div>
@@ -53,7 +78,8 @@ const SplitTool = React.memo(function SplitTool({
               max={10}
               value={rows}
               onChange={(e) => setRows(clamp(Number(e.target.value), 1, 10))}
-              className="w-16 px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 text-center focus:outline-none focus:border-blue-500"
+              disabled={splitting}
+              className="w-16 px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 text-center focus:outline-none focus:border-blue-500 disabled:opacity-50"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -64,11 +90,12 @@ const SplitTool = React.memo(function SplitTool({
               max={10}
               value={cols}
               onChange={(e) => setCols(clamp(Number(e.target.value), 1, 10))}
-              className="w-16 px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 text-center focus:outline-none focus:border-blue-500"
+              disabled={splitting}
+              className="w-16 px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 text-center focus:outline-none focus:border-blue-500 disabled:opacity-50"
             />
           </div>
           <p className="text-xs text-gray-500 ml-auto">
-            → {rows * cols} frames
+            &rarr; {rows * cols} frames
           </p>
         </div>
 
@@ -114,16 +141,36 @@ const SplitTool = React.memo(function SplitTool({
           </svg>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="flex items-start gap-2 mx-5 mb-3 text-xs text-red-400 bg-red-950/30 rounded-lg px-3 py-2">
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-700">
-          <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">
+          <button
+            onClick={onCancel}
+            disabled={splitting}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+          >
             Cancel
           </button>
           <button
             onClick={handleApply}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            disabled={splitting}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-2"
           >
-            Split into {rows * cols} Frames
+            {splitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Splitting...
+              </>
+            ) : (
+              `Split into ${rows * cols} Frames`
+            )}
           </button>
         </div>
       </div>
