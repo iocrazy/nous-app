@@ -165,6 +165,7 @@ async def delete_project(auth: AuthDep, project_id: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@router.patch("/{project_id}/viewport")
 @router.put("/{project_id}/viewport")
 async def update_viewport(
     auth: AuthDep, project_id: str, body: Dict[str, Any]
