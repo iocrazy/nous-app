@@ -289,6 +289,43 @@ export async function chatWithAI(
   return unwrapResponse<{ response: string; actions: unknown[] }>(res);
 }
 
+// ─── Image Upload ─────────────────────────────────────────────────────────────
+
+export interface UploadImageResult {
+  asset_id: string;
+  image_url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+  file_hash: string;
+}
+
+export async function uploadImage(
+  projectId: string,
+  file: File,
+  nodeId?: string,
+): Promise<UploadImageResult> {
+  const headers = await getAuthHeaders();
+  // Remove Content-Type — let the browser set multipart boundary automatically
+  delete (headers as Record<string, string>)['Content-Type'];
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (nodeId) {
+    formData.append('node_id', nodeId);
+  }
+
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/storyboard/projects/${projectId}/upload`,
+    {
+      method: 'POST',
+      headers,
+      body: formData,
+    },
+  );
+  return unwrapResponse<UploadImageResult>(res);
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export type ExportFormat = 'png' | 'pdf' | 'zip';

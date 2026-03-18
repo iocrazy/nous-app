@@ -8,9 +8,11 @@ individual CRUD, batch sync, frame metadata updates, and reorder.
 """
 
 import asyncio
+import mimetypes
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -245,3 +247,133 @@ async def reorder_frames(
     except Exception as exc:
         logger.error("[SBCanvas] reorder_frames failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to reorder frames: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# POST /projects/{project_id}/upload
+# ---------------------------------------------------------------------------
+
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+}
+
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+@router.post("/projects/{project_id}/upload")
+async def upload_image(
+    auth: AuthDep,
+    project_id: str,
+    file: UploadFile = File(...),
+    node_id: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    """
+    Upload an image to a storyboard project.
+
+    Handles deduplication via SHA-256 hash. If the same file already exists
+    in the project, returns the existing asset record without re-saving.
+    A 512px preview thumbnail is generated automatically.
+    """
+    # Validate content type
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported image type: {content_type}. "
+            f"Allowed: {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+        )
+
+    try:
+        svc = StoryboardService()
+        await svc.verify_project_access(project_id, auth.user_id)
+
+        # Read file bytes (with size limit)
+        file_bytes = await file.read()
+        if len(file_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)} MB",
+            )
+        if not file_bytes:
+            raise HTTPException(status_code=422, detail="Empty file")
+
+        result = await svc.upload_image(
+            project_id=project_id,
+            file_bytes=file_bytes,
+            filename=file.filename or "image.png",
+            content_type=content_type,
+            node_id=node_id,
+        )
+        return {"success": True, "data": result}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "[SBCanvas] upload_image project=%s failed: %s", project_id, exc
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload image: {exc}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# GET /assets/{asset_id}/file
+# ---------------------------------------------------------------------------
+
+
+@router.get("/assets/{asset_id}/file")
+async def serve_asset_file(
+    auth: AuthDep,
+    asset_id: str,
+    preview: bool = Query(False, description="Return preview thumbnail instead of original"),
+) -> FileResponse:
+    """
+    Serve a storyboard asset file (original or preview thumbnail).
+
+    The caller must be a member of the team that owns the asset's project.
+    """
+    try:
+        svc = StoryboardService()
+        asset = await svc.get_asset(asset_id)
+        if not asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        # Verify access via project
+        await svc.verify_project_access(str(asset["project_id"]), auth.user_id)
+
+        from pathlib import Path
+        import os
+
+        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+
+        if preview and asset.get("preview_path"):
+            file_path = Path(nas_base) / asset["preview_path"]
+        else:
+            file_path = Path(nas_base) / asset["file_path"]
+
+        file_path = file_path.resolve()
+
+        # Security: prevent path traversal
+        nas_base_resolved = Path(nas_base).resolve()
+        if not str(file_path).startswith(str(nas_base_resolved)):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found on disk")
+
+        mime = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+        return FileResponse(str(file_path), media_type=mime)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[SBCanvas] serve_asset_file %s failed: %s", asset_id, exc)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to serve asset file: {exc}"
+        )
