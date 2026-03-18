@@ -49,6 +49,7 @@ interface NodeTypeEntry {
 
 const ADD_NODE_TYPES: NodeTypeEntry[] = [
   { type: 'upload', label: 'Upload Image', icon: <Upload size={14} /> },
+  { type: 'image', label: 'Image Display', icon: <ImageIcon size={14} /> },
   { type: 'image_edit', label: 'Image Edit', icon: <ImageIcon size={14} /> },
   { type: 'storyboard_split', label: 'Split Frames', icon: <Scissors size={14} /> },
   { type: 'storyboard_gen', label: 'Generate', icon: <Layers size={14} /> },

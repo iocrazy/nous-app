@@ -5,6 +5,7 @@ import NodeWrapper from './shared/NodeWrapper';
 import NodeImagePreview from './shared/NodeImagePreview';
 import { useStoryboardStore } from '../../../stores/storyboardStore';
 import { uploadImage } from '../../../services/storyboardService';
+import { detectAspectRatio, formatDimensionsWithRatio } from '../shared/imageUtils';
 
 // ─── UploadNode ───────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ const UploadNode = React.memo(function UploadNode({ id, selected, data }: NodePr
   const imageUrl = data?.imageUrl as string | undefined;
   const previewUrl = data?.previewUrl as string | undefined;
   const locked = data?.locked as boolean | undefined;
+  const imgWidth = data?.width as number | undefined;
+  const imgHeight = data?.height as number | undefined;
 
   const cleanupBlobUrl = useCallback(() => {
     if (blobUrlRef.current) {
@@ -69,6 +72,10 @@ const UploadNode = React.memo(function UploadNode({ id, selected, data }: NodePr
 
         // Replace blob URL with server URL
         cleanupBlobUrl();
+        const aspectRatio =
+          result.width && result.height
+            ? detectAspectRatio(result.width, result.height)
+            : undefined;
         updateNodeData(id, {
           data_json: {
             ...(data as Record<string, unknown>),
@@ -77,6 +84,7 @@ const UploadNode = React.memo(function UploadNode({ id, selected, data }: NodePr
             assetId: result.asset_id,
             width: result.width,
             height: result.height,
+            aspectRatio,
             fileHash: result.file_hash,
             fileName: file.name,
           },
@@ -187,6 +195,13 @@ const UploadNode = React.memo(function UploadNode({ id, selected, data }: NodePr
             onChange={handleFileChange}
           />
         </label>
+      )}
+
+      {/* Dimensions + aspect ratio */}
+      {imgWidth && imgHeight && !uploading && (
+        <p className="text-[10px] text-gray-500 text-center truncate px-1">
+          {formatDimensionsWithRatio(imgWidth, imgHeight)}
+        </p>
       )}
 
       {error && (

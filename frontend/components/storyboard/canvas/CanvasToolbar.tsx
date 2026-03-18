@@ -47,6 +47,7 @@ interface ExportOption {
 
 const NODE_TYPE_OPTIONS: NodeTypeOption[] = [
   { type: 'upload', label: 'Upload Image', icon: <Upload size={14} /> },
+  { type: 'image', label: 'Image Display', icon: <ImageIcon size={14} /> },
   { type: 'image_edit', label: 'Image Edit', icon: <ImageIcon size={14} /> },
   { type: 'storyboard_split', label: 'Split Frames', icon: <Scissors size={14} /> },
   { type: 'storyboard_gen', label: 'Generate Storyboard', icon: <Layers size={14} /> },
