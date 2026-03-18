@@ -274,9 +274,10 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
-    if (!item.id) return;
+    const rid = (item as any).resource_id || item.id;
+    if (!rid) return;
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    navigate(`${teamPath}/player/${item.id}?from=downloads`);
+    navigate(`${teamPath}/resources/file/${rid}`);
   }, [selectedTeamId, navigate]);
 
   // ─── Toggle select (multi-select) ─────────────────
@@ -528,7 +529,8 @@ export const DownloadsView: React.FC = () => {
     if (!contextMenu) return;
     const v = contextMenu.video;
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    window.open(`${teamPath}/player/${v.id}?from=downloads`, '_blank');
+    const rid = (v as any).resource_id || v.id;
+    window.open(`${teamPath}/resources/file/${rid}`, '_blank');
     setContextMenu(null);
   }, [contextMenu, selectedTeamId]);
 
@@ -1051,7 +1053,8 @@ export const DownloadsView: React.FC = () => {
               if (!contextMenu) return;
               const v = contextMenu.video;
               const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-              navigate(`${teamPath}/player/${v.id}?from=downloads`);
+              const rid = (v as any).resource_id || v.id;
+              navigate(`${teamPath}/resources/file/${rid}`);
               setContextMenu(null);
             }}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
