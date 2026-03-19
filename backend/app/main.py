@@ -212,14 +212,17 @@ try:
         token: str | None = None,
         share_token: str | None = None,
         review_token: str | None = None,
-    ) -> str:
-        """Authenticate a media request. Returns user_id or raises 401.
+    ) -> str | None:
+        """Authenticate a media request. Returns user_id, None (share_token present), or raises 401.
 
         Authentication order:
         1. token query param (signed media token, preferred)
-        2. share_token query param (future: validate sharing link)
+        2. share_token query param (defers auth to permission check)
         3. review_token query param (future: validate review access)
         4. media_session httpOnly cookie (legacy fallback)
+
+        When share_token is present, returns None instead of raising 401
+        so that permission check can validate the share link without login.
         """
         from app.api.media_auth import COOKIE_NAME, validate_media_cookie
 
@@ -227,8 +230,6 @@ try:
 
         if token:
             user_id = validate_media_cookie(token)
-        if not user_id and share_token:
-            pass  # TODO: validate share token
         if not user_id and review_token:
             pass  # TODO: validate review token
         if not user_id:
@@ -236,32 +237,41 @@ try:
             if cookie_value:
                 user_id = validate_media_cookie(cookie_value)
 
-        if not user_id:
+        if not user_id and not share_token:
             raise HTTPException(status_code=401, detail="Authentication required")
         return user_id
 
-    # In-memory cache for media ID → file path lookups (avoids DB hit on every request)
+    # In-memory cache for media ID → (file_path, creator_id, team_ids) lookups
+    # Avoids DB hit on every request. TTL = 5 minutes.
     import time as _time
+    from typing import NamedTuple
 
-    _media_path_cache: dict[tuple[str, str], tuple[str, float]] = {}
+    class _MediaCacheEntry(NamedTuple):
+        file_path: str
+        creator_id: str | None
+        team_ids: tuple[str, ...]
+        cached_at: float
+
+    _media_path_cache: dict[tuple[str, str], _MediaCacheEntry] = {}
     _CACHE_TTL = 300  # 5 minutes
 
-    async def _resolve_file_path(media_id: str, file_type: str = "file") -> str:
+    async def _resolve_file_path(
+        media_id: str, file_type: str = "file"
+    ) -> tuple[str, str | None, tuple[str, ...]]:
         """Resolve a resource/media ID to a file path on disk.
 
         Lookup order:
-        1. resources table (by id) → file_path / cover_image_path
+        1. resources table (by id) → file_path / cover_image_path + ownership
         2. parsed_media table (by id) → download_path / cover_download_path
 
         Uses a 5-minute in-memory cache to avoid DB queries on every media request.
-        Returns the relative file path or raises 404.
+        Returns (file_path, creator_id, team_ids) or raises 404.
         """
         cache_key = (media_id, file_type)
         cached = _media_path_cache.get(cache_key)
+        if cached and _time.time() - cached.cached_at < _CACHE_TTL:
+            return cached.file_path, cached.creator_id, cached.team_ids
         if cached:
-            path, ts = cached
-            if _time.time() - ts < _CACHE_TTL:
-                return path
             del _media_path_cache[cache_key]
 
         from app.db.supabase_client import get_async_supabase_admin
@@ -269,7 +279,7 @@ try:
         supabase = await get_async_supabase_admin()
 
         # Determine which column to query based on file_type
-        resource_col = "file_path" if file_type == "file" else "cover_image_path,thumbnail_path"
+        resource_col = "id,creator_id,file_path" if file_type == "file" else "id,creator_id,cover_image_path,thumbnail_path"
         media_col = "download_path" if file_type == "file" else "cover_download_path"
 
         # 1. Try resources table
@@ -282,22 +292,47 @@ try:
                 elif file_type == "cover":
                     result = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
                 if result:
-                    _media_path_cache[cache_key] = (result, _time.time())
-                    return result
+                    creator_id = res.data.get("creator_id")
+                    resource_id = res.data["id"]
+                    team_ids = await _fetch_team_ids(supabase, resource_id)
+                    entry = _MediaCacheEntry(result, creator_id, team_ids, _time.time())
+                    _media_path_cache[cache_key] = entry
+                    return entry.file_path, entry.creator_id, entry.team_ids
         except Exception as e:
             logger.warning(f"Resource lookup failed for {media_id}: {e}")
 
-        # 2. Try parsed_media table
+        # 2. Try parsed_media table (no ownership info — legacy)
         try:
             res = await supabase.table("parsed_media").select(media_col).eq("id", media_id).maybe_single().execute()
             if res.data and res.data.get(media_col):
                 result = res.data[media_col]
-                _media_path_cache[cache_key] = (result, _time.time())
-                return result
+                entry = _MediaCacheEntry(result, None, (), _time.time())
+                _media_path_cache[cache_key] = entry
+                return entry.file_path, entry.creator_id, entry.team_ids
         except Exception as e:
             logger.warning(f"ParsedMedia lookup failed for {media_id}: {e}")
 
         raise HTTPException(status_code=404, detail="Media not found")
+
+    async def _fetch_team_ids(supabase, resource_id: str) -> tuple[str, ...]:
+        """Fetch team scope IDs for a resource from resource_items."""
+        try:
+            items_res = (
+                await supabase.table("resource_items")
+                .select("scope_id")
+                .eq("resource_id", resource_id)
+                .eq("scope_type", "team")
+                .execute()
+            )
+            if items_res.data:
+                return tuple(
+                    str(item["scope_id"])
+                    for item in items_res.data
+                    if item.get("scope_id")
+                )
+        except Exception as e:
+            logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
+        return ()
 
     def _serve_file(file_path: str) -> FileResponse:
         """Resolve a relative file path and return a FileResponse."""
@@ -319,6 +354,63 @@ try:
             },
         )
 
+    async def _check_permissions(
+        media_id: str,
+        user_id: str | None,
+        share_token: str | None,
+        creator_id: str | None,
+        team_ids: tuple[str, ...],
+    ) -> None:
+        """Check resource-level permissions. Raises 403 if denied.
+
+        Uses cached ownership data from _resolve_file_path when possible,
+        falls back to check_media_access for share_token and team membership.
+        """
+        from app.api.media_permissions import (
+            _get_resource_id_for_media,
+            _validate_share_token,
+        )
+        from app.db.supabase_client import get_async_supabase_admin as _get_admin
+
+        # Fast path: share_token validation (never cached)
+        if share_token:
+            resource_id = await _get_resource_id_for_media(media_id)
+            if resource_id and await _validate_share_token(share_token, resource_id):
+                return
+            # Invalid share token — fall through to user-based checks
+
+        if not user_id:
+            if share_token:
+                raise HTTPException(status_code=403, detail="Invalid or expired share link")
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Fast path: creator check using cached data
+        if creator_id and str(creator_id) == str(user_id):
+            return
+
+        # No ownership info (legacy parsed_media) — allow
+        if creator_id is None:
+            return
+
+        # Team membership check
+        if team_ids:
+            try:
+                supabase = await _get_admin()
+                res = (
+                    await supabase.table("team_members")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .in_("team_id", list(team_ids))
+                    .limit(1)
+                    .execute()
+                )
+                if res.data:
+                    return
+            except Exception as e:
+                logger.error(f"Team membership check failed: {e}")
+
+        raise HTTPException(status_code=403, detail="Access denied")
+
     @app.get("/media/{media_id}")
     async def serve_media_by_id(
         media_id: str,
@@ -331,9 +423,11 @@ try:
 
         URL pattern: /media/{id}?token=signed_token
         The actual file path is resolved from the database, never exposed in the URL.
+        Includes resource-level permission checks.
         """
-        await _authenticate_media_request(request, token, share_token, review_token)
-        file_path = await _resolve_file_path(media_id, "file")
+        user_id = await _authenticate_media_request(request, token, share_token, review_token)
+        file_path, creator_id, team_ids = await _resolve_file_path(media_id, "file")
+        await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
         return _serve_file(file_path)
 
     @app.get("/media/{media_id}/cover")
@@ -347,9 +441,11 @@ try:
         """Serve cover image by resource or parsed_media ID.
 
         URL pattern: /media/{id}/cover?token=signed_token
+        Includes resource-level permission checks.
         """
-        await _authenticate_media_request(request, token, share_token, review_token)
-        file_path = await _resolve_file_path(media_id, "cover")
+        user_id = await _authenticate_media_request(request, token, share_token, review_token)
+        file_path, creator_id, team_ids = await _resolve_file_path(media_id, "cover")
+        await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
         return _serve_file(file_path)
 
     @app.get("/media/{file_path:path}")
