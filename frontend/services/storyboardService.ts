@@ -231,12 +231,14 @@ export interface GenerateImageParams {
 
 export async function generateImage(data: GenerateImageParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-image`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/generate/image`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  // Backend returns { success, task_id } directly (not wrapped in data)
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export interface GenerateVideoParams {
@@ -250,12 +252,13 @@ export interface GenerateVideoParams {
 
 export async function generateVideo(data: GenerateVideoParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-video`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/generate/video`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export interface SplitScriptParams {
@@ -267,12 +270,13 @@ export interface SplitScriptParams {
 
 export async function splitScript(data: SplitScriptParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/split-script`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/split-script`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export async function chatWithAI(

@@ -32,10 +32,15 @@ export interface GraphImageResolver {
 }
 
 export interface GenerateImagePayload {
+  projectId: string;
+  nodeId: string;
   prompt: string;
   model: string;
-  size: string;
+  provider?: string;
+  size?: string;
   aspectRatio: string;
+  characterIds?: string[];
+  referenceImageUrl?: string | null;
   referenceImages?: string[];
   extraParams?: Record<string, unknown>;
 }

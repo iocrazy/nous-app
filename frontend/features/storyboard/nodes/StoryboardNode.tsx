@@ -14,7 +14,7 @@ import {
   useViewport,
   type NodeProps,
 } from '@xyflow/react';
-import { Download, ImagePlus, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
+import { Download, ImagePlus, Loader2, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
 
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
 import { NodeResizeHandle } from '../ui/NodeResizeHandle';
@@ -43,6 +43,8 @@ import {
   NODE_CONTROL_PRIMARY_BUTTON_CLASS,
 } from '../ui/nodeControlStyles';
 import { useCanvasStore } from '../../../stores/canvasStore';
+import { useStoryboardStore } from '../../../stores/storyboardStore';
+import { exportProject, type ExportFormat } from '../../../services/storyboardService';
 
 type StoryboardNodeProps = NodeProps & {
   id: string;
@@ -270,7 +272,9 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
   const [draggedFrameId, setDraggedFrameId] = useState<string | null>(null);
   const [dropTargetFrameId, setDropTargetFrameId] = useState<string | null>(null);
   const [pickerState, setPickerState] = useState<{ frameId: string; x: number; y: number } | null>(null);
+  const currentProjectId = useStoryboardStore((state) => state.currentProjectId);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
   const [isExportPanelVisible, setIsExportPanelVisible] = useState(false);
   const [exportPanelAnchor, setExportPanelAnchor] = useState<PanelAnchor | null>(null);
@@ -450,14 +454,37 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
   }, [draggedFrameId, finalizeSort]);
 
   const handleEditFrame = useCallback((_frame: StoryboardFrameItem) => {
-    // TODO: Phase 4 - backend API for frame editing
-    setExportError('Frame editing not yet available');
-  }, []);
+    // Open frame in image viewer for now; full editing can be added later
+    const imageUrl = _frame.imageUrl || _frame.previewImageUrl;
+    if (imageUrl) {
+      const { openImageViewer } = useCanvasStore.getState();
+      openImageViewer(resolveImageDisplayUrl(imageUrl), frameViewerImageList);
+    }
+  }, [frameViewerImageList]);
 
-  const handleExport = useCallback(async () => {
-    // TODO: Phase 4 - backend API for mergeStoryboardImages
-    setExportError('Export not yet available (requires backend integration)');
-  }, []);
+  const handleExport = useCallback(async (format: ExportFormat = 'png') => {
+    if (!currentProjectId) {
+      setExportError('No project context');
+      return;
+    }
+    setExportError(null);
+    setIsExporting(true);
+    try {
+      const result = await exportProject(currentProjectId, format, {
+        includeFrameNumbers: exportOptions.showFrameIndex,
+        includeNotes: exportOptions.showFrameNote,
+        columns: gridCols,
+      });
+      // Task dispatched — the task manager handles progress tracking
+      setExportError(null);
+      console.info('[StoryboardNode] Export queued — task_id:', result.task_id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setExportError(`Export failed: ${message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [currentProjectId, exportOptions.showFrameIndex, exportOptions.showFrameNote, gridCols]);
 
   const handleTogglePicker = useCallback((frameId: string, x: number, y: number) => {
     setPickerState((previous) => {
@@ -596,14 +623,19 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         <UiButton
           size="sm"
           variant="primary"
+          disabled={isExporting}
           className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
           onClick={(event) => {
             event.stopPropagation();
-            void handleExport();
+            void handleExport('png');
           }}
         >
-          <Download className={NODE_CONTROL_ICON_CLASS} />
-          Merge
+          {isExporting ? (
+            <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
+          ) : (
+            <Download className={NODE_CONTROL_ICON_CLASS} />
+          )}
+          {isExporting ? 'Exporting...' : 'Export PNG'}
         </UiButton>
       </div>
 

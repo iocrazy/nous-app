@@ -7,7 +7,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Minus, Plus, Sparkles } from 'lucide-react';
+import { Loader2, Minus, Plus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -17,6 +17,8 @@ import {
 } from '../domain/canvasNodes';
 import { resolveNodeDisplayName } from '../domain/nodeDisplay';
 import { useCanvasStore } from '../../../stores/canvasStore';
+import { useStoryboardStore } from '../../../stores/storyboardStore';
+import { canvasAiGateway } from '../application/canvasServices';
 import { parseAspectRatio } from '../application/imageData';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
 import { NodeResizeHandle } from '../ui/NodeResizeHandle';
@@ -93,6 +95,9 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
   const updateNodeInternals = useUpdateNodeInternals();
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const addDerivedExportNode = useCanvasStore((state) => state.addDerivedExportNode);
+  const addEdge = useCanvasStore((state) => state.addEdge);
+  const currentProjectId = useStoryboardStore((state) => state.currentProjectId);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -211,9 +216,84 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
   );
 
   const handleGenerate = useCallback(async () => {
-    // TODO: Phase 3 - AI integration
-    setError('AI generation is not yet available (Phase 3)');
-  }, []);
+    if (!currentProjectId) {
+      setError('No project context — save the project first');
+      return;
+    }
+    const framesWithPrompts = nodeData.frames.filter((f) => f.description.trim());
+    if (framesWithPrompts.length === 0) {
+      setError('Please add descriptions to at least one frame');
+      return;
+    }
+
+    setError(null);
+    try {
+      // Submit generation for the first frame with a description as a single job.
+      // Batch generation submits one job per described frame.
+      const taskId = await canvasAiGateway.submitGenerateImageJob({
+        projectId: currentProjectId,
+        nodeId: id,
+        prompt: framesWithPrompts.map((f) => f.description).join('\n---\n'),
+        model: nodeData.model || 'flux-schnell',
+        aspectRatio: nodeData.requestAspectRatio || nodeData.aspectRatio || '1:1',
+      });
+
+      updateNodeData(id, {
+        isGenerating: true,
+        generationStartedAt: Date.now(),
+        generationJobId: taskId,
+      } as Partial<StoryboardGenNodeData>);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Generation failed: ${message}`);
+    }
+  }, [currentProjectId, id, nodeData.frames, nodeData.model, nodeData.requestAspectRatio, nodeData.aspectRatio, updateNodeData]);
+
+  // ─── Poll for generation result ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (!nodeData.isGenerating) return;
+    const jobId = (nodeData as StoryboardGenNodeData & { generationJobId?: string }).generationJobId;
+    if (!jobId) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const job = await canvasAiGateway.getGenerateImageJob(jobId);
+        if (job.status === 'succeeded' && job.result) {
+          // Create export node with the result image
+          const newNodeId = addDerivedExportNode(
+            id,
+            job.result,
+            nodeData.requestAspectRatio || nodeData.aspectRatio || '1:1',
+            undefined,
+            { resultKind: 'storyboardGenOutput', defaultTitle: 'Generated Storyboard' },
+          );
+          if (newNodeId) {
+            addEdge(id, newNodeId);
+          }
+
+          updateNodeData(id, {
+            imageUrl: job.result,
+            isGenerating: false,
+            generationDurationMs: nodeData.generationStartedAt
+              ? Date.now() - nodeData.generationStartedAt
+              : undefined,
+            generationJobId: undefined,
+          } as Partial<StoryboardGenNodeData>);
+        } else if (job.status === 'failed') {
+          setError(job.error || 'Generation failed');
+          updateNodeData(id, {
+            isGenerating: false,
+            generationJobId: undefined,
+          } as Partial<StoryboardGenNodeData>);
+        }
+      } catch {
+        // Network error — keep polling silently
+      }
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [id, nodeData.isGenerating, (nodeData as StoryboardGenNodeData & { generationJobId?: string }).generationJobId, nodeData.generationStartedAt, updateNodeData, addDerivedExportNode, addEdge, nodeData.requestAspectRatio, nodeData.aspectRatio]);
 
   if (!nodeData) return null;
 
@@ -287,10 +367,17 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           onClick={(event) => { event.stopPropagation(); void handleGenerate(); }}
           variant="primary"
           size="sm"
+          disabled={nodeData.isGenerating}
           className={`!min-w-0 shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
         >
-          <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
-          {t('canvas.generate', 'Generate')}
+          {nodeData.isGenerating ? (
+            <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
+          ) : (
+            <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
+          )}
+          {nodeData.isGenerating
+            ? t('canvas.generating', 'Generating...')
+            : t('canvas.generate', 'Generate')}
         </UiButton>
       </div>
 
