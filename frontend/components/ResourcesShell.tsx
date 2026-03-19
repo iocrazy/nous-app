@@ -41,7 +41,7 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({
   children,
 }) => {
   return (
-    <div className="flex h-full animate-in fade-in duration-300">
+    <div className="flex sm:h-full animate-in fade-in duration-300">
       {/* Left panel: Desktop sidebar navigation (hidden on mobile) */}
       <ResourcesSidebar {...sidebarProps} />
 
