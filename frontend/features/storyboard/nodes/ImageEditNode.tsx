@@ -7,7 +7,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { Sparkles } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -15,6 +15,7 @@ import {
   type ImageEditNodeData,
 } from '../domain/canvasNodes';
 import { resolveNodeDisplayName } from '../domain/nodeDisplay';
+import { canvasAiGateway } from '../application/canvasServices';
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
 import { NodeResizeHandle } from '../ui/NodeResizeHandle';
 import { UiButton } from '../../../components/ui';
@@ -23,6 +24,7 @@ import {
   NODE_CONTROL_PRIMARY_BUTTON_CLASS,
 } from '../ui/nodeControlStyles';
 import { useCanvasStore } from '../../../stores/canvasStore';
+import { useStoryboardStore } from '../../../stores/storyboardStore';
 
 type ImageEditNodeProps = NodeProps & {
   id: string;
@@ -49,6 +51,7 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
 
   const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const currentProjectId = useStoryboardStore((state) => state.currentProjectId);
 
   const resolvedTitle = useMemo(
     () => resolveNodeDisplayName(CANVAS_NODE_TYPES.imageEdit, data),
@@ -75,17 +78,74 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
     updateNodeData(id, { prompt: nextPrompt });
   }, [id, updateNodeData]);
 
+  // ─── AI Generation ──────────────────────────────────────────────────────────
+
   const handleGenerate = useCallback(async () => {
-    // TODO: Phase 3 - AI integration
-    // This will call canvasAiGateway.submitGenerateImageJob()
     const prompt = promptDraft.trim();
     if (!prompt) {
       setError(t('node.imageEdit.promptRequired', 'Please enter a prompt'));
       return;
     }
+    if (!currentProjectId) {
+      setError('No project context — save the project first');
+      return;
+    }
 
-    setError('AI generation is not yet available (Phase 3)');
-  }, [promptDraft, t]);
+    setError(null);
+    try {
+      const taskId = await canvasAiGateway.submitGenerateImageJob({
+        projectId: currentProjectId,
+        nodeId: id,
+        prompt,
+        model: data.model || 'flux-schnell',
+        aspectRatio: data.requestAspectRatio || '1:1',
+      });
+
+      updateNodeData(id, {
+        isGenerating: true,
+        generationStartedAt: Date.now(),
+        generationJobId: taskId,
+      } as Partial<ImageEditNodeData>);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Generation failed: ${message}`);
+    }
+  }, [promptDraft, t, currentProjectId, id, data.model, data.requestAspectRatio, updateNodeData]);
+
+  // ─── Poll for generation result ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (!data.isGenerating) return;
+    const jobId = (data as ImageEditNodeData & { generationJobId?: string }).generationJobId;
+    if (!jobId) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const job = await canvasAiGateway.getGenerateImageJob(jobId);
+        if (job.status === 'succeeded' && job.result) {
+          updateNodeData(id, {
+            imageUrl: job.result,
+            isGenerating: false,
+            generationDurationMs: data.generationStartedAt
+              ? Date.now() - data.generationStartedAt
+              : undefined,
+            generationJobId: undefined,
+          } as Partial<ImageEditNodeData>);
+        } else if (job.status === 'failed') {
+          setError(job.error || 'Generation failed');
+          updateNodeData(id, {
+            isGenerating: false,
+            generationJobId: undefined,
+          } as Partial<ImageEditNodeData>);
+        }
+        // queued/running — continue polling
+      } catch {
+        // Network error — keep polling silently
+      }
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [id, data.isGenerating, (data as ImageEditNodeData & { generationJobId?: string }).generationJobId, data.generationStartedAt, updateNodeData]);
 
   return (
     <div
@@ -141,10 +201,17 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
             void handleGenerate();
           }}
           variant="primary"
+          disabled={data.isGenerating}
           className={`shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
         >
-          <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
-          {t('canvas.generate', 'Generate')}
+          {data.isGenerating ? (
+            <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
+          ) : (
+            <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
+          )}
+          {data.isGenerating
+            ? t('canvas.generating', 'Generating...')
+            : t('canvas.generate', 'Generate')}
         </UiButton>
       </div>
 

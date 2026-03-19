@@ -1,12 +1,20 @@
 // HTTP implementation of the AiGateway interface.
 // Calls backend storyboard AI endpoints for image generation.
+//
+// Backend routes (sb_ai_router.py, prefix="/storyboard"):
+//   POST /storyboard/generate/image
+//   POST /storyboard/generate/video
+// Task status is tracked via unified_tasks (task_manager_router):
+//   GET /tasks/{task_id}   (Celery status)
 
 import type { AiGateway, GenerateImagePayload } from '../application/ports';
 import { getAuthHeaders } from '../../../services/parserService';
 
 const getApiUrl = (): string => {
+  // @ts-ignore
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    return (import.meta.env.VITE_API_URL as string) || '';
+    // @ts-ignore
+    return import.meta.env.VITE_API_URL || '';
   }
   return 'http://localhost:8080';
 };
@@ -16,8 +24,16 @@ async function handleJsonResponse<T>(res: Response): Promise<T> {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`AI gateway error ${res.status}: ${text}`);
   }
-  const body = (await res.json()) as { success: boolean; data: T };
-  return body.data;
+  return (await res.json()) as T;
+}
+
+/** Unwrap backend `{ success, data }` envelope. */
+function unwrapEnvelope<T>(body: { success: boolean; data?: T; task_id?: string }): T {
+  if ('data' in body && body.data !== undefined) {
+    return body.data;
+  }
+  // Some endpoints return { success, task_id } without nesting in data
+  return body as unknown as T;
 }
 
 export class HttpAiGateway implements AiGateway {
@@ -29,53 +45,56 @@ export class HttpAiGateway implements AiGateway {
 
   async setApiKey(_provider: string, _apiKey: string): Promise<void> {
     // In the web version, API keys are managed server-side.
-    // This is a no-op — the backend uses its own configured keys.
     console.info('[HttpAiGateway] setApiKey is a no-op in web mode; keys are server-managed.');
   }
 
   async generateImage(payload: GenerateImagePayload): Promise<string> {
     const headers = await getAuthHeaders();
-    const res = await fetch(`${this.apiBase}/api/v1/storyboard/ai/generate-image`, {
+    const res = await fetch(`${this.apiBase}/api/v1/storyboard/generate/image`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        project_id: payload.projectId,
+        node_id: payload.nodeId,
         prompt: payload.prompt,
         model: payload.model,
-        size: payload.size,
+        provider: payload.provider ?? 'replicate',
         aspect_ratio: payload.aspectRatio,
-        reference_images: payload.referenceImages,
-        extra_params: payload.extraParams,
+        character_ids: payload.characterIds ?? [],
+        reference_image_url: payload.referenceImageUrl,
       }),
     });
 
-    const result = await handleJsonResponse<{ task_id: string; image_url?: string }>(res);
+    const body = await handleJsonResponse<{ success: boolean; task_id: string; image_url?: string }>(res);
 
     // If the endpoint returns an image_url directly (synchronous generation),
     // return it. Otherwise, return the task_id for async polling.
-    if (result.image_url) {
-      return result.image_url;
+    if (body.image_url) {
+      return body.image_url;
     }
 
-    return result.task_id;
+    return body.task_id;
   }
 
   async submitGenerateImageJob(payload: GenerateImagePayload): Promise<string> {
     const headers = await getAuthHeaders();
-    const res = await fetch(`${this.apiBase}/api/v1/storyboard/ai/generate-image`, {
+    const res = await fetch(`${this.apiBase}/api/v1/storyboard/generate/image`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        project_id: payload.projectId,
+        node_id: payload.nodeId,
         prompt: payload.prompt,
         model: payload.model,
-        size: payload.size,
+        provider: payload.provider ?? 'replicate',
         aspect_ratio: payload.aspectRatio,
-        reference_images: payload.referenceImages,
-        extra_params: payload.extraParams,
+        character_ids: payload.characterIds ?? [],
+        reference_image_url: payload.referenceImageUrl,
       }),
     });
 
-    const result = await handleJsonResponse<{ task_id: string }>(res);
-    return result.task_id;
+    const body = await handleJsonResponse<{ success: boolean; task_id: string }>(res);
+    return body.task_id;
   }
 
   async getGenerateImageJob(jobId: string): Promise<{
@@ -85,15 +104,42 @@ export class HttpAiGateway implements AiGateway {
     error?: string | null;
   }> {
     const headers = await getAuthHeaders();
-    const res = await fetch(`${this.apiBase}/api/v1/storyboard/ai/jobs/${jobId}`, {
+    // Use the Celery task status endpoint
+    const res = await fetch(`${this.apiBase}/api/v1/tasks/${jobId}`, {
       headers,
     });
 
-    return await handleJsonResponse<{
-      job_id: string;
-      status: 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found';
-      result?: string | null;
+    if (!res.ok) {
+      return { job_id: jobId, status: 'not_found' };
+    }
+
+    const body = await handleJsonResponse<{
+      task_id: string;
+      status: string;
+      result?: Record<string, unknown> | null;
       error?: string | null;
     }>(res);
+
+    // Map Celery statuses to our gateway statuses
+    const statusMap: Record<string, 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found'> = {
+      PENDING: 'queued',
+      STARTED: 'running',
+      SUCCESS: 'succeeded',
+      FAILURE: 'failed',
+      RETRY: 'running',
+      REVOKED: 'failed',
+    };
+
+    const mappedStatus = statusMap[body.status] ?? 'queued';
+    const imageUrl = body.result && typeof body.result === 'object'
+      ? (body.result as Record<string, unknown>).image_url as string | undefined
+      : undefined;
+
+    return {
+      job_id: jobId,
+      status: mappedStatus,
+      result: imageUrl ?? null,
+      error: body.error ?? null,
+    };
   }
 }
