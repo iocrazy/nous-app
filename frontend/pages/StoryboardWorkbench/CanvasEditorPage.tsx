@@ -72,8 +72,8 @@ function mapBackendEdgesToCanvas(
     id: String(be.id),
     source: String(be.source_node_id),
     target: String(be.target_node_id),
-    sourceHandle: be.source_handle ?? 'source',
-    targetHandle: be.target_handle ?? 'target',
+    sourceHandle: (be.source_handle === 'output' ? 'source' : be.source_handle) ?? 'source',
+    targetHandle: (be.target_handle === 'input' ? 'target' : be.target_handle) ?? 'target',
     type: 'disconnectableEdge' as const,
   }));
 }
