@@ -645,7 +645,7 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Render ────────────────────────────────────────
   return (
-    <div className="flex-1 min-w-0 flex flex-col md:h-full">
+    <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? 'h-full' : 'md:h-full'}`}>
       {/* Toolbar — matches ResourcesView style (hidden on mobile, search via overlay) */}
       <div
         className="hidden md:block px-6 py-3 border-b border-zinc-800/80"
@@ -712,7 +712,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
-        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0' : 'px-3 pt-3 pb-5'}`}
+        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0 h-full min-h-0' : 'px-3 pt-3 pb-5'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)

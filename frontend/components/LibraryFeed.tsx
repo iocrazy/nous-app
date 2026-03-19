@@ -62,8 +62,8 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
   };
 
   return (
-    // Height: viewport minus TopBar (56px) + tab bar (~80px) on mobile, minus header on desktop
-    <div className="flex justify-center w-full h-[calc(100vh-136px)] md:h-[calc(100vh-180px)] bg-black">
+    // Height: fill parent container (AppLayout already handles TopBar/tab bar offsets via pt-14/pb-20)
+    <div className="flex justify-center w-full h-full bg-black">
       <div 
         ref={containerRef}
         className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-zinc-800 shadow-2xl"
@@ -245,7 +245,7 @@ const FeedItem = ({
       </div>
 
       {/* Right Sidebar Actions — Douyin style */}
-      <div className="absolute bottom-36 sm:bottom-20 right-2 flex flex-col items-center gap-4 z-20">
+      <div className="absolute bottom-20 sm:bottom-20 right-2 flex flex-col items-center gap-4 z-20">
         <div className="relative">
           <div className="w-10 h-10 rounded-full border border-white bg-zinc-800 overflow-hidden">
              <div className="w-full h-full flex items-center justify-center text-zinc-500">
@@ -305,7 +305,7 @@ const FeedItem = ({
       </div>
 
       {/* Bottom Content Info — pb-16 on mobile to clear tab bar */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 pb-16 sm:pb-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent pt-20 z-10">
+      <div className="absolute bottom-0 left-0 right-0 p-4 pb-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent pt-20 z-10">
         <div className="max-w-[80%]">
           <h3 className="text-white font-bold text-base mb-1 drop-shadow-md cursor-pointer hover:underline">@{item.author || 'User'}</h3>
           <div className="relative">
