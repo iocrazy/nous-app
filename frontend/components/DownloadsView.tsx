@@ -40,7 +40,6 @@ import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
-import { ShareModal } from './ShareModal';
 import { getCoverUrl, getVideoUrl, formatResolution } from '../utils/awemeType';
 import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
 import { useToast } from './Toast';
@@ -271,8 +270,6 @@ export const DownloadsView: React.FC = () => {
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [selectedVideoTags, setSelectedVideoTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
-  const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
-  const [shareTargetName, setShareTargetName] = useState<string>('');
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
 
@@ -593,21 +590,13 @@ export const DownloadsView: React.FC = () => {
 
   const handleCtxShare = useCallback(() => {
     if (!contextMenu) return;
-    const video = contextMenu.video;
-    const rid = resourceIdMap[video.id];
+    const url = contextMenu.video.original_url;
     setContextMenu(null);
-    if (rid) {
-      setShareTargetResourceId(rid);
-      setShareTargetName(video.title || video.description || 'Shared Media');
-    } else {
-      // Fallback: copy original URL if no resource_id
-      const url = video.original_url;
-      if (url) {
-        navigator.clipboard.writeText(url);
-        addToast('Link copied (no resource linked)', 'info');
-      }
+    if (url) {
+      navigator.clipboard.writeText(url);
+      addToast('Link copied to clipboard', 'success');
     }
-  }, [contextMenu, addToast, resourceIdMap]);
+  }, [contextMenu, addToast]);
 
   const handleCtxRename = useCallback(() => {
     if (!contextMenu) return;
@@ -1195,14 +1184,6 @@ export const DownloadsView: React.FC = () => {
         </div>,
         document.body,
       )}
-
-      {/* ── Share Modal ── */}
-      <ShareModal
-        isOpen={!!shareTargetResourceId}
-        onClose={() => { setShareTargetResourceId(null); setShareTargetName(''); }}
-        resourceId={shareTargetResourceId || undefined}
-        defaultName={shareTargetName}
-      />
 
       {/* ── Rename Dialog ── */}
       {renameTarget && (
