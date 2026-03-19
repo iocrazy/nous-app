@@ -10,12 +10,13 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 
   /* ===== Storyboard Canvas Theme Colors ===== */
-  --color-bg-dark: rgb(var(--bg-rgb) / <alpha-value>);
-  --color-surface-dark: rgb(var(--surface-rgb) / <alpha-value>);
-  --color-border-dark: rgb(var(--border-rgb) / <alpha-value>);
-  --color-text-dark: rgb(var(--text-rgb) / <alpha-value>);
-  --color-text-muted: rgb(var(--text-muted-rgb) / <alpha-value>);
-  --color-accent: rgb(var(--accent-rgb) / <alpha-value>);
+  /* Dark theme values from Copilot (static, not referencing CSS vars) */
+  --color-bg-dark: oklch(0.145 0 0);
+  --color-surface-dark: oklch(0.205 0 0);
+  --color-border-dark: oklch(0.274 0 0);
+  --color-text-dark: oklch(1 0 0);
+  --color-text-muted: oklch(0.6 0 0);
+  --color-accent: oklch(0.623 0.214 259.815);
 }
 
 /* Global styles */
