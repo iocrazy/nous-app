@@ -47,7 +47,7 @@ function mapBackendNodesToCanvas(
         return null;
       }
       return {
-        id: bn.id,
+        id: String(bn.id),
         type: frontendType as CanvasNode['type'],
         position: { x: bn.position_x, y: bn.position_y },
         width: bn.width ?? undefined,
@@ -69,12 +69,12 @@ function mapBackendEdgesToCanvas(
   }>,
 ): CanvasEdge[] {
   return backendEdges.map((be) => ({
-    id: be.id,
-    source: be.source_node_id,
-    target: be.target_node_id,
+    id: String(be.id),
+    source: String(be.source_node_id),
+    target: String(be.target_node_id),
     sourceHandle: be.source_handle ?? 'source',
     targetHandle: be.target_handle ?? 'target',
-    type: be.edge_type ?? 'disconnectableEdge',
+    type: 'disconnectableEdge' as const,
   }));
 }
 
