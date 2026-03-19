@@ -62,8 +62,9 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
   };
 
   return (
-    // Height: fill parent container (AppLayout already handles TopBar/tab bar offsets via pt-14/pb-20)
-    <div className="flex justify-center w-full h-full bg-black">
+    // Fixed viewport height: 100dvh minus TopBar(56px) + tab bar(80px)
+    // Uses dvh (dynamic viewport height) for mobile browser chrome handling
+    <div className="flex justify-center w-full bg-black" style={{ height: 'calc(100dvh - 136px)' }}>
       <div 
         ref={containerRef}
         className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-zinc-800 shadow-2xl"
