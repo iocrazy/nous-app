@@ -1,5 +1,12 @@
-// Migrated from Storyboard-Copilot — Tauri-specific code removed.
-// Only pure utility functions are kept.
+// Image data utilities for web-based storyboard canvas.
+// Replaces Tauri-specific image pipeline with HTML Canvas + backend upload.
+
+import {
+  uploadImage,
+  type UploadImageResult,
+} from '../../../services/storyboardService';
+
+// ─── Pure math utilities ─────────────────────────────────────────────────────
 
 export function parseAspectRatio(value: string): number {
   const [width, height] = value.split(':').map((item) => Number(item));
@@ -32,16 +39,27 @@ function greatestCommonDivisor(a: number, b: number): number {
   return x || 1;
 }
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 export interface PreparedNodeImage {
   imageUrl: string;
   previewImageUrl: string;
   aspectRatio: string;
 }
 
+export interface PreparedNodeImageWithUpload extends PreparedNodeImage {
+  /** Server-side asset ID, available after backend upload completes. */
+  assetId?: string;
+}
+
+// ─── Zoom threshold ──────────────────────────────────────────────────────────
+
 export function shouldUseOriginalImageByZoom(zoom: number): boolean {
   const ORIGINAL_IMAGE_ZOOM_THRESHOLD = 1.45;
   return Number.isFinite(zoom) && zoom >= ORIGINAL_IMAGE_ZOOM_THRESHOLD;
 }
+
+// ─── File / Blob reading ─────────────────────────────────────────────────────
 
 export async function readFileAsDataUrl(file: File): Promise<string> {
   const reader = new FileReader();
@@ -68,32 +86,17 @@ export function extractBase64Payload(dataUrl: string): string {
   return payload;
 }
 
+// ─── Canvas helpers ──────────────────────────────────────────────────────────
+
 export function canvasToDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL('image/png');
 }
 
-export async function detectAspectRatio(imageUrl: string): Promise<string> {
-  const image = new Image();
-
-  return await new Promise((resolve, reject) => {
-    image.onload = () => resolve(reduceAspectRatio(image.naturalWidth, image.naturalHeight));
-    image.onerror = () => reject(new Error('Failed to load image'));
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      image.crossOrigin = 'anonymous';
-    }
-    image.src = imageUrl;
-  });
-}
-
-/**
- * In web context, image URLs are used directly — no Tauri convertFileSrc needed.
- */
-export function resolveImageDisplayUrl(imageUrl: string): string {
-  return imageUrl;
-}
+// ─── Image loading ───────────────────────────────────────────────────────────
 
 /**
  * Load an HTMLImageElement from a source URL.
+ * Sets crossOrigin for http(s) sources to allow canvas operations.
  */
 export function loadImageElement(source: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -102,22 +105,109 @@ export function loadImageElement(source: string): Promise<HTMLImageElement> {
       image.crossOrigin = 'anonymous';
     }
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Failed to load image'));
+    image.onerror = () => reject(new Error(`Failed to load image: ${source.slice(0, 120)}`));
     image.src = source;
   });
 }
 
 /**
- * Prepare a node image from a File — creates a blob URL and detects aspect ratio.
+ * Convert any image URL (http, blob, data) to a data URL via canvas fetch + FileReader.
+ * If the source is already a data URL, returns it as-is.
  */
-export async function prepareNodeImageFromFile(file: File): Promise<PreparedNodeImage> {
+export async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
+  if (imageUrl.startsWith('data:')) {
+    return imageUrl;
+  }
+
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status} ${imageUrl.slice(0, 120)}`);
+  }
+
+  const blob = await response.blob();
+  return await blobToDataUrl(blob);
+}
+
+// ─── Aspect ratio detection ──────────────────────────────────────────────────
+
+/**
+ * Detect the aspect ratio of an image by loading it and reading natural dimensions.
+ */
+export async function detectAspectRatio(imageUrl: string): Promise<string> {
+  const image = await loadImageElement(imageUrl);
+  return reduceAspectRatio(image.naturalWidth, image.naturalHeight);
+}
+
+/**
+ * Detect aspect ratio from known width/height without loading an image.
+ */
+export function detectAspectRatioFromDimensions(width: number, height: number): string {
+  return reduceAspectRatio(width, height);
+}
+
+// ─── Display URL resolution ──────────────────────────────────────────────────
+
+/**
+ * In web context, image URLs are used directly — no Tauri convertFileSrc needed.
+ */
+export function resolveImageDisplayUrl(imageUrl: string): string {
+  return imageUrl;
+}
+
+// ─── Node image preparation ──────────────────────────────────────────────────
+
+/**
+ * Prepare a node image from a File.
+ *
+ * 1. Creates a blob URL immediately for optimistic preview.
+ * 2. Detects aspect ratio from the blob.
+ * 3. If a projectId is provided, uploads the file to the backend in the background
+ *    and updates the returned URLs with server-persisted URLs.
+ */
+export async function prepareNodeImageFromFile(
+  file: File,
+  projectId?: string,
+  nodeId?: string,
+): Promise<PreparedNodeImageWithUpload> {
   const blobUrl = URL.createObjectURL(file);
   const aspectRatio = await detectAspectRatio(blobUrl);
 
+  // Without a project context, return blob URLs only (local preview).
+  if (!projectId) {
+    return {
+      imageUrl: blobUrl,
+      previewImageUrl: blobUrl,
+      aspectRatio,
+    };
+  }
+
+  // Upload to backend for persistent storage.
+  let uploadResult: UploadImageResult;
+  try {
+    uploadResult = await uploadImage(projectId, file, nodeId);
+  } catch (error) {
+    // Upload failed — fall back to blob URL so the user still sees the image.
+    console.error('[imageData] Backend upload failed, using blob URL fallback', error);
+    return {
+      imageUrl: blobUrl,
+      previewImageUrl: blobUrl,
+      aspectRatio,
+    };
+  }
+
+  // Revoke the temporary blob URL now that we have server URLs.
+  URL.revokeObjectURL(blobUrl);
+
+  const serverAspectRatio =
+    uploadResult.width > 0 && uploadResult.height > 0
+      ? reduceAspectRatio(uploadResult.width, uploadResult.height)
+      : aspectRatio;
+
   return {
-    imageUrl: blobUrl,
-    previewImageUrl: blobUrl,
-    aspectRatio,
+    imageUrl: uploadResult.image_url,
+    previewImageUrl: uploadResult.preview_url || uploadResult.image_url,
+    aspectRatio: serverAspectRatio,
+    assetId: uploadResult.asset_id,
   };
 }
 
@@ -136,7 +226,7 @@ export async function prepareNodeImage(imageUrl: string): Promise<PreparedNodeIm
 
 /**
  * Persist image locally — in web context, this is a no-op that returns the same URL.
- * TODO: Phase 4 - upload to backend storage
+ * Server-side persistence happens via uploadImage in prepareNodeImageFromFile.
  */
 export async function persistImageLocally(dataUrl: string): Promise<string> {
   return dataUrl;
