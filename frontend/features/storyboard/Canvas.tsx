@@ -40,6 +40,7 @@ import {
 import { nodeTypes } from './nodes';
 import { edgeTypes } from './edges';
 import { NodeSelectionMenu } from './NodeSelectionMenu';
+import { CanvasToolbar } from './CanvasToolbar';
 import { SelectedNodeOverlay } from './ui/SelectedNodeOverlay';
 import { NodeToolDialog } from './ui/NodeToolDialog';
 import { ImageViewerModal } from './ui/ImageViewerModal';
@@ -117,6 +118,7 @@ export function Canvas() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const suppressNextPaneClickRef = useRef(false);
 
+  const [isLocked, setIsLocked] = useState(false);
   const [showNodeMenu, setShowNodeMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [flowPosition, setFlowPosition] = useState({ x: 0, y: 0 });
@@ -447,6 +449,8 @@ export function Canvas() {
         />
         <SelectedNodeOverlay />
       </ReactFlow>
+
+      <CanvasToolbar isLocked={isLocked} onToggleLock={() => setIsLocked(v => !v)} />
 
       {nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
