@@ -645,7 +645,7 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Render ────────────────────────────────────────
   return (
-    <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? 'h-full' : 'md:h-full'}`}>
+    <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? 'h-[calc(100vh-136px)] sm:h-full' : 'md:h-full'}`}>
       {/* Toolbar — matches ResourcesView style (hidden on mobile, search via overlay) */}
       <div
         className="hidden md:block px-6 py-3 border-b border-zinc-800/80"
