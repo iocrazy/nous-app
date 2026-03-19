@@ -1,118 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Pencil, Loader2 } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { ChevronLeft, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useStoryboardStore } from '../../stores/storyboardStore';
-import { fetchProject, updateProject } from '../../services/storyboardService';
-import { useStoryboardPersist } from '../../hooks/storyboard/useStoryboardPersist';
-import { useStoryboardRealtime } from '../../hooks/storyboard/useStoryboardRealtime';
-import StoryboardCanvas from '../../components/storyboard/canvas/StoryboardCanvas';
-import ChatPanel from '../../components/storyboard/chat/ChatPanel';
-import FrameTimeline from '../../components/storyboard/timeline/FrameTimeline';
-import CharacterPanel from '../../components/storyboard/characters/CharacterPanel';
-import { StoryboardFrame } from '../../types';
-
-// ─── Component ────────────────────────────────────────────────────────────────
+import { ReactFlowProvider } from '@xyflow/react';
+import { Canvas } from '../../features/storyboard/Canvas';
 
 export function CanvasEditorPage() {
   const { t } = useTranslation();
-  const {
-    currentProjectId,
-    setCurrentProject,
-    setNodes,
-    setEdges,
-    setCharacters,
-    nodes,
-  } = useStoryboardStore();
+  const navigate = useNavigate();
+  const { teamId, projectId } = useParams<{ teamId: string; projectId?: string }>();
 
-  // ─── Panel visibility ──────────────────────────────────────────────────────
-  const [chatOpen, setChatOpen] = useState(true);
-  const [timelineOpen, setTimelineOpen] = useState(true);
-  const [characterPanelOpen, setCharacterPanelOpen] = useState(false);
-
-  // ─── Project info ──────────────────────────────────────────────────────────
-  const [projectName, setProjectName] = useState('');
+  const [projectName, setProjectName] = useState('Untitled Project');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // ─── Frames derived from nodes ─────────────────────────────────────────────
-  const [frames, setFrames] = useState<StoryboardFrame[]>([]);
-  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
-
-  // ─── Hooks ─────────────────────────────────────────────────────────────────
-  useStoryboardPersist();
-  useStoryboardRealtime();
-
-  // ─── Load project data on mount ────────────────────────────────────────────
-  useEffect(() => {
-    if (!currentProjectId) return;
-
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await fetchProject(currentProjectId!);
-        if (cancelled) return;
-
-        setProjectName(data.name);
-        setNameInput(data.name);
-        setNodes(data.nodes);
-        setEdges(data.edges);
-        setCharacters(data.characters);
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setError(message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [currentProjectId, setNodes, setEdges, setCharacters]);
-
-  // Derive frames from image-type nodes that have frame data
-  useEffect(() => {
-    const derived: StoryboardFrame[] = nodes
-      .filter((n) => {
-        const data = n.data_json as Record<string, unknown> | undefined;
-        return data?.frame != null;
-      })
-      .map((n) => (n.data_json as Record<string, unknown>).frame as StoryboardFrame)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    setFrames(derived);
-  }, [nodes]);
-
-  // ─── Navigation ────────────────────────────────────────────────────────────
-  const navigate = useNavigate();
-  const { teamId } = useParams<{ teamId: string }>();
 
   const handleBack = useCallback(() => {
-    setCurrentProject(null);
     navigate(`/team/${teamId}/storyboard`);
-  }, [setCurrentProject, navigate, teamId]);
+  }, [navigate, teamId]);
 
-  // ─── Project name editing ──────────────────────────────────────────────────
-  const handleNameSubmit = useCallback(async () => {
-    if (!currentProjectId || !nameInput.trim() || nameInput.trim() === projectName) {
+  const handleNameSubmit = useCallback(() => {
+    if (!nameInput.trim() || nameInput.trim() === projectName) {
       setEditingName(false);
       setNameInput(projectName);
       return;
     }
-    try {
-      await updateProject(currentProjectId, { name: nameInput.trim() });
-      setProjectName(nameInput.trim());
-    } catch {
-      setNameInput(projectName);
-    } finally {
-      setEditingName(false);
-    }
-  }, [currentProjectId, nameInput, projectName]);
+    setProjectName(nameInput.trim());
+    setEditingName(false);
+  }, [nameInput, projectName]);
 
   const handleNameKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -124,26 +38,6 @@ export function CanvasEditorPage() {
     },
     [handleNameSubmit, projectName]
   );
-
-  // ─── Timeline handlers ─────────────────────────────────────────────────────
-  const handleSelectFrame = useCallback((frameId: string) => {
-    setSelectedFrameId(frameId);
-  }, []);
-
-  const handleReorderFrames = useCallback((_reordered: StoryboardFrame[]) => {
-    // Frame reordering is persisted by useStoryboardPersist via syncCanvas
-    setFrames(_reordered);
-  }, []);
-
-  // ─── Render ────────────────────────────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 size={32} className="animate-spin text-blue-500" />
-      </div>
-    );
-  }
 
   return (
     <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
@@ -160,7 +54,6 @@ export function CanvasEditorPage() {
 
         <div className="w-px h-4 bg-gray-700" />
 
-        {/* Editable project name */}
         {editingName ? (
           <input
             type="text"
@@ -181,40 +74,14 @@ export function CanvasEditorPage() {
             <Pencil size={12} className="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
           </button>
         )}
-
-        {/* Error indicator */}
-        {error && (
-          <span className="text-xs text-red-400 ml-2 truncate">{error}</span>
-        )}
       </div>
 
-      {/* Main layout */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Character Panel (left slide-out) */}
-        <CharacterPanel
-          open={characterPanelOpen}
-          onClose={() => setCharacterPanelOpen(false)}
-        />
-
-        {/* Canvas (center) */}
-        <div className="flex-1 relative overflow-hidden">
-          <StoryboardCanvas />
-        </div>
-
-        {/* Chat Panel (right, collapsible) */}
-        <ChatPanel
-          open={chatOpen}
-          onToggle={() => setChatOpen((v) => !v)}
-        />
+      {/* Canvas */}
+      <div className="flex-1 relative overflow-hidden min-h-0">
+        <ReactFlowProvider>
+          <Canvas />
+        </ReactFlowProvider>
       </div>
-
-      {/* Frame Timeline (bottom, collapsible) */}
-      <FrameTimeline
-        frames={frames}
-        selectedFrameId={selectedFrameId}
-        onSelectFrame={handleSelectFrame}
-        onReorderFrames={handleReorderFrames}
-      />
     </div>
   );
 }

@@ -1,0 +1,156 @@
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
+import { Copy, Download, Trash2, Unlink2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+import {
+  isExportImageNode,
+  isGroupNode,
+  isImageEditNode,
+  isUploadNode,
+  type CanvasNode,
+} from '../domain/canvasNodes';
+import { UiChipButton, UiPanel } from '../../../components/ui';
+import { useCanvasStore } from '../../../stores/canvasStore';
+import {
+  NODE_TOOLBAR_ALIGN,
+  NODE_TOOLBAR_CLASS,
+  NODE_TOOLBAR_OFFSET,
+  NODE_TOOLBAR_POSITION,
+} from './nodeToolbarConfig';
+
+interface NodeActionToolbarProps {
+  node: CanvasNode;
+}
+
+const TOOLBAR_BUTTON_RADIUS_CLASS = 'rounded-full';
+const TOOLBAR_NEUTRAL_BUTTON_CLASS =
+  'border-[rgba(255,255,255,0.18)] bg-bg-dark/70 text-text-dark hover:border-[rgba(255,255,255,0.32)] hover:bg-bg-dark';
+
+export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
+  const { t } = useTranslation();
+  const isImageEdit = isImageEditNode(node);
+  const deleteNode = useCanvasStore((state) => state.deleteNode);
+  const ungroupNode = useCanvasStore((state) => state.ungroupNode);
+  const [isCopySuccess, setIsCopySuccess] = useState(false);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const imageSource = useMemo(() => {
+    if (isUploadNode(node) || isImageEditNode(node) || isExportImageNode(node)) {
+      return node.data.imageUrl || node.data.previewImageUrl || null;
+    }
+    return null;
+  }, [node]);
+  const canHandleImage = Boolean(imageSource);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyImage = useCallback(async () => {
+    if (!imageSource) {
+      return;
+    }
+
+    setIsCopySuccess(true);
+    if (copyFeedbackTimerRef.current) {
+      clearTimeout(copyFeedbackTimerRef.current);
+    }
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setIsCopySuccess(false);
+      copyFeedbackTimerRef.current = null;
+    }, 1100);
+
+    try {
+      // Web: fetch image and copy to clipboard
+      const response = await fetch(imageSource);
+      const blob = await response.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ]);
+    } catch (error) {
+      console.error('Failed to copy image to clipboard', error);
+    }
+  }, [imageSource]);
+
+  const handleDownload = useCallback(() => {
+    if (!imageSource) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = imageSource;
+    link.download = `node-${node.id}.png`;
+    link.click();
+  }, [imageSource, node.id]);
+
+  return (
+    <ReactFlowNodeToolbar
+      nodeId={node.id}
+      isVisible
+      position={NODE_TOOLBAR_POSITION}
+      align={NODE_TOOLBAR_ALIGN}
+      offset={NODE_TOOLBAR_OFFSET}
+      className={NODE_TOOLBAR_CLASS}
+    >
+      <UiPanel className="flex items-center gap-1 rounded-full p-1">
+        {!isImageEdit && canHandleImage && (
+          <UiChipButton
+            key="image-copy"
+            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} ${
+              isCopySuccess
+                ? '!border-emerald-400/70 !bg-emerald-500/20 !text-emerald-200 hover:!bg-emerald-500/30'
+                : ''
+            }`}
+            onClick={() => {
+              void handleCopyImage();
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            {t('nodeToolbar.copy', 'Copy')}
+          </UiChipButton>
+        )}
+        {!isImageEdit && canHandleImage && (
+          <UiChipButton
+            key="image-download"
+            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+            onClick={handleDownload}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {t('nodeToolbar.download', 'Download')}
+          </UiChipButton>
+        )}
+        {!isImageEdit && isGroupNode(node) && (
+          <UiChipButton
+            key="group-ungroup"
+            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} hover:!border-amber-400/60 hover:!bg-amber-500/20 hover:!text-amber-200`}
+            onClick={(event) => {
+              event.stopPropagation();
+              ungroupNode(node.id);
+            }}
+          >
+            <Unlink2 className="h-3.5 w-3.5" />
+            {t('nodeToolbar.ungroup', 'Ungroup')}
+          </UiChipButton>
+        )}
+        <UiChipButton
+          key="node-delete"
+          className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} border-red-500/45 bg-red-500/15 px-2.5 text-xs text-red-300 hover:bg-red-500/25`}
+          onClick={(event) => {
+            event.stopPropagation();
+            deleteNode(node.id);
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {t('common.delete', 'Delete')}
+        </UiChipButton>
+      </UiPanel>
+    </ReactFlowNodeToolbar>
+  );
+});
+
+NodeActionToolbar.displayName = 'NodeActionToolbar';

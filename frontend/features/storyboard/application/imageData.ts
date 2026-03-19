@@ -85,5 +85,59 @@ export async function detectAspectRatio(imageUrl: string): Promise<string> {
   });
 }
 
-// TODO: migrate — prepareNodeImage, prepareNodeImageFromFile, persistImageLocally
-// These require backend integration to replace Tauri commands.
+/**
+ * In web context, image URLs are used directly — no Tauri convertFileSrc needed.
+ */
+export function resolveImageDisplayUrl(imageUrl: string): string {
+  return imageUrl;
+}
+
+/**
+ * Load an HTMLImageElement from a source URL.
+ */
+export function loadImageElement(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    if (source.startsWith('http://') || source.startsWith('https://')) {
+      image.crossOrigin = 'anonymous';
+    }
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Failed to load image'));
+    image.src = source;
+  });
+}
+
+/**
+ * Prepare a node image from a File — creates a blob URL and detects aspect ratio.
+ */
+export async function prepareNodeImageFromFile(file: File): Promise<PreparedNodeImage> {
+  const blobUrl = URL.createObjectURL(file);
+  const aspectRatio = await detectAspectRatio(blobUrl);
+
+  return {
+    imageUrl: blobUrl,
+    previewImageUrl: blobUrl,
+    aspectRatio,
+  };
+}
+
+/**
+ * Prepare a node image from an existing URL — detects aspect ratio.
+ */
+export async function prepareNodeImage(imageUrl: string): Promise<PreparedNodeImage> {
+  const aspectRatio = await detectAspectRatio(imageUrl).catch(() => '1:1');
+
+  return {
+    imageUrl,
+    previewImageUrl: imageUrl,
+    aspectRatio,
+  };
+}
+
+/**
+ * Persist image locally — in web context, this is a no-op that returns the same URL.
+ * TODO: Phase 4 - upload to backend storage
+ */
+export async function persistImageLocally(dataUrl: string): Promise<string> {
+  return dataUrl;
+}
