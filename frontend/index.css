@@ -9,14 +9,13 @@
   /* Font family */
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 
-  /* ===== Storyboard Canvas Theme Colors ===== */
-  /* Dark theme values from Copilot (static, not referencing CSS vars) */
-  --color-bg-dark: oklch(0.145 0 0);
-  --color-surface-dark: oklch(0.205 0 0);
-  --color-border-dark: oklch(0.274 0 0);
-  --color-text-dark: oklch(1 0 0);
-  --color-text-muted: oklch(0.6 0 0);
-  --color-accent: oklch(0.623 0.214 259.815);
+  /* ===== Storyboard Canvas Theme Colors (zinc-based, matching main app) ===== */
+  --color-bg-dark: #09090b;          /* zinc-950 */
+  --color-surface-dark: #18181b;     /* zinc-900 */
+  --color-border-dark: #27272a;      /* zinc-800 */
+  --color-text-dark: #fafafa;        /* zinc-50 */
+  --color-text-muted: #a1a1aa;       /* zinc-400 */
+  --color-accent: #6366f1;           /* indigo-500 */
 }
 
 /* Global styles */
@@ -302,26 +301,26 @@ body {
   box-shadow: none;
 }
 
-/* ===== Storyboard Canvas Theme Variables ===== */
+/* ===== Storyboard Canvas Theme Variables (zinc-based) ===== */
 :root {
-  --bg: #0f0f0f;
-  --bg-rgb: 15 15 15;
-  --surface: #1a1a1a;
-  --surface-rgb: 26 26 26;
-  --border: #2a2a2a;
-  --border-rgb: 42 42 42;
-  --text: #ffffff;
-  --text-rgb: 255 255 255;
-  --text-muted: #888888;
-  --text-muted-rgb: 136 136 136;
-  --accent: #3B82F6;
-  --accent-rgb: 59 130 246;
-  --ui-surface-panel: rgb(26, 26, 26);
-  --ui-surface-field: rgba(10, 10, 12, 0.92);
-  --ui-border-soft: rgba(255, 255, 255, 0.14);
-  --ui-border-strong: rgba(255, 255, 255, 0.24);
+  --bg: #09090b;              /* zinc-950 */
+  --bg-rgb: 9 9 11;
+  --surface: #18181b;          /* zinc-900 */
+  --surface-rgb: 24 24 27;
+  --border: #27272a;           /* zinc-800 */
+  --border-rgb: 39 39 42;
+  --text: #fafafa;             /* zinc-50 */
+  --text-rgb: 250 250 250;
+  --text-muted: #a1a1aa;       /* zinc-400 */
+  --text-muted-rgb: 161 161 170;
+  --accent: #6366f1;           /* indigo-500 */
+  --accent-rgb: 99 102 241;
+  --ui-surface-panel: #18181b;
+  --ui-surface-field: rgba(9, 9, 11, 0.92);
+  --ui-border-soft: rgba(161, 161, 170, 0.14);
+  --ui-border-strong: rgba(161, 161, 170, 0.24);
   --ui-shadow-panel: 0 14px 34px rgba(0, 0, 0, 0.38);
-  --group-node-bg: color-mix(in srgb, rgb(59 130 246 / 0.3) 30%, black);
+  --group-node-bg: color-mix(in srgb, rgb(99 102 241 / 0.3) 30%, #09090b);
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;
@@ -368,4 +367,40 @@ body {
 
 .canvas-processing-edge__flow {
   animation: canvas-edge-flow 0.6s linear infinite;
+}
+
+/* ===== Infinite Canvas Vignette ===== */
+.canvas-vignette {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(
+    ellipse 80% 70% at 50% 50%,
+    transparent 50%,
+    rgba(9, 9, 11, 0.4) 85%,
+    rgba(9, 9, 11, 0.7) 100%
+  );
+}
+
+/* Smoother ReactFlow viewport transitions */
+.react-flow__viewport {
+  transition: transform 0.05s ease-out;
+}
+
+/* Nicer edge styling */
+.react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+/* Connection line style */
+.react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+/* Background dots subtle opacity */
+.react-flow__background pattern circle {
+  opacity: 0.6;
 }
