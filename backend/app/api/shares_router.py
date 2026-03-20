@@ -510,6 +510,28 @@ async def access_share_by_code(
                 .execute()
             )
 
+        # Fetch resource metadata for preview (mime_type, filename, cover)
+        resource_meta = {}
+        if share.get("resource_id"):
+            try:
+                res_data = (
+                    await client.table("resources")
+                    .select("mime_type, filename, cover_image_path, thumbnail_path, media_id")
+                    .eq("id", share["resource_id"])
+                    .maybe_single()
+                    .execute()
+                )
+                if res_data.data:
+                    resource_meta = {
+                        "mime_type": res_data.data.get("mime_type"),
+                        "filename": res_data.data.get("filename"),
+                        "cover_image_path": res_data.data.get("cover_image_path"),
+                        "thumbnail_path": res_data.data.get("thumbnail_path"),
+                        "media_id": str(res_data.data["media_id"]) if res_data.data.get("media_id") else None,
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to fetch resource metadata for share: {e}")
+
         # Build the response (strip sensitive fields)
         share["view_count"] = new_view_count
         response_data = {
@@ -525,6 +547,7 @@ async def access_share_by_code(
             "folder_id": share.get("folder_id"),
             "version_id": share.get("version_id"),
             "created_at": share["created_at"],
+            **resource_meta,
         }
 
         logger.info(
