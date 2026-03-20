@@ -298,7 +298,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     type="datetime-local"
                     value={expirationDate}
                     onChange={(e) => setExpirationDate(e.target.value)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 transition-colors [color-scheme:dark]"
+                    className="w-full max-w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 transition-colors [color-scheme:dark] box-border"
                   />
                 )}
 
