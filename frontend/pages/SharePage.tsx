@@ -160,6 +160,20 @@ export const SharePage: React.FC = () => {
     return `${API_BASE}/api/v1/resources/${resourceId}/file`;
   };
 
+  const getMediaUrl = (mediaId?: string | null): string | null => {
+    if (!mediaId) return null;
+    return `${API_BASE}/media/${mediaId}?share_token=${shareCode}`;
+  };
+
+  const getCoverMediaUrl = (mediaId?: string | null): string | null => {
+    if (!mediaId) return null;
+    return `${API_BASE}/media/${mediaId}/cover?share_token=${shareCode}`;
+  };
+
+  const isVideoMime = (mime?: string | null) => mime?.startsWith('video/');
+  const isImageMime = (mime?: string | null) => mime?.startsWith('image/');
+  const isAudioMime = (mime?: string | null) => mime?.startsWith('audio/');
+
   const getFileTypeIcon = (shareType: string) => {
     switch (shareType) {
       case 'review': return <Film size={48} className="text-indigo-400" />;
@@ -243,18 +257,26 @@ export const SharePage: React.FC = () => {
   if (!share) return null;
 
   const resourceUrl = getResourceUrl(share.resource_id);
+  const shareAny = share as any;
+  const mimeType: string | null = shareAny.mime_type || null;
+  const mediaId: string | null = shareAny.media_id || null;
+  const mediaUrl = getMediaUrl(mediaId);
+  const coverUrl = getCoverMediaUrl(mediaId);
+  const isVideo = isVideoMime(mimeType);
+  const isImage = isImageMime(mimeType);
+  const isAudio = isAudioMime(mimeType);
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col">
       {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+      <header className="border-b border-zinc-800 px-4 sm:px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-lg font-semibold text-zinc-100">{share.share_name}</h1>
+          <h1 className="text-lg font-semibold text-zinc-100 truncate">{share.share_name}</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {share.allow_download && resourceUrl && (
             <a
               href={resourceUrl}
@@ -269,40 +291,55 @@ export const SharePage: React.FC = () => {
       </header>
 
       {/* Main content */}
-      <main className={`flex-1 flex ${share.share_type === 'review' ? 'flex-row' : 'items-center justify-center'} p-8 gap-6 overflow-hidden`}>
+      <main className={`flex-1 flex ${share.share_type === 'review' ? 'flex-col md:flex-row' : 'items-center justify-center'} p-4 sm:p-8 gap-6 overflow-hidden`}>
         {/* Preview area */}
         <div className={`${share.share_type === 'review' ? 'flex-1 min-w-0' : 'w-full max-w-4xl'}`}>
-          {resourceUrl ? (
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden h-full">
-              {share.share_type === 'review' ? (
-                /* Video player for review mode */
-                <video
-                  ref={videoRef}
-                  src={resourceUrl}
-                  controls
-                  className="w-full h-full object-contain bg-black"
-                />
-              ) : (
-                /* Default file preview */
-                <div className="flex flex-col items-center justify-center py-20">
-                  {getFileTypeIcon(share.share_type)}
-                  <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {share.share_type === 'delivery' ? 'File Delivery' :
-                     share.share_type === 'presentation' ? 'Presentation' : 'Shared Link'}
-                  </p>
-                  {share.allow_download && (
-                    <a
-                      href={resourceUrl}
-                      download
-                      className="mt-6 flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
-                    >
-                      <Download size={16} />
-                      {t('share.download')}
-                    </a>
-                  )}
-                </div>
-              )}
+          {/* Video preview */}
+          {isVideo && mediaUrl ? (
+            <div className="bg-black rounded-2xl overflow-hidden h-full">
+              <video
+                ref={videoRef}
+                src={mediaUrl}
+                poster={coverUrl || undefined}
+                controls
+                className="w-full h-full object-contain bg-black"
+                style={{ maxHeight: 'calc(100vh - 200px)' }}
+              />
+            </div>
+          ) : isImage && mediaUrl ? (
+            /* Image preview */
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden flex items-center justify-center">
+              <img
+                src={mediaUrl}
+                alt={share.share_name}
+                className="max-w-full max-h-[calc(100vh-200px)] object-contain"
+              />
+            </div>
+          ) : isAudio && mediaUrl ? (
+            /* Audio preview */
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-12 flex flex-col items-center justify-center gap-6">
+              <Music size={64} className="text-indigo-400" />
+              <h2 className="text-lg font-medium text-zinc-200">{share.share_name}</h2>
+              <audio src={mediaUrl} controls className="w-full max-w-md" />
+            </div>
+          ) : resourceUrl ? (
+            /* Generic file with download */
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden">
+              <div className="flex flex-col items-center justify-center py-20">
+                {getFileTypeIcon(share.share_type)}
+                <h2 className="mt-4 text-lg font-medium text-zinc-200">{share.share_name}</h2>
+                <p className="mt-1 text-sm text-zinc-500">{shareAny.filename || 'Shared File'}</p>
+                {share.allow_download && (
+                  <a
+                    href={resourceUrl}
+                    download
+                    className="mt-6 flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    <Download size={16} />
+                    {t('share.download')}
+                  </a>
+                )}
+              </div>
             </div>
           ) : (
             <div className="text-center py-20">
