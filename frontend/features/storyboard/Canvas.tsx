@@ -436,9 +436,9 @@ export function Canvas() {
         onlyRenderVisibleElements
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
-        className="bg-bg-dark"
+        className="bg-bg-dark [&_.react-flow__viewport]:transition-transform"
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a2a" />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="#3f3f46" />
         <MiniMap
           className="canvas-minimap nopan nowheel !border-border-dark !bg-surface-dark"
           style={{ pointerEvents: 'all', zIndex: 10000 }}
@@ -449,6 +449,9 @@ export function Canvas() {
         />
         <SelectedNodeOverlay />
       </ReactFlow>
+
+      {/* Vignette overlay for infinite canvas feel */}
+      <div className="canvas-vignette" />
 
       <CanvasToolbar isLocked={isLocked} onToggleLock={() => setIsLocked(v => !v)} />
 
