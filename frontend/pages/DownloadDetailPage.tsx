@@ -8,6 +8,7 @@ import {
 import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
+import { ShareModal } from '../components/ShareModal';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { trashResourceByMediaId } from '../services/resourceService';
 import { getVideoUrl, isVideoType } from '../utils/awemeType';
@@ -45,6 +46,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -369,12 +371,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
 
           {/* Right: share + download + more — hidden on mobile, shown in metadata area instead */}
           <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {video.original_url && (
+            {resourceId && (
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(video.original_url);
-                  addToast('Link copied to clipboard', 'success');
-                }}
+                onClick={() => setIsShareModalOpen(true)}
                 className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
               >
                 <Share2 size={14} />
@@ -600,12 +599,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 onNotesBlur={resourceId ? handleNotesBlur : undefined}
                 mobileActions={
                   <>
-                    {video.original_url && (
+                    {resourceId && (
                       <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(video.original_url);
-                          addToast('Link copied to clipboard', 'success');
-                        }}
+                        onClick={() => setIsShareModalOpen(true)}
                         className="p-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 rounded-lg transition-colors"
                       >
                         <Share2 size={16} />
@@ -762,6 +758,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           </div>
         </div>
       )}
+
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        resourceId={resourceId || undefined}
+        defaultName={video?.title || video?.description || 'Shared Media'}
+      />
     </div>
   );
 }
