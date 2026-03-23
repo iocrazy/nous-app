@@ -548,8 +548,18 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               />
             ) : (
               <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
-                <VideoIcon size={48} className="text-zinc-600" />
-                <p className="text-zinc-400 text-sm font-medium">Video not available for streaming</p>
+                {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
+                  <>
+                    <Loader2 size={48} className="text-indigo-500 animate-spin" />
+                    <p className="text-zinc-300 text-sm font-medium">Downloading...</p>
+                    <p className="text-zinc-500 text-xs">The media file is being downloaded. Please wait.</p>
+                  </>
+                ) : (
+                  <>
+                    <VideoIcon size={48} className="text-zinc-600" />
+                    <p className="text-zinc-400 text-sm font-medium">Video not available for streaming</p>
+                  </>
+                )}
                 <p className="text-zinc-500 text-xs max-w-[300px] text-center">
                   This video hasn't been downloaded yet. Use the Download button to fetch the media file.
                 </p>
