@@ -1,7 +1,34 @@
-import { useState, useCallback, useRef, useEffect, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowRight, Check, Circle, Eraser, MousePointer2, PenLine, Square, Trash2, Type, Undo2, Redo2, X } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import {
+  Stage, Layer, Rect, Ellipse, Line, Arrow, Text,
+  Image as KonvaImage, Transformer, Group,
+} from 'react-konva';
+import type { KonvaEventObject } from 'konva/lib/Node';
+import type Konva from 'konva';
+import {
+  ArrowRight, Check, Circle, Eraser, MousePointer2, Minus as LineIcon,
+  PenLine, Square, Trash2, Type, Undo2, Redo2, X,
+} from 'lucide-react';
 import { UiButton } from '../../../components/ui';
 import { loadImageElement, canvasToDataUrl } from '../application/imageData';
+import {
+  type AnnotationItem,
+  type AnnotationToolType,
+  type DraftState,
+  buildAnnotationFromDraft,
+  clamp,
+  createAnnotationId,
+  flattenAnnotationsToCanvas,
+  moveAnnotation,
+  transformAnnotation,
+  normalizeRect,
+  PRESET_COLORS,
+  STROKE_WIDTH_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  MAX_UNDO_STACK,
+} from './annotation/konvaShapes';
+
+// ─── Props ──────────────────────────────────────────────────────────────────
 
 interface AnnotateToolEditorProps {
   imageUrl: string;
@@ -9,397 +36,135 @@ interface AnnotateToolEditorProps {
   onCancel: () => void;
 }
 
-type AnnotationToolType = 'select' | 'pen' | 'rect' | 'ellipse' | 'arrow' | 'text' | 'eraser';
+// ─── Constants ──────────────────────────────────────────────────────────────
 
-interface AnnotationItem {
-  id: string;
-  type: Exclude<AnnotationToolType, 'select' | 'eraser'>;
-  color: string;
-  lineWidth: number;
-  opacity: number;
-  points?: number[];
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  text?: string;
-  fontSize?: number;
+const VIEWPORT_PADDING = 16;
+const VIEWPORT_MIN_W = 220;
+const VIEWPORT_MIN_H = 180;
+
+interface ToolButton {
+  type: AnnotationToolType;
+  label: string;
+  icon: typeof Square;
+  group: 'select' | 'draw' | 'shape' | 'other';
 }
 
-const TOOL_BUTTONS: Array<{ type: AnnotationToolType; label: string; icon: typeof Square; group: 'select' | 'draw' | 'shape' | 'other' }> = [
+const TOOL_BUTTONS: ToolButton[] = [
   { type: 'select', label: 'Select', icon: MousePointer2, group: 'select' },
   { type: 'pen', label: 'Pen', icon: PenLine, group: 'draw' },
+  { type: 'line', label: 'Line', icon: LineIcon, group: 'draw' },
   { type: 'eraser', label: 'Eraser', icon: Eraser, group: 'draw' },
-  { type: 'rect', label: 'Rectangle', icon: Square, group: 'shape' },
+  { type: 'rect', label: 'Rect', icon: Square, group: 'shape' },
   { type: 'ellipse', label: 'Ellipse', icon: Circle, group: 'shape' },
   { type: 'arrow', label: 'Arrow', icon: ArrowRight, group: 'shape' },
   { type: 'text', label: 'Text', icon: Type, group: 'other' },
 ];
 
-const STROKE_WIDTHS = [2, 4, 6, 8];
-const FONT_SIZES = [12, 16, 20, 24, 32, 48];
-const PRESET_COLORS = ['#FF4444', '#FF8800', '#FFDD00', '#44CC44', '#4488FF', '#FFFFFF', '#000000'];
-const MAX_UNDO_STACK = 40;
+// ─── Tool button groups ─────────────────────────────────────────────────────
 
-function createAnnotationId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function distanceToLine(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const lengthSq = dx * dx + dy * dy;
-  if (lengthSq === 0) return Math.hypot(px - x1, py - y1);
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq));
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-}
-
-function hitTestAnnotation(item: AnnotationItem, x: number, y: number, threshold: number): boolean {
-  const effectiveThreshold = Math.max(threshold, item.lineWidth + 4);
-
-  if (item.type === 'pen' && item.points && item.points.length >= 4) {
-    for (let i = 0; i < item.points.length - 2; i += 2) {
-      if (distanceToLine(x, y, item.points[i], item.points[i + 1], item.points[i + 2], item.points[i + 3]) < effectiveThreshold) {
-        return true;
-      }
+function groupToolButtons(buttons: ToolButton[]): ToolButton[][] {
+  const groups: ToolButton[][] = [];
+  let current: ToolButton[] = [];
+  let currentGroup: string | null = null;
+  for (const btn of buttons) {
+    if (btn.group !== currentGroup) {
+      if (current.length > 0) groups.push(current);
+      current = [];
+      currentGroup = btn.group;
     }
-    return false;
+    current.push(btn);
   }
-
-  if (item.type === 'rect' && item.width != null && item.height != null) {
-    const ix = item.x ?? 0;
-    const iy = item.y ?? 0;
-    const w = item.width;
-    const h = item.height;
-    const minX = Math.min(ix, ix + w);
-    const maxX = Math.max(ix, ix + w);
-    const minY = Math.min(iy, iy + h);
-    const maxY = Math.max(iy, iy + h);
-    return x >= minX - effectiveThreshold && x <= maxX + effectiveThreshold &&
-           y >= minY - effectiveThreshold && y <= maxY + effectiveThreshold;
-  }
-
-  if (item.type === 'ellipse' && item.width != null && item.height != null) {
-    const cx = (item.x ?? 0) + item.width / 2;
-    const cy = (item.y ?? 0) + item.height / 2;
-    const rx = Math.abs(item.width / 2) + effectiveThreshold;
-    const ry = Math.abs(item.height / 2) + effectiveThreshold;
-    if (rx === 0 || ry === 0) return false;
-    return ((x - cx) * (x - cx)) / (rx * rx) + ((y - cy) * (y - cy)) / (ry * ry) <= 1;
-  }
-
-  if (item.type === 'arrow' && item.width != null && item.height != null) {
-    const x1 = item.x ?? 0;
-    const y1 = item.y ?? 0;
-    return distanceToLine(x, y, x1, y1, x1 + item.width, y1 + item.height) < effectiveThreshold;
-  }
-
-  if (item.type === 'text' && item.text) {
-    const ix = item.x ?? 0;
-    const iy = item.y ?? 0;
-    const fontSize = item.fontSize ?? 16;
-    const estimatedWidth = item.text.length * fontSize * 0.6;
-    return x >= ix - 4 && x <= ix + estimatedWidth + 4 && y >= iy - fontSize && y <= iy + 4;
-  }
-
-  return false;
+  if (current.length > 0) groups.push(current);
+  return groups;
 }
+
+const TOOL_GROUPS = groupToolButtons(TOOL_BUTTONS);
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateToolEditorProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Image state
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+
+  // Tool state
   const [activeTool, setActiveTool] = useState<AnnotationToolType>('pen');
   const [color, setColor] = useState('#FF4444');
-  const [lineWidth, setLineWidth] = useState(4);
+  const [strokeWidth, setStrokeWidth] = useState(4);
   const [fontSize, setFontSize] = useState(20);
   const [opacity, setOpacity] = useState(1);
+
+  // Annotations
   const [annotations, setAnnotations] = useState<AnnotationItem[]>([]);
   const [undoStack, setUndoStack] = useState<AnnotationItem[][]>([]);
   const [redoStack, setRedoStack] = useState<AnnotationItem[][]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [imageEl, setImageEl] = useState<HTMLImageElement | null>(null);
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
-  const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null);
-  const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; origItem: AnnotationItem } | null>(null);
+  const [draft, setDraft] = useState<DraftState | null>(null);
 
-  const drawingRef = useRef<{
-    active: boolean;
-    points: number[];
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null>(null);
+  // Text editing
+  const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null);
+  const textInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Viewport sizing
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const viewportRef = useRef<HTMLDivElement>(null);
+
+  // Konva refs
+  const stageRef = useRef<Konva.Stage | null>(null);
+  const contentGroupRef = useRef<Konva.Group | null>(null);
+  const transformerRef = useRef<Konva.Transformer | null>(null);
+  const shapeRefs = useRef<Map<string, Konva.Node>>(new Map());
+  const stageHostRef = useRef<HTMLDivElement>(null);
 
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
   const selectedAnnotation = useMemo(
-    () => annotations.find((item) => item.id === selectedId) ?? null,
-    [annotations, selectedId]
+    () => annotations.find((a) => a.id === selectedId) ?? null,
+    [annotations, selectedId],
   );
 
-  // Save state for undo
+  // ─── Load image ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    void loadImageElement(imageUrl)
+      .then((img) => setImage(img))
+      .catch(() => setError('Failed to load image'));
+  }, [imageUrl]);
+
+  // ─── Viewport sizing ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setViewportSize({ width: Math.max(0, Math.round(rect.width)), height: Math.max(0, Math.round(rect.height)) });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const { stageWidth, stageHeight, scale } = useMemo(() => {
+    if (!image) return { stageWidth: 560, stageHeight: 400, scale: 1 };
+    const maxW = Math.max(VIEWPORT_MIN_W, viewportSize.width - VIEWPORT_PADDING * 2);
+    const maxH = Math.max(VIEWPORT_MIN_H, viewportSize.height - VIEWPORT_PADDING * 2);
+    const ratio = Math.min(maxW / image.naturalWidth, maxH / image.naturalHeight, 1);
+    return {
+      stageWidth: Math.max(1, Math.round(image.naturalWidth * ratio)),
+      stageHeight: Math.max(1, Math.round(image.naturalHeight * ratio)),
+      scale: ratio,
+    };
+  }, [image, viewportSize]);
+
+  // ─── History helpers ────────────────────────────────────────────────────
+
   const pushUndo = useCallback((current: AnnotationItem[]) => {
     setUndoStack((prev) => [...prev, current].slice(-MAX_UNDO_STACK));
     setRedoStack([]);
   }, []);
-
-  // Load image
-  useEffect(() => {
-    void loadImageElement(imageUrl)
-      .then((img) => {
-        setImageEl(img);
-        const maxWidth = 560;
-        const scale = Math.min(1, maxWidth / img.naturalWidth);
-        setCanvasSize({
-          width: Math.round(img.naturalWidth * scale),
-          height: Math.round(img.naturalHeight * scale),
-        });
-      })
-      .catch(() => setError('Failed to load image'));
-  }, [imageUrl]);
-
-  // Redraw canvas
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !imageEl) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(imageEl, 0, 0, canvas.width, canvas.height);
-
-    for (const item of annotations) {
-      ctx.save();
-      ctx.globalAlpha = item.opacity ?? 1;
-      ctx.strokeStyle = item.color;
-      ctx.fillStyle = item.color;
-      ctx.lineWidth = item.lineWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      if (item.type === 'pen' && item.points && item.points.length >= 4) {
-        ctx.beginPath();
-        ctx.moveTo(item.points[0], item.points[1]);
-        for (let i = 2; i < item.points.length; i += 2) {
-          ctx.lineTo(item.points[i], item.points[i + 1]);
-        }
-        ctx.stroke();
-      } else if (item.type === 'rect' && item.width != null && item.height != null) {
-        ctx.strokeRect(item.x ?? 0, item.y ?? 0, item.width, item.height);
-      } else if (item.type === 'ellipse' && item.width != null && item.height != null) {
-        const cx = (item.x ?? 0) + item.width / 2;
-        const cy = (item.y ?? 0) + item.height / 2;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, Math.abs(item.width / 2), Math.abs(item.height / 2), 0, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (item.type === 'arrow' && item.x != null && item.y != null && item.width != null && item.height != null) {
-        const x1 = item.x; const y1 = item.y;
-        const x2 = item.x + item.width; const y2 = item.y + item.height;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-        const angle = Math.atan2(y2 - y1, x2 - x1);
-        const headLen = Math.max(10, item.lineWidth * 3);
-        ctx.beginPath();
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
-        ctx.stroke();
-      } else if (item.type === 'text' && item.text) {
-        ctx.font = `bold ${item.fontSize ?? 16}px sans-serif`;
-        ctx.fillText(item.text, item.x ?? 0, item.y ?? 0);
-      }
-
-      // Selection highlight
-      if (item.id === selectedId) {
-        ctx.strokeStyle = '#6366f1';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 3]);
-        if (item.type === 'rect' && item.width != null && item.height != null) {
-          ctx.strokeRect((item.x ?? 0) - 3, (item.y ?? 0) - 3, item.width + 6, item.height + 6);
-        } else if (item.type === 'ellipse' && item.width != null && item.height != null) {
-          const cx = (item.x ?? 0) + item.width / 2;
-          const cy = (item.y ?? 0) + item.height / 2;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, Math.abs(item.width / 2) + 3, Math.abs(item.height / 2) + 3, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (item.type === 'text' && item.text) {
-          const tw = (item.fontSize ?? 16) * item.text.length * 0.6;
-          ctx.strokeRect((item.x ?? 0) - 3, (item.y ?? 0) - (item.fontSize ?? 16) - 3, tw + 6, (item.fontSize ?? 16) + 6);
-        }
-        ctx.setLineDash([]);
-      }
-
-      ctx.restore();
-    }
-  }, [annotations, imageEl, selectedId]);
-
-  useEffect(() => { redraw(); }, [redraw]);
-
-  const getCanvasCoords = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * (canvas.width / rect.width),
-      y: (e.clientY - rect.top) * (canvas.height / rect.height),
-    };
-  };
-
-  const handlePointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const { x, y } = getCanvasCoords(e);
-
-    if (activeTool === 'text') {
-      setTextInput({ x, y, value: '' });
-      return;
-    }
-
-    if (activeTool === 'select') {
-      // Try to select an annotation under pointer
-      const hitItem = [...annotations].reverse().find((item) => hitTestAnnotation(item, x, y, 8));
-      if (hitItem) {
-        setSelectedId(hitItem.id);
-        setDragState({ id: hitItem.id, startX: x, startY: y, origItem: { ...hitItem } });
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      } else {
-        setSelectedId(null);
-      }
-      return;
-    }
-
-    if (activeTool === 'eraser') {
-      // Erase annotation under pointer
-      const hitItem = [...annotations].reverse().find((item) => hitTestAnnotation(item, x, y, 12));
-      if (hitItem) {
-        pushUndo(annotations);
-        setAnnotations((prev) => prev.filter((item) => item.id !== hitItem.id));
-        if (selectedId === hitItem.id) setSelectedId(null);
-      }
-      return;
-    }
-
-    drawingRef.current = { active: true, points: [x, y], startX: x, startY: y, currentX: x, currentY: y };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    // Handle select drag (move annotation)
-    if (dragState) {
-      const { x, y } = getCanvasCoords(e);
-      const dx = x - dragState.startX;
-      const dy = y - dragState.startY;
-      setAnnotations((prev) =>
-        prev.map((item) => {
-          if (item.id !== dragState.id) return item;
-          const orig = dragState.origItem;
-          if (orig.type === 'pen' && orig.points) {
-            return {
-              ...item,
-              points: orig.points.map((p, i) => (i % 2 === 0 ? p + dx : p + dy)),
-            };
-          }
-          return { ...item, x: (orig.x ?? 0) + dx, y: (orig.y ?? 0) + dy };
-        })
-      );
-      return;
-    }
-
-    const d = drawingRef.current;
-    if (!d || !d.active) return;
-    const { x, y } = getCanvasCoords(e);
-    d.currentX = x; d.currentY = y;
-    if (activeTool === 'pen') {
-      d.points.push(x, y);
-    }
-    // Live preview
-    redraw();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    ctx.save();
-    ctx.globalAlpha = opacity;
-    ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-    if (activeTool === 'pen') {
-      ctx.beginPath();
-      ctx.moveTo(d.points[0], d.points[1]);
-      for (let i = 2; i < d.points.length; i += 2) ctx.lineTo(d.points[i], d.points[i + 1]);
-      ctx.stroke();
-    } else if (activeTool === 'rect') {
-      ctx.strokeRect(d.startX, d.startY, x - d.startX, y - d.startY);
-    } else if (activeTool === 'ellipse') {
-      const cx = (d.startX + x) / 2; const cy = (d.startY + y) / 2;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, Math.abs(x - d.startX) / 2, Math.abs(y - d.startY) / 2, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (activeTool === 'arrow') {
-      ctx.beginPath(); ctx.moveTo(d.startX, d.startY); ctx.lineTo(x, y); ctx.stroke();
-      const angle = Math.atan2(y - d.startY, x - d.startX);
-      const headLen = Math.max(10, lineWidth * 3);
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - headLen * Math.cos(angle - Math.PI / 6), y - headLen * Math.sin(angle - Math.PI / 6));
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - headLen * Math.cos(angle + Math.PI / 6), y - headLen * Math.sin(angle + Math.PI / 6));
-      ctx.stroke();
-    }
-    ctx.restore();
-  };
-
-  const handlePointerUp = () => {
-    // Finalize select drag
-    if (dragState) {
-      pushUndo(annotations.map((item) => (item.id === dragState.id ? dragState.origItem : item)));
-      setDragState(null);
-      return;
-    }
-
-    const d = drawingRef.current;
-    if (!d || !d.active) return;
-    drawingRef.current = null;
-
-    const drawTool = activeTool as Exclude<AnnotationToolType, 'select' | 'eraser'>;
-    const item: AnnotationItem = {
-      id: createAnnotationId(),
-      type: drawTool,
-      color,
-      lineWidth,
-      opacity,
-    };
-
-    if (activeTool === 'pen') {
-      if (d.points.length < 4) return;
-      item.points = [...d.points];
-    } else {
-      item.x = d.startX; item.y = d.startY;
-      item.width = d.currentX - d.startX;
-      item.height = d.currentY - d.startY;
-    }
-
-    pushUndo(annotations);
-    setAnnotations((prev) => [...prev, item]);
-  };
-
-  const handleTextSubmit = () => {
-    if (!textInput || !textInput.value.trim()) { setTextInput(null); return; }
-    pushUndo(annotations);
-    setAnnotations((prev) => [...prev, {
-      id: createAnnotationId(),
-      type: 'text' as const,
-      color,
-      lineWidth,
-      opacity,
-      x: textInput.x,
-      y: textInput.y,
-      text: textInput.value,
-      fontSize,
-    }]);
-    setTextInput(null);
-  };
 
   const handleUndo = useCallback(() => {
     if (undoStack.length === 0) return;
@@ -422,7 +187,7 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
   const handleDeleteSelected = useCallback(() => {
     if (!selectedId) return;
     pushUndo(annotations);
-    setAnnotations((prev) => prev.filter((item) => item.id !== selectedId));
+    setAnnotations((prev) => prev.filter((a) => a.id !== selectedId));
     setSelectedId(null);
   }, [annotations, pushUndo, selectedId]);
 
@@ -433,102 +198,405 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
     setSelectedId(null);
   }, [annotations, pushUndo]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const cmd = event.ctrlKey || event.metaKey;
-      if (cmd && event.key === 'z' && !event.shiftKey) { event.preventDefault(); handleUndo(); return; }
-      if (cmd && (event.key === 'y' || (event.key === 'z' && event.shiftKey))) { event.preventDefault(); handleRedo(); return; }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId && !textInput) {
-        event.preventDefault();
-        handleDeleteSelected();
-      }
+  // ─── Image coordinate conversion ───────────────────────────────────────
+
+  const getImagePoint = useCallback(() => {
+    const stage = stageRef.current;
+    const group = contentGroupRef.current;
+    if (!stage || !group || !image) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    const transform = group.getAbsoluteTransform().copy();
+    transform.invert();
+    const pt = transform.point(pointer);
+    return {
+      x: clamp(pt.x, 0, image.naturalWidth),
+      y: clamp(pt.y, 0, image.naturalHeight),
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [image]);
+
+  // ─── Text editor helpers ──────────────────────────────────────────────
+
+  const toHostPoint = useCallback((x: number, y: number) => {
+    const group = contentGroupRef.current;
+    const stage = stageRef.current;
+    const host = stageHostRef.current;
+    const stagePoint = group
+      ? group.getAbsoluteTransform().point({ x, y })
+      : { x: x * scale, y: y * scale };
+    if (!stage || !host) return stagePoint;
+    const stageRect = stage.container().getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    return {
+      x: stagePoint.x + (stageRect.left - hostRect.left),
+      y: stagePoint.y + (stageRect.top - hostRect.top),
+    };
+  }, [scale]);
+
+  const textEditorPos = useMemo(() => {
+    if (!textInput) return null;
+    return toHostPoint(textInput.x, textInput.y);
+  }, [textInput, toHostPoint]);
+
+  const handleTextCommit = useCallback(() => {
+    if (!textInput) return;
+    const value = textInput.value.trim();
+    if (!value) { setTextInput(null); return; }
+    pushUndo(annotations);
+    const newItem: AnnotationItem = {
+      id: createAnnotationId(),
+      type: 'text',
+      x: textInput.x,
+      y: textInput.y,
+      text: value,
+      fontSize,
+      color,
+      strokeWidth,
+      opacity,
+    };
+    setAnnotations((prev) => [...prev, newItem]);
+    setSelectedId(newItem.id);
+    setTextInput(null);
+  }, [annotations, color, fontSize, opacity, pushUndo, strokeWidth, textInput]);
+
+  // ─── Pointer handlers ────────────────────────────────────────────────
+
+  const handlePointerDown = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    stageHostRef.current?.focus();
+    const point = getImagePoint();
+    if (!point) return;
+
+    const target = e.target;
+    const isBg = target === target.getStage() || target.name() === 'annotation-background';
+
+    if (activeTool === 'text') {
+      if (isBg) {
+        setTextInput({ x: point.x, y: point.y, value: '' });
+        requestAnimationFrame(() => textInputRef.current?.focus());
+      }
+      return;
+    }
+
+    if (activeTool === 'eraser') {
+      // Find annotation under pointer via Konva hit detection
+      if (!isBg) {
+        const clickedId = target.id();
+        if (clickedId) {
+          pushUndo(annotations);
+          setAnnotations((prev) => prev.filter((a) => a.id !== clickedId));
+          if (selectedId === clickedId) setSelectedId(null);
+        }
+      }
+      return;
+    }
+
+    if (activeTool === 'select') {
+      if (isBg) {
+        setSelectedId(null);
+      }
+      // Konva handles selection via shape click events
+      return;
+    }
+
+    // Drawing tools — only start on background
+    if (!isBg) return;
+    setTextInput(null);
+    setSelectedId(null);
+    setDraft({
+      tool: activeTool as DraftState['tool'],
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+      points: activeTool === 'pen' ? [point.x, point.y] : undefined,
+    });
+  }, [activeTool, annotations, getImagePoint, pushUndo, selectedId]);
+
+  const handlePointerMove = useCallback(() => {
+    if (!draft) return;
+    const point = getImagePoint();
+    if (!point) return;
+
+    if (draft.tool === 'pen') {
+      setDraft((prev) => prev && prev.tool === 'pen'
+        ? { ...prev, currentX: point.x, currentY: point.y, points: [...(prev.points ?? []), point.x, point.y] }
+        : prev,
+      );
+    } else {
+      setDraft((prev) => prev ? { ...prev, currentX: point.x, currentY: point.y } : prev);
+    }
+  }, [draft, getImagePoint]);
+
+  const handlePointerUp = useCallback(() => {
+    if (!draft) return;
+    const point = getImagePoint();
+    const finalDraft: DraftState = {
+      ...draft,
+      currentX: point?.x ?? draft.currentX,
+      currentY: point?.y ?? draft.currentY,
+    };
+    const item = buildAnnotationFromDraft(finalDraft, color, strokeWidth, opacity);
+    setDraft(null);
+    if (!item) return;
+    pushUndo(annotations);
+    setAnnotations((prev) => [...prev, item]);
+    setSelectedId(item.id);
+  }, [annotations, color, draft, getImagePoint, opacity, pushUndo, strokeWidth]);
+
+  // ─── Draft annotation for live preview ────────────────────────────────
+
+  const draftAnnotation = useMemo((): AnnotationItem | null => {
+    if (!draft) return null;
+    if (draft.tool === 'pen') {
+      const pts = draft.points ?? [draft.startX, draft.startY];
+      if (pts.length < 2) return null;
+      return { id: 'draft', type: 'pen', points: pts, color, strokeWidth, opacity };
+    }
+    if (draft.tool === 'line') {
+      return { id: 'draft', type: 'line', points: [draft.startX, draft.startY, draft.currentX, draft.currentY], color, strokeWidth, opacity };
+    }
+    if (draft.tool === 'arrow') {
+      return { id: 'draft', type: 'arrow', points: [draft.startX, draft.startY, draft.currentX, draft.currentY], color, strokeWidth, opacity };
+    }
+    const rect = normalizeRect(draft.startX, draft.startY, draft.currentX, draft.currentY);
+    if (draft.tool === 'rect') {
+      return { id: 'draft', type: 'rect', ...rect, color, strokeWidth, opacity };
+    }
+    return { id: 'draft', type: 'ellipse', ...rect, color, strokeWidth, opacity };
+  }, [color, draft, opacity, strokeWidth]);
+
+  // ─── Konva shape refs ─────────────────────────────────────────────────
+
+  const bindShapeRef = useCallback((id: string, node: Konva.Node | null) => {
+    if (node) shapeRefs.current.set(id, node);
+    else shapeRefs.current.delete(id);
+  }, []);
+
+  // ─── Shape drag/transform end handlers ────────────────────────────────
+
+  const handleDragEnd = useCallback((item: AnnotationItem, e: KonvaEventObject<DragEvent>) => {
+    const node = e.target;
+    const nx = node.x();
+    const ny = node.y();
+    if (item.type === 'pen' || item.type === 'line' || item.type === 'arrow') {
+      node.x(0);
+      node.y(0);
+    }
+    pushUndo(annotations);
+    setAnnotations((prev) => prev.map((a) => (a.id === item.id ? moveAnnotation(a, nx, ny) : a)));
+  }, [annotations, pushUndo]);
+
+  const handleTransformEnd = useCallback((item: AnnotationItem, e: KonvaEventObject<Event>) => {
+    const node = e.target;
+    const sx = node.scaleX();
+    const sy = node.scaleY();
+    const nx = node.x();
+    const ny = node.y();
+    node.scaleX(1);
+    node.scaleY(1);
+    if (item.type === 'pen' || item.type === 'line' || item.type === 'arrow') {
+      node.x(0);
+      node.y(0);
+    }
+    pushUndo(annotations);
+    setAnnotations((prev) => prev.map((a) => (a.id === item.id ? transformAnnotation(a, nx, ny, sx, sy) : a)));
+  }, [annotations, pushUndo]);
+
+  // ─── Sync transformer ────────────────────────────────────────────────
+
+  useEffect(() => {
+    const tr = transformerRef.current;
+    if (!tr) return;
+    if (!selectedId || activeTool !== 'select') {
+      tr.nodes([]);
+      tr.getLayer()?.batchDraw();
+      return;
+    }
+    const node = shapeRefs.current.get(selectedId);
+    if (!node) {
+      tr.nodes([]);
+      tr.getLayer()?.batchDraw();
+      return;
+    }
+    tr.nodes([node]);
+    tr.getLayer()?.batchDraw();
+  }, [selectedId, activeTool, annotations]);
+
+  // ─── Keyboard shortcuts ───────────────────────────────────────────────
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (textInput) return;
+    const cmd = e.ctrlKey || e.metaKey;
+    if (cmd && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
+    if (cmd && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); handleDeleteSelected(); }
   }, [handleDeleteSelected, handleRedo, handleUndo, selectedId, textInput]);
 
+  // ─── Render a single annotation shape ─────────────────────────────────
+
+  const renderShape = useCallback((item: AnnotationItem, itemOpacity = 1) => {
+    const isSelected = selectedId === item.id;
+    const canDrag = activeTool === 'select' && isSelected;
+
+    const commonProps = {
+      draggable: canDrag,
+      onClick: () => { if (activeTool === 'select') setSelectedId(item.id); },
+      onTap: () => { if (activeTool === 'select') setSelectedId(item.id); },
+      onDragEnd: (e: KonvaEventObject<DragEvent>) => handleDragEnd(item, e),
+      onTransformEnd: (e: KonvaEventObject<Event>) => handleTransformEnd(item, e),
+    };
+
+    if (item.type === 'pen') {
+      return (
+        <Line
+          key={item.id}
+          id={item.id}
+          ref={(n) => bindShapeRef(item.id, n)}
+          points={item.points}
+          stroke={item.color}
+          strokeWidth={item.strokeWidth}
+          lineJoin="round"
+          lineCap="round"
+          opacity={item.opacity * itemOpacity}
+          strokeScaleEnabled={false}
+          {...commonProps}
+        />
+      );
+    }
+
+    if (item.type === 'line') {
+      return (
+        <Line
+          key={item.id}
+          id={item.id}
+          ref={(n) => bindShapeRef(item.id, n)}
+          points={item.points}
+          stroke={item.color}
+          strokeWidth={item.strokeWidth}
+          lineCap="round"
+          opacity={item.opacity * itemOpacity}
+          strokeScaleEnabled={false}
+          {...commonProps}
+        />
+      );
+    }
+
+    if (item.type === 'arrow') {
+      return (
+        <Arrow
+          key={item.id}
+          id={item.id}
+          ref={(n) => bindShapeRef(item.id, n)}
+          points={item.points}
+          stroke={item.color}
+          fill={item.color}
+          strokeWidth={item.strokeWidth}
+          pointerLength={Math.max(10, item.strokeWidth * 4)}
+          pointerWidth={Math.max(10, item.strokeWidth * 3)}
+          opacity={item.opacity * itemOpacity}
+          strokeScaleEnabled={false}
+          {...commonProps}
+        />
+      );
+    }
+
+    if (item.type === 'rect') {
+      return (
+        <Rect
+          key={item.id}
+          id={item.id}
+          ref={(n) => bindShapeRef(item.id, n)}
+          x={item.x}
+          y={item.y}
+          width={item.width}
+          height={item.height}
+          stroke={item.color}
+          strokeWidth={item.strokeWidth}
+          opacity={item.opacity * itemOpacity}
+          strokeScaleEnabled={false}
+          {...commonProps}
+        />
+      );
+    }
+
+    if (item.type === 'ellipse') {
+      return (
+        <Ellipse
+          key={item.id}
+          id={item.id}
+          ref={(n) => bindShapeRef(item.id, n)}
+          x={item.x + item.width / 2}
+          y={item.y + item.height / 2}
+          radiusX={item.width / 2}
+          radiusY={item.height / 2}
+          stroke={item.color}
+          strokeWidth={item.strokeWidth}
+          opacity={item.opacity * itemOpacity}
+          strokeScaleEnabled={false}
+          {...commonProps}
+        />
+      );
+    }
+
+    // text
+    return (
+      <Text
+        key={item.id}
+        id={item.id}
+        ref={(n) => bindShapeRef(item.id, n)}
+        x={item.x}
+        y={item.y}
+        text={item.text}
+        fill={item.color}
+        fontSize={item.fontSize}
+        fontStyle="bold"
+        lineHeight={1.2}
+        opacity={item.opacity * itemOpacity}
+        {...commonProps}
+        onDblClick={(e) => {
+          e.cancelBubble = true;
+          setTextInput({ x: item.x, y: item.y, value: item.text });
+          setSelectedId(item.id);
+          // Remove old text, will be re-added on commit
+          pushUndo(annotations);
+          setAnnotations((prev) => prev.filter((a) => a.id !== item.id));
+          requestAnimationFrame(() => textInputRef.current?.focus());
+        }}
+      />
+    );
+  }, [activeTool, annotations, bindShapeRef, handleDragEnd, handleTransformEnd, pushUndo, selectedId]);
+
+  // ─── Export ───────────────────────────────────────────────────────────
+
   const handleConfirm = useCallback(async () => {
-    setProcessing(true); setError(null);
+    setProcessing(true);
+    setError(null);
     try {
-      if (!imageEl) throw new Error('Image not loaded');
-      const canvas = document.createElement('canvas');
-      canvas.width = imageEl.naturalWidth;
-      canvas.height = imageEl.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas context failed');
-      ctx.drawImage(imageEl, 0, 0);
-      const scaleX = imageEl.naturalWidth / canvasSize.width;
-      const scaleY = imageEl.naturalHeight / canvasSize.height;
-
-      for (const item of annotations) {
-        ctx.save();
-        ctx.globalAlpha = item.opacity ?? 1;
-        ctx.strokeStyle = item.color; ctx.fillStyle = item.color;
-        ctx.lineWidth = item.lineWidth * Math.max(scaleX, scaleY);
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-        if (item.type === 'pen' && item.points) {
-          ctx.beginPath();
-          ctx.moveTo(item.points[0] * scaleX, item.points[1] * scaleY);
-          for (let i = 2; i < item.points.length; i += 2) ctx.lineTo(item.points[i] * scaleX, item.points[i + 1] * scaleY);
-          ctx.stroke();
-        } else if (item.type === 'rect' && item.width != null) {
-          ctx.strokeRect((item.x ?? 0) * scaleX, (item.y ?? 0) * scaleY, item.width * scaleX, (item.height ?? 0) * scaleY);
-        } else if (item.type === 'ellipse' && item.width != null) {
-          const cx = ((item.x ?? 0) + item.width / 2) * scaleX;
-          const cy = ((item.y ?? 0) + (item.height ?? 0) / 2) * scaleY;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, Math.abs(item.width / 2) * scaleX, Math.abs((item.height ?? 0) / 2) * scaleY, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (item.type === 'arrow' && item.width != null) {
-          const x1 = (item.x ?? 0) * scaleX; const y1 = (item.y ?? 0) * scaleY;
-          const x2 = x1 + item.width * scaleX; const y2 = y1 + (item.height ?? 0) * scaleY;
-          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-          const angle = Math.atan2(y2 - y1, x2 - x1);
-          const headLen = Math.max(10, ctx.lineWidth * 3);
-          ctx.beginPath();
-          ctx.moveTo(x2, y2);
-          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
-          ctx.moveTo(x2, y2);
-          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
-          ctx.stroke();
-        } else if (item.type === 'text' && item.text) {
-          const fSize = (item.fontSize ?? 16) * Math.max(scaleX, scaleY);
-          ctx.font = `bold ${fSize}px sans-serif`;
-          ctx.fillText(item.text, (item.x ?? 0) * scaleX, (item.y ?? 0) * scaleY);
-        }
-        ctx.restore();
-      }
-
+      if (!image) throw new Error('Image not loaded');
+      const canvas = flattenAnnotationsToCanvas(image, annotations);
       onConfirm(canvasToDataUrl(canvas));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Annotation failed');
+      setError(err instanceof Error ? err.message : 'Annotation export failed');
     } finally {
       setProcessing(false);
     }
-  }, [annotations, canvasSize, imageEl, onConfirm]);
+  }, [annotations, image, onConfirm]);
 
-  const cursorClass = activeTool === 'text' ? 'cursor-text' :
-    activeTool === 'select' ? 'cursor-default' :
-    activeTool === 'eraser' ? 'cursor-pointer' : 'cursor-crosshair';
+  // ─── Transformer config ───────────────────────────────────────────────
 
-  // Group tool buttons by separator
-  const toolGroups = useMemo(() => {
-    const groups: Array<Array<typeof TOOL_BUTTONS[0]>> = [];
-    let currentGroup: string | null = null;
-    let currentButtons: Array<typeof TOOL_BUTTONS[0]> = [];
-    for (const btn of TOOL_BUTTONS) {
-      if (btn.group !== currentGroup) {
-        if (currentButtons.length > 0) groups.push(currentButtons);
-        currentButtons = [];
-        currentGroup = btn.group;
-      }
-      currentButtons.push(btn);
-    }
-    if (currentButtons.length > 0) groups.push(currentButtons);
-    return groups;
-  }, []);
+  const transformerKeepRatio = selectedAnnotation?.type === 'text';
+  const transformerAnchors = transformerKeepRatio
+    ? (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const)
+    : (['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left'] as const);
+
+  // ─── Cursor ───────────────────────────────────────────────────────────
+
+  const cursorClass = activeTool === 'text' ? 'cursor-text'
+    : activeTool === 'select' ? 'cursor-default'
+    : activeTool === 'eraser' ? 'cursor-pointer'
+    : 'cursor-crosshair';
+
+  // ─── Render ───────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -537,21 +605,24 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
         <span>Annotate Image</span>
       </div>
 
-      {/* Tool bar with separator groups */}
+      {/* Toolbar */}
       <div className="flex items-center gap-0.5">
-        {toolGroups.map((group, gi) => (
+        {TOOL_GROUPS.map((group, gi) => (
           <div key={gi} className="flex items-center gap-0.5">
             {gi > 0 && <div className="mx-1 h-5 w-px bg-[rgba(255,255,255,0.12)]" />}
             {group.map((tool) => {
               const Icon = tool.icon;
               return (
-                <button key={tool.type} type="button" onClick={() => { setActiveTool(tool.type); if (tool.type !== 'select') setSelectedId(null); }}
+                <button
+                  key={tool.type}
+                  type="button"
+                  onClick={() => { setActiveTool(tool.type); if (tool.type !== 'select') setSelectedId(null); }}
                   className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors ${
                     activeTool === tool.type
                       ? 'bg-indigo-600 text-white'
                       : 'bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]'
                   }`}
-                  title={`${tool.label}${tool.type === 'select' ? ' (move annotations)' : ''}`}
+                  title={tool.label}
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {tool.label}
@@ -563,119 +634,152 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
         <div className="ml-auto flex items-center gap-1">
           <button type="button" onClick={handleUndo} disabled={!canUndo}
             className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
-            title="Undo (Ctrl+Z)"
-          ><Undo2 className="h-3.5 w-3.5" /></button>
+            title="Undo (Ctrl+Z)"><Undo2 className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={handleRedo} disabled={!canRedo}
             className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
-            title="Redo (Ctrl+Shift+Z)"
-          ><Redo2 className="h-3.5 w-3.5" /></button>
+            title="Redo (Ctrl+Shift+Z)"><Redo2 className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={handleDeleteSelected} disabled={!selectedId}
             className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
-            title="Delete selected (Del)"
-          ><Trash2 className="h-3.5 w-3.5" /></button>
+            title="Delete selected"><Trash2 className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={handleClear} disabled={annotations.length === 0}
             className="flex h-6 w-6 items-center justify-center rounded text-red-400 hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
-            title="Clear all"
-          ><X className="h-3.5 w-3.5" /></button>
+            title="Clear all"><X className="h-3.5 w-3.5" /></button>
         </div>
       </div>
 
-      {/* Color + stroke + opacity */}
+      {/* Style controls */}
       <div className="flex flex-wrap items-center gap-3">
+        {/* Color presets + custom */}
         <div className="flex items-center gap-1">
           {PRESET_COLORS.map((c) => (
             <button key={c} type="button" onClick={() => setColor(c)}
-              className={`h-5 w-5 rounded-full border-2 transition-transform ${color === c ? 'border-white scale-110' : 'border-transparent'}`}
-              style={{ backgroundColor: c }}
-            />
+              className={`h-5 w-5 rounded-full border-2 transition-transform ${color === c ? 'scale-110 border-white' : 'border-transparent'}`}
+              style={{ backgroundColor: c }} />
           ))}
           <input type="color" value={color} onChange={(e) => setColor(e.target.value)}
-            className="ml-1 h-5 w-5 cursor-pointer rounded border-none bg-transparent"
-          />
+            className="ml-1 h-5 w-5 cursor-pointer rounded border-none bg-transparent" />
         </div>
 
+        {/* Stroke width */}
         {activeTool !== 'text' && activeTool !== 'select' && activeTool !== 'eraser' && (
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-text-muted">Width:</span>
-            {STROKE_WIDTHS.map((w) => (
-              <button key={w} type="button" onClick={() => setLineWidth(w)}
-                className={`flex h-6 w-6 items-center justify-center rounded text-[10px] ${lineWidth === w ? 'bg-indigo-600 text-white' : 'bg-[rgba(255,255,255,0.08)] text-text-muted'}`}
+            {STROKE_WIDTH_OPTIONS.map((w) => (
+              <button key={w} type="button" onClick={() => setStrokeWidth(w)}
+                className={`flex h-6 w-6 items-center justify-center rounded text-[10px] ${strokeWidth === w ? 'bg-indigo-600 text-white' : 'bg-[rgba(255,255,255,0.08)] text-text-muted'}`}
               >{w}</button>
             ))}
           </div>
         )}
 
+        {/* Font size */}
         {activeTool === 'text' && (
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-text-muted">Size:</span>
-            <select
-              value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
-              className="h-6 rounded border border-[rgba(255,255,255,0.14)] bg-bg-dark/80 px-1 text-[10px] text-text-dark outline-none"
-            >
-              {FONT_SIZES.map((s) => (
-                <option key={s} value={s}>{s}px</option>
-              ))}
+            <select value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))}
+              className="h-6 rounded border border-[rgba(255,255,255,0.14)] bg-bg-dark/80 px-1 text-[10px] text-text-dark outline-none">
+              {FONT_SIZE_OPTIONS.map((s) => <option key={s} value={s}>{s}px</option>)}
             </select>
           </div>
         )}
 
+        {/* Opacity */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-text-muted">Opacity:</span>
-          <input
-            type="range"
-            min={0.1}
-            max={1}
-            step={0.05}
-            value={opacity}
-            onChange={(e) => setOpacity(Number(e.target.value))}
-            className="h-1 w-16 cursor-pointer"
-          />
-          <span className="text-[10px] text-text-muted w-7">{Math.round(opacity * 100)}%</span>
+          <input type="range" min={0.1} max={1} step={0.05} value={opacity}
+            onChange={(e) => setOpacity(Number(e.target.value))} className="h-1 w-16 cursor-pointer" />
+          <span className="w-7 text-[10px] text-text-muted">{Math.round(opacity * 100)}%</span>
         </div>
       </div>
 
-      {/* Canvas */}
-      <div ref={containerRef} className="relative overflow-hidden rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/60">
-        <canvas
-          ref={canvasRef}
-          width={canvasSize.width}
-          height={canvasSize.height}
-          className={`block w-full ${cursorClass}`}
-          style={{ aspectRatio: canvasSize.width > 0 ? `${canvasSize.width} / ${canvasSize.height}` : undefined }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-        />
-        {textInput && (
-          <input
-            type="text"
-            autoFocus
-            value={textInput.value}
-            onChange={(e) => setTextInput((prev) => prev ? { ...prev, value: e.target.value } : null)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleTextSubmit(); if (e.key === 'Escape') setTextInput(null); }}
-            onBlur={handleTextSubmit}
-            className="absolute z-10 rounded border border-indigo-400 bg-black/80 px-1.5 py-0.5 text-sm text-white outline-none"
-            style={{
-              left: `${(textInput.x / canvasSize.width) * 100}%`,
-              top: `${(textInput.y / canvasSize.height) * 100}%`,
-              minWidth: 80,
-              fontSize: `${Math.max(10, fontSize * (containerRef.current ? containerRef.current.clientWidth / canvasSize.width : 1) * 0.7)}px`,
-            }}
-          />
-        )}
+      {/* Konva Canvas */}
+      <div ref={viewportRef} className="relative h-[min(58vh,560px)] overflow-hidden rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/60">
+        <div
+          ref={stageHostRef}
+          tabIndex={0}
+          className={`relative flex h-full w-full items-center justify-center p-2 outline-none ${cursorClass}`}
+          onKeyDown={handleKeyDown}
+        >
+          <Stage
+            ref={stageRef}
+            width={stageWidth}
+            height={stageHeight}
+            onMouseDown={handlePointerDown}
+            onTouchStart={handlePointerDown}
+            onMouseMove={handlePointerMove}
+            onTouchMove={handlePointerMove}
+            onMouseUp={handlePointerUp}
+            onTouchEnd={handlePointerUp}
+            onMouseLeave={handlePointerUp}
+          >
+            <Layer>
+              <Group ref={contentGroupRef} scaleX={scale} scaleY={scale}>
+                {image && (
+                  <KonvaImage
+                    image={image}
+                    x={0}
+                    y={0}
+                    width={image.naturalWidth}
+                    height={image.naturalHeight}
+                    name="annotation-background"
+                  />
+                )}
+                {annotations.map((a) => renderShape(a))}
+                {draftAnnotation && renderShape(draftAnnotation, 0.7)}
+                <Transformer
+                  ref={transformerRef}
+                  boundBoxFunc={(oldBox, newBox) => (newBox.width < 5 || newBox.height < 5) ? oldBox : newBox}
+                  rotateEnabled={false}
+                  borderStroke="#6366f1"
+                  anchorStroke="#6366f1"
+                  anchorFill="#ffffff"
+                  anchorSize={8}
+                  ignoreStroke
+                  keepRatio={transformerKeepRatio}
+                  enabledAnchors={[...transformerAnchors]}
+                />
+              </Group>
+            </Layer>
+          </Stage>
+
+          {/* Text editing overlay */}
+          {textInput && textEditorPos && (
+            <div
+              className="absolute z-20 flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.2)] bg-black/75 p-2 backdrop-blur-sm"
+              style={{ left: `${textEditorPos.x}px`, top: `${textEditorPos.y}px`, transform: 'translate(0, -100%)', minWidth: 160, maxWidth: 280 }}
+            >
+              <textarea
+                ref={textInputRef}
+                value={textInput.value}
+                onChange={(e) => setTextInput((prev) => prev ? { ...prev, value: e.target.value } : null)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleTextCommit(); }
+                  if (e.key === 'Escape') { e.preventDefault(); setTextInput(null); }
+                }}
+                rows={2}
+                className="w-full resize-none rounded border border-[rgba(255,255,255,0.18)] bg-bg-dark/90 px-2 py-1.5 text-sm text-text-dark outline-none focus:border-indigo-400"
+                placeholder="Enter text..."
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setTextInput(null)}
+                  className="rounded border border-[rgba(255,255,255,0.22)] px-2 py-1 text-xs text-text-muted hover:bg-bg-dark">Cancel</button>
+                <button type="button" onClick={handleTextCommit}
+                  className="rounded border border-indigo-400/45 bg-indigo-500/20 px-2 py-1 text-xs text-text-dark hover:bg-indigo-500/30">OK</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Info bar */}
+      {/* Status bar */}
       <div className="flex items-center gap-3 text-[10px] text-text-muted">
         <span>{annotations.length} annotation{annotations.length !== 1 ? 's' : ''}</span>
-        {selectedAnnotation && (
-          <span>Selected: {selectedAnnotation.type}</span>
-        )}
+        {selectedAnnotation && <span>Selected: {selectedAnnotation.type}</span>}
       </div>
 
       {error && <div className="text-xs text-red-400">{error}</div>}
 
+      {/* Action buttons */}
       <div className="flex justify-end gap-2">
         <UiButton size="sm" variant="ghost" onClick={onCancel}>
           <X className="h-3.5 w-3.5" /> Cancel

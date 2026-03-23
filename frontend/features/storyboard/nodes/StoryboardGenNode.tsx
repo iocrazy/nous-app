@@ -10,7 +10,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, useViewport } from '@xyflow/react';
-import { Minus, Plus, Sparkles } from 'lucide-react';
+import { Layers, Minus, Plus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -66,6 +66,9 @@ import {
   NODE_CONTROL_PARAMS_CHIP_CLASS,
   NODE_CONTROL_PRIMARY_BUTTON_CLASS,
 } from '../ui/nodeControlStyles';
+import { FrameList } from './storyboard-gen/FrameList';
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 type StoryboardGenNodeProps = {
   id: string;
@@ -75,20 +78,12 @@ type StoryboardGenNodeProps = {
   height?: number;
 };
 
-interface AspectRatioChoice {
-  value: string;
-  label: string;
-}
+interface AspectRatioChoice { value: string; label: string; }
+interface PickerAnchor { left: number; top: number; }
 
-interface PickerAnchor {
-  left: number;
-  top: number;
-}
+// ─── Constants ──────────────────────────────────────────────────────────────
 
-const AUTO_ASPECT_RATIO_OPTION: AspectRatioChoice = {
-  value: AUTO_REQUEST_ASPECT_RATIO,
-  label: 'Auto',
-};
+const AUTO_ASPECT_RATIO_OPTION: AspectRatioChoice = { value: AUTO_REQUEST_ASPECT_RATIO, label: 'Auto' };
 const PICKER_FALLBACK_ANCHOR: PickerAnchor = { left: 8, top: 8 };
 
 const STORYBOARD_NODE_HORIZONTAL_PADDING_PX = 24;
@@ -116,29 +111,21 @@ const FRAME_CELL_MIN_HEIGHT_PX = 16;
 const FRIENDLY_ASPECT_RATIO_CANDIDATES = [
   '1:1', '16:9', '9:16', '4:3', '3:4', '21:9', '9:21', '3:2', '2:3', '5:4', '4:5',
 ];
-const RATIO_CONTROL_MODE_BUTTON_CLASS =
-  'flex h-5 items-center rounded-full border px-1.5 text-[9px] transition-colors';
+const RATIO_CONTROL_MODE_BUTTON_CLASS = 'flex h-5 items-center rounded-full border px-1.5 text-[9px] transition-colors';
+const COMPACT_BUTTON_CLASS = 'flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors';
 
-function getTextareaCaretOffset(
-  textarea: HTMLTextAreaElement,
-  caretIndex: number
-): PickerAnchor {
+// ─── Utility functions ──────────────────────────────────────────────────────
+
+function getTextareaCaretOffset(textarea: HTMLTextAreaElement, caretIndex: number): PickerAnchor {
   const mirror = document.createElement('div');
   const computed = window.getComputedStyle(textarea);
-  const mirrorStyle = mirror.style;
-  mirrorStyle.position = 'absolute';
-  mirrorStyle.visibility = 'hidden';
-  mirrorStyle.pointerEvents = 'none';
-  mirrorStyle.whiteSpace = 'pre-wrap';
-  mirrorStyle.overflowWrap = 'break-word';
-  mirrorStyle.wordBreak = 'break-word';
-  mirrorStyle.boxSizing = computed.boxSizing;
-  mirrorStyle.width = `${textarea.clientWidth}px`;
-  mirrorStyle.font = computed.font;
-  mirrorStyle.lineHeight = computed.lineHeight;
-  mirrorStyle.letterSpacing = computed.letterSpacing;
-  mirrorStyle.padding = computed.padding;
-  mirrorStyle.border = computed.border;
+  const s = mirror.style;
+  s.position = 'absolute'; s.visibility = 'hidden'; s.pointerEvents = 'none';
+  s.whiteSpace = 'pre-wrap'; s.overflowWrap = 'break-word'; s.wordBreak = 'break-word';
+  s.boxSizing = computed.boxSizing; s.width = `${textarea.clientWidth}px`;
+  s.font = computed.font; s.lineHeight = computed.lineHeight;
+  s.letterSpacing = computed.letterSpacing; s.padding = computed.padding;
+  s.border = computed.border;
   mirror.textContent = textarea.value.slice(0, caretIndex);
   const marker = document.createElement('span');
   marker.textContent = textarea.value.slice(caretIndex, caretIndex + 1) || ' ';
@@ -150,12 +137,7 @@ function getTextareaCaretOffset(
   return { left: Math.max(0, left), top: Math.max(0, top) };
 }
 
-function resolvePickerAnchor(
-  container: HTMLDivElement | null,
-  textarea: HTMLTextAreaElement,
-  caretIndex: number,
-  zoom: number
-): PickerAnchor {
+function resolvePickerAnchor(container: HTMLDivElement | null, textarea: HTMLTextAreaElement, caretIndex: number, zoom: number): PickerAnchor {
   if (!container) return PICKER_FALLBACK_ANCHOR;
   const containerRect = container.getBoundingClientRect();
   const textareaRect = textarea.getBoundingClientRect();
@@ -167,12 +149,7 @@ function resolvePickerAnchor(
   };
 }
 
-function resolvePointerAnchor(
-  container: HTMLDivElement | null,
-  clientX: number,
-  clientY: number,
-  zoom: number
-): PickerAnchor {
+function resolvePointerAnchor(container: HTMLDivElement | null, clientX: number, clientY: number, zoom: number): PickerAnchor {
   if (!container) return PICKER_FALLBACK_ANCHOR;
   const containerRect = container.getBoundingClientRect();
   const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
@@ -186,30 +163,22 @@ function renderFrameDescriptionWithHighlights(description: string, maxImageCount
   if (!description) return ' ';
   const segments: ReactNode[] = [];
   let lastIndex = 0;
-  const referenceTokens = findReferenceTokens(description, maxImageCount);
-  for (const token of referenceTokens) {
-    if (token.start > lastIndex) {
-      segments.push(<span key={`plain-${lastIndex}`}>{description.slice(lastIndex, token.start)}</span>);
-    }
+  for (const token of findReferenceTokens(description, maxImageCount)) {
+    if (token.start > lastIndex) segments.push(<span key={`p-${lastIndex}`}>{description.slice(lastIndex, token.start)}</span>);
     segments.push(
-      <span
-        key={`ref-${token.start}`}
-        className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:-inset-x-[4px] before:-inset-y-[1px] before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']"
-      >
+      <span key={`r-${token.start}`} className="relative z-0 text-white [text-shadow:0.24px_0_currentColor,-0.24px_0_currentColor] before:absolute before:-inset-x-[4px] before:-inset-y-[1px] before:-z-10 before:rounded-[7px] before:bg-accent/55 before:content-['']">
         {token.token}
-      </span>
+      </span>,
     );
     lastIndex = token.start + token.token.length;
   }
-  if (lastIndex < description.length) {
-    segments.push(<span key={`plain-${lastIndex}`}>{description.slice(lastIndex)}</span>);
-  }
+  if (lastIndex < description.length) segments.push(<span key={`p-${lastIndex}`}>{description.slice(lastIndex)}</span>);
   return segments;
 }
 
 function buildFrameDescriptionDrafts(frames: StoryboardGenNodeData['frames']): Record<string, string> {
   const drafts: Record<string, string> = {};
-  for (const frame of frames) { drafts[frame.id] = frame.description; }
+  for (const frame of frames) drafts[frame.id] = frame.description;
   return drafts;
 }
 
@@ -224,105 +193,84 @@ function generateFrameId(): string {
 }
 
 function toCssAspectRatio(aspectRatio: string): string {
-  const [width = '1', height = '1'] = aspectRatio.split(':');
-  return `${width} / ${height}`;
+  const [w = '1', h = '1'] = aspectRatio.split(':');
+  return `${w} / ${h}`;
 }
 
-function pickClosestAspectRatio(targetRatio: number, supportedAspectRatios: string[]): string {
-  const supported = supportedAspectRatios.length > 0 ? supportedAspectRatios : ['1:1'];
-  let bestValue = supported[0];
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const ar of supported) {
-    const distance = Math.abs(Math.log(parseAspectRatio(ar) / targetRatio));
-    if (distance < bestDistance) { bestDistance = distance; bestValue = ar; }
+function pickClosestAspectRatio(targetRatio: number, supported: string[]): string {
+  const list = supported.length > 0 ? supported : ['1:1'];
+  let best = list[0]; let bestDist = Infinity;
+  for (const ar of list) {
+    const d = Math.abs(Math.log(parseAspectRatio(ar) / targetRatio));
+    if (d < bestDist) { bestDist = d; best = ar; }
   }
-  return bestValue;
+  return best;
 }
 
-function ratioValueToAspectRatioString(ratioValue: number): string {
-  if (!Number.isFinite(ratioValue) || ratioValue <= 0) return DEFAULT_ASPECT_RATIO;
-  const scaledWidth = Math.max(1, Math.round(ratioValue * 1000));
-  const scaledHeight = 1000;
-  const gcd = (a: number, b: number): number => {
-    let x = Math.abs(a); let y = Math.abs(b);
-    while (y !== 0) { const t = y; y = x % y; x = t; }
-    return x || 1;
-  };
-  const divisor = gcd(scaledWidth, scaledHeight);
-  return `${Math.round(scaledWidth / divisor)}:${Math.round(scaledHeight / divisor)}`;
+function ratioValueToString(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return DEFAULT_ASPECT_RATIO;
+  const sw = Math.max(1, Math.round(v * 1000)); const sh = 1000;
+  const gcd = (a: number, b: number): number => { let x = Math.abs(a); let y = Math.abs(b); while (y) { const t = y; y = x % y; x = t; } return x || 1; };
+  const d = gcd(sw, sh);
+  return `${Math.round(sw / d)}:${Math.round(sh / d)}`;
 }
 
-function formatFriendlyAspectRatio(ratioValue: number): string {
-  if (!Number.isFinite(ratioValue) || ratioValue <= 0) return DEFAULT_ASPECT_RATIO;
-  const snapped = pickClosestAspectRatio(ratioValue, FRIENDLY_ASPECT_RATIO_CANDIDATES);
-  if (Math.abs(Math.log(parseAspectRatio(snapped) / ratioValue)) <= Math.log(1.04)) return snapped;
-  return ratioValue >= 1 ? `${ratioValue.toFixed(2)}:1` : `1:${(1 / ratioValue).toFixed(2)}`;
+function formatFriendlyAspectRatio(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return DEFAULT_ASPECT_RATIO;
+  const snapped = pickClosestAspectRatio(v, FRIENDLY_ASPECT_RATIO_CANDIDATES);
+  if (Math.abs(Math.log(parseAspectRatio(snapped) / v)) <= Math.log(1.04)) return snapped;
+  return v >= 1 ? `${v.toFixed(2)}:1` : `1:${(1 / v).toFixed(2)}`;
 }
 
-function resolveStoryboardAspectRatios(
-  mode: StoryboardRatioControlMode,
-  controlRatioValue: number,
-  rows: number,
-  cols: number
-) {
-  const safeRows = Math.max(1, rows);
-  const safeCols = Math.max(1, cols);
-  const safeControl = Number.isFinite(controlRatioValue) && controlRatioValue > 0 ? controlRatioValue : 1;
-  const cellRatioValue = mode === 'cell' ? safeControl : safeControl * (safeRows / safeCols);
-  const overallRatioValue = mode === 'overall' ? safeControl : safeControl * (safeCols / safeRows);
+function resolveStoryboardAspectRatios(mode: StoryboardRatioControlMode, control: number, rows: number, cols: number) {
+  const sr = Math.max(1, rows); const sc = Math.max(1, cols);
+  const sv = Number.isFinite(control) && control > 0 ? control : 1;
+  const cell = mode === 'cell' ? sv : sv * (sr / sc);
+  const overall = mode === 'overall' ? sv : sv * (sc / sr);
   return {
-    cellRatioValue,
-    overallRatioValue,
-    cellAspectRatio: ratioValueToAspectRatioString(cellRatioValue),
-    overallAspectRatio: ratioValueToAspectRatioString(overallRatioValue),
-    cellAspectRatioLabel: formatFriendlyAspectRatio(cellRatioValue),
-    overallAspectRatioLabel: formatFriendlyAspectRatio(overallRatioValue),
+    cellRatioValue: cell, overallRatioValue: overall,
+    cellAspectRatio: ratioValueToString(cell), overallAspectRatio: ratioValueToString(overall),
+    cellAspectRatioLabel: formatFriendlyAspectRatio(cell), overallAspectRatioLabel: formatFriendlyAspectRatio(overall),
   };
 }
 
-type GridStepperControlProps = {
-  label: string;
-  value: number;
-  onDecrease: () => void;
-  onIncrease: () => void;
-};
+// ─── Grid Stepper ───────────────────────────────────────────────────────────
 
-function GridStepperControl({ label, value, onDecrease, onIncrease }: GridStepperControlProps) {
+function GridStepperControl({ label, value, onDecrease, onIncrease }: { label: string; value: number; onDecrease: () => void; onIncrease: () => void }) {
   return (
     <div className={GRID_CONTROL_CONTAINER_CLASS}>
       <span className={GRID_CONTROL_LABEL_CLASS}>{label}</span>
-      <button type="button" className={GRID_CONTROL_BUTTON_CLASS} onClick={(e) => { e.stopPropagation(); onDecrease(); }}>
-        <Minus className={GRID_CONTROL_ICON_CLASS} />
-      </button>
+      <button type="button" className={GRID_CONTROL_BUTTON_CLASS} onClick={(e) => { e.stopPropagation(); onDecrease(); }}><Minus className={GRID_CONTROL_ICON_CLASS} /></button>
       <span className={GRID_CONTROL_VALUE_CLASS}>{value}</span>
-      <button type="button" className={GRID_CONTROL_BUTTON_CLASS} onClick={(e) => { e.stopPropagation(); onIncrease(); }}>
-        <Plus className={GRID_CONTROL_ICON_CLASS} />
-      </button>
+      <button type="button" className={GRID_CONTROL_BUTTON_CLASS} onClick={(e) => { e.stopPropagation(); onIncrease(); }}><Plus className={GRID_CONTROL_ICON_CLASS} /></button>
     </div>
   );
 }
+
+// ─── Main component ─────────────────────────────────────────────────────────
 
 export const StoryboardGenNode = memo(({ id, data, selected, width, height }: StoryboardGenNodeProps) => {
   const { t, i18n } = useTranslation();
   const { zoom } = useViewport();
   const updateNodeInternals = useUpdateNodeInternals();
-  const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
-  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const addNode = useCanvasStore((state) => state.addNode);
-  const addEdge = useCanvasStore((state) => state.addEdge);
-  const findNodePosition = useCanvasStore((state) => state.findNodePosition);
-  const currentProjectId = useStoryboardStore((state) => state.currentProjectId);
-  const apiKeys = useSettingsStore((state) => state.apiKeys);
-  const grsaiNanoBananaProModel = useSettingsStore((state) => state.grsaiNanoBananaProModel);
-  const showNodePrice = useSettingsStore((state) => state.showNodePrice);
-  const priceDisplayCurrencyMode = useSettingsStore((state) => state.priceDisplayCurrencyMode);
-  const usdToCnyRate = useSettingsStore((state) => state.usdToCnyRate);
-  const preferDiscountedPrice = useSettingsStore((state) => state.preferDiscountedPrice);
-  const grsaiCreditTierId = useSettingsStore((state) => state.grsaiCreditTierId);
+  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const addNode = useCanvasStore((s) => s.addNode);
+  const addEdge = useCanvasStore((s) => s.addEdge);
+  const findNodePosition = useCanvasStore((s) => s.findNodePosition);
+  const currentProjectId = useStoryboardStore((s) => s.currentProjectId);
+  const apiKeys = useSettingsStore((s) => s.apiKeys);
+  const grsaiNanoBananaProModel = useSettingsStore((s) => s.grsaiNanoBananaProModel);
+  const showNodePrice = useSettingsStore((s) => s.showNodePrice);
+  const priceDisplayCurrencyMode = useSettingsStore((s) => s.priceDisplayCurrencyMode);
+  const usdToCnyRate = useSettingsStore((s) => s.usdToCnyRate);
+  const preferDiscountedPrice = useSettingsStore((s) => s.preferDiscountedPrice);
+  const grsaiCreditTierId = useSettingsStore((s) => s.grsaiCreditTierId);
 
   const [error, setError] = useState<string | null>(null);
+  const [compact, setCompact] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const activeFrameTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [showImagePicker, setShowImagePicker] = useState(false);
@@ -336,96 +284,45 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
 
   const nodeData = data as StoryboardGenNodeData;
   const [frameDescriptionDrafts, setFrameDescriptionDrafts] = useState<Record<string, string>>(() =>
-    buildFrameDescriptionDrafts(nodeData.frames)
+    buildFrameDescriptionDrafts(nodeData.frames),
   );
   const frameDescriptionDraftsRef = useRef(frameDescriptionDrafts);
+  const resolvedTitle = useMemo(() => resolveNodeDisplayName(CANVAS_NODE_TYPES.storyboardGen, nodeData), [nodeData]);
 
-  const resolvedTitle = useMemo(
-    () => resolveNodeDisplayName(CANVAS_NODE_TYPES.storyboardGen, nodeData),
-    [nodeData]
-  );
+  // ─── Incoming images ────────────────────────────────────────────────
 
-  const incomingImages = useMemo(
-    () => canvasGraphImageResolver.collectInputImages(id, nodes, edges),
-    [id, nodes, edges]
-  );
-  const incomingImageItems = useMemo(
-    () => incomingImages.map((imageUrl, index) => ({
-      imageUrl,
-      displayUrl: resolveImageDisplayUrl(imageUrl),
-      label: `Image ${index + 1}`,
-    })),
-    [incomingImages]
-  );
-  const incomingImageViewerList = useMemo(
-    () => incomingImageItems.map((item) => resolveImageDisplayUrl(item.imageUrl)),
-    [incomingImageItems]
-  );
+  const incomingImages = useMemo(() => canvasGraphImageResolver.collectInputImages(id, nodes, edges), [id, nodes, edges]);
+  const incomingImageItems = useMemo(() => incomingImages.map((url, i) => ({
+    imageUrl: url, displayUrl: resolveImageDisplayUrl(url), label: `Image ${i + 1}`,
+  })), [incomingImages]);
+  const incomingImageViewerList = useMemo(() => incomingImageItems.map((i) => resolveImageDisplayUrl(i.imageUrl)), [incomingImageItems]);
+
+  // ─── Model / resolution ─────────────────────────────────────────────
 
   const imageModels = useMemo(() => listImageModels(), []);
-  const selectedModel = useMemo(() => {
-    const modelId = nodeData.model ?? DEFAULT_IMAGE_MODEL_ID;
-    return getImageModel(modelId);
-  }, [nodeData.model]);
+  const selectedModel = useMemo(() => getImageModel(nodeData.model ?? DEFAULT_IMAGE_MODEL_ID), [nodeData.model]);
   const providerApiKey = apiKeys[selectedModel.providerId] ?? '';
-  const effectiveExtraParams = useMemo(
-    () => ({
-      ...(nodeData.extraParams ?? {}),
-      ...(selectedModel.id === GRSAI_NANO_BANANA_PRO_MODEL_ID
-        ? { grsai_pro_model: grsaiNanoBananaProModel }
-        : {}),
-    }),
-    [grsaiNanoBananaProModel, nodeData.extraParams, selectedModel.id]
-  );
-  const resolutionOptions = useMemo(
-    () => resolveImageModelResolutions(selectedModel, { extraParams: effectiveExtraParams }),
-    [effectiveExtraParams, selectedModel]
-  );
-  const selectedResolution = useMemo(
-    () => resolveImageModelResolution(selectedModel, nodeData.size, { extraParams: effectiveExtraParams }),
-    [effectiveExtraParams, nodeData.size, selectedModel]
-  );
-  const aspectRatioOptions = useMemo<AspectRatioChoice[]>(
-    () => [AUTO_ASPECT_RATIO_OPTION, ...selectedModel.aspectRatios],
-    [selectedModel.aspectRatios]
-  );
-  const selectedAspectRatio = useMemo((): AspectRatioChoice => {
-    const found = nodeData.requestAspectRatio
-      ? aspectRatioOptions.find((item) => item.value === nodeData.requestAspectRatio)
-      : undefined;
+  const effectiveExtraParams = useMemo(() => ({
+    ...(nodeData.extraParams ?? {}),
+    ...(selectedModel.id === GRSAI_NANO_BANANA_PRO_MODEL_ID ? { grsai_pro_model: grsaiNanoBananaProModel } : {}),
+  }), [grsaiNanoBananaProModel, nodeData.extraParams, selectedModel.id]);
+  const resolutionOptions = useMemo(() => resolveImageModelResolutions(selectedModel, { extraParams: effectiveExtraParams }), [effectiveExtraParams, selectedModel]);
+  const selectedResolution = useMemo(() => resolveImageModelResolution(selectedModel, nodeData.size, { extraParams: effectiveExtraParams }), [effectiveExtraParams, nodeData.size, selectedModel]);
+  const aspectRatioOptions = useMemo<AspectRatioChoice[]>(() => [AUTO_ASPECT_RATIO_OPTION, ...selectedModel.aspectRatios], [selectedModel.aspectRatios]);
+  const selectedAspectRatio = useMemo(() => {
+    const found = nodeData.requestAspectRatio ? aspectRatioOptions.find((i) => i.value === nodeData.requestAspectRatio) : undefined;
     return found ?? AUTO_ASPECT_RATIO_OPTION;
   }, [aspectRatioOptions, nodeData.requestAspectRatio]);
 
-  const showAdvancedRatioControls = false; // simplified for web
+  const showAdvancedRatioControls = false;
   const ratioControlMode: StoryboardRatioControlMode = nodeData.ratioControlMode === 'overall' ? 'overall' : 'cell';
-  const controlAspectRatioValue = useMemo(() => {
-    if (selectedAspectRatio.value === AUTO_REQUEST_ASPECT_RATIO) {
-      return nodeData.aspectRatio || DEFAULT_ASPECT_RATIO;
-    }
-    return selectedAspectRatio.value || DEFAULT_ASPECT_RATIO;
-  }, [nodeData.aspectRatio, selectedAspectRatio.value]);
-  const resolvedAspectRatios = useMemo(
-    () => resolveStoryboardAspectRatios(ratioControlMode, parseAspectRatio(controlAspectRatioValue), nodeData.gridRows, nodeData.gridCols),
-    [controlAspectRatioValue, nodeData.gridCols, nodeData.gridRows, ratioControlMode]
-  );
+  const controlAspectRatioValue = useMemo(() => selectedAspectRatio.value === AUTO_REQUEST_ASPECT_RATIO ? (nodeData.aspectRatio || DEFAULT_ASPECT_RATIO) : (selectedAspectRatio.value || DEFAULT_ASPECT_RATIO), [nodeData.aspectRatio, selectedAspectRatio.value]);
+  const resolvedAspectRatios = useMemo(() => resolveStoryboardAspectRatios(ratioControlMode, parseAspectRatio(controlAspectRatioValue), nodeData.gridRows, nodeData.gridCols), [controlAspectRatioValue, nodeData.gridCols, nodeData.gridRows, ratioControlMode]);
   const frameAspectRatioValue = resolvedAspectRatios.cellAspectRatio;
-
-  const showWebSearchToggle =
-    selectedModel.id === FAL_NANO_BANANA_2_MODEL_ID || selectedModel.id === KIE_NANO_BANANA_2_MODEL_ID;
+  const showWebSearchToggle = selectedModel.id === FAL_NANO_BANANA_2_MODEL_ID || selectedModel.id === KIE_NANO_BANANA_2_MODEL_ID;
   const webSearchEnabled = Boolean(nodeData.extraParams?.enable_web_search);
 
-  const resolvedPriceDisplay = useMemo(
-    () =>
-      showNodePrice
-        ? resolveModelPriceDisplay(selectedModel, {
-          resolution: selectedResolution.value,
-          extraParams: effectiveExtraParams,
-          language: i18n.language,
-          settings: { displayCurrencyMode: priceDisplayCurrencyMode, usdToCnyRate, preferDiscountedPrice, grsaiCreditTierId },
-        })
-        : null,
-    [grsaiCreditTierId, i18n.language, preferDiscountedPrice, priceDisplayCurrencyMode, effectiveExtraParams, selectedModel, selectedResolution.value, showNodePrice, usdToCnyRate]
-  );
+  const resolvedPriceDisplay = useMemo(() => showNodePrice ? resolveModelPriceDisplay(selectedModel, { resolution: selectedResolution.value, extraParams: effectiveExtraParams, language: i18n.language, settings: { displayCurrencyMode: priceDisplayCurrencyMode, usdToCnyRate, preferDiscountedPrice, grsaiCreditTierId } }) : null, [grsaiCreditTierId, i18n.language, preferDiscountedPrice, priceDisplayCurrencyMode, effectiveExtraParams, selectedModel, selectedResolution.value, showNodePrice, usdToCnyRate]);
   const resolvedPriceTooltip = useMemo(() => {
     if (!resolvedPriceDisplay) return undefined;
     const lines = [resolvedPriceDisplay.label];
@@ -434,92 +331,70 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     return lines.join('\n');
   }, [resolvedPriceDisplay]);
 
-  const supportedAspectRatioValues = useMemo(
-    () => selectedModel.aspectRatios.map((item) => item.value),
-    [selectedModel.aspectRatios]
-  );
-  const mappedOverallRequestAspectRatio = useMemo(
-    () => pickClosestAspectRatio(resolvedAspectRatios.overallRatioValue, supportedAspectRatioValues),
-    [resolvedAspectRatios.overallRatioValue, supportedAspectRatioValues]
-  );
+  const supportedAspectRatioValues = useMemo(() => selectedModel.aspectRatios.map((i) => i.value), [selectedModel.aspectRatios]);
+  const mappedOverallRequestAspectRatio = useMemo(() => pickClosestAspectRatio(resolvedAspectRatios.overallRatioValue, supportedAspectRatioValues), [resolvedAspectRatios.overallRatioValue, supportedAspectRatioValues]);
+
+  // ─── Layout computation ─────────────────────────────────────────────
 
   const baseFrameLayout = useMemo(() => {
-    const aspectRatio = Math.max(0.1, parseAspectRatio(frameAspectRatioValue));
-    let cellWidth = STORYBOARD_GRID_BASE_CELL_HEIGHT_PX * aspectRatio;
-    let gridWidth = nodeData.gridCols * cellWidth + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX;
-    if (gridWidth > STORYBOARD_GRID_MAX_WIDTH_PX) {
-      const scale = STORYBOARD_GRID_MAX_WIDTH_PX / gridWidth;
-      cellWidth *= scale;
-      gridWidth = nodeData.gridCols * cellWidth + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX;
-    }
-    const roundedCellWidth = Math.max(FRAME_CELL_MIN_WIDTH_PX, Math.round(cellWidth));
-    const roundedCellHeight = Math.max(FRAME_CELL_MIN_HEIGHT_PX, Math.round(roundedCellWidth / aspectRatio));
-    const roundedGridWidth = nodeData.gridCols * roundedCellWidth + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX;
-    const roundedGridHeight = nodeData.gridRows * roundedCellHeight + Math.max(0, nodeData.gridRows - 1) * FRAME_GRID_GAP_PX;
-    const nodeInnerWidth = Math.max(STORYBOARD_CONTROL_ROW_WIDTH_PX, STORYBOARD_PARAMS_ROW_WIDTH_PX, roundedGridWidth);
-    const nodeWidth = Math.max(STORYBOARD_GEN_NODE_MIN_WIDTH_PX, Math.round(nodeInnerWidth + STORYBOARD_NODE_HORIZONTAL_PADDING_PX));
-    const nodeHeight = Math.max(STORYBOARD_GEN_NODE_MIN_HEIGHT_PX, Math.round(NODE_VERTICAL_PADDING_PX + CONTROL_ROW_HEIGHT_PX + CONTROL_ROW_MARGIN_BOTTOM_PX + roundedGridHeight + FRAME_GRID_MARGIN_BOTTOM_PX + PARAM_ROW_HEIGHT_PX));
-    return { nodeWidth, nodeHeight };
+    const ar = Math.max(0.1, parseAspectRatio(frameAspectRatioValue));
+    let cw = STORYBOARD_GRID_BASE_CELL_HEIGHT_PX * ar;
+    let gw = nodeData.gridCols * cw + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX;
+    if (gw > STORYBOARD_GRID_MAX_WIDTH_PX) { const s = STORYBOARD_GRID_MAX_WIDTH_PX / gw; cw *= s; gw = nodeData.gridCols * cw + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX; }
+    const rcw = Math.max(FRAME_CELL_MIN_WIDTH_PX, Math.round(cw));
+    const rch = Math.max(FRAME_CELL_MIN_HEIGHT_PX, Math.round(rcw / ar));
+    const rgw = nodeData.gridCols * rcw + Math.max(0, nodeData.gridCols - 1) * STORYBOARD_GRID_GAP_PX;
+    const rgh = nodeData.gridRows * rch + Math.max(0, nodeData.gridRows - 1) * FRAME_GRID_GAP_PX;
+    const niw = Math.max(STORYBOARD_CONTROL_ROW_WIDTH_PX, STORYBOARD_PARAMS_ROW_WIDTH_PX, rgw);
+    return {
+      nodeWidth: Math.max(STORYBOARD_GEN_NODE_MIN_WIDTH_PX, Math.round(niw + STORYBOARD_NODE_HORIZONTAL_PADDING_PX)),
+      nodeHeight: Math.max(STORYBOARD_GEN_NODE_MIN_HEIGHT_PX, Math.round(NODE_VERTICAL_PADDING_PX + CONTROL_ROW_HEIGHT_PX + CONTROL_ROW_MARGIN_BOTTOM_PX + rgh + FRAME_GRID_MARGIN_BOTTOM_PX + PARAM_ROW_HEIGHT_PX)),
+    };
   }, [frameAspectRatioValue, nodeData.gridCols, nodeData.gridRows]);
 
   const totalFrames = useMemo(() => (nodeData.gridRows ?? 1) * (nodeData.gridCols ?? 1), [nodeData.gridRows, nodeData.gridCols]);
+  const filledFrameCount = useMemo(() => nodeData.frames.filter((f) => (frameDescriptionDrafts[f.id] ?? f.description).trim().length > 0).length, [frameDescriptionDrafts, nodeData.frames]);
   const resolvedNodeWidth = Math.max(baseFrameLayout.nodeWidth, Math.round(width ?? baseFrameLayout.nodeWidth));
   const resolvedNodeHeight = Math.max(baseFrameLayout.nodeHeight, Math.round(height ?? baseFrameLayout.nodeHeight));
 
   const frameLayout = useMemo(() => {
-    const cols = Math.max(1, nodeData.gridCols);
-    const rows = Math.max(1, nodeData.gridRows);
-    const aspectRatio = Math.max(0.1, parseAspectRatio(frameAspectRatioValue));
-    const innerWidth = Math.max(120, resolvedNodeWidth - STORYBOARD_NODE_HORIZONTAL_PADDING_PX);
-    const availableGridHeight = Math.max(72, resolvedNodeHeight - NODE_VERTICAL_PADDING_PX - CONTROL_ROW_HEIGHT_PX - CONTROL_ROW_MARGIN_BOTTOM_PX - FRAME_GRID_MARGIN_BOTTOM_PX - PARAM_ROW_HEIGHT_PX);
-    const widthLimitedCellWidth = (innerWidth - Math.max(0, cols - 1) * STORYBOARD_GRID_GAP_PX) / cols;
-    const heightLimitedCellHeight = (availableGridHeight - Math.max(0, rows - 1) * FRAME_GRID_GAP_PX) / rows;
-    const heightLimitedCellWidth = heightLimitedCellHeight * aspectRatio;
-    const cellWidth = Math.max(FRAME_CELL_MIN_WIDTH_PX, Math.floor(Math.min(widthLimitedCellWidth, heightLimitedCellWidth)));
-    const gridWidth = cols * cellWidth + Math.max(0, cols - 1) * STORYBOARD_GRID_GAP_PX;
-    const paramsRowWidth = Math.max(STORYBOARD_PARAMS_ROW_WIDTH_PX, Math.floor(innerWidth));
-    return { cellWidth, gridWidth, paramsRowWidth, cellAspectRatio: toCssAspectRatio(frameAspectRatioValue) };
+    const cols = Math.max(1, nodeData.gridCols); const rows = Math.max(1, nodeData.gridRows);
+    const ar = Math.max(0.1, parseAspectRatio(frameAspectRatioValue));
+    const innerW = Math.max(120, resolvedNodeWidth - STORYBOARD_NODE_HORIZONTAL_PADDING_PX);
+    const availH = Math.max(72, resolvedNodeHeight - NODE_VERTICAL_PADDING_PX - CONTROL_ROW_HEIGHT_PX - CONTROL_ROW_MARGIN_BOTTOM_PX - FRAME_GRID_MARGIN_BOTTOM_PX - PARAM_ROW_HEIGHT_PX);
+    const wLim = (innerW - Math.max(0, cols - 1) * STORYBOARD_GRID_GAP_PX) / cols;
+    const hLim = (availH - Math.max(0, rows - 1) * FRAME_GRID_GAP_PX) / rows;
+    const cw = Math.max(FRAME_CELL_MIN_WIDTH_PX, Math.floor(Math.min(wLim, hLim * ar)));
+    return {
+      cellWidth: cw,
+      gridWidth: cols * cw + Math.max(0, cols - 1) * STORYBOARD_GRID_GAP_PX,
+      paramsRowWidth: Math.max(STORYBOARD_PARAMS_ROW_WIDTH_PX, Math.floor(innerW)),
+      cellAspectRatio: toCssAspectRatio(frameAspectRatioValue),
+    };
   }, [frameAspectRatioValue, nodeData.gridCols, nodeData.gridRows, resolvedNodeHeight, resolvedNodeWidth]);
 
+  // ─── Effects ────────────────────────────────────────────────────────
+
   useEffect(() => { frameDescriptionDraftsRef.current = frameDescriptionDrafts; }, [frameDescriptionDrafts]);
-
   useEffect(() => {
-    const nextDrafts = buildFrameDescriptionDrafts(nodeData.frames);
-    setFrameDescriptionDrafts((prev) => areFrameDescriptionDraftsEqual(prev, nextDrafts) ? prev : nextDrafts);
+    const next = buildFrameDescriptionDrafts(nodeData.frames);
+    setFrameDescriptionDrafts((prev) => areFrameDescriptionDraftsEqual(prev, next) ? prev : next);
   }, [nodeData.frames]);
-
   useEffect(() => { updateNodeInternals(id); }, [id, resolvedNodeHeight, resolvedNodeWidth, updateNodeInternals]);
-
-  // Sync model defaults
   useEffect(() => {
     if (nodeData.model !== selectedModel.id) updateNodeData(id, { model: selectedModel.id });
     if (nodeData.size !== selectedResolution.value) updateNodeData(id, { size: selectedResolution.value as ImageSize });
     if (nodeData.requestAspectRatio !== selectedAspectRatio.value) updateNodeData(id, { requestAspectRatio: selectedAspectRatio.value });
   }, [id, nodeData, selectedModel.id, selectedResolution.value, selectedAspectRatio.value, updateNodeData]);
-
   useEffect(() => {
-    if (incomingImages.length === 0) {
-      setShowImagePicker(false);
-      setPickerFrameIndex(null);
-      setPickerCursor(null);
-      setPickerActiveIndex(0);
-      return;
-    }
-    setPickerActiveIndex((prev) => Math.min(prev, incomingImages.length - 1));
+    if (incomingImages.length === 0) { setShowImagePicker(false); setPickerFrameIndex(null); setPickerCursor(null); setPickerActiveIndex(0); return; }
+    setPickerActiveIndex((p) => Math.min(p, incomingImages.length - 1));
   }, [incomingImages.length]);
-
   useEffect(() => {
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
-      setShowImagePicker(false);
-      setPickerFrameIndex(null);
-      setPickerCursor(null);
-    };
-    document.addEventListener('pointerdown', handleOutsidePointerDown, true);
-    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
+    const handler = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) { setShowImagePicker(false); setPickerFrameIndex(null); setPickerCursor(null); } };
+    document.addEventListener('pointerdown', handler, true);
+    return () => document.removeEventListener('pointerdown', handler, true);
   }, []);
-
-  // Auto-generate frames when grid changes
   useEffect(() => {
     if (nodeData.frames.length === totalFrames) return;
     const newFrames: StoryboardGenNodeData['frames'] = [];
@@ -530,118 +405,91 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     updateNodeData(id, { frames: newFrames });
   }, [id, nodeData.frames, totalFrames, updateNodeData]);
 
-  const handleRowChange = useCallback(
-    (delta: number) => { updateNodeData(id, { gridRows: Math.max(1, Math.min(9, nodeData.gridRows + delta)) }); },
-    [nodeData, updateNodeData, id]
-  );
+  // ─── Callbacks ──────────────────────────────────────────────────────
 
-  const handleColChange = useCallback(
-    (delta: number) => { updateNodeData(id, { gridCols: Math.max(1, Math.min(9, nodeData.gridCols + delta)) }); },
-    [nodeData, updateNodeData, id]
-  );
+  const handleRowChange = useCallback((d: number) => { updateNodeData(id, { gridRows: Math.max(1, Math.min(9, nodeData.gridRows + d)) }); }, [id, nodeData, updateNodeData]);
+  const handleColChange = useCallback((d: number) => { updateNodeData(id, { gridCols: Math.max(1, Math.min(9, nodeData.gridCols + d)) }); }, [id, nodeData, updateNodeData]);
 
-  const handleFrameDescriptionChange = useCallback(
-    (index: number, description: string) => {
-      const frame = nodeData.frames[index];
-      if (!frame) return;
-      setFrameDescriptionDrafts((prev) => prev[frame.id] === description ? prev : { ...prev, [frame.id]: description });
-      const firstRef = findReferenceTokens(description, incomingImages.length)[0];
-      const referenceIndex = firstRef ? firstRef.value - 1 : null;
-      if (frame.description === description && frame.referenceIndex === referenceIndex) return;
-      const newFrames = [...nodeData.frames];
-      newFrames[index] = { ...frame, description, referenceIndex };
-      updateNodeData(id, { frames: newFrames });
-    },
-    [id, incomingImages.length, nodeData.frames, updateNodeData]
-  );
+  const handleFrameDescriptionChange = useCallback((index: number, description: string) => {
+    const frame = nodeData.frames[index];
+    if (!frame) return;
+    setFrameDescriptionDrafts((prev) => prev[frame.id] === description ? prev : { ...prev, [frame.id]: description });
+    const firstRef = findReferenceTokens(description, incomingImages.length)[0];
+    const refIndex = firstRef ? firstRef.value - 1 : null;
+    if (frame.description === description && frame.referenceIndex === refIndex) return;
+    const newFrames = [...nodeData.frames];
+    newFrames[index] = { ...frame, description, referenceIndex: refIndex };
+    updateNodeData(id, { frames: newFrames });
+  }, [id, incomingImages.length, nodeData.frames, updateNodeData]);
 
-  const closeImagePicker = useCallback(() => {
-    setShowImagePicker(false);
-    setPickerFrameIndex(null);
-    setPickerCursor(null);
-    setPickerActiveIndex(0);
-  }, []);
-
+  const closeImagePicker = useCallback(() => { setShowImagePicker(false); setPickerFrameIndex(null); setPickerCursor(null); setPickerActiveIndex(0); }, []);
   const syncFrameHighlightScroll = useCallback((frameId: string) => {
-    const textarea = frameTextareaRefs.current[frameId];
-    const highlight = frameHighlightRefs.current[frameId];
-    if (textarea && highlight) { highlight.scrollTop = textarea.scrollTop; highlight.scrollLeft = textarea.scrollLeft; }
+    const ta = frameTextareaRefs.current[frameId]; const hl = frameHighlightRefs.current[frameId];
+    if (ta && hl) { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; }
   }, []);
 
-  const insertImageReference = useCallback((imageIndex: number) => {
+  const insertImageReference = useCallback((imgIndex: number) => {
     if (!nodeData || pickerFrameIndex === null) return;
     const frame = nodeData.frames[pickerFrameIndex];
     if (!frame) { closeImagePicker(); return; }
-    const marker = `@Image${imageIndex + 1}`;
-    const currentDescription = frameDescriptionDraftsRef.current[frame.id] ?? frame.description;
-    const cursor = pickerCursor ?? currentDescription.length;
-    const { nextText, nextCursor } = insertReferenceToken(currentDescription, cursor, marker);
+    const marker = `@Image${imgIndex + 1}`;
+    const cur = frameDescriptionDraftsRef.current[frame.id] ?? frame.description;
+    const cursor = pickerCursor ?? cur.length;
+    const { nextText, nextCursor } = insertReferenceToken(cur, cursor, marker);
     handleFrameDescriptionChange(pickerFrameIndex, nextText);
     closeImagePicker();
-    requestAnimationFrame(() => {
-      activeFrameTextareaRef.current?.focus();
-      activeFrameTextareaRef.current?.setSelectionRange(nextCursor, nextCursor);
-    });
+    requestAnimationFrame(() => { activeFrameTextareaRef.current?.focus(); activeFrameTextareaRef.current?.setSelectionRange(nextCursor, nextCursor); });
   }, [closeImagePicker, handleFrameDescriptionChange, nodeData, pickerCursor, pickerFrameIndex]);
 
-  const handleFrameDescriptionKeyDown = useCallback(
-    (index: number, event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (showImagePicker && incomingImages.length > 0 && pickerFrameIndex === index) {
-        if (event.key === 'ArrowDown') { event.preventDefault(); setPickerActiveIndex((p) => (p + 1) % incomingImages.length); return; }
-        if (event.key === 'ArrowUp') { event.preventDefault(); setPickerActiveIndex((p) => p === 0 ? incomingImages.length - 1 : p - 1); return; }
-        if (event.key === 'Enter') { event.preventDefault(); insertImageReference(pickerActiveIndex); return; }
-      }
-
-      if (event.key === 'Backspace' || event.key === 'Delete') {
-        const frame = nodeData.frames[index];
-        if (!frame) return;
-        const currentDescription = frameDescriptionDraftsRef.current[frame.id] ?? frame.description;
-        const selStart = event.currentTarget.selectionStart ?? currentDescription.length;
-        const selEnd = event.currentTarget.selectionEnd ?? selStart;
-        const deleteRange = resolveReferenceAwareDeleteRange(currentDescription, selStart, selEnd, event.key === 'Backspace' ? 'backward' : 'forward', incomingImages.length);
-        if (deleteRange) {
-          event.preventDefault();
-          const { nextText, nextCursor } = removeTextRange(currentDescription, deleteRange);
-          handleFrameDescriptionChange(index, nextText);
-          requestAnimationFrame(() => {
-            activeFrameTextareaRef.current?.focus();
-            activeFrameTextareaRef.current?.setSelectionRange(nextCursor, nextCursor);
-            syncFrameHighlightScroll(frame.id);
-          });
-          return;
-        }
-      }
-
-      if (event.key === '@' && incomingImages.length > 0) {
+  const handleFrameDescriptionKeyDown = useCallback((index: number, event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (showImagePicker && incomingImages.length > 0 && pickerFrameIndex === index) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); setPickerActiveIndex((p) => (p + 1) % incomingImages.length); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); setPickerActiveIndex((p) => p === 0 ? incomingImages.length - 1 : p - 1); return; }
+      if (event.key === 'Enter') { event.preventDefault(); insertImageReference(pickerActiveIndex); return; }
+    }
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+      const frame = nodeData.frames[index]; if (!frame) return;
+      const cur = frameDescriptionDraftsRef.current[frame.id] ?? frame.description;
+      const ss = event.currentTarget.selectionStart ?? cur.length; const se = event.currentTarget.selectionEnd ?? ss;
+      const dr = resolveReferenceAwareDeleteRange(cur, ss, se, event.key === 'Backspace' ? 'backward' : 'forward', incomingImages.length);
+      if (dr) {
         event.preventDefault();
-        const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-        const pointerAnchor = lastPointerAnchorRef.current;
-        if (pointerAnchor && pointerAnchor.frameIndex === index) {
-          setPickerAnchor(pointerAnchor.anchor);
-        } else {
-          setPickerAnchor(resolvePickerAnchor(rootRef.current, event.currentTarget, cursor, zoom));
-        }
-        setPickerFrameIndex(index);
-        setPickerCursor(cursor);
-        setPickerActiveIndex(0);
-        setShowImagePicker(true);
-        activeFrameTextareaRef.current = event.currentTarget;
+        const { nextText, nextCursor } = removeTextRange(cur, dr);
+        handleFrameDescriptionChange(index, nextText);
+        requestAnimationFrame(() => { activeFrameTextareaRef.current?.focus(); activeFrameTextareaRef.current?.setSelectionRange(nextCursor, nextCursor); syncFrameHighlightScroll(frame.id); });
         return;
       }
+    }
+    if (event.key === '@' && incomingImages.length > 0) {
+      event.preventDefault();
+      const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+      const pa = lastPointerAnchorRef.current;
+      setPickerAnchor(pa && pa.frameIndex === index ? pa.anchor : resolvePickerAnchor(rootRef.current, event.currentTarget, cursor, zoom));
+      setPickerFrameIndex(index); setPickerCursor(cursor); setPickerActiveIndex(0); setShowImagePicker(true);
+      activeFrameTextareaRef.current = event.currentTarget;
+      return;
+    }
+    if (event.key === 'Escape' && showImagePicker) { event.preventDefault(); closeImagePicker(); }
+  }, [closeImagePicker, handleFrameDescriptionChange, incomingImages.length, insertImageReference, nodeData.frames, pickerActiveIndex, pickerFrameIndex, showImagePicker, syncFrameHighlightScroll, zoom]);
 
-      if (event.key === 'Escape' && showImagePicker) { event.preventDefault(); closeImagePicker(); }
-    },
-    [closeImagePicker, handleFrameDescriptionChange, incomingImages.length, insertImageReference, nodeData.frames, pickerActiveIndex, pickerFrameIndex, showImagePicker, syncFrameHighlightScroll, zoom]
-  );
+  // ─── Frame reorder ──────────────────────────────────────────────────
+
+  const handleFrameReorder = useCallback((fromIndex: number, toIndex: number) => {
+    const newFrames = [...nodeData.frames];
+    const [moved] = newFrames.splice(fromIndex, 1);
+    newFrames.splice(toIndex, 0, moved);
+    updateNodeData(id, { frames: newFrames });
+  }, [id, nodeData.frames, updateNodeData]);
+
+  // ─── Generate ───────────────────────────────────────────────────────
 
   const buildPrompt = useCallback((): string => {
     if (!nodeData) return '';
     const { gridRows, gridCols, frames } = nodeData;
     const parts: string[] = [`Generate a ${gridRows}x${gridCols} storyboard grid with ${gridRows * gridCols} frames.`];
-    frames.forEach((frame, index) => {
+    frames.forEach((frame, i) => {
       const desc = (frameDescriptionDraftsRef.current[frame.id] ?? frame.description).trim();
-      if (!desc) return;
-      parts.push(`Frame ${index + 1}: ${desc}`);
+      if (desc) parts.push(`Frame ${i + 1}: ${desc}`);
     });
     return parts.join('\n');
   }, [nodeData]);
@@ -651,64 +499,38 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     if (!currentProjectId) { setError('No project context — save the project first'); return; }
     const prompt = buildPrompt();
     if (!prompt || nodeData.frames.every((f) => !(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim())) {
-      setError('Please add descriptions to at least one frame');
-      return;
+      setError('Please add descriptions to at least one frame'); return;
     }
-
-    const generationStartedAt = Date.now();
-    const newNodePosition = findNodePosition(id, EXPORT_RESULT_NODE_DEFAULT_WIDTH, EXPORT_RESULT_NODE_LAYOUT_HEIGHT);
-    const newNodeId = addNode(CANVAS_NODE_TYPES.exportImage, newNodePosition, {
-      isGenerating: true,
-      generationStartedAt,
-      generationDurationMs: selectedModel.expectedDurationMs ?? 60000,
-      displayName: EXPORT_RESULT_DISPLAY_NAME.storyboardGenOutput,
-      resultKind: 'storyboardGenOutput' as const,
-      prompt: '',
-      model: selectedModel.id,
-      size: selectedResolution.value as ImageSize,
-      requestAspectRatio: mappedOverallRequestAspectRatio,
+    const startedAt = Date.now();
+    const pos = findNodePosition(id, EXPORT_RESULT_NODE_DEFAULT_WIDTH, EXPORT_RESULT_NODE_LAYOUT_HEIGHT);
+    const newId = addNode(CANVAS_NODE_TYPES.exportImage, pos, {
+      isGenerating: true, generationStartedAt: startedAt, generationDurationMs: selectedModel.expectedDurationMs ?? 60000,
+      displayName: EXPORT_RESULT_DISPLAY_NAME.storyboardGenOutput, resultKind: 'storyboardGenOutput' as const,
+      prompt: '', model: selectedModel.id, size: selectedResolution.value as ImageSize, requestAspectRatio: mappedOverallRequestAspectRatio,
     });
-    addEdge(id, newNodeId);
-    setSelectedNode(null);
-    setError(null);
-
+    addEdge(id, newId); setSelectedNode(null); setError(null);
     try {
-      const taskId = await canvasAiGateway.submitGenerateImageJob({
-        projectId: currentProjectId,
-        nodeId: id,
-        prompt,
-        model: nodeData.model || selectedModel.id,
-        aspectRatio: mappedOverallRequestAspectRatio,
-      });
-
-      updateNodeData(newNodeId, {
-        generationJobId: taskId,
-        generationSourceType: 'storyboardGen',
-        generationProviderId: selectedModel.providerId,
-      });
+      const taskId = await canvasAiGateway.submitGenerateImageJob({ projectId: currentProjectId, nodeId: id, prompt, model: nodeData.model || selectedModel.id, aspectRatio: mappedOverallRequestAspectRatio });
+      updateNodeData(newId, { generationJobId: taskId, generationSourceType: 'storyboardGen', generationProviderId: selectedModel.providerId });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(`Generation failed: ${message}`);
-      updateNodeData(newNodeId, {
-        isGenerating: false,
-        generationStartedAt: null,
-        generationJobId: null,
-        generationError: message,
-      });
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Generation failed: ${msg}`);
+      updateNodeData(newId, { isGenerating: false, generationStartedAt: null, generationJobId: null, generationError: msg });
     }
   }, [addEdge, addNode, buildPrompt, currentProjectId, findNodePosition, id, mappedOverallRequestAspectRatio, nodeData, selectedModel, selectedResolution.value, setSelectedNode, updateNodeData]);
+
+  // ─── Render highlight helper ────────────────────────────────────────
+
+  const renderHighlight = useCallback((desc: string) => renderFrameDescriptionWithHighlights(desc, incomingImages.length), [incomingImages.length]);
 
   if (!nodeData) return null;
 
   return (
     <div
       ref={rootRef}
-      className={`
-        group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/95 p-3 transition-colors duration-150
-        ${selected
-          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
-          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
-      `}
+      className={`group relative flex h-full flex-col overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/95 p-3 transition-colors duration-150 ${
+        selected ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]' : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'
+      }`}
       style={{ width: `${resolvedNodeWidth}px`, height: `${resolvedNodeHeight}px` }}
       onClick={() => setSelectedNode(id)}
     >
@@ -716,159 +538,81 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         className={NODE_HEADER_FLOATING_POSITION_CLASS}
         icon={<Sparkles className="h-4 w-4" />}
         titleText={resolvedTitle}
-        rightSlot={
-          resolvedPriceDisplay ? (
-            <NodePriceBadge label={resolvedPriceDisplay.label} title={resolvedPriceTooltip} />
-          ) : undefined
-        }
+        rightSlot={resolvedPriceDisplay ? <NodePriceBadge label={resolvedPriceDisplay.label} title={resolvedPriceTooltip} /> : undefined}
         editable
-        onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
+        onTitleChange={(t) => updateNodeData(id, { displayName: t })}
       />
 
-      {/* Frame summary + grid settings */}
+      {/* Grid settings + frame counter */}
       <div className="mb-2.5 flex shrink-0 items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <GridStepperControl label={t('node.storyboardGen.rowsShort', 'R')} value={nodeData.gridRows} onDecrease={() => handleRowChange(-1)} onIncrease={() => handleRowChange(1)} />
           <GridStepperControl label={t('node.storyboardGen.colsShort', 'C')} value={nodeData.gridCols} onDecrease={() => handleColChange(-1)} onIncrease={() => handleColChange(1)} />
         </div>
 
-        {showAdvancedRatioControls && (
-          <div className="min-w-0 flex-1 rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-center text-[10px] text-text-muted">
-            <span>Cell: {resolvedAspectRatios.cellAspectRatioLabel}</span>
-            <span className="mx-1 text-[rgba(255,255,255,0.22)]">|</span>
-            <span>Overall: {resolvedAspectRatios.overallAspectRatioLabel}</span>
-          </div>
-        )}
-
         <div className="flex items-center gap-1">
-          {showAdvancedRatioControls && (
-            <div className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] p-0.5">
-              <button type="button"
-                className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'overall' ? 'border-accent/55 bg-accent/18 text-text-dark' : 'border-transparent bg-transparent text-text-muted hover:bg-white/5'}`}
-                onClick={(e) => { e.stopPropagation(); updateNodeData(id, { ratioControlMode: 'overall' }); }}
-              >Overall</button>
-              <button type="button"
-                className={`${RATIO_CONTROL_MODE_BUTTON_CLASS} ${ratioControlMode === 'cell' ? 'border-accent/55 bg-accent/18 text-text-dark' : 'border-transparent bg-transparent text-text-muted hover:bg-white/5'}`}
-                onClick={(e) => { e.stopPropagation(); updateNodeData(id, { ratioControlMode: 'cell' }); }}
-              >Cell</button>
-            </div>
-          )}
+          {/* Frame counter badge */}
           <div className={GRID_SUMMARY_CLASS}>
-            {t('node.storyboardGen.frameCount', { count: totalFrames, defaultValue: `${totalFrames} frames` })}
+            {filledFrameCount}/{totalFrames} frames
           </div>
-          {/* Copy/Paste descriptions */}
-          <button
-            type="button"
-            className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors"
-            onClick={async (e) => {
-              e.stopPropagation();
-              const text = nodeData.frames
-                .map((f, i) => `Frame ${String(i + 1).padStart(2, '0')}: ${(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim()}`)
-                .join('\n');
-              try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
-            }}
-            title="Copy all frame descriptions"
-          >Copy</button>
-          <button
-            type="button"
-            className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors"
-            onClick={async (e) => {
-              e.stopPropagation();
-              try {
-                const text = await navigator.clipboard.readText();
-                const lines = text.split('\n').map((line) => line.replace(/^Frame\s*\d+\s*:\s*/i, '').trim());
-                const frames = [...nodeData.frames];
-                lines.forEach((line, i) => {
-                  if (i < frames.length && line) {
-                    handleFrameDescriptionChange(i, line);
-                  }
-                });
-              } catch { /* ignore */ }
-            }}
-            title="Paste frame descriptions from clipboard"
-          >Paste</button>
+          {/* Compact mode toggle */}
+          <button type="button" className={`${COMPACT_BUTTON_CLASS} ${compact ? 'bg-indigo-600/20 border-indigo-400/40 text-text-dark' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setCompact((p) => !p); }}
+            title={compact ? 'Expanded view' : 'Compact view'}
+          ><Layers className="h-2.5 w-2.5" /></button>
+          {/* Copy/Paste */}
+          <button type="button" className={COMPACT_BUTTON_CLASS}
+            onClick={async (e) => { e.stopPropagation(); const text = nodeData.frames.map((f, i) => `Frame ${String(i + 1).padStart(2, '0')}: ${(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim()}`).join('\n'); try { await navigator.clipboard.writeText(text); } catch { /* ignore */ } }}
+            title="Copy all frame descriptions">Copy</button>
+          <button type="button" className={COMPACT_BUTTON_CLASS}
+            onClick={async (e) => { e.stopPropagation(); try { const text = await navigator.clipboard.readText(); text.split('\n').map((l) => l.replace(/^Frame\s*\d+\s*:\s*/i, '').trim()).forEach((l, i) => { if (i < nodeData.frames.length && l) handleFrameDescriptionChange(i, l); }); } catch { /* ignore */ } }}
+            title="Paste frame descriptions">Paste</button>
         </div>
       </div>
 
-      {/* Frame Grid */}
+      {/* Frame Grid — delegated to FrameList */}
       <div className="mb-2 flex min-h-0 flex-1 items-center justify-center">
-        <div
-          className="grid gap-0.5"
-          style={{ width: `${frameLayout.gridWidth}px`, gridTemplateColumns: `repeat(${nodeData.gridCols}, ${frameLayout.cellWidth}px)` }}
-        >
-          {nodeData.frames.map((frame, index) => {
-            const frameDescription = frameDescriptionDrafts[frame.id] ?? frame.description;
-            const tooltipText = frameDescription.trim()
-              ? `Frame ${String(index + 1).padStart(2, '0')}: ${frameDescription.trim().slice(0, 200)}${frameDescription.length > 200 ? '...' : ''}`
-              : `Frame ${String(index + 1).padStart(2, '0')} (empty)`;
-            return (
-              <div
-                title={tooltipText}
-                key={frame.id}
-                className="relative overflow-hidden rounded border border-[rgba(255,255,255,0.06)] bg-bg-dark/40"
-                style={{ aspectRatio: frameLayout.cellAspectRatio }}
-              >
-                <div
-                  ref={(el) => { frameHighlightRefs.current[frame.id] = el; }}
-                  aria-hidden="true"
-                  className="ui-scrollbar pointer-events-none absolute inset-0 overflow-y-auto overflow-x-hidden text-[10px] leading-4 text-text-dark"
-                  style={{ scrollbarGutter: 'stable' }}
-                >
-                  <div className="min-h-full whitespace-pre-wrap break-words px-1.5 py-1 text-left">
-                    {renderFrameDescriptionWithHighlights(frameDescription, incomingImages.length)}
-                  </div>
-                </div>
-                <textarea
-                  ref={(el) => { frameTextareaRefs.current[frame.id] = el; }}
-                  value={frameDescription}
-                  onChange={(event) => handleFrameDescriptionChange(index, event.target.value)}
-                  onKeyDown={(event) => handleFrameDescriptionKeyDown(index, event)}
-                  onScroll={() => syncFrameHighlightScroll(frame.id)}
-                  onPointerDown={(event) => {
-                    lastPointerAnchorRef.current = {
-                      frameIndex: index,
-                      anchor: resolvePointerAnchor(rootRef.current, event.clientX, event.clientY, zoom),
-                    };
-                  }}
-                  onFocus={(event) => {
-                    activeFrameTextareaRef.current = event.currentTarget;
-                    syncFrameHighlightScroll(frame.id);
-                  }}
-                  placeholder={t('node.storyboardGen.framePlaceholder', { index: String(index + 1).padStart(2, '0'), defaultValue: `Frame ${String(index + 1).padStart(2, '0')}` })}
-                  wrap="soft"
-                  className="ui-scrollbar nodrag nowheel relative z-10 h-full w-full resize-none overflow-y-auto overflow-x-hidden bg-transparent px-1.5 py-1 text-left text-[10px] leading-4 text-transparent caret-text-dark placeholder:text-text-muted/40 focus:border-accent/50 focus:outline-none whitespace-pre-wrap break-words"
-                  style={{ scrollbarGutter: 'stable' }}
-                />
-              </div>
-            );
-          })}
-        </div>
+        <FrameList
+          frames={nodeData.frames}
+          gridCols={nodeData.gridCols}
+          frameDescriptionDrafts={frameDescriptionDrafts}
+          cellWidth={frameLayout.cellWidth}
+          gridWidth={frameLayout.gridWidth}
+          cellAspectRatio={frameLayout.cellAspectRatio}
+          incomingImageCount={incomingImages.length}
+          renderHighlight={renderHighlight}
+          onDescriptionChange={handleFrameDescriptionChange}
+          onKeyDown={handleFrameDescriptionKeyDown}
+          onReorder={handleFrameReorder}
+          onPointerDown={(index, e) => {
+            lastPointerAnchorRef.current = {
+              frameIndex: index,
+              anchor: resolvePointerAnchor(rootRef.current, e.clientX, e.clientY, zoom),
+            };
+          }}
+          onFocus={(index, e) => {
+            activeFrameTextareaRef.current = e.currentTarget;
+            syncFrameHighlightScroll(nodeData.frames[index]?.id ?? '');
+          }}
+          onScroll={syncFrameHighlightScroll}
+          highlightRefs={frameHighlightRefs}
+          textareaRefs={frameTextareaRefs}
+          compact={compact}
+        />
       </div>
 
       {/* Image reference picker */}
       {showImagePicker && incomingImageItems.length > 0 && (
-        <div
-          className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+        <div className="nowheel absolute z-30 w-[120px] overflow-hidden rounded-xl border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
           style={{ left: pickerAnchor.left, top: pickerAnchor.top }}
-          onMouseDown={(event) => event.stopPropagation()}
-          onWheelCapture={(event) => event.stopPropagation()}
-        >
+          onMouseDown={(e) => e.stopPropagation()} onWheelCapture={(e) => e.stopPropagation()}>
           <div className="ui-scrollbar nowheel max-h-[180px] overflow-y-auto" onWheelCapture={(e) => e.stopPropagation()}>
-            {incomingImageItems.map((item, imageIndex) => (
-              <button
-                key={`${item.imageUrl}-${imageIndex}`}
-                type="button"
-                onClick={(e) => { e.stopPropagation(); insertImageReference(imageIndex); }}
-                onMouseEnter={() => setPickerActiveIndex(imageIndex)}
-                className={`flex w-full items-center gap-2 border border-transparent bg-bg-dark/70 px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[rgba(255,255,255,0.18)] ${pickerActiveIndex === imageIndex ? 'border-[rgba(255,255,255,0.24)] bg-bg-dark' : ''}`}
-              >
-                <CanvasNodeImage
-                  src={item.displayUrl}
-                  alt={item.label}
-                  viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
-                  viewerImageList={incomingImageViewerList}
-                  className="h-8 w-8 rounded object-cover"
-                />
+            {incomingImageItems.map((item, imgIdx) => (
+              <button key={`${item.imageUrl}-${imgIdx}`} type="button"
+                onClick={(e) => { e.stopPropagation(); insertImageReference(imgIdx); }}
+                onMouseEnter={() => setPickerActiveIndex(imgIdx)}
+                className={`flex w-full items-center gap-2 border border-transparent bg-bg-dark/70 px-2 py-2 text-left text-sm text-text-dark transition-colors hover:border-[rgba(255,255,255,0.18)] ${pickerActiveIndex === imgIdx ? 'border-[rgba(255,255,255,0.24)] bg-bg-dark' : ''}`}>
+                <CanvasNodeImage src={item.displayUrl} alt={item.label} viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)} viewerImageList={incomingImageViewerList} className="h-8 w-8 rounded object-cover" />
                 <span>{item.label}</span>
               </button>
             ))}
@@ -879,48 +623,23 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
       {error && <div className="mb-1.5 shrink-0 text-[10px] text-red-400">{error}</div>}
 
       {/* AI Parameters */}
-      <div
-        className="relative mx-auto mt-auto flex shrink-0 items-center justify-between"
-        style={{ width: `${frameLayout.paramsRowWidth}px` }}
-      >
+      <div className="relative mx-auto mt-auto flex shrink-0 items-center justify-between" style={{ width: `${frameLayout.paramsRowWidth}px` }}>
         <ModelParamsControls
-          imageModels={imageModels}
-          selectedModel={selectedModel}
-          resolutionOptions={resolutionOptions}
-          selectedResolution={selectedResolution}
-          selectedAspectRatio={selectedAspectRatio}
-          aspectRatioOptions={aspectRatioOptions}
-          onModelChange={(modelId) => updateNodeData(id, { model: modelId })}
-          onResolutionChange={(resolution) => updateNodeData(id, { size: resolution as ImageSize })}
+          imageModels={imageModels} selectedModel={selectedModel} resolutionOptions={resolutionOptions}
+          selectedResolution={selectedResolution} selectedAspectRatio={selectedAspectRatio} aspectRatioOptions={aspectRatioOptions}
+          onModelChange={(m) => updateNodeData(id, { model: m })}
+          onResolutionChange={(r) => updateNodeData(id, { size: r as ImageSize })}
           onAspectRatioChange={(ar) => updateNodeData(id, { requestAspectRatio: ar })}
           extraParams={nodeData.extraParams}
-          onExtraParamChange={(key, value) =>
-            updateNodeData(id, { extraParams: { ...(nodeData.extraParams ?? {}), [key]: value } })
-          }
-          showWebSearchToggle={showWebSearchToggle}
-          webSearchEnabled={webSearchEnabled}
-          onWebSearchToggle={(enabled) =>
-            updateNodeData(id, { extraParams: { ...(nodeData.extraParams ?? {}), enable_web_search: enabled } })
-          }
-          triggerSize="sm"
-          chipClassName={NODE_CONTROL_CHIP_CLASS}
-          modelChipClassName={NODE_CONTROL_MODEL_CHIP_CLASS}
-          paramsChipClassName={NODE_CONTROL_PARAMS_CHIP_CLASS}
-          modelPanelAlign="center"
-          paramsPanelAlign="center"
-          modelPanelClassName="inline-block min-w-[300px] max-w-[calc(100vw-32px)] p-2"
-          paramsPanelClassName="w-[420px] p-3"
+          onExtraParamChange={(k, v) => updateNodeData(id, { extraParams: { ...(nodeData.extraParams ?? {}), [k]: v } })}
+          showWebSearchToggle={showWebSearchToggle} webSearchEnabled={webSearchEnabled}
+          onWebSearchToggle={(en) => updateNodeData(id, { extraParams: { ...(nodeData.extraParams ?? {}), enable_web_search: en } })}
+          triggerSize="sm" chipClassName={NODE_CONTROL_CHIP_CLASS} modelChipClassName={NODE_CONTROL_MODEL_CHIP_CLASS}
+          paramsChipClassName={NODE_CONTROL_PARAMS_CHIP_CLASS} modelPanelAlign="center" paramsPanelAlign="center"
+          modelPanelClassName="inline-block min-w-[300px] max-w-[calc(100vw-32px)] p-2" paramsPanelClassName="w-[420px] p-3"
         />
-
-        <UiButton
-          onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            void handleGenerate();
-          }}
-          variant="primary"
-          size="sm"
-          className={`!min-w-0 shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-        >
+        <UiButton onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerate(); }}
+          variant="primary" size="sm" className={`!min-w-0 shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}>
           <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
           {t('canvas.generate', 'Generate')}
         </UiButton>
