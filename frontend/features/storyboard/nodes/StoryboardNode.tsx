@@ -97,10 +97,24 @@ function createDefaultExportOptions(): StoryboardExportOptions {
   };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function resolveExportOptions(options: StoryboardSplitNodeData['exportOptions']): StoryboardExportOptions {
-  return {
+  const merged = {
     ...createDefaultExportOptions(),
     ...(options ?? {}),
+  };
+
+  const rawFontSize = Number.isFinite(merged.fontSize) ? merged.fontSize : 4;
+  const normalizedFontPercent = rawFontSize > 20
+    ? Math.round(rawFontSize / 6)
+    : rawFontSize;
+
+  return {
+    ...merged,
+    fontSize: clamp(Math.round(normalizedFontPercent), 1, 20),
   };
 }
 
@@ -673,6 +687,15 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
+                  <div className="mb-1">Note placement</div>
+                  <UiSelect value={exportOptions.notePlacement} onChange={(event) => patchExportOptions({ notePlacement: event.target.value === 'bottom' ? 'bottom' : 'overlay' })}>
+                    <option value="overlay">Overlay</option>
+                    <option value="bottom">Below</option>
+                  </UiSelect>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
                   <div className="mb-1">Gap</div>
                   <UiInput type="number" min={0} max={120} value={exportOptions.cellGap} className="h-8" onChange={(event) => patchExportOptions({ cellGap: Number(event.target.value) || 0 })} />
                 </div>
@@ -680,6 +703,26 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
                   <div className="mb-1">Font size (%)</div>
                   <UiInput type="number" min={1} max={20} value={exportOptions.fontSize} className="h-8" onChange={(event) => patchExportOptions({ fontSize: Number(event.target.value) || 4 })} />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex items-center gap-2">
+                  <span>Background</span>
+                  <input
+                    type="color"
+                    value={exportOptions.backgroundColor}
+                    onChange={(event) => patchExportOptions({ backgroundColor: event.target.value })}
+                    className="h-7 w-full rounded border border-[rgba(255,255,255,0.14)] bg-transparent"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span>Text</span>
+                  <input
+                    type="color"
+                    value={exportOptions.textColor}
+                    onChange={(event) => patchExportOptions({ textColor: event.target.value })}
+                    className="h-7 w-full rounded border border-[rgba(255,255,255,0.14)] bg-transparent"
+                  />
+                </label>
               </div>
             </div>
           </UiPanel>

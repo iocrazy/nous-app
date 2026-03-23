@@ -24,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { useCanvasStore } from '../../stores/canvasStore';
-import { canvasEventBus } from './application/canvasServices';
+import { canvasAiGateway, canvasEventBus } from './application/canvasServices';
 import {
   CANVAS_NODE_TYPES,
   type CanvasEdge,
@@ -32,6 +32,7 @@ import {
   type CanvasNodeType,
   DEFAULT_NODE_WIDTH,
 } from './domain/canvasNodes';
+import { prepareNodeImage } from './application/imageData';
 import {
   getConnectMenuNodeTypes,
   nodeHasSourceHandle,
@@ -132,6 +133,7 @@ export function Canvas() {
   const pasteIterationRef = useRef(0);
   const pasteImageHandledRef = useRef(false);
   const duplicateNodesRef = useRef<((sourceNodeIds: string[]) => string | null) | null>(null);
+  const activeGenerationPollNodeIdsRef = useRef(new Set<string>());
 
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -410,6 +412,73 @@ export function Canvas() {
     },
     [connectNodes, nodes, pendingConnectStart, reactFlowInstance]
   );
+
+  // ─── AI Generation Job Polling ────────────────────────────────────────────
+  useEffect(() => {
+    const POLL_INTERVAL_MS = 1400;
+    const sleep = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms); });
+
+    const pendingExportNodes = nodes.filter((node) => {
+      if (node.type !== CANVAS_NODE_TYPES.exportImage) return false;
+      const d = node.data as Record<string, unknown>;
+      return d.isGenerating === true && typeof d.generationJobId === 'string' && (d.generationJobId as string).length > 0;
+    });
+
+    for (const pendingNode of pendingExportNodes) {
+      if (activeGenerationPollNodeIdsRef.current.has(pendingNode.id)) continue;
+      activeGenerationPollNodeIdsRef.current.add(pendingNode.id);
+
+      void (async () => {
+        try {
+          while (true) {
+            const currentNode = useCanvasStore.getState().nodes.find((n) => n.id === pendingNode.id);
+            if (!currentNode) break;
+            const currentData = currentNode.data as Record<string, unknown>;
+            const jobId = typeof currentData.generationJobId === 'string' ? currentData.generationJobId : '';
+            if (!jobId || currentData.isGenerating !== true) break;
+
+            const status = await canvasAiGateway.getGenerateImageJob(jobId).catch((err) => {
+              console.warn('[GenerationJob] poll failed', { nodeId: pendingNode.id, jobId, error: err });
+              return null;
+            });
+            if (!status) { await sleep(POLL_INTERVAL_MS); continue; }
+
+            if (status.status === 'queued' || status.status === 'running') {
+              await sleep(POLL_INTERVAL_MS);
+              continue;
+            }
+
+            if (status.status === 'succeeded' && typeof status.result === 'string' && status.result.trim()) {
+              const prepared = await prepareNodeImage(status.result);
+              updateNodeData(pendingNode.id, {
+                imageUrl: prepared.imageUrl,
+                previewImageUrl: prepared.previewImageUrl,
+                aspectRatio: prepared.aspectRatio,
+                isGenerating: false,
+                generationStartedAt: null,
+                generationJobId: null,
+                generationProviderId: null,
+                generationError: null,
+              });
+              break;
+            }
+
+            const errorMessage = status.error ?? (status.status === 'not_found' ? 'Job not found' : 'Generation failed');
+            updateNodeData(pendingNode.id, {
+              isGenerating: false,
+              generationStartedAt: null,
+              generationJobId: null,
+              generationProviderId: null,
+              generationError: errorMessage,
+            });
+            break;
+          }
+        } finally {
+          activeGenerationPollNodeIdsRef.current.delete(pendingNode.id);
+        }
+      })();
+    }
+  }, [nodes, updateNodeData]);
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
