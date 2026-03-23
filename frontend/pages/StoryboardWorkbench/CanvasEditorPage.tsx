@@ -175,7 +175,7 @@ export function CanvasEditorPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-gray-950">
+      <div className="flex h-full items-center justify-center bg-zinc-950">
         <Loader2 size={24} className="animate-spin text-gray-500" />
       </div>
     );
@@ -183,7 +183,7 @@ export function CanvasEditorPage() {
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-gray-950">
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-zinc-950">
         <p className="text-sm text-red-400">Failed to load project</p>
         <p className="text-xs text-gray-500">{loadError}</p>
         <button
@@ -198,7 +198,7 @@ export function CanvasEditorPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-950 overflow-hidden">
+    <div className="h-full flex flex-col bg-zinc-950 overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-800 flex-shrink-0 bg-gray-900">
         <button
