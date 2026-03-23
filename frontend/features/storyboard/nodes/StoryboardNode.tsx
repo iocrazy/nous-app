@@ -14,7 +14,7 @@ import {
   useViewport,
   type NodeProps,
 } from '@xyflow/react';
-import { Download, ImagePlus, Loader2, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
+import { Download, ImageDown, ImagePlus, Loader2, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
 
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
 import { NodeResizeHandle } from '../ui/NodeResizeHandle';
@@ -32,19 +32,13 @@ import {
   isUploadNode,
 } from '../domain/canvasNodes';
 import { resolveNodeDisplayName } from '../domain/nodeDisplay';
-import {
-  resolveImageDisplayUrl,
-  shouldUseOriginalImageByZoom,
-} from '../application/imageData';
+import { resolveImageDisplayUrl, shouldUseOriginalImageByZoom } from '../application/imageData';
 import { UiButton, UiCheckbox, UiChipButton, UiInput, UiPanel, UiSelect } from '../../../components/ui';
-import {
-  NODE_CONTROL_CHIP_CLASS,
-  NODE_CONTROL_ICON_CLASS,
-  NODE_CONTROL_PRIMARY_BUTTON_CLASS,
-} from '../ui/nodeControlStyles';
+import { NODE_CONTROL_CHIP_CLASS, NODE_CONTROL_ICON_CLASS, NODE_CONTROL_PRIMARY_BUTTON_CLASS } from '../ui/nodeControlStyles';
 import { useCanvasStore } from '../../../stores/canvasStore';
 import { useStoryboardStore } from '../../../stores/storyboardStore';
 import { exportProject, type ExportFormat } from '../../../services/storyboardService';
+import { mergeStoryboardFrames, downloadDataUrl, type MergeFrameInput } from '../application/storyboardMerge';
 
 type StoryboardNodeProps = NodeProps & {
   id: string;
@@ -500,6 +494,47 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
     }
   }, [currentProjectId, exportOptions.showFrameIndex, exportOptions.showFrameNote, gridCols]);
 
+  const [isMerging, setIsMerging] = useState(false);
+
+  const handleLocalMerge = useCallback(async () => {
+    setExportError(null);
+    setIsMerging(true);
+    try {
+      const mergeFrames: MergeFrameInput[] = orderedFrames
+        .filter((frame) => frame.imageUrl)
+        .map((frame) => ({
+          imageUrl: resolveImageDisplayUrl(frame.imageUrl!),
+          note: frame.note || undefined,
+        }));
+      if (mergeFrames.length === 0) {
+        setExportError('No frames with images to merge');
+        return;
+      }
+      const dataUrl = await mergeStoryboardFrames(mergeFrames, {
+        rows: gridRows,
+        cols: gridCols,
+        gap: exportOptions.cellGap,
+        padding: exportOptions.outerPadding,
+        backgroundColor: exportOptions.backgroundColor,
+        showFrameNumbers: exportOptions.showFrameIndex,
+        frameNumberColor: exportOptions.textColor,
+        frameNumberSize: Math.round(exportOptions.fontSize * 6),
+        frameNumberPrefix: exportOptions.frameIndexPrefix,
+        showNotes: exportOptions.showFrameNote,
+        noteColor: exportOptions.textColor,
+        noteSize: Math.round(exportOptions.fontSize * 3.5),
+        notePlacement: exportOptions.notePlacement === 'bottom' ? 'below' : 'overlay',
+      });
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      downloadDataUrl(dataUrl, `storyboard-${timestamp}.png`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setExportError(`Local merge failed: ${message}`);
+    } finally {
+      setIsMerging(false);
+    }
+  }, [orderedFrames, gridRows, gridCols, exportOptions]);
+
   const handleTogglePicker = useCallback((frameId: string, x: number, y: number) => {
     setPickerState((previous) => {
       if (previous?.frameId === frameId) return null;
@@ -634,23 +669,43 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
           </div>
         </div>
 
-        <UiButton
-          size="sm"
-          variant="primary"
-          disabled={isExporting}
-          className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void handleExport('png');
-          }}
-        >
-          {isExporting ? (
-            <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
-          ) : (
-            <Download className={NODE_CONTROL_ICON_CLASS} />
-          )}
-          {isExporting ? 'Exporting...' : 'Export PNG'}
-        </UiButton>
+        <div className="flex items-center gap-1.5">
+          <UiButton
+            size="sm"
+            variant="muted"
+            disabled={isMerging}
+            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleLocalMerge();
+            }}
+            title="Merge frames locally and download"
+          >
+            {isMerging ? (
+              <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
+            ) : (
+              <ImageDown className={NODE_CONTROL_ICON_CLASS} />
+            )}
+            {isMerging ? 'Merging...' : 'Save PNG'}
+          </UiButton>
+          <UiButton
+            size="sm"
+            variant="primary"
+            disabled={isExporting}
+            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleExport('png');
+            }}
+          >
+            {isExporting ? (
+              <Loader2 className={`${NODE_CONTROL_ICON_CLASS} animate-spin`} />
+            ) : (
+              <Download className={NODE_CONTROL_ICON_CLASS} />
+            )}
+            {isExporting ? 'Exporting...' : 'Export PNG'}
+          </UiButton>
+        </div>
       </div>
 
       {typeof document !== 'undefined' && isExportPanelOpen && createPortal(
