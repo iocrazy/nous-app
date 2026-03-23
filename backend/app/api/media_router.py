@@ -499,15 +499,14 @@ async def fetch_media_by_type(
             if status_updates:
                 await resources_repo.update_download_status(resource_id, status_updates)
 
-        # 4) Detect platform: pass URL for yt-dlp platforms so Celery uses the right strategy
-        # Carousel/image types (2/68) MUST use Douyin path (not yt-dlp) for music download
+        # 4) Detect platform: Douyin uses its own downloader, others use yt-dlp
         original_url = media.get("original_url")
         dispatch_url = None
-        is_image_type = int(media_type) in (2, 68) if str(media_type).isdigit() else False
-        if original_url and not is_image_type:
-            _, handler_type = URLRouter.detect_platform(original_url)
-            if handler_type == "ytdlp":
-                dispatch_url = original_url
+        if original_url:
+            platform, _ = URLRouter.detect_platform(original_url)
+            if platform not in ("douyin", "tiktok"):
+                dispatch_url = original_url  # yt-dlp path
+            # Douyin/TikTok: dispatch_url=None → Celery uses Douyin downloader
 
         # 5) Dedup + dispatch
         dispatch_result = await _dedup_and_dispatch(
