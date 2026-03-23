@@ -52,11 +52,53 @@ export interface PreparedNodeImageWithUpload extends PreparedNodeImage {
   assetId?: string;
 }
 
+interface ImagePipelineError extends Error {
+  details?: string;
+}
+
+// ─── Error helpers ───────────────────────────────────────────────────────────
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.message;
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function createImagePipelineError(message: string, details?: string, cause?: unknown): ImagePipelineError {
+  const error: ImagePipelineError = new Error(message);
+  const parts: string[] = [];
+  if (details) parts.push(details);
+  if (cause !== undefined) parts.push(`cause: ${stringifyUnknown(cause)}`);
+  if (parts.length > 0) error.details = parts.join('\n');
+  return error;
+}
+
 // ─── Zoom threshold ──────────────────────────────────────────────────────────
 
+const ORIGINAL_IMAGE_ZOOM_THRESHOLD = 1.45;
+
 export function shouldUseOriginalImageByZoom(zoom: number): boolean {
-  const ORIGINAL_IMAGE_ZOOM_THRESHOLD = 1.45;
   return Number.isFinite(zoom) && zoom >= ORIGINAL_IMAGE_ZOOM_THRESHOLD;
+}
+
+// ─── Image element cache ─────────────────────────────────────────────────────
+
+const imageElementCache = new Map<string, HTMLImageElement>();
+const IMAGE_CACHE_MAX_SIZE = 64;
+
+function evictImageCache(): void {
+  if (imageElementCache.size <= IMAGE_CACHE_MAX_SIZE) return;
+  const keysToDelete = Array.from(imageElementCache.keys()).slice(0, imageElementCache.size - IMAGE_CACHE_MAX_SIZE);
+  for (const key of keysToDelete) {
+    imageElementCache.delete(key);
+  }
+}
+
+/**
+ * Get a cached HTMLImageElement or null if not yet cached.
+ */
+export function getCachedImageElement(source: string): HTMLImageElement | null {
+  return imageElementCache.get(source) ?? null;
 }
 
 // ─── File / Blob reading ─────────────────────────────────────────────────────
@@ -94,24 +136,61 @@ export function canvasToDataUrl(canvas: HTMLCanvasElement): string {
 
 // ─── Image loading ───────────────────────────────────────────────────────────
 
+const DEFAULT_LOAD_RETRY_COUNT = 2;
+const RETRY_DELAY_MS = 500;
+
 /**
  * Load an HTMLImageElement from a source URL.
  * Sets crossOrigin for http(s) sources to allow canvas operations.
+ * Uses an internal cache to avoid redundant loads.
+ * Retries on failure for http(s) sources.
  */
-export function loadImageElement(source: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    if (source.startsWith('http://') || source.startsWith('https://')) {
-      image.crossOrigin = 'anonymous';
+export async function loadImageElement(
+  source: string,
+  retryCount = DEFAULT_LOAD_RETRY_COUNT
+): Promise<HTMLImageElement> {
+  const cached = imageElementCache.get(source);
+  if (cached) return cached;
+
+  let lastError: Error | null = null;
+  const isRemote = source.startsWith('http://') || source.startsWith('https://');
+  const maxAttempts = isRemote ? retryCount + 1 : 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, RETRY_DELAY_MS * attempt);
+      });
     }
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Failed to load image: ${source.slice(0, 120)}`));
-    image.src = source;
-  });
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        if (isRemote) {
+          img.crossOrigin = 'anonymous';
+        }
+        img.onload = () => resolve(img);
+        img.onerror = () =>
+          reject(createImagePipelineError(
+            'Failed to load image',
+            `source=${source.slice(0, 120)}, attempt=${attempt + 1}/${maxAttempts}`
+          ));
+        img.src = source;
+      });
+
+      imageElementCache.set(source, image);
+      evictImageCache();
+      return image;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  throw lastError ?? new Error(`Failed to load image: ${source.slice(0, 120)}`);
 }
 
 /**
- * Convert any image URL (http, blob, data) to a data URL via canvas fetch + FileReader.
+ * Convert any image URL (http, blob, data) to a data URL via fetch + FileReader.
  * If the source is already a data URL, returns it as-is.
  */
 export async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
@@ -121,11 +200,75 @@ export async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
 
   const response = await fetch(imageUrl);
   if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status} ${imageUrl.slice(0, 120)}`);
+    throw createImagePipelineError(
+      'Failed to fetch image',
+      `url=${imageUrl.slice(0, 120)}, status=${response.status}`
+    );
   }
 
   const blob = await response.blob();
   return await blobToDataUrl(blob);
+}
+
+/**
+ * Convert an image URL to a Blob object.
+ * Useful for clipboard operations and file downloads.
+ */
+export async function imageUrlToBlob(imageUrl: string): Promise<Blob> {
+  if (imageUrl.startsWith('data:')) {
+    const response = await fetch(imageUrl);
+    return await response.blob();
+  }
+
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    throw createImagePipelineError(
+      'Failed to fetch image as blob',
+      `url=${imageUrl.slice(0, 120)}, status=${response.status}`
+    );
+  }
+
+  return await response.blob();
+}
+
+// ─── Preview rendering ───────────────────────────────────────────────────────
+
+const DEFAULT_PREVIEW_MAX_DIMENSION = 512;
+
+function resolvePreviewMimeType(imageUrl: string): string {
+  if (imageUrl.startsWith('data:image/png')) return 'image/png';
+  if (imageUrl.startsWith('data:image/webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
+/**
+ * Create a downscaled preview data URL from a full-size image.
+ */
+export async function createPreviewDataUrl(
+  imageUrl: string,
+  maxDimension = DEFAULT_PREVIEW_MAX_DIMENSION
+): Promise<string> {
+  const dataUrl = await imageUrlToDataUrl(imageUrl);
+  const image = await loadImageElement(dataUrl, 0);
+  const longestSide = Math.max(image.naturalWidth, image.naturalHeight);
+  if (longestSide <= maxDimension) return dataUrl;
+
+  const scale = maxDimension / longestSide;
+  const targetWidth = Math.max(1, Math.round(image.naturalWidth * scale));
+  const targetHeight = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext('2d');
+  if (!context) return dataUrl;
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  const mimeType = resolvePreviewMimeType(dataUrl);
+  return mimeType === 'image/jpeg' ? canvas.toDataURL(mimeType, 0.86) : canvas.toDataURL(mimeType);
 }
 
 // ─── Aspect ratio detection ──────────────────────────────────────────────────
@@ -230,4 +373,11 @@ export async function prepareNodeImage(imageUrl: string): Promise<PreparedNodeIm
  */
 export async function persistImageLocally(dataUrl: string): Promise<string> {
   return dataUrl;
+}
+
+/**
+ * Clear the image element cache (useful on project switch).
+ */
+export function clearImageCache(): void {
+  imageElementCache.clear();
 }

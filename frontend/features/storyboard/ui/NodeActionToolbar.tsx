@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
-import { Copy, Crop, Download, PenLine, RefreshCw, Scissors, Trash2, Unlink2 } from 'lucide-react';
+import { Copy, Crop, Download, Info, PenLine, RefreshCw, Scissors, Trash2, Unlink2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -53,6 +53,7 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
 
   const [isCopySuccess, setIsCopySuccess] = useState(false);
   const [isCopyTextSuccess, setIsCopyTextSuccess] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTextFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -137,6 +138,24 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
     link.click();
   }, [imageSource, node.id]);
 
+  // Node metadata for info popover
+  const nodeMetadata = useMemo(() => {
+    const meta: Array<{ label: string; value: string }> = [];
+    meta.push({ label: 'ID', value: node.id.slice(0, 12) });
+    meta.push({ label: 'Type', value: node.type ?? 'unknown' });
+    if (node.position) {
+      meta.push({ label: 'Position', value: `${Math.round(node.position.x)}, ${Math.round(node.position.y)}` });
+    }
+    const nodeData = node.data as Record<string, unknown>;
+    if (typeof nodeData.aspectRatio === 'string') {
+      meta.push({ label: 'Aspect Ratio', value: nodeData.aspectRatio });
+    }
+    if (typeof nodeData.displayName === 'string' && nodeData.displayName) {
+      meta.push({ label: 'Title', value: nodeData.displayName as string });
+    }
+    return meta;
+  }, [node]);
+
   return (
     <ReactFlowNodeToolbar
       nodeId={node.id}
@@ -147,21 +166,29 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
       className={NODE_TOOLBAR_CLASS}
     >
       <UiPanel className="flex items-center gap-1 rounded-full p-1">
-        {!isImageEdit && tools.map((tool) => {
-          const Icon = toolIconMap[tool.icon] ?? Crop;
-          return (
-            <UiChipButton
-              key={tool.type}
-              className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
-              onClick={() =>
-                canvasEventBus.publish('tool-dialog/open', { nodeId: node.id, toolType: tool.type })
-              }
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {resolveToolLabel(tool.type)}
-            </UiChipButton>
-          );
-        })}
+        {/* Tool actions group */}
+        {!isImageEdit && tools.length > 0 && (
+          <>
+            {tools.map((tool) => {
+              const Icon = toolIconMap[tool.icon] ?? Crop;
+              return (
+                <UiChipButton
+                  key={tool.type}
+                  className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+                  onClick={() =>
+                    canvasEventBus.publish('tool-dialog/open', { nodeId: node.id, toolType: tool.type })
+                  }
+                  title={`${resolveToolLabel(tool.type)}`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {resolveToolLabel(tool.type)}
+                </UiChipButton>
+              );
+            })}
+            <div className="mx-0.5 h-5 w-px bg-[rgba(255,255,255,0.12)]" />
+          </>
+        )}
+
         {!isImageEdit && canReupload && (
           <UiChipButton
             key="upload-reupload"
@@ -172,17 +199,31 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
             {t('nodeToolbar.reupload', 'Reupload')}
           </UiChipButton>
         )}
+
+        {/* Copy/Download group */}
         {!isImageEdit && canHandleImage && (
-          <UiChipButton
-            key="image-copy"
-            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} ${
-              isCopySuccess ? '!border-emerald-400/70 !bg-emerald-500/20 !text-emerald-200 hover:!bg-emerald-500/30' : ''
-            }`}
-            onClick={() => { void handleCopyImage(); }}
-          >
-            <Copy className="h-3.5 w-3.5" />
-            {t('nodeToolbar.copy', 'Copy')}
-          </UiChipButton>
+          <>
+            <UiChipButton
+              key="image-copy"
+              className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} ${
+                isCopySuccess ? '!border-emerald-400/70 !bg-emerald-500/20 !text-emerald-200 hover:!bg-emerald-500/30' : ''
+              }`}
+              onClick={() => { void handleCopyImage(); }}
+              title="Copy image to clipboard"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              {t('nodeToolbar.copy', 'Copy')}
+            </UiChipButton>
+            <UiChipButton
+              key="image-download"
+              className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
+              onClick={handleDownload}
+              title="Download image"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {t('nodeToolbar.download', 'Download')}
+            </UiChipButton>
+          </>
         )}
         {!isImageEdit && canCopyStoryboardText && (
           <UiChipButton
@@ -191,6 +232,7 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
               isCopyTextSuccess ? '!border-emerald-400/70 !bg-emerald-500/20 !text-emerald-200 hover:!bg-emerald-500/30' : ''
             }`}
             onClick={() => { void handleCopyStoryboardText(); }}
+            title="Copy frame text to clipboard"
           >
             <Copy className="h-3.5 w-3.5" />
             {t('nodeToolbar.copyText', 'Copy Text')}
@@ -201,26 +243,51 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
             key="generation-error-copy"
             className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} !border-red-500/45 !bg-red-500/15 !text-red-200 hover:!bg-red-500/25`}
             onClick={() => { void handleCopyGenerationError(); }}
+            title="Copy error message"
           >
             <Copy className="h-3.5 w-3.5" />
             {t('nodeToolbar.copyErrorReport', 'Copy Error')}
           </UiChipButton>
         )}
-        {!isImageEdit && canHandleImage && (
-          <UiChipButton
-            key="image-download"
-            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
-            onClick={handleDownload}
-          >
-            <Download className="h-3.5 w-3.5" />
-            {t('nodeToolbar.download', 'Download')}
-          </UiChipButton>
+
+        {/* Management group */}
+        {(isGroupNode(node) || true) && (
+          <div className="mx-0.5 h-5 w-px bg-[rgba(255,255,255,0.12)]" />
         )}
+
+        {/* Info button */}
+        <div className="relative">
+          <UiChipButton
+            key="node-info"
+            className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} ${
+              showInfo ? '!border-indigo-400/60 !bg-indigo-500/20' : ''
+            }`}
+            onClick={(event) => { event.stopPropagation(); setShowInfo((v) => !v); }}
+            title="Node info"
+          >
+            <Info className="h-3.5 w-3.5" />
+          </UiChipButton>
+          {showInfo && (
+            <div
+              className="absolute bottom-full left-1/2 z-50 mb-2 w-48 -translate-x-1/2 rounded-lg border border-[rgba(255,255,255,0.14)] bg-surface-dark p-2 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {nodeMetadata.map((item) => (
+                <div key={item.label} className="flex items-center justify-between py-0.5 text-[10px]">
+                  <span className="text-text-muted">{item.label}</span>
+                  <span className="text-text-dark font-mono">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {!isImageEdit && isGroupNode(node) && (
           <UiChipButton
             key="group-ungroup"
             className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS} hover:!border-amber-400/60 hover:!bg-amber-500/20 hover:!text-amber-200`}
             onClick={(event) => { event.stopPropagation(); ungroupNode(node.id); }}
+            title="Ungroup nodes"
           >
             <Unlink2 className="h-3.5 w-3.5" />
             {t('nodeToolbar.ungroup', 'Ungroup')}
@@ -230,6 +297,7 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
           key="node-delete"
           className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} border-red-500/45 bg-red-500/15 px-2.5 text-xs text-red-300 hover:bg-red-500/25`}
           onClick={(event) => { event.stopPropagation(); deleteNode(node.id); }}
+          title="Delete node (Del)"
         >
           <Trash2 className="h-3.5 w-3.5" />
           {t('common.delete', 'Delete')}
