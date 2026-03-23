@@ -86,11 +86,24 @@ Carousel player component:
 - Mute/unmute toggle button
 - Plays independently of slide navigation
 
-### 3. `frontend/pages/DownloadDetailPage.tsx`
+### 3. `frontend/pages/DownloadDetailPage.tsx` — unified layout
 
-- Detect `media_type` is `'2'` or `'68'`
-- Render `<SlidePlayer>` instead of `<VideoPlayer>`
-- Pass resource_id for API calls
+**Same page, adaptive player area.** Page layout stays identical (left player + right detail panel). Only the player area adapts:
+
+```
+DownloadDetailPage
+  ├── Left: Player Area (adaptive)
+  │   ├── media_type = video → <VideoPlayer>
+  │   └── media_type = 2/68  → <SlidePlayer> (carousel + bg music)
+  └── Right: Detail Panel (shared, unchanged)
+      ├── Overview tab (stats, tags, notes)
+      ├── Transcript tab
+      └── Analysis tab
+```
+
+- Detect `media_type` from parsed_media data
+- Swap `<VideoPlayer>` for `<SlidePlayer>` in the same container
+- All other UI (header, detail panel, actions) stays identical
 
 ## Files Changed
 
@@ -99,8 +112,8 @@ Carousel player component:
 | `backend/app/services/downloader.py` | slides/ subfolder, resource creation, standalone audio download |
 | `backend/app/services/douyin_parser.py` | Extract music.play_url |
 | `backend/app/api/media_router.py` | Add slides listing endpoint |
-| `frontend/components/SlidePlayer.tsx` | **New** — carousel player + background music |
-| `frontend/pages/DownloadDetailPage.tsx` | Route to SlidePlayer for type 2/68 |
+| `frontend/components/SlidePlayer.tsx` | **New** — carousel + background music (used inside DownloadDetailPage) |
+| `frontend/pages/DownloadDetailPage.tsx` | Adaptive player area: VideoPlayer or SlidePlayer based on media_type |
 
 ## Out of Scope
 
