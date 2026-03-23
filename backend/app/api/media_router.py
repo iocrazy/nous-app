@@ -1446,6 +1446,168 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
+@router.get("/download/{platform_id}/slides", tags=TAGS_DOWNLOAD)
+async def list_slides(platform_id: str, auth: AuthDep):
+    """
+    List slide files for a carousel/image-text media item.
+
+    Returns an ordered list of files in the slides/ subfolder.
+
+    - **platform_id**: Media unique identifier
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        repo = MediaRepository()
+        video = await repo.get_by_platform_id(platform_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        download_path = video.get("download_path")
+        if not download_path:
+            raise HTTPException(status_code=404, detail="Download path not found")
+
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
+
+        slides_dir = Path(base_path) / download_path / "slides"
+        if not slides_dir.exists() or not slides_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Slides folder not found")
+
+        # List and sort slide files
+        slides = []
+        for f in sorted(slides_dir.iterdir()):
+            if not f.is_file():
+                continue
+            suffix = f.suffix.lower()
+            if suffix in (".jpg", ".jpeg", ".png", ".webp"):
+                slide_type = "image"
+                media_type = f"image/{suffix.lstrip('.')}"
+            elif suffix in (".mp4", ".mov", ".webm"):
+                slide_type = "video"
+                media_type = f"video/{suffix.lstrip('.')}"
+            else:
+                continue
+
+            slides.append({
+                "name": f.name,
+                "type": slide_type,
+                "media_type": media_type,
+                "url": f"/api/v1/videos/download/{platform_id}/slides/{f.name}",
+            })
+
+        return {"slides": slides, "count": len(slides)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list slides for {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list slides")
+
+
+@router.get("/download/{platform_id}/slides/{filename}", tags=TAGS_DOWNLOAD)
+async def serve_slide_file(platform_id: str, filename: str, auth: AuthDep):
+    """
+    Serve a single slide file (image or video clip).
+
+    - **platform_id**: Media unique identifier
+    - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
+
+    Authentication: Bearer Token or API Key
+    """
+    import mimetypes as _mt
+
+    # Validate filename to prevent path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    try:
+        repo = MediaRepository()
+        video = await repo.get_by_platform_id(platform_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        download_path = video.get("download_path")
+        if not download_path:
+            raise HTTPException(status_code=404, detail="Download path not found")
+
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
+
+        file_path = Path(base_path) / download_path / "slides" / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Slide file not found")
+
+        content_type = _mt.guess_type(str(file_path))[0] or "application/octet-stream"
+
+        return FileResponse(
+            path=str(file_path),
+            media_type=content_type,
+            content_disposition_type="inline",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve slide {filename} for {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve slide file")
+
+
+@router.get("/download/{platform_id}/audio", tags=TAGS_DOWNLOAD)
+async def serve_audio_file(platform_id: str, auth: AuthDep):
+    """
+    Serve the standalone background audio file for carousel content.
+
+    - **platform_id**: Media unique identifier
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        repo = MediaRepository()
+        video = await repo.get_by_platform_id(platform_id)
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
+
+        # Try music_download_path first, then fallback to download_path/audio.mp3
+        audio_file = None
+        music_path = video.get("music_download_path")
+        if music_path:
+            candidate = Path(base_path) / music_path
+            if candidate.exists():
+                audio_file = candidate
+
+        if not audio_file:
+            download_path = video.get("download_path")
+            if download_path:
+                candidate = Path(base_path) / download_path / "audio.mp3"
+                if candidate.exists():
+                    audio_file = candidate
+
+        if not audio_file:
+            raise HTTPException(status_code=404, detail="Audio file not found")
+
+        return FileResponse(
+            path=str(audio_file),
+            media_type="audio/mpeg",
+            content_disposition_type="inline",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve audio for {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve audio file")
+
+
 @router.get("/logs", tags=TAGS_LOGS)
 async def get_user_logs(
     auth: AuthDep,

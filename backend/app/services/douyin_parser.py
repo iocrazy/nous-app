@@ -171,6 +171,11 @@ class DouyinParser:
         # Extract cover URLs
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
+        # Extract standalone music play URL (carousel types have separate audio)
+        music_play_urls = (
+            aweme_detail.get("music", {}).get("play_url", {}).get("url_list", [])
+        )
+
         # Build return data
         return {
             "platform_id": aweme_id,
@@ -192,6 +197,7 @@ class DouyinParser:
             "image_download_urls": image_download_urls,
             "video_download_urls": video_download_urls,
             "music_name": music_name,
+            "music_play_urls": music_play_urls,
             "need_download_video": download_video,
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
@@ -332,6 +338,11 @@ class DouyinParser:
         # Extract cover URLs
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
+        # Extract standalone music play URL (carousel types have separate audio)
+        music_play_urls = (
+            aweme_detail.get("music", {}).get("play_url", {}).get("url_list", [])
+        )
+
         return {
             "platform_id": aweme_id,
             "author": aweme_detail.get("author", {}).get("nickname"),
@@ -351,6 +362,7 @@ class DouyinParser:
             "source_platform": "douyin",
             "image_download_urls": image_download_urls,
             "music_name": music_name,
+            "music_play_urls": music_play_urls,
             "need_download_video": download_video,
             "need_download_cover": download_cover,
             "cover_urls": cover_data["cover_urls"],
