@@ -285,15 +285,13 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             >
               <ChevronRight size={16} />
             </button>
-            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white/90 font-medium z-10 pointer-events-none">
-              {currentImageIndex + 1}/{images.length}
-            </div>
+            {/* Image count moved to right side, below type indicator */}
           </>
         )}
 
         {/* Platform Logo Badge */}
         {!showingAnyScrub && data.source_platform && (
-          <div className={`absolute ${isAlbum ? 'top-9' : 'top-2'} left-2 z-10 pointer-events-none`}>
+          <div className="absolute top-2 left-2 z-10 pointer-events-none">
             {['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(data.source_platform) ? (
               <div className="bg-black/60 backdrop-blur-sm p-1 rounded-full">
                 <img src={`/icons/${data.source_platform}.svg`} alt="" className="w-4 h-4" />
@@ -306,17 +304,24 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </div>
         )}
 
-        {/* Type Indicator (Right side) */}
+        {/* Type Indicator (Right side) + Album count */}
         {!showingAnyScrub && (
-          <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
-            {isShared && (
-              <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
-                <Users size={12} />
+          <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
+            <div className="flex items-center gap-1.5">
+              {isShared && (
+                <div className="bg-indigo-500/90 backdrop-blur-sm p-1.5 rounded-full text-white" title="Shared in Team">
+                  <Users size={12} />
+                </div>
+              )}
+              <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
+                {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
+              </div>
+            </div>
+            {isAlbum && (
+              <div className="bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded-full text-[10px] text-white/90 font-medium">
+                {currentImageIndex + 1}/{images.length}
               </div>
             )}
-            <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
-              {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
-            </div>
           </div>
         )}
 
