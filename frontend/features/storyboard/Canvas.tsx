@@ -48,6 +48,7 @@ import { ImageViewerModal } from './ui/ImageViewerModal';
 import { useCanvasPersist } from './hooks/useCanvasPersist';
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+const ALT_DRAG_COPY_Z_INDEX = 2000;
 
 interface PendingConnectStart {
   nodeId: string;
@@ -58,6 +59,18 @@ interface PendingConnectStart {
 interface ClipboardSnapshot {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+}
+
+interface DuplicateOptions {
+  explicitOffset?: { x: number; y: number };
+  disableOffsetIteration?: boolean;
+  suppressSelect?: boolean;
+  suppressPersist?: boolean;
+}
+
+interface DuplicateResult {
+  firstNodeId: string | null;
+  idMap: Map<string, string>;
 }
 
 function getNodeSize(node: CanvasNode): { width: number; height: number } {
@@ -134,6 +147,12 @@ export function Canvas() {
   const pasteImageHandledRef = useRef(false);
   const duplicateNodesRef = useRef<((sourceNodeIds: string[]) => string | null) | null>(null);
   const activeGenerationPollNodeIdsRef = useRef(new Set<string>());
+  const altDragCopyRef = useRef<{
+    sourceNodeIds: string[];
+    startPositions: Map<string, { x: number; y: number }>;
+    copiedNodeIds: string[];
+    sourceToCopyIdMap: Map<string, string>;
+  } | null>(null);
 
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -248,25 +267,48 @@ export function Canvas() {
     return () => document.removeEventListener('paste', handlePaste);
   }, [selectedUploadNodeId]);
 
-  // Duplicate nodes helper
+  // Duplicate nodes helper — supports Alt+Drag copy options
   const duplicateNodes = useCallback(
-    (sourceNodeIds: string[]) => {
+    (sourceNodeIds: string[], options: DuplicateOptions = {}): DuplicateResult | null => {
       const dedupedIds = Array.from(new Set(sourceNodeIds));
       if (dedupedIds.length === 0) return null;
       const sourceNodes = nodes.filter((node) => dedupedIds.includes(node.id));
       if (sourceNodes.length === 0) return null;
       const sourceIdSet = new Set(sourceNodes.map((node) => node.id));
       const internalEdges = edges.filter((edge) => sourceIdSet.has(edge.source) && sourceIdSet.has(edge.target));
-      const offset = { x: 44 + pasteIterationRef.current * 8, y: 30 + pasteIterationRef.current * 6 };
+      const offsetStep = options.disableOffsetIteration ? 0 : pasteIterationRef.current;
+      const baseOffset = options.explicitOffset ?? { x: 44, y: 30 };
+      const offset = {
+        x: baseOffset.x + offsetStep * 8,
+        y: baseOffset.y + offsetStep * 6,
+      };
       const idMap = new Map<string, string>();
       for (const sourceNode of sourceNodes) {
         const data = cloneNodeData(sourceNode.data);
+        // Clear generation state on cloned data
+        const record = data as Record<string, unknown>;
+        if ('isGenerating' in record) { (data as { isGenerating?: boolean }).isGenerating = false; }
+        if ('generationJobId' in record) { (data as { generationJobId?: string | null }).generationJobId = null; }
+        if ('generationStartedAt' in record) { (data as { generationStartedAt?: number | null }).generationStartedAt = null; }
+        if ('generationError' in record) { (data as { generationError?: string | null }).generationError = null; }
         const nextNodeId = addNode(
           sourceNode.type as CanvasNodeType,
           { x: sourceNode.position.x + offset.x, y: sourceNode.position.y + offset.y },
           { ...data }
         );
         idMap.set(sourceNode.id, nextNodeId);
+      }
+      // Sync dimensions from source to copies
+      const sizeSyncChanges = sourceNodes
+        .map((sourceNode) => {
+          const copyId = idMap.get(sourceNode.id);
+          if (!copyId) return null;
+          const size = getNodeSize(sourceNode);
+          return { id: copyId, type: 'dimensions' as const, dimensions: size, resizing: false, setAttributes: true };
+        })
+        .filter(Boolean) as NodeChange<CanvasNode>[];
+      if (sizeSyncChanges.length > 0) {
+        applyNodesChange(sizeSyncChanges);
       }
       for (const edge of internalEdges) {
         const nextSource = idMap.get(edge.source);
@@ -275,17 +317,123 @@ export function Canvas() {
           connectNodes({ source: nextSource, target: nextTarget, sourceHandle: edge.sourceHandle ?? 'source', targetHandle: edge.targetHandle ?? 'target' });
         }
       }
-      pasteIterationRef.current += 1;
+      if (!options.disableOffsetIteration) {
+        pasteIterationRef.current += 1;
+      }
       const firstNodeId = idMap.get(sourceNodes[0].id) ?? null;
-      if (firstNodeId) setSelectedNode(firstNodeId);
-      return firstNodeId;
+      if (firstNodeId && !options.suppressSelect) {
+        setSelectedNode(firstNodeId);
+      }
+      return { firstNodeId, idMap };
     },
-    [addNode, connectNodes, edges, nodes, setSelectedNode]
+    [addNode, applyNodesChange, connectNodes, edges, nodes, setSelectedNode]
   );
 
   useEffect(() => {
-    duplicateNodesRef.current = (sourceNodeIds: string[]) => duplicateNodes(sourceNodeIds);
+    duplicateNodesRef.current = (sourceNodeIds: string[]) => duplicateNodes(sourceNodeIds)?.firstNodeId ?? null;
   }, [duplicateNodes]);
+
+  // ─── Alt+Drag to Duplicate ─────────────────────────────────────────────────
+  const handleNodeDragStart = useCallback(
+    (event: ReactMouseEvent, node: CanvasNode) => {
+      if (!event.altKey) {
+        altDragCopyRef.current = null;
+        return;
+      }
+      const sourceNodeIds = selectedNodeIds.includes(node.id) ? selectedNodeIds : [node.id];
+      if (sourceNodeIds.length === 0) { altDragCopyRef.current = null; return; }
+      const startPositions = new Map<string, { x: number; y: number }>();
+      for (const sourceNodeId of sourceNodeIds) {
+        const sourceNode = nodes.find((item) => item.id === sourceNodeId);
+        if (sourceNode) {
+          startPositions.set(sourceNodeId, { x: sourceNode.position.x, y: sourceNode.position.y });
+        }
+      }
+      if (startPositions.size === 0) { altDragCopyRef.current = null; return; }
+      const result = duplicateNodes(sourceNodeIds, {
+        explicitOffset: { x: 0, y: 0 },
+        disableOffsetIteration: true,
+        suppressPersist: true,
+        suppressSelect: true,
+      });
+      if (!result) { altDragCopyRef.current = null; return; }
+      const copiedNodeIds = sourceNodeIds
+        .map((sid) => result.idMap.get(sid))
+        .filter((cid): cid is string => Boolean(cid));
+      if (copiedNodeIds.length === 0) { altDragCopyRef.current = null; return; }
+      // Raise duplicated nodes above originals
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((n) =>
+          copiedNodeIds.includes(n.id)
+            ? { ...n, zIndex: ALT_DRAG_COPY_Z_INDEX, style: { ...(n.style ?? {}), zIndex: ALT_DRAG_COPY_Z_INDEX } }
+            : n
+        ),
+      }));
+      altDragCopyRef.current = { sourceNodeIds, startPositions, copiedNodeIds, sourceToCopyIdMap: result.idMap };
+    },
+    [duplicateNodes, nodes, selectedNodeIds]
+  );
+
+  const handleNodeDrag = useCallback(
+    (_event: ReactMouseEvent, node: CanvasNode) => {
+      const altState = altDragCopyRef.current;
+      if (!altState) return;
+      const startPos = altState.startPositions.get(node.id);
+      if (!startPos) return;
+      const dx = node.position.x - startPos.x;
+      const dy = node.position.y - startPos.y;
+      // Restore originals to start positions and move copies to delta
+      const restoreChanges = altState.sourceNodeIds
+        .map((sid) => {
+          const sp = altState.startPositions.get(sid);
+          if (!sp) return null;
+          return { id: sid, type: 'position' as const, position: sp, dragging: true };
+        })
+        .filter(Boolean) as NodeChange<CanvasNode>[];
+      const moveChanges = altState.sourceNodeIds
+        .map((sid) => {
+          const sp = altState.startPositions.get(sid);
+          const cid = altState.sourceToCopyIdMap.get(sid);
+          if (!sp || !cid) return null;
+          return { id: cid, type: 'position' as const, position: { x: sp.x + dx, y: sp.y + dy }, dragging: true };
+        })
+        .filter(Boolean) as NodeChange<CanvasNode>[];
+      const allChanges = [...restoreChanges, ...moveChanges];
+      if (allChanges.length > 0) applyNodesChange(allChanges);
+    },
+    [applyNodesChange]
+  );
+
+  const handleNodeDragStop = useCallback(
+    (_event: ReactMouseEvent, node: CanvasNode) => {
+      const altState = altDragCopyRef.current;
+      if (!altState) return;
+      altDragCopyRef.current = null;
+      const startPos = altState.startPositions.get(node.id);
+      if (!startPos) return;
+      const dx = node.position.x - startPos.x;
+      const dy = node.position.y - startPos.y;
+      const restoreChanges = altState.sourceNodeIds
+        .map((sid) => {
+          const sp = altState.startPositions.get(sid);
+          if (!sp) return null;
+          return { id: sid, type: 'position' as const, position: sp, dragging: false };
+        })
+        .filter(Boolean) as NodeChange<CanvasNode>[];
+      const finalizeChanges = altState.sourceNodeIds
+        .map((sid) => {
+          const sp = altState.startPositions.get(sid);
+          const cid = altState.sourceToCopyIdMap.get(sid);
+          if (!sp || !cid) return null;
+          return { id: cid, type: 'position' as const, position: { x: sp.x + dx, y: sp.y + dy }, dragging: false };
+        })
+        .filter(Boolean) as NodeChange<CanvasNode>[];
+      const allChanges = [...restoreChanges, ...finalizeChanges];
+      if (allChanges.length > 0) applyNodesChange(allChanges);
+      if (altState.copiedNodeIds.length > 0) setSelectedNode(altState.copiedNodeIds[0]);
+    },
+    [applyNodesChange, setSelectedNode]
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -491,6 +639,9 @@ export function Canvas() {
         onConnect={handleConnect}
         onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
         onPaneClick={handlePaneClick}
         onMove={handleMove}
         onMoveEnd={handleMoveEnd}
@@ -500,6 +651,7 @@ export function Canvas() {
         defaultViewport={DEFAULT_VIEWPORT}
         minZoom={0.1}
         maxZoom={5}
+        autoPanOnNodeDrag
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         multiSelectionKeyCode={['Control', 'Meta']}
