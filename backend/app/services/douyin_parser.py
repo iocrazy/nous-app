@@ -18,6 +18,56 @@ class DouyinParser:
     """Douyin data parsing service, responsible for cleaning and structuring Douyin API data"""
 
     @staticmethod
+    def _extract_music_play_urls(aweme_detail: Dict[str, Any], source: str = "") -> list:
+        """Extract music play URLs from aweme_detail, trying multiple paths.
+
+        Douyin's music structure varies between API sources:
+        - Full API: music.play_url.url_list = [url1, url2, ...]
+        - Full API: music.play_url.uri = "obj/xxx" (build stable URL)
+        - LightHTTP: music.play_url may be empty {}, but music.mid exists
+        - Some: music.play_url is a string URL directly
+        """
+        music_obj = aweme_detail.get("music", {})
+        if not music_obj:
+            logger.info(f"[DouyinParser/{source}] No music object")
+            return []
+
+        urls: list = []
+
+        # Path 1: play_url.url_list (full API)
+        play_url_obj = music_obj.get("play_url", {})
+        if isinstance(play_url_obj, dict):
+            urls = play_url_obj.get("url_list", [])
+            if not urls:
+                # Path 2: play_url.uri → build stable URL
+                uri = play_url_obj.get("uri", "")
+                if uri:
+                    urls = [f"https://sf-tk-sg.ibytedtos.com/obj/{uri}"]
+        elif isinstance(play_url_obj, str) and play_url_obj:
+            urls = [play_url_obj]
+
+        # Path 3: music.mid → build stable URL from music ID
+        if not urls:
+            mid = music_obj.get("mid", "") or music_obj.get("id_str", "") or str(music_obj.get("id", ""))
+            if mid and mid != "0" and mid != "":
+                urls = [f"https://sf-tk-sg.ibytedtos.com/obj/ies-music/{mid}.mp3"]
+
+        # Path 4: music.url (sometimes present)
+        if not urls:
+            direct_url = music_obj.get("url", "")
+            if direct_url:
+                urls = [direct_url]
+
+        logger.info(
+            f"[DouyinParser/{source}] music extraction: "
+            f"keys={sorted(music_obj.keys())}, "
+            f"play_url_type={type(play_url_obj).__name__}, "
+            f"mid={music_obj.get('mid', 'N/A')}, "
+            f"result_urls={len(urls)}"
+        )
+        return urls
+
+    @staticmethod
     async def parse_aweme_detail(
         aweme_detail: Dict[str, Any],
         valid_url: str,
@@ -172,20 +222,7 @@ class DouyinParser:
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
         # Extract standalone music play URL (carousel types have separate audio)
-        # Try multiple paths: play_url.url_list, play_url.uri → stable URL
-        music_obj = aweme_detail.get("music", {})
-        play_url_obj = music_obj.get("play_url", {})
-        music_play_urls = []
-        if isinstance(play_url_obj, dict):
-            music_play_urls = play_url_obj.get("url_list", [])
-            # Fallback: build from URI if url_list is empty
-            if not music_play_urls:
-                uri = play_url_obj.get("uri", "")
-                if uri:
-                    music_play_urls = [f"https://sf-tk-sg.ibytedtos.com/obj/{uri}"]
-        elif isinstance(play_url_obj, str):
-            music_play_urls = [play_url_obj]
-        logger.info(f"[DouyinParser] Image-text music: play_url_keys={list(play_url_obj.keys()) if isinstance(play_url_obj, dict) else type(play_url_obj).__name__}, urls={len(music_play_urls)}")
+        music_play_urls = DouyinParser._extract_music_play_urls(aweme_detail, "image_text")
 
         # Build return data
         return {
@@ -350,18 +387,7 @@ class DouyinParser:
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
         # Extract standalone music play URL (carousel types have separate audio)
-        music_obj_2 = aweme_detail.get("music", {})
-        play_url_obj_2 = music_obj_2.get("play_url", {})
-        music_play_urls = []
-        if isinstance(play_url_obj_2, dict):
-            music_play_urls = play_url_obj_2.get("url_list", [])
-            if not music_play_urls:
-                uri = play_url_obj_2.get("uri", "")
-                if uri:
-                    music_play_urls = [f"https://sf-tk-sg.ibytedtos.com/obj/{uri}"]
-        elif isinstance(play_url_obj_2, str):
-            music_play_urls = [play_url_obj_2]
-        logger.info(f"[DouyinParser] Image-collection music: play_url_keys={list(play_url_obj_2.keys()) if isinstance(play_url_obj_2, dict) else type(play_url_obj_2).__name__}, urls={len(music_play_urls)}")
+        music_play_urls = DouyinParser._extract_music_play_urls(aweme_detail, "image_collection")
 
         return {
             "platform_id": aweme_id,
