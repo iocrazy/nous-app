@@ -7,11 +7,12 @@ import {
 } from 'lucide-react';
 import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
+import { SlidePlayer } from '../components/SlidePlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { trashResourceByMediaId } from '../services/resourceService';
-import { getVideoUrl, isVideoType } from '../utils/awemeType';
+import { getVideoUrl, isVideoType, isAlbumType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
 import { updateResource, getVersionHlsUrl } from '../services/resourceService';
@@ -534,7 +535,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
-            {(hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
+            {isAlbumType(video.media_type) ? (
+              <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} />
+            ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
                 src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
                 originalSrc={hlsUrl ? getVideoUrl(video, mediaToken ?? undefined) || undefined : undefined}
