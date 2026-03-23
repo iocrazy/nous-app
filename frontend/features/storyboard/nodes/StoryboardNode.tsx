@@ -14,7 +14,7 @@ import {
   useViewport,
   type NodeProps,
 } from '@xyflow/react';
-import { Download, ImageDown, ImagePlus, Loader2, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
+import { Download, ImageDown, ImagePlus, Loader2, Plus, SlidersHorizontal, SquareArrowOutUpRight } from 'lucide-react';
 
 import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
 import { NodeResizeHandle } from '../ui/NodeResizeHandle';
@@ -218,6 +218,11 @@ const FrameCard = memo(
             onSortStart(frame.id);
           }}
         >
+          {/* Frame number overlay */}
+          <div className="pointer-events-none absolute left-0.5 top-0.5 z-10 flex h-4 min-w-[16px] items-center justify-center rounded-sm bg-black/50 px-0.5 text-[8px] font-medium text-white/70 leading-none">
+            {index + 1}
+          </div>
+
           {frame.imageUrl ? (
             <CanvasNodeImage
               src={imageSource ?? ''}
@@ -228,8 +233,11 @@ const FrameCard = memo(
               draggable={false}
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-[11px] text-text-muted">
-              Empty
+            <div className="flex h-full w-full items-center justify-center border border-dashed border-[rgba(255,255,255,0.12)]">
+              <div className="flex flex-col items-center gap-0.5">
+                <Plus className="h-3 w-3 text-text-muted/40" />
+                <span className="text-[9px] text-text-muted/40">Empty</span>
+              </div>
             </div>
           )}
 
@@ -296,6 +304,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
   const [draggedFrameId, setDraggedFrameId] = useState<string | null>(null);
   const [dropTargetFrameId, setDropTargetFrameId] = useState<string | null>(null);
   const [pickerState, setPickerState] = useState<{ frameId: string; x: number; y: number } | null>(null);
+  const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
   const currentProjectId = useStoryboardStore((state) => state.currentProjectId);
   const [exportError, setExportError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);

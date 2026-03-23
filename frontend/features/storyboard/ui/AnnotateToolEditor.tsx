@@ -51,14 +51,14 @@ interface ToolButton {
 }
 
 const TOOL_BUTTONS: ToolButton[] = [
-  { type: 'select', label: 'Select', icon: MousePointer2, group: 'select' },
-  { type: 'pen', label: 'Pen', icon: PenLine, group: 'draw' },
-  { type: 'line', label: 'Line', icon: LineIcon, group: 'draw' },
-  { type: 'eraser', label: 'Eraser', icon: Eraser, group: 'draw' },
-  { type: 'rect', label: 'Rect', icon: Square, group: 'shape' },
-  { type: 'ellipse', label: 'Ellipse', icon: Circle, group: 'shape' },
-  { type: 'arrow', label: 'Arrow', icon: ArrowRight, group: 'shape' },
-  { type: 'text', label: 'Text', icon: Type, group: 'other' },
+  { type: 'select', label: 'Select (V)', icon: MousePointer2, group: 'select' },
+  { type: 'pen', label: 'Pen (B)', icon: PenLine, group: 'draw' },
+  { type: 'line', label: 'Line (L)', icon: LineIcon, group: 'draw' },
+  { type: 'eraser', label: 'Eraser (X)', icon: Eraser, group: 'draw' },
+  { type: 'rect', label: 'Rect (R)', icon: Square, group: 'shape' },
+  { type: 'ellipse', label: 'Ellipse (E)', icon: Circle, group: 'shape' },
+  { type: 'arrow', label: 'Arrow (A)', icon: ArrowRight, group: 'shape' },
+  { type: 'text', label: 'Text (T)', icon: Type, group: 'other' },
 ];
 
 // ─── Tool button groups ─────────────────────────────────────────────────────
@@ -430,8 +430,33 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
     const cmd = e.ctrlKey || e.metaKey;
     if (cmd && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
     if (cmd && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); handleDeleteSelected(); }
-  }, [handleDeleteSelected, handleRedo, handleUndo, selectedId, textInput]);
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); handleDeleteSelected(); return; }
+    // Tool shortcuts (single key when not in text mode)
+    if (!cmd && !e.shiftKey && !e.altKey) {
+      const key = e.key.toLowerCase();
+      if (key === 'v') { e.preventDefault(); setActiveTool('select'); return; }
+      if (key === 'b') { e.preventDefault(); setActiveTool('pen'); return; }
+      if (key === 'l') { e.preventDefault(); setActiveTool('line'); return; }
+      if (key === 'x') { e.preventDefault(); setActiveTool('eraser'); return; }
+      if (key === 'r') { e.preventDefault(); setActiveTool('rect'); return; }
+      if (key === 'e') { e.preventDefault(); setActiveTool('ellipse'); return; }
+      if (key === 'a') { e.preventDefault(); setActiveTool('arrow'); return; }
+      if (key === 't') { e.preventDefault(); setActiveTool('text'); return; }
+    }
+    // Duplicate selected (Ctrl+D)
+    if (cmd && e.key === 'd' && selectedId) {
+      e.preventDefault();
+      const item = annotations.find((a) => a.id === selectedId);
+      if (item) {
+        pushUndo(annotations);
+        const dup = { ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}` };
+        if ('x' in dup && typeof dup.x === 'number') (dup as { x: number }).x += 20;
+        if ('y' in dup && typeof dup.y === 'number') (dup as { y: number }).y += 20;
+        setAnnotations((prev) => [...prev, dup as AnnotationItem]);
+        setSelectedId(dup.id);
+      }
+    }
+  }, [annotations, handleDeleteSelected, handleRedo, handleUndo, pushUndo, selectedId, textInput]);
 
   // ─── Render a single annotation shape ─────────────────────────────────
 
@@ -830,6 +855,10 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
       <div className="flex items-center gap-3 text-[10px] text-text-muted">
         <span>{annotations.length} annotation{annotations.length !== 1 ? 's' : ''}</span>
         {selectedAnnotation && <span>Selected: {selectedAnnotation.type}</span>}
+        {image && <span className="ml-auto">{image.naturalWidth} x {image.naturalHeight}px</span>}
+        <span className="text-text-muted/50">
+          {activeTool === 'select' ? 'V' : activeTool === 'pen' ? 'B' : activeTool === 'rect' ? 'R' : activeTool === 'ellipse' ? 'E' : activeTool === 'arrow' ? 'A' : activeTool === 'text' ? 'T' : activeTool === 'eraser' ? 'X' : activeTool === 'line' ? 'L' : ''}
+        </span>
       </div>
 
       {error && <div className="text-xs text-red-400">{error}</div>}

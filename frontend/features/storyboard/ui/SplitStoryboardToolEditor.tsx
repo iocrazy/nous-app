@@ -120,14 +120,14 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
           {gridLines.verticals.map((line) => (
             <div
               key={line.key}
-              className="absolute top-0 bottom-0 bg-indigo-400"
+              className="absolute top-0 bottom-0 bg-indigo-400 transition-all duration-200 ease-out"
               style={{ left: line.left, width: line.width, opacity: line.opacity }}
             />
           ))}
           {gridLines.horizontals.map((line) => (
             <div
               key={line.key}
-              className="absolute left-0 right-0 bg-indigo-400"
+              className="absolute left-0 right-0 bg-indigo-400 transition-all duration-200 ease-out"
               style={{ top: line.top, height: line.height, opacity: line.opacity }}
             />
           ))}
@@ -285,13 +285,18 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
 
       {error && <div className="text-xs text-red-400">{error}</div>}
 
-      <div className="flex justify-end gap-2">
-        <UiButton size="sm" variant="ghost" onClick={onCancel}>
-          <X className="h-3.5 w-3.5" /> Cancel
-        </UiButton>
-        <UiButton size="sm" variant="primary" disabled={processing} onClick={handleConfirm}>
-          <Check className="h-3.5 w-3.5" /> {processing ? 'Splitting...' : 'Split'}
-        </UiButton>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-text-muted/50">
+          Output: {totalFrames - excludedCells.size} frame{(totalFrames - excludedCells.size) !== 1 ? 's' : ''}
+        </span>
+        <div className="flex gap-2">
+          <UiButton size="sm" variant="ghost" onClick={onCancel}>
+            <X className="h-3.5 w-3.5" /> Cancel
+          </UiButton>
+          <UiButton size="sm" variant="primary" disabled={processing} onClick={handleConfirm}>
+            <Check className="h-3.5 w-3.5" /> {processing ? 'Splitting...' : `Split (${totalFrames - excludedCells.size})`}
+          </UiButton>
+        </div>
       </div>
     </div>
   );
