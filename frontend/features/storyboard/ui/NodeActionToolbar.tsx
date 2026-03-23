@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NodeToolbar as ReactFlowNodeToolbar } from '@xyflow/react';
-import { Copy, Crop, Download, Info, PenLine, RefreshCw, Scissors, Trash2, Unlink2 } from 'lucide-react';
+import { Copy, Crop, Download, Info, PenLine, RefreshCw, Scissors, Trash2, Unlink2, FileDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -138,6 +138,19 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
     link.click();
   }, [imageSource, node.id]);
 
+  // Batch download helper (downloads the current image with auto naming)
+  const handleDownloadWithName = useCallback(() => {
+    if (!imageSource) return;
+    const displayName = typeof (node.data as Record<string, unknown>).displayName === 'string'
+      ? (node.data as Record<string, unknown>).displayName as string
+      : '';
+    const safeName = displayName.replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 40) || `node-${node.id.slice(0, 8)}`;
+    const link = document.createElement('a');
+    link.href = imageSource;
+    link.download = `${safeName}.png`;
+    link.click();
+  }, [imageSource, node.data, node.id]);
+
   // Node metadata for info popover
   const nodeMetadata = useMemo(() => {
     const meta: Array<{ label: string; value: string }> = [];
@@ -217,8 +230,8 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
             <UiChipButton
               key="image-download"
               className={`h-8 ${TOOLBAR_BUTTON_RADIUS_CLASS} px-2.5 text-xs ${TOOLBAR_NEUTRAL_BUTTON_CLASS}`}
-              onClick={handleDownload}
-              title="Download image"
+              onClick={handleDownloadWithName}
+              title="Download image with auto name"
             >
               <Download className="h-3.5 w-3.5" />
               {t('nodeToolbar.download', 'Download')}

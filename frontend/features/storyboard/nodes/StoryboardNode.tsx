@@ -780,7 +780,35 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
             ) : (
               <Download className={NODE_CONTROL_ICON_CLASS} />
             )}
-            {isExporting ? 'Exporting...' : 'Export PNG'}
+            {isExporting ? 'Exporting...' : 'PNG'}
+          </UiButton>
+          <UiButton
+            size="sm"
+            variant="muted"
+            disabled={isExporting}
+            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleExport('pdf');
+            }}
+            title="Export as PDF"
+          >
+            <Download className={NODE_CONTROL_ICON_CLASS} />
+            PDF
+          </UiButton>
+          <UiButton
+            size="sm"
+            variant="muted"
+            disabled={isExporting}
+            className={`nodrag ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleExport('zip');
+            }}
+            title="Export as ZIP"
+          >
+            <SquareArrowOutUpRight className={NODE_CONTROL_ICON_CLASS} />
+            ZIP
           </UiButton>
         </div>
       </div>
@@ -862,10 +890,16 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         document.body
       )}
 
-      {/* Metadata summary */}
-      <div className="mt-1 flex shrink-0 items-center gap-2 text-[10px] text-text-muted">
-        <span>{framesWithImages}/{totalFrames} frames with images</span>
-        {frameAspectRatio && <span>Aspect: {frameAspectRatio}</span>}
+      {/* Frame statistics in header */}
+      <div className="mt-1 flex shrink-0 flex-wrap items-center gap-2 text-[10px] text-text-muted">
+        <span>{framesWithImages}/{totalFrames} frames</span>
+        {frameAspectRatio && <span>| {frameAspectRatio}</span>}
+        {orderedFrames.some((f) => typeof f.duration_seconds === 'number' && f.duration_seconds > 0) && (
+          <span>| {orderedFrames.reduce((sum, f) => sum + (f.duration_seconds ?? 0), 0).toFixed(1)}s total</span>
+        )}
+        {orderedFrames.some((f) => typeof f.duration_seconds === 'number' && f.duration_seconds > 0) && (
+          <span>| avg {(orderedFrames.reduce((sum, f) => sum + (f.duration_seconds ?? 0), 0) / Math.max(1, orderedFrames.filter((f) => typeof f.duration_seconds === 'number' && f.duration_seconds > 0).length)).toFixed(1)}s</span>
+        )}
       </div>
 
       {exportError && <div className="mt-2 shrink-0 text-xs text-red-400">{exportError}</div>}
@@ -884,6 +918,38 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
             onClick={() => handleEditFrame(data.frames.find((f) => f.id === frameContextMenu.frameId)!)}
           >
             View Image
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            onClick={() => {
+              const note = prompt('Frame note:', data.frames.find((f) => f.id === frameContextMenu.frameId)?.note ?? '');
+              if (note !== null) {
+                updateStoryboardFrame(id, frameContextMenu.frameId, { note });
+              }
+              setFrameContextMenu(null);
+            }}
+          >
+            Edit Note
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            onClick={() => {
+              const inputRef = document.createElement('input');
+              inputRef.type = 'file';
+              inputRef.accept = 'image/*';
+              inputRef.onchange = () => {
+                const file = inputRef.files?.[0];
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                updateStoryboardFrame(id, frameContextMenu.frameId, { imageUrl: url, previewImageUrl: url });
+              };
+              inputRef.click();
+              setFrameContextMenu(null);
+            }}
+          >
+            Replace Image
           </button>
           <button
             type="button"

@@ -232,7 +232,7 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
         </div>
       </div>
 
-      {/* Cell hover preview */}
+      {/* Cell hover preview with size info */}
       {hoveredCell !== null && (
         <div className="flex items-center gap-1.5 text-[10px] text-text-muted">
           <Eye className="h-3 w-3" />
@@ -240,8 +240,16 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
             Cell S{hoveredCell + 1} — Row {Math.floor(hoveredCell / cols) + 1}, Col {(hoveredCell % cols) + 1}
             {excludedCells.has(hoveredCell) ? ' (excluded)' : ''}
           </span>
+          <span className="ml-auto text-zinc-500">
+            ~{Math.round((1 / cols) * 100)}% x {Math.round((1 / rows) * 100)}%
+          </span>
         </div>
       )}
+
+      {/* Grid boundary info */}
+      <div className="flex items-center gap-2 text-[10px] text-text-muted/70">
+        <span>Drag grid line positions are evenly distributed</span>
+      </div>
 
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">

@@ -7,6 +7,8 @@ import {
   type PriceDisplayCurrencyMode,
 } from '../features/storyboard/pricing/types';
 
+export type UiRadiusPreset = 'compact' | 'default' | 'large';
+export type ThemeTonePreset = 'neutral' | 'warm' | 'cool';
 export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
 export type ProviderApiKeys = Record<string, string>;
 export const DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL = 'nano-banana-pro';
@@ -29,6 +31,10 @@ interface SettingsState {
   preferDiscountedPrice: boolean;
   grsaiCreditTierId: GrsaiCreditTierId;
   canvasEdgeRoutingMode: CanvasEdgeRoutingMode;
+  uiRadiusPreset: UiRadiusPreset;
+  themeTonePreset: ThemeTonePreset;
+  accentColor: string;
+  downloadPresetPaths: string[];
   setProviderApiKey: (providerId: string, key: string) => void;
   setGrsaiNanoBananaProModel: (model: string) => void;
   setHideProviderGuidePopover: (hide: boolean) => void;
@@ -45,6 +51,20 @@ interface SettingsState {
   setPreferDiscountedPrice: (enabled: boolean) => void;
   setGrsaiCreditTierId: (tierId: GrsaiCreditTierId) => void;
   setCanvasEdgeRoutingMode: (mode: CanvasEdgeRoutingMode) => void;
+  setUiRadiusPreset: (preset: UiRadiusPreset) => void;
+  setThemeTonePreset: (preset: ThemeTonePreset) => void;
+  setAccentColor: (color: string) => void;
+  setDownloadPresetPaths: (paths: string[]) => void;
+}
+
+const HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/;
+
+function normalizeHexColor(input: string): string {
+  const trimmed = input.trim();
+  if (!HEX_COLOR_PATTERN.test(trimmed)) {
+    return '#3B82F6';
+  }
+  return trimmed.startsWith('#') ? trimmed.toUpperCase() : `#${trimmed.toUpperCase()}`;
 }
 
 function normalizeApiKey(input: string): string {
@@ -154,6 +174,10 @@ export const useSettingsStore = create<SettingsState>()(
       preferDiscountedPrice: false,
       grsaiCreditTierId: DEFAULT_GRSAI_CREDIT_TIER_ID,
       canvasEdgeRoutingMode: 'spline',
+      uiRadiusPreset: 'default',
+      themeTonePreset: 'neutral',
+      accentColor: '#3B82F6',
+      downloadPresetPaths: [],
       setProviderApiKey: (providerId, key) =>
         set((state) => ({
           apiKeys: {
@@ -192,6 +216,10 @@ export const useSettingsStore = create<SettingsState>()(
         set({ grsaiCreditTierId: normalizeGrsaiCreditTierId(grsaiCreditTierId) }),
       setCanvasEdgeRoutingMode: (canvasEdgeRoutingMode) =>
         set({ canvasEdgeRoutingMode: normalizeCanvasEdgeRoutingMode(canvasEdgeRoutingMode) }),
+      setUiRadiusPreset: (preset) => set({ uiRadiusPreset: preset }),
+      setThemeTonePreset: (preset) => set({ themeTonePreset: preset }),
+      setAccentColor: (color) => set({ accentColor: normalizeHexColor(color) }),
+      setDownloadPresetPaths: (paths) => set({ downloadPresetPaths: Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean))) }),
     }),
     {
       name: 'storyboard-settings-storage',

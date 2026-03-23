@@ -24,6 +24,13 @@ function resolveDialogWidth(toolType: string): string {
   return 'max-w-md';
 }
 
+function resolveDialogDescription(toolType: string): string | null {
+  if (toolType === NODE_TOOL_TYPES.crop) return 'Select the area to crop. Double-click to apply.';
+  if (toolType === NODE_TOOL_TYPES.annotate) return 'Draw shapes and text on the image.';
+  if (toolType === NODE_TOOL_TYPES.splitStoryboard) return 'Split image into a grid of storyboard frames.';
+  return null;
+}
+
 export function NodeToolDialog() {
   const activeToolDialog = useCanvasStore((state) => state.activeToolDialog);
   const nodes = useCanvasStore((state) => state.nodes);
@@ -161,7 +168,12 @@ export function NodeToolDialog() {
       >
         {/* Header bar */}
         <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.08)] px-4 py-2.5">
-          <span className="text-sm font-medium text-text-dark">{dialogTitle}</span>
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-text-dark">{dialogTitle}</span>
+            {resolveDialogDescription(toolType) && (
+              <span className="text-[10px] text-text-muted">{resolveDialogDescription(toolType)}</span>
+            )}
+          </div>
           <button
             type="button"
             onClick={handleClose}

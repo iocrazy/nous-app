@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, type PointerEvent as ReactPointerEvent } from 'react';
-import { Crop, Check, X, RotateCcw } from 'lucide-react';
+import { Crop, Check, X, RotateCcw, FlipHorizontal, FlipVertical, RotateCw } from 'lucide-react';
 import { UiButton } from '../../../components/ui';
 import { cropImageSource } from '../application/toolProcessor';
 import { loadImageElement } from '../application/imageData';
@@ -299,6 +299,40 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
           <RotateCcw className="h-3 w-3" />
           Reset
         </button>
+      </div>
+
+      {/* Flip/Rotate controls */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-text-muted">Transform:</span>
+        <button type="button" title="Flip Horizontal"
+          className="flex h-6 w-6 items-center justify-center rounded bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]"
+          onClick={() => {
+            // Flip crop horizontally
+            setCropRect((prev) => ({
+              ...prev,
+              x: 1 - prev.x - prev.width,
+            }));
+          }}><FlipHorizontal className="h-3 w-3" /></button>
+        <button type="button" title="Flip Vertical"
+          className="flex h-6 w-6 items-center justify-center rounded bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]"
+          onClick={() => {
+            setCropRect((prev) => ({
+              ...prev,
+              y: 1 - prev.y - prev.height,
+            }));
+          }}><FlipVertical className="h-3 w-3" /></button>
+        <button type="button" title="Rotate crop 90deg"
+          className="flex h-6 w-6 items-center justify-center rounded bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]"
+          onClick={() => {
+            // Swap w/h for rotation effect (approximate crop rotation)
+            const imgRatio = imageDimensions.width / imageDimensions.height;
+            setCropRect((prev) => ({
+              x: prev.y,
+              y: 1 - prev.x - prev.width * imgRatio,
+              width: prev.height / imgRatio,
+              height: prev.width * imgRatio,
+            }));
+          }}><RotateCw className="h-3 w-3" /></button>
       </div>
 
       {/* Image info display */}

@@ -8,6 +8,7 @@ import {
   Lock,
   Unlock,
   Trash2,
+  Grid3x3,
 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 
@@ -17,9 +18,11 @@ import { useCanvasStore } from '../../stores/canvasStore';
 interface CanvasToolbarProps {
   isLocked: boolean;
   onToggleLock: () => void;
+  snapToGrid?: boolean;
+  onToggleSnap?: () => void;
 }
 
-export const CanvasToolbar = memo(({ isLocked, onToggleLock }: CanvasToolbarProps) => {
+export const CanvasToolbar = memo(({ isLocked, onToggleLock, snapToGrid, onToggleSnap }: CanvasToolbarProps) => {
   const { t } = useTranslation();
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const addNode = useCanvasStore((state) => state.addNode);
@@ -78,6 +81,16 @@ export const CanvasToolbar = memo(({ isLocked, onToggleLock }: CanvasToolbarProp
       </button>
 
       <div className="h-6 w-px bg-border-dark" />
+
+      {onToggleSnap && (
+        <button
+          onClick={onToggleSnap}
+          className={`rounded p-1.5 transition-colors hover:bg-bg-dark ${snapToGrid ? 'bg-indigo-500/20' : ''}`}
+          title={snapToGrid ? 'Disable snap to grid' : 'Enable snap to grid'}
+        >
+          <Grid3x3 className={`h-4 w-4 ${snapToGrid ? 'text-indigo-400' : 'text-text-muted'}`} />
+        </button>
+      )}
 
       <button
         onClick={onToggleLock}
