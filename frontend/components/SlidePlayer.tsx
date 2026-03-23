@@ -53,7 +53,8 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
         if (!resp.ok) {
           throw new Error(`Failed to load slides (${resp.status})`);
         }
-        const data: Slide[] = await resp.json();
+        const json = await resp.json();
+        const data: Slide[] = Array.isArray(json) ? json : (json.slides || []);
         if (!cancelled) {
           setSlides(data);
           setCurrentIndex(0);
@@ -165,6 +166,15 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
   }
 
   const currentSlide = slides[currentIndex];
+
+  if (!currentSlide) {
+    return (
+      <div className="w-full h-full bg-zinc-950 rounded-lg flex flex-col items-center justify-center gap-3">
+        <ImageOff size={48} className="text-zinc-600" />
+        <p className="text-zinc-400 text-sm">Slide not found</p>
+      </div>
+    );
+  }
 
   return (
     <div
