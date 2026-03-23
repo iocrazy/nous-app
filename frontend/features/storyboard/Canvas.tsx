@@ -44,6 +44,7 @@ import { CanvasToolbar } from './CanvasToolbar';
 import { SelectedNodeOverlay } from './ui/SelectedNodeOverlay';
 import { NodeToolDialog } from './ui/NodeToolDialog';
 import { ImageViewerModal } from './ui/ImageViewerModal';
+import { useCanvasPersist } from './hooks/useCanvasPersist';
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
@@ -114,6 +115,8 @@ function getClientPosition(event: MouseEvent | TouchEvent): { x: number; y: numb
 }
 
 export function Canvas() {
+  useCanvasPersist();
+
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const suppressNextPaneClickRef = useRef(false);
