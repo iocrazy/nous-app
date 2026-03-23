@@ -1473,9 +1473,13 @@ async def list_slides(platform_id: str, auth: AuthDep):
         except ValueError:
             raise HTTPException(status_code=404, detail="Download path not configured")
 
+        # Check slides/ subfolder first (new format), fallback to root folder (old format)
         slides_dir = Path(base_path) / download_path / "slides"
         if not slides_dir.exists() or not slides_dir.is_dir():
-            raise HTTPException(status_code=404, detail="Slides folder not found")
+            # Fallback: old downloads stored images in root folder
+            slides_dir = Path(base_path) / download_path
+            if not slides_dir.exists() or not slides_dir.is_dir():
+                raise HTTPException(status_code=404, detail="Slides folder not found")
 
         # List and sort slide files
         slides = []
@@ -1539,7 +1543,10 @@ async def serve_slide_file(platform_id: str, filename: str, auth: AuthDep):
         except ValueError:
             raise HTTPException(status_code=404, detail="Download path not configured")
 
+        # Check slides/ subfolder first, fallback to root folder (old format)
         file_path = Path(base_path) / download_path / "slides" / filename
+        if not file_path.exists():
+            file_path = Path(base_path) / download_path / filename
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Slide file not found")
 
