@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Grid3x3, Check, X, Minus, Plus } from 'lucide-react';
+import { Grid3x3, Check, X, Minus, Plus, Eye } from 'lucide-react';
 import { UiButton } from '../../../components/ui';
 import { canvasToolProcessor } from '../application/canvasServices';
 import { NODE_TOOL_TYPES } from '../domain/canvasNodes';
@@ -29,6 +29,14 @@ const LINE_THICKNESS_OPTIONS = [
   { label: 'Thick', value: 4 },
 ] as const;
 
+const SUGGESTED_GRIDS = [
+  { label: '2x2', rows: 2, cols: 2 },
+  { label: '2x3', rows: 2, cols: 3 },
+  { label: '3x3', rows: 3, cols: 3 },
+  { label: '3x4', rows: 3, cols: 4 },
+  { label: '4x4', rows: 4, cols: 4 },
+] as const;
+
 export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: SplitStoryboardToolEditorProps) {
   const [rows, setRows] = useState(3);
   const [cols, setCols] = useState(3);
@@ -36,6 +44,8 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
   const [showFrameNumbers, setShowFrameNumbers] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<number | null>(null);
+  const [excludedCells, setExcludedCells] = useState<Set<number>>(new Set());
 
   const totalFrames = rows * cols;
 
@@ -137,16 +147,101 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
               </span>
             </div>
           ))}
+          {/* Cell interaction zones */}
+          {Array.from({ length: totalFrames }, (_, i) => {
+            const row = Math.floor(i / cols);
+            const col = i % cols;
+            const isExcluded = excludedCells.has(i);
+            const isHovered = hoveredCell === i;
+            return (
+              <div
+                key={`cell-${i}`}
+                className={`absolute cursor-pointer transition-colors ${
+                  isExcluded
+                    ? 'bg-red-500/30'
+                    : isHovered
+                      ? 'bg-indigo-400/15'
+                      : ''
+                }`}
+                style={{
+                  left: `${(col / cols) * 100}%`,
+                  top: `${(row / rows) * 100}%`,
+                  width: `${(1 / cols) * 100}%`,
+                  height: `${(1 / rows) * 100}%`,
+                  pointerEvents: 'auto',
+                }}
+                onMouseEnter={() => setHoveredCell(i)}
+                onMouseLeave={() => setHoveredCell(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExcludedCells((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(i)) {
+                      next.delete(i);
+                    } else {
+                      // Don't exclude all cells
+                      if (next.size < totalFrames - 1) {
+                        next.add(i);
+                      }
+                    }
+                    return next;
+                  });
+                }}
+                title={isExcluded ? `Click to include S${i + 1}` : `Click to exclude S${i + 1}`}
+              >
+                {isExcluded && (
+                  <div className="flex h-full items-center justify-center">
+                    <X className="h-4 w-4 text-red-300/80" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
+      {/* Quick grid presets */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-text-muted">Grid:</span>
+        {SUGGESTED_GRIDS.map((grid) => (
+          <button
+            key={grid.label}
+            type="button"
+            onClick={() => { setRows(grid.rows); setCols(grid.cols); setExcludedCells(new Set()); }}
+            className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
+              rows === grid.rows && cols === grid.cols
+                ? 'bg-indigo-600 text-white'
+                : 'bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]'
+            }`}
+          >
+            {grid.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center gap-4">
-        <StepperControl label="Rows" value={rows} min={1} max={9} onChange={setRows} />
-        <StepperControl label="Cols" value={cols} min={1} max={9} onChange={setCols} />
-        <div className="text-xs text-text-muted ml-auto">
-          {totalFrames} frames
+        <StepperControl label="Rows" value={rows} min={1} max={9} onChange={(v) => { setRows(v); setExcludedCells(new Set()); }} />
+        <StepperControl label="Cols" value={cols} min={1} max={9} onChange={(v) => { setCols(v); setExcludedCells(new Set()); }} />
+        <div className="flex flex-col items-end gap-0.5 ml-auto">
+          <span className="text-xs text-text-muted">
+            {totalFrames - excludedCells.size} / {totalFrames} frames
+          </span>
+          {excludedCells.size > 0 && (
+            <span className="text-[10px] text-amber-400">{excludedCells.size} excluded</span>
+          )}
         </div>
       </div>
+
+      {/* Cell hover preview */}
+      {hoveredCell !== null && (
+        <div className="flex items-center gap-1.5 text-[10px] text-text-muted">
+          <Eye className="h-3 w-3" />
+          <span>
+            Cell S{hoveredCell + 1} — Row {Math.floor(hoveredCell / cols) + 1}, Col {(hoveredCell % cols) + 1}
+            {excludedCells.has(hoveredCell) ? ' (excluded)' : ''}
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">

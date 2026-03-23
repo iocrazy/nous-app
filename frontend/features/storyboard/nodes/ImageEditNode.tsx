@@ -457,7 +457,63 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         )}
       </div>
 
-      <div className="mt-2 flex shrink-0 items-center gap-1">
+      {/* Upstream image preview strip */}
+      {incomingImageItems.length > 0 && (
+        <div className="mt-1.5 shrink-0">
+          <div className="mb-1 text-[9px] text-text-muted">Input Images ({incomingImageItems.length})</div>
+          <div className="flex gap-1 overflow-x-auto">
+            {incomingImageItems.slice(0, 6).map((item, index) => (
+              <CanvasNodeImage
+                key={`upstream-${index}`}
+                src={item.displayUrl}
+                alt={item.label}
+                viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
+                viewerImageList={incomingImageViewerList}
+                className="h-10 w-10 shrink-0 rounded border border-[rgba(255,255,255,0.1)] object-cover"
+                draggable={false}
+              />
+            ))}
+            {incomingImageItems.length > 6 && (
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-[rgba(255,255,255,0.1)] bg-bg-dark/50 text-[10px] text-text-muted">
+                +{incomingImageItems.length - 6}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Negative prompt */}
+      <div className="mt-1.5 shrink-0">
+        <input
+          type="text"
+          value={(data.extraParams?.negative_prompt as string) ?? ''}
+          onChange={(e) => {
+            e.stopPropagation();
+            updateNodeData(id, { extraParams: { ...(data.extraParams ?? {}), negative_prompt: e.target.value } });
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          placeholder={t('node.imageEdit.negativePrompt', 'Negative prompt (optional)...')}
+          className="nodrag nowheel w-full rounded border border-[rgba(255,255,255,0.1)] bg-bg-dark/30 px-1.5 py-0.5 text-[11px] text-text-dark outline-none placeholder:text-text-muted/60"
+        />
+      </div>
+
+      {/* Seed + controls row */}
+      <div className="mt-1.5 flex shrink-0 items-center gap-1">
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={(data.extraParams?.seed as number) ?? ''}
+            onChange={(e) => {
+              e.stopPropagation();
+              const seedValue = e.target.value ? Number(e.target.value) : undefined;
+              updateNodeData(id, { extraParams: { ...(data.extraParams ?? {}), seed: seedValue } });
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            placeholder="Seed"
+            className="nodrag nowheel h-6 w-16 rounded border border-[rgba(255,255,255,0.1)] bg-bg-dark/30 px-1 text-[10px] text-text-dark outline-none placeholder:text-text-muted/60"
+            title="Seed for reproducibility (leave empty for random)"
+          />
+        </div>
         <ModelParamsControls
           imageModels={imageModels}
           selectedModel={selectedModel}
@@ -489,7 +545,18 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         </UiButton>
       </div>
 
-      {error && <div className="mt-1 shrink-0 text-xs text-red-400">{error}</div>}
+      {error && (
+        <div className="mt-1 flex shrink-0 items-center gap-2">
+          <span className="text-xs text-red-400 flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setError(null); void handleGenerate(); }}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-red-300 border border-red-500/30 hover:bg-red-500/15 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <Handle type="target" id="target" position={Position.Left} className="!h-2 !w-2 !border-surface-dark !bg-accent" />
       <Handle type="source" id="source" position={Position.Right} className="!h-2 !w-2 !border-surface-dark !bg-accent" />

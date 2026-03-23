@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, type PointerEvent as ReactPointerEvent } from 'react';
-import { Crop, Check, X } from 'lucide-react';
+import { Crop, Check, X, RotateCcw } from 'lucide-react';
 import { UiButton } from '../../../components/ui';
 import { cropImageSource } from '../application/toolProcessor';
 import { loadImageElement } from '../application/imageData';
@@ -17,16 +17,32 @@ const ASPECT_RATIOS = [
   { label: '9:16', value: '9:16' },
   { label: '4:3', value: '4:3' },
   { label: '3:4', value: '3:4' },
+  { label: '3:2', value: '3:2' },
+  { label: '2:3', value: '2:3' },
+  { label: '21:9', value: '21:9' },
 ] as const;
 
 type HandlePosition = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'move';
 
 const HANDLE_SIZE_PX = 10;
 const MIN_CROP_PERCENT = 0.05;
+const MIN_CROP_SIZE_PX = 16;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
+
+const CURSOR_MAP: Record<HandlePosition, string> = {
+  nw: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+  se: 'nwse-resize',
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize',
+  move: 'move',
+};
 
 export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,6 +51,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [cropRect, setCropRect] = useState({ x: 0.1, y: 0.1, width: 0.8, height: 0.8 });
+  const [activeHandle, setActiveHandle] = useState<HandlePosition | null>(null);
   const dragRef = useRef<{
     handle: HandlePosition;
     startX: number;
@@ -43,6 +60,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
     containerWidth: number;
     containerHeight: number;
   } | null>(null);
+  const lastClickTimeRef = useRef(0);
 
   useEffect(() => {
     void (async () => {
@@ -67,6 +85,10 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
     }
   }, [aspectRatio, imageDimensions]);
 
+  const handleResetCrop = useCallback(() => {
+    setCropRect({ x: 0, y: 0, width: 1, height: 1 });
+  }, []);
+
   const handlePointerDown = useCallback(
     (handle: HandlePosition, event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -82,6 +104,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
         containerWidth: rect.width,
         containerHeight: rect.height,
       };
+      setActiveHandle(handle);
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
     },
     [cropRect]
@@ -140,7 +163,10 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
     [aspectRatio, imageDimensions]
   );
 
-  const handlePointerUp = useCallback(() => { dragRef.current = null; }, []);
+  const handlePointerUp = useCallback(() => {
+    dragRef.current = null;
+    setActiveHandle(null);
+  }, []);
 
   const handleConfirm = useCallback(async () => {
     setProcessing(true);
@@ -160,15 +186,32 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
     }
   }, [imageUrl, cropRect, imageDimensions, onConfirm]);
 
+  // Double-click on crop area to apply
+  const handleCropAreaDoubleClick = useCallback(() => {
+    const now = Date.now();
+    if (now - lastClickTimeRef.current < 300) {
+      void handleConfirm();
+    }
+    lastClickTimeRef.current = now;
+  }, [handleConfirm]);
+
+  // Computed crop info
+  const cropPixelWidth = Math.round(cropRect.width * imageDimensions.width);
+  const cropPixelHeight = Math.round(cropRect.height * imageDimensions.height);
+  const cropPercentage = imageDimensions.width > 0 && imageDimensions.height > 0
+    ? Math.round(cropRect.width * cropRect.height * 100)
+    : 0;
+  const isFullImage = cropRect.x <= 0.001 && cropRect.y <= 0.001 && cropRect.width >= 0.999 && cropRect.height >= 0.999;
+
   const handlePositions: Array<{ pos: HandlePosition; style: React.CSSProperties; cursor: string }> = [
-    { pos: 'nw', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'nwse-resize' },
-    { pos: 'ne', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'nesw-resize' },
-    { pos: 'sw', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'nesw-resize' },
-    { pos: 'se', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'nwse-resize' },
-    { pos: 'n', style: { left: `calc(${(cropRect.x + cropRect.width / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'ns-resize' },
-    { pos: 's', style: { left: `calc(${(cropRect.x + cropRect.width / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'ns-resize' },
-    { pos: 'w', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'ew-resize' },
-    { pos: 'e', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: 'ew-resize' },
+    { pos: 'nw', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.nw },
+    { pos: 'ne', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.ne },
+    { pos: 'sw', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.sw },
+    { pos: 'se', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.se },
+    { pos: 'n', style: { left: `calc(${(cropRect.x + cropRect.width / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${cropRect.y * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.n },
+    { pos: 's', style: { left: `calc(${(cropRect.x + cropRect.width / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.s },
+    { pos: 'w', style: { left: `calc(${cropRect.x * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.w },
+    { pos: 'e', style: { left: `calc(${(cropRect.x + cropRect.width) * 100}% - ${HANDLE_SIZE_PX / 2}px)`, top: `calc(${(cropRect.y + cropRect.height / 2) * 100}% - ${HANDLE_SIZE_PX / 2}px)` }, cursor: CURSOR_MAP.e },
   ];
 
   return (
@@ -211,6 +254,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
             height: `${cropRect.height * 100}%`,
           }}
           onPointerDown={(e) => handlePointerDown('move', e)}
+          onClick={handleCropAreaDoubleClick}
         />
 
         {/* Rule of thirds grid inside crop */}
@@ -235,7 +279,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {ASPECT_RATIOS.map((ar) => (
           <button key={ar.value} type="button" onClick={() => setAspectRatio(ar.value)}
             className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
@@ -245,10 +289,23 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
             }`}
           >{ar.label}</button>
         ))}
+        <button
+          type="button"
+          onClick={handleResetCrop}
+          disabled={isFullImage}
+          className="ml-auto flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-text-muted transition-colors hover:bg-[rgba(255,255,255,0.14)] disabled:opacity-30"
+          title="Reset crop to full image"
+        >
+          <RotateCcw className="h-3 w-3" />
+          Reset
+        </button>
       </div>
 
-      <div className="text-[10px] text-text-muted">
-        {Math.round(cropRect.width * imageDimensions.width)} x {Math.round(cropRect.height * imageDimensions.height)} px
+      {/* Image info display */}
+      <div className="flex items-center gap-4 text-[10px] text-text-muted">
+        <span>Original: {imageDimensions.width} x {imageDimensions.height}</span>
+        <span>Crop: {cropPixelWidth} x {cropPixelHeight}</span>
+        <span>{cropPercentage}% of original</span>
       </div>
 
       {error && <div className="text-xs text-red-400">{error}</div>}

@@ -756,6 +756,37 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           <div className={GRID_SUMMARY_CLASS}>
             {t('node.storyboardGen.frameCount', { count: totalFrames, defaultValue: `${totalFrames} frames` })}
           </div>
+          {/* Copy/Paste descriptions */}
+          <button
+            type="button"
+            className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors"
+            onClick={async (e) => {
+              e.stopPropagation();
+              const text = nodeData.frames
+                .map((f, i) => `Frame ${String(i + 1).padStart(2, '0')}: ${(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim()}`)
+                .join('\n');
+              try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+            }}
+            title="Copy all frame descriptions"
+          >Copy</button>
+          <button
+            type="button"
+            className="flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                const text = await navigator.clipboard.readText();
+                const lines = text.split('\n').map((line) => line.replace(/^Frame\s*\d+\s*:\s*/i, '').trim());
+                const frames = [...nodeData.frames];
+                lines.forEach((line, i) => {
+                  if (i < frames.length && line) {
+                    handleFrameDescriptionChange(i, line);
+                  }
+                });
+              } catch { /* ignore */ }
+            }}
+            title="Paste frame descriptions from clipboard"
+          >Paste</button>
         </div>
       </div>
 
@@ -767,8 +798,12 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         >
           {nodeData.frames.map((frame, index) => {
             const frameDescription = frameDescriptionDrafts[frame.id] ?? frame.description;
+            const tooltipText = frameDescription.trim()
+              ? `Frame ${String(index + 1).padStart(2, '0')}: ${frameDescription.trim().slice(0, 200)}${frameDescription.length > 200 ? '...' : ''}`
+              : `Frame ${String(index + 1).padStart(2, '0')} (empty)`;
             return (
               <div
+                title={tooltipText}
                 key={frame.id}
                 className="relative overflow-hidden rounded border border-[rgba(255,255,255,0.06)] bg-bg-dark/40"
                 style={{ aspectRatio: frameLayout.cellAspectRatio }}

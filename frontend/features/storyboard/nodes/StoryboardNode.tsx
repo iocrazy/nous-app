@@ -112,10 +112,18 @@ function resolveExportOptions(options: StoryboardSplitNodeData['exportOptions'])
   };
 }
 
+interface FrameContextMenuState {
+  frameId: string;
+  frameIndex: number;
+  x: number;
+  y: number;
+}
+
 interface FrameCardProps {
   nodeId: string;
   frame: StoryboardFrameItem;
   index: number;
+  totalFrames: number;
   frameAspectRatioCss: string;
   imageFit: StoryboardExportOptions['imageFit'];
   viewerImageList: string[];
@@ -125,6 +133,7 @@ interface FrameCardProps {
   onSortHover: (frameId: string) => void;
   onTogglePicker: (frameId: string, x: number, y: number) => void;
   onEditFrame: (frame: StoryboardFrameItem) => void;
+  onContextMenu: (state: FrameContextMenuState) => void;
 }
 
 interface IncomingImageItem {
@@ -144,6 +153,7 @@ const FrameCard = memo(
     nodeId,
     frame,
     index,
+    totalFrames,
     frameAspectRatioCss,
     imageFit,
     viewerImageList,
@@ -153,6 +163,7 @@ const FrameCard = memo(
     onSortHover,
     onTogglePicker,
     onEditFrame,
+    onContextMenu,
   }: FrameCardProps) => {
     const updateStoryboardFrame = useCanvasStore((state) => state.updateStoryboardFrame);
     const { zoom } = useViewport();
@@ -183,6 +194,11 @@ const FrameCard = memo(
           onSortHover(frame.id);
         }}
         onMouseDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onContextMenu({ frameId: frame.id, frameIndex: index, x: event.clientX, y: event.clientY });
+        }}
         className={`nodrag relative bg-bg-dark/85 transition-colors ${dragging
           ? 'z-10 opacity-55 ring-1 ring-accent/65'
           : asDropTarget
@@ -555,6 +571,65 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
     [id, incomingImageItems, updateStoryboardFrame]
   );
 
+  // Frame context menu state
+  const [frameContextMenu, setFrameContextMenu] = useState<FrameContextMenuState | null>(null);
+  const frameContextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!frameContextMenu) return;
+    const handleClose = (e: PointerEvent) => {
+      if (frameContextMenuRef.current?.contains(e.target as Node)) return;
+      setFrameContextMenu(null);
+    };
+    document.addEventListener('pointerdown', handleClose, true);
+    return () => document.removeEventListener('pointerdown', handleClose, true);
+  }, [frameContextMenu]);
+
+  const handleFrameContextMenu = useCallback((state: FrameContextMenuState) => {
+    setFrameContextMenu(state);
+    setPickerState(null);
+  }, []);
+
+  const handleDuplicateFrame = useCallback((frameId: string) => {
+    const frame = data.frames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const maxOrder = Math.max(...data.frames.map((f) => f.order), 0);
+    const newFrame: StoryboardFrameItem = {
+      ...frame,
+      id: `frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      order: maxOrder + 1,
+    };
+    updateNodeData(id, { frames: [...data.frames, newFrame] });
+    setFrameContextMenu(null);
+  }, [data.frames, id, updateNodeData]);
+
+  const handleDeleteFrame = useCallback((frameId: string) => {
+    if (data.frames.length <= 1) return;
+    updateNodeData(id, { frames: data.frames.filter((f) => f.id !== frameId) });
+    setFrameContextMenu(null);
+  }, [data.frames, id, updateNodeData]);
+
+  const handleMoveFrame = useCallback((frameId: string, direction: 'up' | 'down') => {
+    const sorted = [...data.frames].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((f) => f.id === frameId);
+    if (idx < 0) return;
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= sorted.length) return;
+    // Swap orders
+    const frameA = sorted[idx];
+    const frameB = sorted[targetIdx];
+    const updatedFrames = data.frames.map((f) => {
+      if (f.id === frameA.id) return { ...f, order: frameB.order };
+      if (f.id === frameB.id) return { ...f, order: frameA.order };
+      return f;
+    });
+    updateNodeData(id, { frames: updatedFrames });
+    setFrameContextMenu(null);
+  }, [data.frames, id, updateNodeData]);
+
+  // Metadata summary
+  const framesWithImages = orderedFrames.filter((f) => f.imageUrl).length;
+
   return (
     <div
       ref={rootRef}
@@ -592,6 +667,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
               nodeId={id}
               frame={frame}
               index={index}
+              totalFrames={totalFrames}
               frameAspectRatioCss={frameAspectRatioCss}
               imageFit={exportOptions.imageFit}
               viewerImageList={frameViewerImageList}
@@ -601,6 +677,7 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
               onSortHover={handleSortHover}
               onTogglePicker={handleTogglePicker}
               onEditFrame={handleEditFrame}
+              onContextMenu={handleFrameContextMenu}
             />
           ))}
         </div>
@@ -785,7 +862,64 @@ export const StoryboardNode = memo(({ id, data, selected, width, height }: Story
         document.body
       )}
 
+      {/* Metadata summary */}
+      <div className="mt-1 flex shrink-0 items-center gap-2 text-[10px] text-text-muted">
+        <span>{framesWithImages}/{totalFrames} frames with images</span>
+        {frameAspectRatio && <span>Aspect: {frameAspectRatio}</span>}
+      </div>
+
       {exportError && <div className="mt-2 shrink-0 text-xs text-red-400">{exportError}</div>}
+
+      {/* Frame context menu portal */}
+      {frameContextMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={frameContextMenuRef}
+          className="nowheel fixed z-[160] w-[140px] overflow-hidden rounded-lg border border-[rgba(255,255,255,0.16)] bg-surface-dark shadow-xl"
+          style={{ left: `${frameContextMenu.x}px`, top: `${frameContextMenu.y}px` }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            onClick={() => handleEditFrame(data.frames.find((f) => f.id === frameContextMenu.frameId)!)}
+          >
+            View Image
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            disabled={frameContextMenu.frameIndex === 0}
+            onClick={() => handleMoveFrame(frameContextMenu.frameId, 'up')}
+          >
+            Move Up
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            disabled={frameContextMenu.frameIndex === totalFrames - 1}
+            onClick={() => handleMoveFrame(frameContextMenu.frameId, 'down')}
+          >
+            Move Down
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-dark hover:bg-[rgba(255,255,255,0.08)]"
+            onClick={() => handleDuplicateFrame(frameContextMenu.frameId)}
+          >
+            Duplicate
+          </button>
+          <div className="mx-2 h-px bg-[rgba(255,255,255,0.08)]" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
+            disabled={data.frames.length <= 1}
+            onClick={() => handleDeleteFrame(frameContextMenu.frameId)}
+          >
+            Delete Frame
+          </button>
+        </div>,
+        document.body
+      )}
 
       <Handle type="target" id="target" position={Position.Left} className="!h-2 !w-2 !border-surface-dark !bg-accent" />
       <Handle type="source" id="source" position={Position.Right} className="!h-2 !w-2 !border-surface-dark !bg-accent" />

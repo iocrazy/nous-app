@@ -49,6 +49,7 @@ import { useCanvasPersist } from './hooks/useCanvasPersist';
 
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 const ALT_DRAG_COPY_Z_INDEX = 2000;
+const GENERATION_JOB_POLL_INTERVAL_MS = 1400;
 
 interface PendingConnectStart {
   nodeId: string;
@@ -111,6 +112,24 @@ function resolveClipboardImageFile(event: ClipboardEvent): File | null {
   return null;
 }
 
+function hasRectCollision(
+  candidateRect: { x: number; y: number; width: number; height: number },
+  nodes: CanvasNode[],
+  ignoreNodeIds: Set<string>
+): boolean {
+  const margin = 18;
+  return nodes.some((node) => {
+    if (ignoreNodeIds.has(node.id)) return false;
+    const size = getNodeSize(node);
+    return (
+      candidateRect.x < node.position.x + size.width + margin &&
+      candidateRect.x + candidateRect.width + margin > node.position.x &&
+      candidateRect.y < node.position.y + size.height + margin &&
+      candidateRect.y + candidateRect.height + margin > node.position.y
+    );
+  });
+}
+
 function canNodeTypeBeManualConnectionSource(type: CanvasNodeType): boolean {
   return type === CANVAS_NODE_TYPES.upload || type === CANVAS_NODE_TYPES.exportImage;
 }
@@ -134,6 +153,7 @@ export function Canvas() {
   const reactFlowInstance = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const suppressNextPaneClickRef = useRef(false);
+  const suppressNextEdgeClickRef = useRef(false);
 
   const [isLocked, setIsLocked] = useState(false);
   const [showNodeMenu, setShowNodeMenu] = useState(false);
@@ -152,6 +172,16 @@ export function Canvas() {
     startPositions: Map<string, { x: number; y: number }>;
     copiedNodeIds: string[];
     sourceToCopyIdMap: Map<string, string>;
+  } | null>(null);
+  const edgePanGestureRef = useRef<{
+    active: boolean;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startViewportX: number;
+    startViewportY: number;
+    zoom: number;
+    moved: boolean;
   } | null>(null);
 
   const nodes = useCanvasStore((state) => state.nodes);
@@ -214,6 +244,88 @@ export function Canvas() {
     },
     [deleteEdge]
   );
+
+  const handleEdgeClick = useCallback((event: ReactMouseEvent) => {
+    if (!suppressNextEdgeClickRef.current) return;
+    suppressNextEdgeClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  // ─── Edge Pan Gesture ────────────────────────────────────────────────────
+  useEffect(() => {
+    const wrapperElement = wrapperRef.current;
+    if (!wrapperElement) return;
+
+    const edgePathSelector = '.react-flow__edge-path, .react-flow__edge-interaction';
+    const dragThreshold = 4;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('.react-flow__edgeupdater')) return;
+      if (!target.closest(edgePathSelector)) return;
+
+      const viewport = reactFlowInstance.getViewport();
+      edgePanGestureRef.current = {
+        active: true,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startViewportX: viewport.x,
+        startViewportY: viewport.y,
+        zoom: viewport.zoom,
+        moved: false,
+      };
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const gesture = edgePanGestureRef.current;
+      if (!gesture || !gesture.active || event.pointerId !== gesture.pointerId) return;
+
+      const deltaX = event.clientX - gesture.startClientX;
+      const deltaY = event.clientY - gesture.startClientY;
+      if (!gesture.moved && Math.hypot(deltaX, deltaY) >= dragThreshold) {
+        gesture.moved = true;
+      }
+      if (!gesture.moved) return;
+
+      suppressNextEdgeClickRef.current = true;
+      reactFlowInstance.setViewport(
+        { x: gesture.startViewportX + deltaX, y: gesture.startViewportY + deltaY, zoom: gesture.zoom },
+        { duration: 0 }
+      );
+    };
+
+    const completeEdgePanGesture = () => {
+      const gesture = edgePanGestureRef.current;
+      if (!gesture) return;
+      edgePanGestureRef.current = null;
+      if (gesture.moved) {
+        setViewportState(reactFlowInstance.getViewport());
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (edgePanGestureRef.current?.pointerId === event.pointerId) completeEdgePanGesture();
+    };
+    const handlePointerCancel = (event: PointerEvent) => {
+      if (edgePanGestureRef.current?.pointerId === event.pointerId) completeEdgePanGesture();
+    };
+
+    wrapperElement.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerCancel, true);
+
+    return () => {
+      wrapperElement.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointermove', handlePointerMove, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerCancel, true);
+    };
+  }, [reactFlowInstance, setViewportState]);
 
   const handleConnect = useCallback(
     (connection: Connection) => {
@@ -468,6 +580,25 @@ export function Canvas() {
         return;
       }
 
+      // Select all (Cmd+A)
+      if (cmd && key === 'a') {
+        event.preventDefault();
+        const selectChanges: NodeChange<CanvasNode>[] = nodes.map((n) => ({
+          id: n.id,
+          type: 'select' as const,
+          selected: true,
+        }));
+        applyNodesChange(selectChanges);
+        return;
+      }
+
+      // Deselect all (Escape)
+      if (event.key === 'Escape') {
+        setSelectedNode(null);
+        setShowNodeMenu(false);
+        return;
+      }
+
       if (event.key === 'Delete' || event.key === 'Backspace') {
         const idsToDelete = selectedNodeIds.length > 0 ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [];
         if (idsToDelete.length === 0) return;
@@ -478,7 +609,7 @@ export function Canvas() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [edges, nodes, selectedNodeId, selectedNodeIds, deleteNode, deleteNodes, groupNodes, undo, redo, selectedUploadNodeId]);
+  }, [applyNodesChange, edges, nodes, selectedNodeId, selectedNodeIds, deleteNode, deleteNodes, groupNodes, undo, redo, selectedUploadNodeId, setSelectedNode]);
 
   const openNodeMenuAtClientPosition = useCallback((clientX: number, clientY: number) => {
     const containerRect = wrapperRef.current?.getBoundingClientRect();
@@ -636,6 +767,7 @@ export function Canvas() {
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onEdgeDoubleClick={handleEdgeDoubleClick}
+        onEdgeClick={handleEdgeClick}
         onConnect={handleConnect}
         onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
