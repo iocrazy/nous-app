@@ -535,7 +535,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
-            {isAlbumType(video.media_type) ? (
+            {video.media_type && isAlbumType(video.media_type) ? (
               <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
