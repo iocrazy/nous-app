@@ -45,7 +45,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
       setIsLoading(true);
       setLoadError(null);
       try {
-        const headers = getAuthHeaders();
+        const headers = await getAuthHeaders();
         const resp = await fetch(
           `${baseUrl}/api/v1/videos/download/${platformId}/slides`,
           { headers },
