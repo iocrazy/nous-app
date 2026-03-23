@@ -98,7 +98,7 @@ function ProjectCard({
   const characterCount = project.character_count ?? 0;
 
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-gray-700 bg-gray-800/60 transition-colors hover:border-gray-600 hover:bg-gray-800">
+    <div className="group relative overflow-hidden rounded-xl border border-zinc-700 bg-zinc-800/60 transition-colors hover:border-zinc-600 hover:bg-zinc-800">
       {/* Cover */}
       <button
         type="button"
@@ -107,7 +107,7 @@ function ProjectCard({
         style={{ background: coverGradient(project.id) }}
       >
         <div className="flex h-full items-center justify-center">
-          <Layers size={32} className="text-gray-500/60" />
+          <Layers size={32} className="text-zinc-500/60" />
         </div>
       </button>
 
@@ -117,8 +117,8 @@ function ProjectCard({
         onClick={() => onClick(project.id)}
         className="block w-full px-4 py-3 text-left"
       >
-        <h3 className="truncate text-sm font-medium text-gray-100">{project.name}</h3>
-        <div className="mt-1 flex items-center gap-3 text-[11px] text-gray-500">
+        <h3 className="truncate text-sm font-medium text-zinc-100">{project.name}</h3>
+        <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-500">
           {frameCount > 0 && <span>{frameCount} frames</span>}
           {characterCount > 0 && <span>{characterCount} chars</span>}
           <span>{formatRelativeTime(project.updated_at)}</span>
@@ -133,13 +133,13 @@ function ProjectCard({
             e.stopPropagation();
             setMenuOpen((prev) => !prev);
           }}
-          className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/40 text-gray-300 opacity-0 transition-all hover:bg-black/60 group-hover:opacity-100"
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/40 text-zinc-300 opacity-0 transition-all hover:bg-black/60 group-hover:opacity-100"
         >
           <MoreVertical size={14} />
         </button>
 
         {menuOpen && (
-          <div className="absolute right-0 top-8 z-20 w-36 overflow-hidden rounded-lg border border-gray-700 bg-gray-900 py-1 shadow-xl">
+          <div className="absolute right-0 top-8 z-20 w-36 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
             {MENU_ITEMS.map((item) => (
               <button
                 key={item.key}
@@ -151,7 +151,7 @@ function ProjectCard({
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
                   item.danger
                     ? 'text-red-400 hover:bg-red-950/40'
-                    : 'text-gray-300 hover:bg-gray-800'
+                    : 'text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
                 <item.icon size={12} />

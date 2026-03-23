@@ -232,13 +232,13 @@ export function ProjectListPage() {
           </div>
         ) : sorted.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
-            <Layers size={48} className="text-gray-700" />
+            <Layers size={48} className="text-zinc-700" />
             <div>
-              <p className="text-sm font-medium text-gray-400">
+              <p className="text-sm font-medium text-zinc-400">
                 {search ? 'No projects match your search' : t('storyboard.noProjects')}
               </p>
               {!search && (
-                <p className="text-xs text-gray-600 mt-1">{t('storyboard.createFirst')}</p>
+                <p className="text-xs text-zinc-600 mt-1">{t('storyboard.createFirst')}</p>
               )}
             </div>
             {!search && (

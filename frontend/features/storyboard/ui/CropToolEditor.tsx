@@ -88,7 +88,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
         />
         {/* Crop overlay visualization */}
         <div
-          className="absolute border-2 border-blue-400/80 bg-blue-400/10"
+          className="absolute border-2 border-indigo-400/80 bg-indigo-400/10"
           style={{
             left: `${cropRect.x * 100}%`,
             top: `${cropRect.y * 100}%`,
@@ -106,7 +106,7 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
             onClick={() => setAspectRatio(ar.value)}
             className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
               aspectRatio === ar.value
-                ? 'bg-blue-600 text-white'
+                ? 'bg-indigo-600 text-white'
                 : 'bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]'
             }`}
           >

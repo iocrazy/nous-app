@@ -176,7 +176,7 @@ export function CanvasEditorPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-zinc-950">
-        <Loader2 size={24} className="animate-spin text-gray-500" />
+        <Loader2 size={24} className="animate-spin text-zinc-500" />
       </div>
     );
   }
@@ -185,11 +185,11 @@ export function CanvasEditorPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-zinc-950">
         <p className="text-sm text-red-400">Failed to load project</p>
-        <p className="text-xs text-gray-500">{loadError}</p>
+        <p className="text-xs text-zinc-500">{loadError}</p>
         <button
           type="button"
           onClick={handleBack}
-          className="text-sm text-blue-400 hover:text-blue-300"
+          className="text-sm text-indigo-400 hover:text-indigo-300"
         >
           Back to projects
         </button>
@@ -200,17 +200,17 @@ export function CanvasEditorPage() {
   return (
     <div className="h-full flex flex-col bg-zinc-950 overflow-hidden">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-800 flex-shrink-0 bg-gray-900">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 flex-shrink-0 bg-zinc-900">
         <button
           type="button"
           onClick={handleBack}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-100 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
         >
           <ChevronLeft size={16} />
           <span className="hidden sm:inline">{t('storyboard.back', 'Back')}</span>
         </button>
 
-        <div className="w-px h-4 bg-gray-700" />
+        <div className="w-px h-4 bg-zinc-700" />
 
         {editingName ? (
           <input
@@ -220,13 +220,13 @@ export function CanvasEditorPage() {
             onChange={(e) => setNameInput(e.target.value)}
             onBlur={() => void handleNameSubmit()}
             onKeyDown={handleNameKeyDown}
-            className="px-2 py-0.5 bg-gray-800 border border-blue-500 rounded text-sm font-medium text-gray-100 focus:outline-none min-w-0 max-w-xs"
+            className="px-2 py-0.5 bg-zinc-800 border border-indigo-500 rounded text-sm font-medium text-zinc-100 focus:outline-none min-w-0 max-w-xs"
           />
         ) : (
           <button
             type="button"
             onClick={() => { setEditingName(true); setNameInput(projectName); }}
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-200 hover:text-white transition-colors group"
+            className="flex items-center gap-1.5 text-sm font-medium text-zinc-200 hover:text-white transition-colors group"
           >
             <span className="truncate max-w-xs">{projectName}</span>
             <Pencil size={12} className="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
