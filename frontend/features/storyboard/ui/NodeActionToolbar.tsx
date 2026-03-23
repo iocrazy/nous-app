@@ -315,6 +315,13 @@ export const NodeActionToolbar = memo(({ node }: NodeActionToolbarProps) => {
           <Trash2 className="h-3.5 w-3.5" />
           {t('common.delete', 'Delete')}
         </UiChipButton>
+
+        {/* Selection info badge */}
+        {showInfo && (
+          <span className="ml-1 rounded-full bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 text-[9px] text-text-muted">
+            {node.type}
+          </span>
+        )}
       </UiPanel>
     </ReactFlowNodeToolbar>
   );

@@ -25,9 +25,9 @@ function resolveDialogWidth(toolType: string): string {
 }
 
 function resolveDialogDescription(toolType: string): string | null {
-  if (toolType === NODE_TOOL_TYPES.crop) return 'Select the area to crop. Double-click to apply.';
-  if (toolType === NODE_TOOL_TYPES.annotate) return 'Draw shapes and text on the image.';
-  if (toolType === NODE_TOOL_TYPES.splitStoryboard) return 'Split image into a grid of storyboard frames.';
+  if (toolType === NODE_TOOL_TYPES.crop) return 'Select the area to crop. Arrow keys nudge, double-click to apply.';
+  if (toolType === NODE_TOOL_TYPES.annotate) return 'Draw shapes and text. B=pen, R=rect, E=ellipse, A=arrow, T=text, V=select, X=eraser.';
+  if (toolType === NODE_TOOL_TYPES.splitStoryboard) return 'Split image into a grid of storyboard frames. Click cells to exclude.';
   return null;
 }
 

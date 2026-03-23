@@ -195,6 +195,20 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
     lastClickTimeRef.current = now;
   }, [handleConfirm]);
 
+  // Keyboard nudge: arrow keys move crop 1px, shift+arrow 10px
+  const handleCropKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    const step = e.shiftKey ? 10 : 1;
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    setCropRect((prev) => ({
+      ...prev,
+      x: clamp(prev.x + dx / imageDimensions.width, 0, 1 - prev.width),
+      y: clamp(prev.y + dy / imageDimensions.height, 0, 1 - prev.height),
+    }));
+  }, [imageDimensions]);
+
   // Computed crop info
   const cropPixelWidth = Math.round(cropRect.width * imageDimensions.width);
   const cropPixelHeight = Math.round(cropRect.height * imageDimensions.height);
@@ -223,9 +237,11 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
 
       <div
         ref={containerRef}
-        className="relative overflow-hidden rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/60 select-none"
+        tabIndex={0}
+        className="relative overflow-hidden rounded-lg border border-[rgba(255,255,255,0.1)] bg-bg-dark/60 select-none outline-none focus:ring-1 focus:ring-indigo-400/30"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onKeyDown={handleCropKeyDown}
       >
         <img src={imageUrl} alt="Crop preview" className="block max-h-[300px] w-full object-contain" draggable={false} />
 
@@ -244,9 +260,9 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
           />
         </div>
 
-        {/* Crop area border */}
+        {/* Crop area border with animated dashes */}
         <div
-          className="absolute border-2 border-indigo-400/80 cursor-move"
+          className="absolute border-2 border-indigo-400/80 cursor-move transition-all duration-150 ease-out"
           style={{
             left: `${cropRect.x * 100}%`,
             top: `${cropRect.y * 100}%`,
@@ -336,11 +352,15 @@ export function CropToolEditor({ imageUrl, onConfirm, onCancel }: CropToolEditor
       </div>
 
       {/* Image info display */}
-      <div className="flex items-center gap-4 text-[10px] text-text-muted">
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted">
         <span>Original: {imageDimensions.width} x {imageDimensions.height}</span>
         <span>Crop: {cropPixelWidth} x {cropPixelHeight}</span>
         <span>{cropPercentage}% of original</span>
+        {cropPixelWidth > 0 && cropPixelHeight > 0 && (
+          <span className="ml-auto text-text-muted/50">~{Math.round(cropPixelWidth * cropPixelHeight * 4 / 1024)}KB output</span>
+        )}
       </div>
+      <div className="text-[9px] text-text-muted/40">Arrow keys: nudge 1px | Shift+arrows: 10px | Double-click: apply</div>
 
       {error && <div className="text-xs text-red-400">{error}</div>}
 

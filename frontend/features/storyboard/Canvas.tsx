@@ -839,9 +839,9 @@ export function Canvas() {
         snapToGrid={snapToGrid} onToggleSnap={() => setSnapToGrid((v) => !v)} />
 
       {nodes.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in fade-in duration-500">
           <div className="flex max-w-3xl flex-col items-center gap-5 px-6 text-center">
-            <div>
+            <div className="animate-in zoom-in-95 duration-700 delay-150">
               <div className="mb-2 text-2xl text-text-muted">Double-click to add a node</div>
               <div className="text-sm text-text-muted opacity-60">Upload images, edit, and create storyboards</div>
             </div>

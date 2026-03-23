@@ -171,7 +171,7 @@ export const FrameList = memo(function FrameList({
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(index, e)}
             onDragEnd={handleDragEnd}
-            className={`group/frame relative overflow-hidden rounded border transition-all duration-150 ${
+            className={`group/frame relative overflow-hidden rounded border transition-all duration-200 ease-out animate-in fade-in zoom-in-95 ${
               isDragging
                 ? 'opacity-40 border-zinc-600'
                 : isDropTarget
@@ -182,10 +182,22 @@ export const FrameList = memo(function FrameList({
             } bg-bg-dark/40 hover:bg-bg-dark/60`}
             style={{ aspectRatio: cellAspectRatio }}
           >
+            {/* Frame number overlay */}
+            <div className="pointer-events-none absolute left-0.5 top-0.5 z-20 flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-black/50 text-[7px] font-medium text-white/70 leading-none">
+              {index + 1}
+            </div>
+
             {/* Drag handle */}
             <div className="absolute left-0 top-0 z-20 flex h-4 w-full cursor-grab items-center justify-center opacity-0 transition-opacity group-hover/frame:opacity-100 active:cursor-grabbing">
               <GripVertical className="h-2.5 w-2.5 text-text-muted/50" />
             </div>
+
+            {/* Character count */}
+            {hasContent && !compact && (
+              <div className="pointer-events-none absolute bottom-0.5 right-0.5 z-20 rounded-sm bg-black/40 px-0.5 text-[7px] text-white/40 leading-none">
+                {description.length}
+              </div>
+            )}
 
             {/* Status dot */}
             {statusDot && (
