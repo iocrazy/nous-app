@@ -18,7 +18,7 @@ class DouyinParser:
     """Douyin data parsing service, responsible for cleaning and structuring Douyin API data"""
 
     @staticmethod
-    def _extract_music_play_urls(aweme_detail: Dict[str, Any], source: str = "") -> list:
+    async def _extract_music_play_urls(aweme_detail: Dict[str, Any], source: str = "") -> list:
         """Extract music play URLs from aweme_detail, trying multiple paths.
 
         Douyin's music structure varies between API sources:
@@ -46,11 +46,24 @@ class DouyinParser:
         elif isinstance(play_url_obj, str) and play_url_obj:
             urls = [play_url_obj]
 
-        # Path 3: music.mid → build stable URL from music ID
+        # Path 3: music.mid → fetch play_url from Douyin mobile API
         if not urls:
-            mid = music_obj.get("mid", "") or music_obj.get("id_str", "") or str(music_obj.get("id", ""))
+            mid = str(music_obj.get("mid", "") or music_obj.get("id_str", "") or music_obj.get("id", ""))
             if mid and mid != "0" and mid != "":
-                urls = [f"https://sf-tk-sg.ibytedtos.com/obj/ies-music/{mid}.mp3"]
+                try:
+                    import httpx
+                    api_url = f"https://aweme.snssdk.com/aweme/v1/music/detail/?music_id={mid}"
+                    api_headers = {"User-Agent": "com.ss.android.ugc.aweme/330101 (Linux; U; Android 14;)"}
+                    async with httpx.AsyncClient(timeout=8) as client:
+                        resp = await client.get(api_url, headers=api_headers)
+                        if resp.status_code == 200:
+                            music_info = resp.json().get("music_info", {})
+                            api_play_url = music_info.get("play_url", {})
+                            if isinstance(api_play_url, dict):
+                                urls = api_play_url.get("url_list", [])
+                            logger.info(f"[DouyinParser/{source}] Fetched music via API: mid={mid}, urls={len(urls)}")
+                except Exception as e:
+                    logger.warning(f"[DouyinParser/{source}] Music API fetch failed for mid={mid}: {e}")
 
         # Path 4: music.url (sometimes present)
         if not urls:
@@ -222,7 +235,7 @@ class DouyinParser:
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
         # Extract standalone music play URL (carousel types have separate audio)
-        music_play_urls = DouyinParser._extract_music_play_urls(aweme_detail, "image_text")
+        music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_text")
 
         # Build return data
         return {
@@ -387,7 +400,7 @@ class DouyinParser:
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
         # Extract standalone music play URL (carousel types have separate audio)
-        music_play_urls = DouyinParser._extract_music_play_urls(aweme_detail, "image_collection")
+        music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_collection")
 
         return {
             "platform_id": aweme_id,
