@@ -1,4 +1,5 @@
 import { InMemoryCanvasEventBus } from './eventBus';
+import { DefaultGraphImageResolver } from './graphImageResolver';
 import { nodeCatalog } from './nodeCatalog';
 import { CanvasNodeFactory } from './nodeFactory';
 import { CanvasToolProcessor } from './toolProcessor';
@@ -15,5 +16,8 @@ export const canvasToolGateway = new HttpToolGateway();
 // Tool processor for crop, annotate, and split operations.
 export const canvasToolProcessor = new CanvasToolProcessor(canvasToolGateway, uuidGenerator);
 
-// AI gateway for image/video generation (Phase 3 will add real usage).
+// AI gateway for image/video generation.
 export const canvasAiGateway = new HttpAiGateway();
+
+// Graph image resolver — collects input images from upstream nodes.
+export const canvasGraphImageResolver = new DefaultGraphImageResolver();
