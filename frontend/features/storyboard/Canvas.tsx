@@ -50,6 +50,20 @@ import { useCanvasPersist } from './hooks/useCanvasPersist';
 const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 const ALT_DRAG_COPY_Z_INDEX = 2000;
 const GENERATION_JOB_POLL_INTERVAL_MS = 1400;
+const SNAP_GRID_SIZE = 16;
+
+const KEYBOARD_SHORTCUTS = [
+  { keys: 'Ctrl+Z', label: 'Undo' },
+  { keys: 'Ctrl+Shift+Z', label: 'Redo' },
+  { keys: 'Ctrl+C', label: 'Copy' },
+  { keys: 'Ctrl+V', label: 'Paste' },
+  { keys: 'Ctrl+G', label: 'Group' },
+  { keys: 'Del / Backspace', label: 'Delete' },
+  { keys: 'Alt+Drag', label: 'Duplicate nodes' },
+  { keys: 'Double-click', label: 'Add node' },
+  { keys: 'Scroll', label: 'Zoom' },
+  { keys: '?', label: 'Toggle shortcuts' },
+] as const;
 
 interface PendingConnectStart {
   nodeId: string;
@@ -156,6 +170,8 @@ export function Canvas() {
   const suppressNextEdgeClickRef = useRef(false);
 
   const [isLocked, setIsLocked] = useState(false);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showNodeMenu, setShowNodeMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [flowPosition, setFlowPosition] = useState({ x: 0, y: 0 });
@@ -592,8 +608,16 @@ export function Canvas() {
         return;
       }
 
+      // Toggle keyboard shortcuts help (?)
+      if (event.key === '?' || (event.shiftKey && key === '/')) {
+        event.preventDefault();
+        setShowShortcutsHelp((prev) => !prev);
+        return;
+      }
+
       // Deselect all (Escape)
       if (event.key === 'Escape') {
+        if (showShortcutsHelp) { setShowShortcutsHelp(false); return; }
         setSelectedNode(null);
         setShowNodeMenu(false);
         return;
@@ -609,7 +633,7 @@ export function Canvas() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [applyNodesChange, edges, nodes, selectedNodeId, selectedNodeIds, deleteNode, deleteNodes, groupNodes, undo, redo, selectedUploadNodeId, setSelectedNode]);
+  }, [applyNodesChange, edges, nodes, selectedNodeId, selectedNodeIds, deleteNode, deleteNodes, groupNodes, undo, redo, selectedUploadNodeId, setSelectedNode, showShortcutsHelp]);
 
   const openNodeMenuAtClientPosition = useCallback((clientX: number, clientY: number) => {
     const containerRect = wrapperRef.current?.getBoundingClientRect();
@@ -791,6 +815,8 @@ export function Canvas() {
         deleteKeyCode={null}
         onlyRenderVisibleElements
         zoomOnDoubleClick={false}
+        snapToGrid={snapToGrid}
+        snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]}
         proOptions={{ hideAttribution: true }}
         className="bg-bg-dark [&_.react-flow__viewport]:transition-transform"
       >
@@ -809,7 +835,8 @@ export function Canvas() {
       {/* Vignette overlay for infinite canvas feel */}
       <div className="canvas-vignette" />
 
-      <CanvasToolbar isLocked={isLocked} onToggleLock={() => setIsLocked(v => !v)} />
+      <CanvasToolbar isLocked={isLocked} onToggleLock={() => setIsLocked(v => !v)}
+        snapToGrid={snapToGrid} onToggleSnap={() => setSnapToGrid((v) => !v)} />
 
       {nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -845,6 +872,43 @@ export function Canvas() {
         onClose={closeImageViewer}
         onNavigate={navigateImageViewer}
       />
+
+      {/* Zoom level indicator */}
+      <ZoomIndicator />
+
+      {/* Keyboard shortcuts help overlay */}
+      {showShortcutsHelp && (
+        <div className="absolute inset-0 z-[300] flex items-center justify-center bg-black/50"
+          onClick={() => setShowShortcutsHelp(false)}>
+          <div className="w-72 rounded-xl border border-[rgba(255,255,255,0.14)] bg-surface-dark p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-sm font-medium text-text-dark">Keyboard Shortcuts</h3>
+            <div className="flex flex-col gap-1.5">
+              {KEYBOARD_SHORTCUTS.map((shortcut) => (
+                <div key={shortcut.keys} className="flex items-center justify-between text-xs">
+                  <span className="text-text-muted">{shortcut.label}</span>
+                  <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-text-dark">{shortcut.keys}</kbd>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 text-center text-[10px] text-text-muted">Press ? or Esc to close</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Zoom Indicator ─────────────────────────────────────────────────────────
+
+function ZoomIndicator() {
+  const currentViewport = useCanvasStore((s) => s.currentViewport);
+  const zoomLevel = currentViewport?.zoom ?? 1;
+  const zoomPercent = Math.round(zoomLevel * 100);
+
+  return (
+    <div className="absolute bottom-3 left-3 z-20 flex items-center rounded-full border border-[rgba(255,255,255,0.12)] bg-surface-dark/80 px-2 py-1 text-[10px] text-text-muted backdrop-blur-sm">
+      {zoomPercent}%
     </div>
   );
 }

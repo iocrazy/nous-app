@@ -6,8 +6,9 @@ import {
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import {
-  ArrowRight, Check, Circle, Eraser, MousePointer2, Minus as LineIcon,
-  PenLine, Square, Trash2, Type, Undo2, Redo2, X,
+  ArrowRight, Check, Circle, Copy, Eraser, MousePointer2, Minus as LineIcon,
+  MoveVertical, PenLine, Square, Trash2, Type, Undo2, Redo2, X,
+  ZoomIn, ZoomOut, Maximize2,
 } from 'lucide-react';
 import { UiButton } from '../../../components/ui';
 import { loadImageElement, canvasToDataUrl } from '../application/imageData';
@@ -632,6 +633,35 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
           </div>
         ))}
         <div className="ml-auto flex items-center gap-1">
+          {/* Duplicate selected (Ctrl+D) */}
+          <button type="button" onClick={() => {
+            if (!selectedId) return;
+            const item = annotations.find((a) => a.id === selectedId);
+            if (!item) return;
+            pushUndo(annotations);
+            const dup = { ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}` };
+            if ('x' in dup && typeof dup.x === 'number') (dup as { x: number }).x += 20;
+            if ('y' in dup && typeof dup.y === 'number') (dup as { y: number }).y += 20;
+            setAnnotations((prev) => [...prev, dup as AnnotationItem]);
+            setSelectedId(dup.id);
+          }} disabled={!selectedId}
+            className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
+            title="Duplicate (Ctrl+D)"><Copy className="h-3.5 w-3.5" /></button>
+          {/* Layer ordering */}
+          <button type="button" onClick={() => {
+            if (!selectedId) return;
+            pushUndo(annotations);
+            setAnnotations((prev) => {
+              const idx = prev.findIndex((a) => a.id === selectedId);
+              if (idx < 0 || idx >= prev.length - 1) return prev;
+              const next = [...prev];
+              [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+              return next;
+            });
+          }} disabled={!selectedId}
+            className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
+            title="Bring Forward"><MoveVertical className="h-3.5 w-3.5" /></button>
+          <div className="mx-0.5 h-4 w-px bg-[rgba(255,255,255,0.1)]" />
           <button type="button" onClick={handleUndo} disabled={!canUndo}
             className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)] disabled:opacity-30"
             title="Undo (Ctrl+Z)"><Undo2 className="h-3.5 w-3.5" /></button>
@@ -690,6 +720,31 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
             onChange={(e) => setOpacity(Number(e.target.value))} className="h-1 w-16 cursor-pointer" />
           <span className="w-7 text-[10px] text-text-muted">{Math.round(opacity * 100)}%</span>
         </div>
+      </div>
+
+      {/* Zoom controls */}
+      <div className="flex items-center gap-1.5">
+        <button type="button" onClick={() => {
+          if (!stageRef.current) return;
+          const s = stageRef.current.scaleX();
+          const ns = Math.min(5, s * 1.25);
+          stageRef.current.scale({ x: ns, y: ns });
+        }} className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)]"
+          title="Zoom In"><ZoomIn className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => {
+          if (!stageRef.current) return;
+          const s = stageRef.current.scaleX();
+          const ns = Math.max(0.2, s / 1.25);
+          stageRef.current.scale({ x: ns, y: ns });
+        }} className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)]"
+          title="Zoom Out"><ZoomOut className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => {
+          if (!stageRef.current) return;
+          stageRef.current.scale({ x: 1, y: 1 });
+          stageRef.current.position({ x: 0, y: 0 });
+        }} className="flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-[rgba(255,255,255,0.1)]"
+          title="Fit to View"><Maximize2 className="h-3.5 w-3.5" /></button>
+        <span className="text-[10px] text-text-muted">Space+drag to pan</span>
       </div>
 
       {/* Konva Canvas */}

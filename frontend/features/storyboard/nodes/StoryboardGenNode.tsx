@@ -10,7 +10,7 @@ import {
   useRef,
 } from 'react';
 import { Handle, Position, useUpdateNodeInternals, useViewport } from '@xyflow/react';
-import { Layers, Minus, Plus, Sparkles } from 'lucide-react';
+import { AlertTriangle, Copy as CopyIcon, Layers, Minus, Plus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -113,6 +113,9 @@ const FRIENDLY_ASPECT_RATIO_CANDIDATES = [
 ];
 const RATIO_CONTROL_MODE_BUTTON_CLASS = 'flex h-5 items-center rounded-full border px-1.5 text-[9px] transition-colors';
 const COMPACT_BUTTON_CLASS = 'flex h-5 items-center rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.04)] px-1.5 text-[9px] text-text-muted hover:bg-white/10 transition-colors';
+const SHIMMER_CLASS = 'animate-pulse bg-gradient-to-r from-zinc-800 via-zinc-700 to-zinc-800 bg-[length:200%_100%]';
+const FRAME_ERROR_CLASS = 'border-red-500/40 bg-red-500/5';
+const FRAME_GENERATING_CLASS = 'border-indigo-400/30';
 
 // ─── Utility functions ──────────────────────────────────────────────────────
 
@@ -519,6 +522,71 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
     }
   }, [addEdge, addNode, buildPrompt, currentProjectId, findNodePosition, id, mappedOverallRequestAspectRatio, nodeData, selectedModel, selectedResolution.value, setSelectedNode, updateNodeData]);
 
+  // ─── Frame duplication ──────────────────────────────────────────────
+
+  const handleDuplicateFrame = useCallback((index: number) => {
+    const frame = nodeData.frames[index];
+    if (!frame) return;
+    const cloned = { ...frame, id: generateFrameId() };
+    const newFrames = [...nodeData.frames];
+    newFrames.splice(index + 1, 0, cloned);
+    updateNodeData(id, {
+      frames: newFrames,
+      gridRows: Math.ceil(newFrames.length / Math.max(1, nodeData.gridCols)),
+    });
+  }, [id, nodeData, updateNodeData]);
+
+  // ─── Generate selected frames ─────────────────────────────────────
+
+  const [selectedFrameIndices, setSelectedFrameIndices] = useState<Set<number>>(new Set());
+
+  const handleToggleFrameSelection = useCallback((index: number) => {
+    setSelectedFrameIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleGenerateSelected = useCallback(async () => {
+    if (selectedFrameIndices.size === 0) {
+      void handleGenerate();
+      return;
+    }
+    // Generate only for selected frames — builds prompt from those
+    if (!nodeData || !currentProjectId) { setError('No project context'); return; }
+    const parts: string[] = [`Generate a ${nodeData.gridRows}x${nodeData.gridCols} storyboard grid.`];
+    const selectedArr = Array.from(selectedFrameIndices).sort((a, b) => a - b);
+    for (const idx of selectedArr) {
+      const frame = nodeData.frames[idx];
+      if (!frame) continue;
+      const desc = (frameDescriptionDraftsRef.current[frame.id] ?? frame.description).trim();
+      if (desc) parts.push(`Frame ${idx + 1}: ${desc}`);
+    }
+    const prompt = parts.join('\n');
+    if (parts.length <= 1) { setError('Selected frames have no descriptions'); return; }
+
+    const pos = findNodePosition(id, EXPORT_RESULT_NODE_DEFAULT_WIDTH, EXPORT_RESULT_NODE_LAYOUT_HEIGHT);
+    const newId = addNode(CANVAS_NODE_TYPES.exportImage, pos, {
+      isGenerating: true, generationStartedAt: Date.now(), generationDurationMs: selectedModel.expectedDurationMs ?? 60000,
+      displayName: EXPORT_RESULT_DISPLAY_NAME.storyboardGenOutput, resultKind: 'storyboardGenOutput' as const,
+      prompt: '', model: selectedModel.id, size: selectedResolution.value as ImageSize, requestAspectRatio: mappedOverallRequestAspectRatio,
+    });
+    addEdge(id, newId); setSelectedNode(null); setError(null);
+    try {
+      const taskId = await canvasAiGateway.submitGenerateImageJob({ projectId: currentProjectId, nodeId: id, prompt, model: nodeData.model || selectedModel.id, aspectRatio: mappedOverallRequestAspectRatio });
+      updateNodeData(newId, { generationJobId: taskId, generationSourceType: 'storyboardGen', generationProviderId: selectedModel.providerId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Generation failed: ${msg}`);
+      updateNodeData(newId, { isGenerating: false, generationStartedAt: null, generationJobId: null, generationError: msg });
+    }
+  }, [addEdge, addNode, currentProjectId, findNodePosition, handleGenerate, id, mappedOverallRequestAspectRatio, nodeData, selectedFrameIndices, selectedModel, selectedResolution.value, setSelectedNode, updateNodeData]);
+
   // ─── Render highlight helper ────────────────────────────────────────
 
   const renderHighlight = useCallback((desc: string) => renderFrameDescriptionWithHighlights(desc, incomingImages.length), [incomingImages.length]);
@@ -562,13 +630,30 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           ><Layers className="h-2.5 w-2.5" /></button>
           {/* Copy/Paste */}
           <button type="button" className={COMPACT_BUTTON_CLASS}
-            onClick={async (e) => { e.stopPropagation(); const text = nodeData.frames.map((f, i) => `Frame ${String(i + 1).padStart(2, '0')}: ${(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim()}`).join('\n'); try { await navigator.clipboard.writeText(text); } catch { /* ignore */ } }}
-            title="Copy all frame descriptions">Copy</button>
+            onClick={async (e) => { e.stopPropagation(); const text = nodeData.frames.map((f, i) => `Frame ${String(i + 1).padStart(2, '0')}: ${(frameDescriptionDraftsRef.current[f.id] ?? f.description).trim()}`).join('\n'); try { await navigator.clipboard.writeText(text); } catch (err) { console.error('Copy failed', err); } }}
+            title="Copy all frame descriptions"><CopyIcon className="h-2.5 w-2.5 mr-0.5" />Copy</button>
           <button type="button" className={COMPACT_BUTTON_CLASS}
-            onClick={async (e) => { e.stopPropagation(); try { const text = await navigator.clipboard.readText(); text.split('\n').map((l) => l.replace(/^Frame\s*\d+\s*:\s*/i, '').trim()).forEach((l, i) => { if (i < nodeData.frames.length && l) handleFrameDescriptionChange(i, l); }); } catch { /* ignore */ } }}
+            onClick={async (e) => { e.stopPropagation(); try { const text = await navigator.clipboard.readText(); text.split('\n').map((l) => l.replace(/^Frame\s*\d+\s*:\s*/i, '').trim()).forEach((l, i) => { if (i < nodeData.frames.length && l) handleFrameDescriptionChange(i, l); }); } catch (err) { console.error('Paste failed', err); } }}
             title="Paste frame descriptions">Paste</button>
         </div>
       </div>
+
+      {/* Reference images inline preview */}
+      {incomingImageItems.length > 0 && (
+        <div className="mb-1.5 flex shrink-0 items-center gap-1 overflow-x-auto">
+          <span className="text-[8px] text-text-muted whitespace-nowrap">Ref:</span>
+          {incomingImageItems.map((item, idx) => (
+            <div key={`ref-${idx}`} className="relative shrink-0 h-6 w-6 rounded border border-[rgba(255,255,255,0.12)] overflow-hidden"
+              title={item.label}>
+              <CanvasNodeImage src={item.displayUrl} alt={item.label}
+                viewerSourceUrl={resolveImageDisplayUrl(item.imageUrl)}
+                viewerImageList={incomingImageViewerList}
+                className="h-full w-full object-cover" />
+              <span className="absolute bottom-0 right-0 bg-black/70 px-0.5 text-[7px] text-white leading-none">{idx + 1}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Frame Grid — delegated to FrameList */}
       <div className="mb-2 flex min-h-0 flex-1 items-center justify-center">
@@ -620,7 +705,12 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
         </div>
       )}
 
-      {error && <div className="mb-1.5 shrink-0 text-[10px] text-red-400">{error}</div>}
+      {error && (
+        <div className="mb-1.5 flex shrink-0 items-start gap-1 rounded border border-red-500/30 bg-red-500/5 px-2 py-1">
+          <AlertTriangle className="h-3 w-3 shrink-0 text-red-400 mt-0.5" />
+          <span className="text-[10px] text-red-400 leading-tight">{error}</span>
+        </div>
+      )}
 
       {/* AI Parameters */}
       <div className="relative mx-auto mt-auto flex shrink-0 items-center justify-between" style={{ width: `${frameLayout.paramsRowWidth}px` }}>
@@ -638,11 +728,20 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
           paramsChipClassName={NODE_CONTROL_PARAMS_CHIP_CLASS} modelPanelAlign="center" paramsPanelAlign="center"
           modelPanelClassName="inline-block min-w-[300px] max-w-[calc(100vw-32px)] p-2" paramsPanelClassName="w-[420px] p-3"
         />
-        <UiButton onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerate(); }}
-          variant="primary" size="sm" className={`!min-w-0 shrink-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}>
-          <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
-          {t('canvas.generate', 'Generate')}
-        </UiButton>
+        <div className="flex items-center gap-1 shrink-0">
+          {selectedFrameIndices.size > 0 && (
+            <UiButton onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerateSelected(); }}
+              variant="primary" size="sm" className={`!min-w-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS} !bg-indigo-600`}>
+              <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
+              {selectedFrameIndices.size}/{totalFrames}
+            </UiButton>
+          )}
+          <UiButton onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerate(); }}
+            variant="primary" size="sm" className={`!min-w-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}>
+            <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
+            {selectedFrameIndices.size > 0 ? t('canvas.generateAll', 'All') : t('canvas.generate', 'Generate')}
+          </UiButton>
+        </div>
       </div>
 
       <Handle type="target" id="target" position={Position.Left} className="!h-2 !w-2 !border-surface-dark !bg-accent" />

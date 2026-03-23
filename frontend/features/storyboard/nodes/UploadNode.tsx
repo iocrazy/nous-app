@@ -16,7 +16,7 @@ import {
   useViewport,
   type NodeProps,
 } from '@xyflow/react';
-import { Upload } from 'lucide-react';
+import { FileImage, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -269,6 +269,15 @@ export const UploadNode = memo(({ id, data, selected, width, height }: UploadNod
           </div>
         </label>
       )}
+      {/* File info bar */}
+      {data.sourceFileName && (
+        <div className="absolute bottom-0 left-0 right-0 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 text-[9px] text-zinc-300 backdrop-blur-sm rounded-b-[var(--node-radius)]">
+          <FileImage className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate">{data.sourceFileName}</span>
+          {resolvedAspectRatio !== '1:1' && <span className="ml-auto shrink-0">{resolvedAspectRatio}</span>}
+        </div>
+      )}
+
       <input
         ref={inputRef}
         type="file"

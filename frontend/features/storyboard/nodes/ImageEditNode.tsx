@@ -482,6 +482,23 @@ export const ImageEditNode = memo(({ id, data, selected, width, height }: ImageE
         </div>
       )}
 
+      {/* Prompt templates / suggestions */}
+      <div className="mt-1.5 flex shrink-0 flex-wrap items-center gap-1">
+        <span className="text-[9px] text-text-muted">Quick:</span>
+        {['Anime style', 'Photorealistic', 'Watercolor', 'Line art', 'Oil painting'].map((tmpl) => (
+          <button key={tmpl} type="button"
+            onClick={(e) => { e.stopPropagation(); const ta = promptRef.current; if (ta) { const cur = ta.value; const next = cur ? `${cur}, ${tmpl.toLowerCase()}` : tmpl.toLowerCase(); updateNodeData(id, { prompt: next }); } }}
+            className="rounded-full bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 text-[9px] text-text-muted hover:bg-[rgba(255,255,255,0.12)] transition-colors">
+            {tmpl}
+          </button>
+        ))}
+      </div>
+
+      {/* Model info tooltip */}
+      <div className="mt-0.5 shrink-0 text-[9px] text-text-muted/60" title={`Provider: ${selectedModel.providerId} | Max resolution: ${selectedResolution.label ?? selectedResolution.value}`}>
+        {selectedModel.name} — {selectedModel.providerId}
+      </div>
+
       {/* Negative prompt */}
       <div className="mt-1.5 shrink-0">
         <input
