@@ -260,8 +260,11 @@ export const SharePage: React.FC = () => {
   const shareAny = share as any;
   const mimeType: string | null = shareAny.mime_type || null;
   const mediaId: string | null = shareAny.media_id || null;
-  const mediaUrl = getMediaUrl(mediaId);
-  const coverUrl = getCoverMediaUrl(mediaId);
+  const thumbnailPath: string | null = shareAny.thumbnail_path || null;
+
+  // Prefer /media/{id} route (supports share_token auth), fallback to resource file URL
+  const mediaUrl = getMediaUrl(mediaId) || resourceUrl;
+  const coverUrl = getCoverMediaUrl(mediaId) || (thumbnailPath ? `${API_BASE}/media/${share.resource_id}/cover?share_token=${shareCode}` : null);
   const isVideo = isVideoMime(mimeType);
   const isImage = isImageMime(mimeType);
   const isAudio = isAudioMime(mimeType);
