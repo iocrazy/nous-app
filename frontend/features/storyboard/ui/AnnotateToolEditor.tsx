@@ -56,7 +56,7 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
         onChange={(e) => setText(e.target.value)}
         placeholder="Enter annotation text..."
         autoFocus
-        className="rounded border border-[rgba(255,255,255,0.14)] bg-bg-dark/60 px-3 py-2 text-sm text-text-dark placeholder:text-text-muted/60 focus:border-blue-500 focus:outline-none"
+        className="rounded border border-[rgba(255,255,255,0.14)] bg-bg-dark/60 px-3 py-2 text-sm text-text-dark placeholder:text-text-muted/60 focus:border-indigo-500 focus:outline-none"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && text.trim()) void handleConfirm();
           if (e.key === 'Escape') onCancel();
@@ -72,7 +72,7 @@ export function AnnotateToolEditor({ imageUrl, onConfirm, onCancel }: AnnotateTo
               onClick={() => setPosition(pos.value)}
               className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
                 position === pos.value
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-indigo-600 text-white'
                   : 'bg-[rgba(255,255,255,0.08)] text-text-muted hover:bg-[rgba(255,255,255,0.14)]'
               }`}
             >

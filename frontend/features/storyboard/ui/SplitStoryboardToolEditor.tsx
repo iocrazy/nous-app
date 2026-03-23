@@ -69,14 +69,14 @@ export function SplitStoryboardToolEditor({ imageUrl, onConfirm, onCancel }: Spl
           {Array.from({ length: cols - 1 }).map((_, i) => (
             <div
               key={`col-${i}`}
-              className="absolute top-0 bottom-0 w-px bg-blue-400/60"
+              className="absolute top-0 bottom-0 w-px bg-indigo-400/60"
               style={{ left: `${((i + 1) / cols) * 100}%` }}
             />
           ))}
           {Array.from({ length: rows - 1 }).map((_, i) => (
             <div
               key={`row-${i}`}
-              className="absolute left-0 right-0 h-px bg-blue-400/60"
+              className="absolute left-0 right-0 h-px bg-indigo-400/60"
               style={{ top: `${((i + 1) / rows) * 100}%` }}
             />
           ))}
