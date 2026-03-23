@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthDep, OptionalAuthDep
 from app.core.enums import DownloadStatus
 from app.repositories.tags_repository import TagsRepository
 from app.core.utils import Utils
@@ -1512,7 +1512,7 @@ async def list_slides(platform_id: str, auth: AuthDep):
 
 
 @router.get("/download/{platform_id}/slides/{filename}", tags=TAGS_DOWNLOAD)
-async def serve_slide_file(platform_id: str, filename: str, auth: AuthDep):
+async def serve_slide_file(platform_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None):
     """
     Serve a single slide file (image or video clip).
 
@@ -1522,6 +1522,15 @@ async def serve_slide_file(platform_id: str, filename: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     import mimetypes as _mt
+    from app.api.media_auth import validate_media_cookie
+
+    # Auth: Bearer token OR ?token= query param
+    if not auth and token:
+        user_id = validate_media_cookie(token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    elif not auth:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     # Validate filename to prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
@@ -1565,14 +1574,23 @@ async def serve_slide_file(platform_id: str, filename: str, auth: AuthDep):
 
 
 @router.get("/download/{platform_id}/audio", tags=TAGS_DOWNLOAD)
-async def serve_audio_file(platform_id: str, auth: AuthDep):
+async def serve_audio_file(platform_id: str, auth: OptionalAuthDep = None, token: str = None):
     """
     Serve the standalone background audio file for carousel content.
 
     - **platform_id**: Media unique identifier
 
-    Authentication: Bearer Token or API Key
+    Authentication: Bearer Token, API Key, or ?token= query param
     """
+    from app.api.media_auth import validate_media_cookie
+
+    if not auth and token:
+        user_id = validate_media_cookie(token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    elif not auth:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
