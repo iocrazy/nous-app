@@ -35,12 +35,12 @@ function sortProjects(projects: ProjectSummary[], sortField: SortField): Project
 
 function SkeletonCard() {
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden animate-pulse">
-      <div className="h-36 bg-gray-700" />
+    <div className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden animate-pulse">
+      <div className="h-36 bg-zinc-700" />
       <div className="px-4 py-3 space-y-2">
-        <div className="h-3 bg-gray-700 rounded w-3/4" />
-        <div className="h-2 bg-gray-700 rounded w-1/2" />
-        <div className="h-2 bg-gray-700 rounded w-1/3" />
+        <div className="h-3 bg-zinc-700 rounded w-3/4" />
+        <div className="h-2 bg-zinc-700 rounded w-1/2" />
+        <div className="h-2 bg-zinc-700 rounded w-1/3" />
       </div>
     </div>
   );
@@ -169,16 +169,16 @@ export function ProjectListPage() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full bg-gray-950 min-h-0">
+    <div className="flex flex-col h-full bg-zinc-950 min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 flex-shrink-0">
-        <h1 className="text-xl font-semibold text-gray-100">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
+        <h1 className="text-xl font-semibold text-zinc-100">
           {t('storyboard.title')}
         </h1>
         <button
           type="button"
           onClick={() => setShowNewDialog(true)}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
         >
           <Plus size={16} />
           {t('storyboard.newProject')}
@@ -186,27 +186,27 @@ export function ProjectListPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-800 flex-shrink-0">
+      <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800 flex-shrink-0">
         <div className="relative flex-1 max-w-xs">
           <Search
             size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
           />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('storyboard.search')}
-            className="w-full pl-8 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+            className="w-full pl-8 pr-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">{t('storyboard.sortBy')}</span>
+          <span className="text-xs text-zinc-500">{t('storyboard.sortBy')}</span>
           <select
             value={sortField}
             onChange={(e) => setSortField(e.target.value as SortField)}
-            className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 focus:outline-none focus:border-blue-500 transition-colors"
+            className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
           >
             <option value="name">{t('storyboard.sort.name', 'Name')}</option>
             <option value="created_at">{t('storyboard.sort.created', 'Created')}</option>
@@ -245,7 +245,7 @@ export function ProjectListPage() {
               <button
                 type="button"
                 onClick={() => setShowNewDialog(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
               >
                 <Plus size={14} />
                 {t('storyboard.newProject')}
