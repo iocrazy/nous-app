@@ -707,10 +707,13 @@ class DownloaderService:
 
         resources_repo = ResourcesRepository()
 
-        existing = await resources_repo.get_resource_by_media_id(media_id)
+        existing = await resources_repo.get_resource_by_media_id_and_creator(
+            media_id, user_id
+        )
         if existing:
             logger.info(
-                f"[Carousel/Resource] Resource already exists for media {media_id}"
+                f"[Carousel/Resource] Resource already exists for media {media_id} "
+                f"(user {user_id})"
             )
             return
 

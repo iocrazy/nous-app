@@ -893,6 +893,63 @@ def _do_douyin_download(
                 error_msg = getattr(video_result, "error", None) or "Image download failed"
                 logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
 
+                # Fallback: re-parse to get fresh image URLs and retry
+                try:
+                    from app.services.douyin_parser import DouyinParser
+                    from app.services.lightweight_parser import LightweightParser
+
+                    logger.info(
+                        f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
+                    )
+                    aweme_detail = run_async(
+                        LightweightParser._fetch_share_page(platform_id)
+                    )
+                    if aweme_detail:
+                        LightweightParser._process_video_urls(aweme_detail)
+                        new_parsed = run_async(
+                            DouyinParser.parse_aweme_detail(
+                                aweme_detail=aweme_detail,
+                                valid_url=media.get("original_url", ""),
+                                download_video=True,
+                                download_music=False,
+                                download_cover=False,
+                            )
+                        )
+                        if new_parsed:
+                            # Update DB with fresh URLs
+                            update_fields = {}
+                            for field in ("image_download_urls", "video_download_urls"):
+                                if new_parsed.get(field):
+                                    update_fields[field] = new_parsed[field]
+                            if update_fields:
+                                repo = MediaRepository()
+                                run_async(repo.update(platform_id, update_fields))
+                                logger.info(
+                                    f"[Download/Exec] image: re-parsed {platform_id}, "
+                                    f"updated {list(update_fields.keys())}"
+                                )
+
+                            # Retry download with fresh URLs
+                            video_result = run_async(
+                                DownloaderService.download_images_by_platform_id(
+                                    platform_id, user_id=user_id
+                                )
+                            )
+                            results["video"] = (
+                                video_result.video_download_status.value
+                                if hasattr(video_result, "video_download_status")
+                                else "unknown"
+                            )
+                            logger.info(
+                                f"[Download/Exec] image retry: "
+                                f"{results['video']} for {platform_id}"
+                            )
+                except Exception as reparse_err:
+                    logger.warning(
+                        f"[Download/Exec] image: re-parse fallback failed "
+                        f"for {platform_id}: {reparse_err}"
+                    )
+
             # Mark image stage complete
             if 'video' in stages:
                 video_end = stages['video'][0] + stages['video'][1]
