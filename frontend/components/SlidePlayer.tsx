@@ -11,12 +11,12 @@ interface Slide {
 }
 
 interface SlidePlayerProps {
-  platformId: string;
+  mediaId: string;
   mediaToken?: string;
   downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken, downloadStatus }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,11 +32,11 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
 
   // Build authenticated URL with token query param
   const buildSlideUrl = useCallback((filename: string) => {
-    const url = `${baseUrl}/api/v1/videos/download/${platformId}/slides/${filename}`;
+    const url = `${baseUrl}/api/v1/media/${mediaId}/slides/${filename}`;
     return mediaToken ? `${url}?token=${encodeURIComponent(mediaToken)}` : url;
   }, [baseUrl, platformId, mediaToken]);
 
-  const audioUrl = `${baseUrl}/api/v1/videos/download/${platformId}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`;
+  const audioUrl = `${baseUrl}/api/v1/media/${mediaId}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`;
 
   // Fetch slide list on mount
   useEffect(() => {
@@ -48,7 +48,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
       try {
         const headers = await getAuthHeaders();
         const resp = await fetch(
-          `${baseUrl}/api/v1/videos/download/${platformId}/slides`,
+          `${baseUrl}/api/v1/media/${mediaId}/slides`,
           { headers },
         );
         if (!resp.ok) {

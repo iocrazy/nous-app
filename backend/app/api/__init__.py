@@ -33,6 +33,7 @@ from app.api.task_router import router as task_router
 from app.api.user_settings_router import router as settings_router
 from app.api.media_router import legacy_router as legacy_douyin_router
 from app.api.media_router import router as media_router
+from app.api.media_router import media_content_router
 from app.api.teams_router import router as teams_router
 from app.api.invites_router import router as invites_router
 from app.api.video_collections_router import router as video_collections_router
@@ -51,6 +52,8 @@ api_router.include_router(router=media_auth_router, tags=["Media Auth"])
 api_router.include_router(router=temp_token_router, tags=["Temp Token"])
 
 api_router.include_router(router=media_router, tags=["Media"])
+
+api_router.include_router(router=media_content_router, tags=["Media Content"])
 
 api_router.include_router(router=legacy_douyin_router, tags=["Legacy"])
 
