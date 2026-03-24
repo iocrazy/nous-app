@@ -13,9 +13,10 @@ interface Slide {
 interface SlidePlayerProps {
   platformId: string;
   mediaToken?: string;
+  downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken, downloadStatus }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -145,12 +146,23 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ platformId, mediaToken
     );
   }
 
-  // Error state
+  // Error state — distinguish between downloading and actual failure
   if (loadError) {
+    const isStillDownloading = downloadStatus === 'pending' || downloadStatus === 'downloading';
     return (
       <div className="w-full h-full bg-zinc-950 rounded-lg flex flex-col items-center justify-center gap-3">
-        <ImageOff size={48} className="text-zinc-600" />
-        <p className="text-zinc-400 text-sm">{loadError}</p>
+        {isStillDownloading ? (
+          <>
+            <Loader2 size={48} className="text-indigo-500 animate-spin" />
+            <p className="text-zinc-300 text-sm font-medium">Downloading...</p>
+            <p className="text-zinc-500 text-xs">Images are being downloaded. Please wait.</p>
+          </>
+        ) : (
+          <>
+            <ImageOff size={48} className="text-zinc-600" />
+            <p className="text-zinc-400 text-sm">{loadError}</p>
+          </>
+        )}
       </div>
     );
   }

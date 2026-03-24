@@ -355,7 +355,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
       <div className="flex flex-col h-full p-2 sm:p-4 md:p-0">
-        <div className="hidden sm:flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
+        <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
           {/* Left: back + title */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
             <button
@@ -536,7 +536,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           {/* Video Player — main area */}
           <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
             {video.media_type && isAlbumType(video.media_type) ? (
-              <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} />
+              <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} downloadStatus={video.video_download_status || video.image_download_status || undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
                 src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
