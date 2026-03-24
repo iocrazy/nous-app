@@ -502,11 +502,61 @@ async def fetch_media_by_type(
         # 4) Detect platform: Douyin uses its own downloader, others use yt-dlp
         original_url = media.get("original_url")
         dispatch_url = None
+        platform = None
         if original_url:
             platform, _ = URLRouter.detect_platform(original_url)
             if platform not in ("douyin", "tiktok"):
                 dispatch_url = original_url  # yt-dlp path
             # Douyin/TikTok: dispatch_url=None → Celery uses Douyin downloader
+
+        # 4.5) Re-parse to get fresh URLs + updated stats (Douyin/TikTok only)
+        #       CDN URLs expire in hours; stale URLs cause download failures.
+        if platform in ("douyin", "tiktok"):
+            try:
+                aweme_detail = await LightweightParser._fetch_share_page(platform_id)
+                if aweme_detail:
+                    LightweightParser._process_video_urls(aweme_detail)
+                    new_parsed = await DouyinParser.parse_aweme_detail(
+                        aweme_detail=aweme_detail,
+                        valid_url=media.get("original_url", ""),
+                        download_video=True,
+                        download_music=True,
+                        download_cover=True,
+                    )
+                    if new_parsed:
+                        # Update URLs + stats in parsed_media
+                        update_fields = {}
+                        url_fields = [
+                            "video_download_urls",
+                            "image_download_urls",
+                            "music_play_urls",
+                            "cover_urls",
+                        ]
+                        for field in url_fields:
+                            if new_parsed.get(field):
+                                update_fields[field] = new_parsed[field]
+
+                        stat_fields = [
+                            "like_count",
+                            "comment_count",
+                            "share_count",
+                            "favorite_count",
+                        ]
+                        for field in stat_fields:
+                            if new_parsed.get(field) is not None:
+                                update_fields[field] = new_parsed[field]
+
+                        if update_fields:
+                            await repo.update(platform_id, update_fields)
+                            logger.info(
+                                f"[Refetch] Re-parsed {platform_id}: "
+                                f"updated {list(update_fields.keys())}"
+                            )
+            except Exception as e:
+                logger.warning(
+                    f"[Refetch] Re-parse failed for {platform_id}, "
+                    f"proceeding with existing URLs: {e}"
+                )
 
         # 5) Dedup + dispatch
         dispatch_result = await _dedup_and_dispatch(
@@ -1221,7 +1271,6 @@ async def retry_download(
             media_type=int(media_type) if str(media_type).isdigit() else 0,
             video_title=video_title,
             download_video=request.video_bool,
-            download_music=False,
             download_cover=request.cover_bool,
             background_tasks=background_tasks,
         )

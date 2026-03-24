@@ -137,7 +137,6 @@ def retry_failed_downloads():
                             "video_download_status": DownloadStatus.PENDING.value,
                             "error_message": None,
                         },
-                        user_id=user_id,
                     )
                 )
 
