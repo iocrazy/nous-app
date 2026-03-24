@@ -367,6 +367,17 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         aweme_detail = run_async(LightweightParser.parse(original_url))
         parse_method = "LightHTTP"
 
+        # If short URL failed, try full URL with platform_id
+        if not aweme_detail and platform_id:
+            media_type_str = str(media.get("media_type", "0"))
+            # carousel/note types use /note/ URL, videos use /video/
+            path_prefix = "note" if media_type_str in ("2", "68") else "video"
+            full_url = f"https://www.douyin.com/{path_prefix}/{platform_id}"
+            logger.info(f"[Download/URL] Short URL failed, trying full URL: {full_url}")
+            aweme_detail = run_async(LightweightParser.parse(full_url))
+            if aweme_detail:
+                parse_method = "LightHTTP-fullURL"
+
         if aweme_detail:
             new_parsed = run_async(DouyinParser.parse_aweme_detail(
                 aweme_detail=aweme_detail,
