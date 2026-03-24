@@ -52,16 +52,26 @@ class DouyinParser:
             if mid and mid != "0" and mid != "":
                 try:
                     import httpx
-                    api_url = f"https://aweme.snssdk.com/aweme/v1/music/detail/?music_id={mid}"
+                    # Try multiple API endpoints (DNS may vary by environment)
+                    api_endpoints = [
+                        f"https://aweme.snssdk.com/aweme/v1/music/detail/?music_id={mid}",
+                        f"https://api-va.tiktokv.com/aweme/v1/music/detail/?music_id={mid}",
+                    ]
                     api_headers = {"User-Agent": "com.ss.android.ugc.aweme/330101 (Linux; U; Android 14;)"}
-                    async with httpx.AsyncClient(timeout=8) as client:
-                        resp = await client.get(api_url, headers=api_headers)
-                        if resp.status_code == 200:
-                            music_info = resp.json().get("music_info", {})
-                            api_play_url = music_info.get("play_url", {})
-                            if isinstance(api_play_url, dict):
-                                urls = api_play_url.get("url_list", [])
-                            logger.info(f"[DouyinParser/{source}] Fetched music via API: mid={mid}, urls={len(urls)}")
+                    for api_url in api_endpoints:
+                        try:
+                            async with httpx.AsyncClient(timeout=10) as client:
+                                resp = await client.get(api_url, headers=api_headers)
+                                if resp.status_code == 200:
+                                    music_info = resp.json().get("music_info", {})
+                                    api_play_url = music_info.get("play_url", {})
+                                    if isinstance(api_play_url, dict):
+                                        urls = api_play_url.get("url_list", [])
+                                    if urls:
+                                        logger.info(f"[DouyinParser/{source}] Fetched music via API: mid={mid}, urls={len(urls)}, endpoint={api_url[:40]}")
+                                        break
+                        except Exception as ep_err:
+                            logger.debug(f"[DouyinParser/{source}] Music API endpoint failed: {api_url[:40]}: {ep_err}")
                 except Exception as e:
                     logger.warning(f"[DouyinParser/{source}] Music API fetch failed for mid={mid}: {e}")
 
