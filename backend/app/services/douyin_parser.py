@@ -390,15 +390,35 @@ class DouyinParser:
         Returns:
             Dict[str, Any]: Structured image collection data
         """
-        # Extract image URLs (image collection)
+        # Extract image URLs + video URLs (image collection)
+        # Type 2 can contain:
+        #   - Static images: images[*].download_url_list → .webp/.jpg
+        #   - Animated images: images[*].download_url_list → .webp (animated)
+        #   - Video version: top-level video.play_addr → .mp4 (for animated posts)
+        #   - Per-image video: images[*].video.play_addr → .mp4 (mixed content)
         images = aweme_detail.get("images", [])
         image_download_urls = []
+        video_download_urls = []
 
         if images:
             for item in images:
-                image_urls = item.get("download_url_list", [])
-                if image_urls:
-                    image_download_urls.append(image_urls)
+                # Check if this image item has an embedded video (like type 68)
+                if item.get("video", {}):
+                    vid_urls = item.get("video", {}).get("play_addr", {}).get("url_list", [])
+                    if vid_urls:
+                        video_download_urls.append(vid_urls)
+                else:
+                    image_urls = item.get("download_url_list", [])
+                    if image_urls:
+                        image_download_urls.append(image_urls)
+
+        # Also extract top-level video (animated image posts have video version here)
+        top_video = aweme_detail.get("video", {})
+        if top_video and top_video.get("play_addr", {}).get("url_list"):
+            top_video_urls = top_video["play_addr"]["url_list"]
+            if top_video_urls:
+                video_download_urls.append(top_video_urls)
+                logger.info(f"[DouyinParser] Image collection has top-level video: {len(top_video_urls)} URLs")
 
         # Build music name
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
@@ -430,6 +450,7 @@ class DouyinParser:
             "datasize_bytes": 0,  # Image collections don't have video file size
             "source_platform": "douyin",
             "image_download_urls": image_download_urls,
+            "video_download_urls": video_download_urls,
             "music_name": music_name,
             "music_play_urls": music_play_urls,
             "need_download_video": download_video,
