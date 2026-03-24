@@ -536,7 +536,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           {/* Video Player — main area */}
           <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
             {video.media_type && isAlbumType(video.media_type) ? (
-              <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} downloadStatus={video.video_download_status || video.image_download_status || undefined} />
+              <SlidePlayer platformId={video.platform_id} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer
                 src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
