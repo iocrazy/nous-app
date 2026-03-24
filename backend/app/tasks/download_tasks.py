@@ -510,9 +510,13 @@ def _validate_and_refresh_urls(
     if not urls:
         return media, False, "no URLs available"
 
-    # Test current URLs
+    # Test current URLs (handle nested lists: [[url1, url2], [url3, url4]])
     fail_reason = ""
-    for url in urls:
+    for item in urls:
+        # Nested list: item is [url1, url2, ...] — test first URL
+        url = item[0] if isinstance(item, list) and item else item
+        if not isinstance(url, str):
+            continue
         ok, reason = run_async(_check_url_accessible(url))
         if ok:
             return media, True, "ok"
@@ -532,7 +536,10 @@ def _validate_and_refresh_urls(
     if not fresh_urls:
         return media, False, "re-parse returned no URLs"
 
-    for url in fresh_urls:
+    for item in fresh_urls:
+        url = item[0] if isinstance(item, list) and item else item
+        if not isinstance(url, str):
+            continue
         ok, reason = run_async(_check_url_accessible(url))
         if ok:
             logger.info(f"[Download/Validate] Fresh {type_key} URLs accessible for {platform_id}")
