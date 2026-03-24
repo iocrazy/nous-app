@@ -1447,42 +1447,49 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
-@router.get("/download/{platform_id}/slides", tags=TAGS_DOWNLOAD)
-async def list_slides(platform_id: str, auth: AuthDep):
+# ===========================================================================
+# NEW: /api/v1/media/{media_id}/slides and /audio routes
+# Uses media_id (parsed_media Snowflake ID) — consistent with /media/{media_id}
+# ===========================================================================
+
+media_content_router = APIRouter(prefix="/media")
+
+TAGS_MEDIA_CONTENT = ["Media Content"]
+
+
+async def _get_media_download_path(media_id: str) -> tuple[dict, str]:
+    """Resolve media_id to download_path. Returns (media_record, download_path)."""
+    from app.db.supabase_client import get_async_supabase_admin
+    supabase = await get_async_supabase_admin()
+    res = await supabase.table("parsed_media").select("*").eq("id", media_id).maybe_single().execute()
+    if not res or not res.data:
+        raise HTTPException(status_code=404, detail="Media not found")
+    download_path = res.data.get("download_path")
+    if not download_path:
+        raise HTTPException(status_code=404, detail="Download path not found")
+    return res.data, download_path
+
+
+@media_content_router.get("/{media_id}/slides", tags=TAGS_MEDIA_CONTENT)
+async def list_slides(media_id: str, auth: AuthDep):
     """
     List slide files for a carousel/image-text media item.
 
-    Returns an ordered list of files in the slides/ subfolder.
-
-    - **platform_id**: Media unique identifier
+    - **media_id**: parsed_media Snowflake ID
 
     Authentication: Bearer Token or API Key
     """
     try:
-        repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id)
-
-        if not video:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        download_path = video.get("download_path")
-        if not download_path:
-            raise HTTPException(status_code=404, detail="Download path not found")
-
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
 
         # Check slides/ subfolder first (new format), fallback to root folder (old format)
         slides_dir = Path(base_path) / download_path / "slides"
         if not slides_dir.exists() or not slides_dir.is_dir():
-            # Fallback: old downloads stored images in root folder
             slides_dir = Path(base_path) / download_path
             if not slides_dir.exists() or not slides_dir.is_dir():
                 raise HTTPException(status_code=404, detail="Slides folder not found")
 
-        # List and sort slide files
         slides = []
         for f in sorted(slides_dir.iterdir()):
             if not f.is_file():
@@ -1490,147 +1497,110 @@ async def list_slides(platform_id: str, auth: AuthDep):
             suffix = f.suffix.lower()
             if suffix in (".jpg", ".jpeg", ".png", ".webp"):
                 slide_type = "image"
-                media_type = f"image/{suffix.lstrip('.')}"
+                mt = f"image/{suffix.lstrip('.')}"
             elif suffix in (".mp4", ".mov", ".webm"):
                 slide_type = "video"
-                media_type = f"video/{suffix.lstrip('.')}"
+                mt = f"video/{suffix.lstrip('.')}"
             else:
                 continue
-
             slides.append({
                 "name": f.name,
                 "type": slide_type,
-                "media_type": media_type,
-                "url": f"/api/v1/videos/download/{platform_id}/slides/{f.name}",
+                "media_type": mt,
+                "url": f"/api/v1/media/{media_id}/slides/{f.name}",
             })
 
         return {"slides": slides, "count": len(slides)}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list slides for {platform_id}: {e}")
+        logger.error(f"Failed to list slides for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list slides")
 
 
-@router.get("/download/{platform_id}/slides/{filename}", tags=TAGS_DOWNLOAD)
-async def serve_slide_file(platform_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None):
+@media_content_router.get("/{media_id}/slides/{filename}", tags=TAGS_MEDIA_CONTENT)
+async def serve_slide_file(media_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None):
     """
-    Serve a single slide file (image or video clip).
+    Serve a single slide file.
 
-    - **platform_id**: Media unique identifier
+    - **media_id**: parsed_media Snowflake ID
     - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
 
-    Authentication: Bearer Token or API Key
+    Authentication: Bearer Token, API Key, or ?token= query param
     """
     import mimetypes as _mt
     from app.api.media_auth import validate_media_cookie
 
-    # Auth: Bearer token OR ?token= query param
     if not auth and token:
-        user_id = validate_media_cookie(token)
-        if not user_id:
+        if not validate_media_cookie(token):
             raise HTTPException(status_code=401, detail="Invalid token")
     elif not auth:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    # Validate filename to prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     try:
-        repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id)
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
 
-        if not video:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        download_path = video.get("download_path")
-        if not download_path:
-            raise HTTPException(status_code=404, detail="Download path not found")
-
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
-
-        # Check slides/ subfolder first, fallback to root folder (old format)
         file_path = Path(base_path) / download_path / "slides" / filename
         if not file_path.exists():
             file_path = Path(base_path) / download_path / filename
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Slide file not found")
 
-        content_type = _mt.guess_type(str(file_path))[0] or "application/octet-stream"
-
         return FileResponse(
             path=str(file_path),
-            media_type=content_type,
+            media_type=_mt.guess_type(str(file_path))[0] or "application/octet-stream",
             content_disposition_type="inline",
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve slide {filename} for {platform_id}: {e}")
+        logger.error(f"Failed to serve slide {filename} for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve slide file")
 
 
-@router.get("/download/{platform_id}/audio", tags=TAGS_DOWNLOAD)
-async def serve_audio_file(platform_id: str, auth: OptionalAuthDep = None, token: str = None):
+@media_content_router.get("/{media_id}/audio", tags=TAGS_MEDIA_CONTENT)
+async def serve_audio_file(media_id: str, auth: OptionalAuthDep = None, token: str = None):
     """
-    Serve the standalone background audio file for carousel content.
+    Serve standalone background audio for carousel content.
 
-    - **platform_id**: Media unique identifier
+    - **media_id**: parsed_media Snowflake ID
 
     Authentication: Bearer Token, API Key, or ?token= query param
     """
     from app.api.media_auth import validate_media_cookie
 
     if not auth and token:
-        user_id = validate_media_cookie(token)
-        if not user_id:
+        if not validate_media_cookie(token):
             raise HTTPException(status_code=401, detail="Invalid token")
     elif not auth:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
-        repo = MediaRepository()
-        video = await repo.get_by_platform_id(platform_id)
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
 
-        if not video:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
-
-        # Try music_download_path first, then fallback to download_path/audio.mp3
         audio_file = None
-        music_path = video.get("music_download_path")
+        music_path = media.get("music_download_path")
         if music_path:
             candidate = Path(base_path) / music_path
             if candidate.exists():
                 audio_file = candidate
-
         if not audio_file:
-            download_path = video.get("download_path")
-            if download_path:
-                candidate = Path(base_path) / download_path / "audio.mp3"
-                if candidate.exists():
-                    audio_file = candidate
-
+            candidate = Path(base_path) / download_path / "audio.mp3"
+            if candidate.exists():
+                audio_file = candidate
         if not audio_file:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
-        return FileResponse(
-            path=str(audio_file),
-            media_type="audio/mpeg",
-            content_disposition_type="inline",
-        )
+        return FileResponse(path=str(audio_file), media_type="audio/mpeg", content_disposition_type="inline")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve audio for {platform_id}: {e}")
+        logger.error(f"Failed to serve audio for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve audio file")
 
 
