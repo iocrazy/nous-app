@@ -34,7 +34,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   const buildSlideUrl = useCallback((filename: string) => {
     const url = `${baseUrl}/api/v1/media/${mediaId}/slides/${filename}`;
     return mediaToken ? `${url}?token=${encodeURIComponent(mediaToken)}` : url;
-  }, [baseUrl, platformId, mediaToken]);
+  }, [baseUrl, mediaId, mediaToken]);
 
   const audioUrl = `${baseUrl}/api/v1/media/${mediaId}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`;
 
@@ -73,7 +73,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
 
     fetchSlides();
     return () => { cancelled = true; };
-  }, [baseUrl, platformId]);
+  }, [baseUrl, mediaId]);
 
   // Navigate slides
   const goTo = useCallback((index: number) => {
