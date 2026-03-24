@@ -452,6 +452,15 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
                     f"({len(new_parsed[field])} URLs, via {parse_method})"
                 )
 
+        # Also update music_play_urls if re-parsed (carousel needs standalone music)
+        if new_parsed.get("music_play_urls"):
+            update_fields["music_play_urls"] = new_parsed["music_play_urls"]
+            media["music_play_urls"] = new_parsed["music_play_urls"]
+            logger.info(
+                f"[Download/URL] Refreshed music_play_urls for {platform_id} "
+                f"({len(new_parsed['music_play_urls'])} URLs, via {parse_method})"
+            )
+
         if update_fields:
             run_async(_MR().update(platform_id, update_fields))
         else:
