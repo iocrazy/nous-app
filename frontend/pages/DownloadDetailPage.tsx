@@ -641,12 +641,12 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                                 <>
                                   {isCompleted(video.video_download_status) && hasVideoFile && (
                                     <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('video'); }} className={btnClass}>
-                                      <Download size={13} className="text-indigo-400" /> Download Video
+                                      <Download size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Download Images' : 'Download Video'}
                                     </button>
                                   )}
                                   {!isCompleted(video.video_download_status) && video.original_url && (
                                     <button onClick={() => { setShowMoreMenu(false); handleFetchMedia({ video: true }); }} className={btnClass}>
-                                      <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+                                      <CloudDownload size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Fetch Images' : 'Fetch Video'}
                                     </button>
                                   )}
                                   {isCompleted(video.cover_download_status) && hasCoverFile && (
@@ -673,7 +673,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                                   <div className="border-t border-zinc-700 my-1" />
                                   <button
                                     className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
-                                    onClick={() => { setShowMoreMenu(false); setShowDeleteDialog(true); }}
+                                    onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}
                                   >
                                     <Trash2 size={13} /> Delete
                                   </button>
