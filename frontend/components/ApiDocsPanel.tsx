@@ -332,11 +332,11 @@ const EndpointSection: React.FC<{ ep: EndpointDef }> = ({ ep }) => {
 // --- Scopes Table ---
 
 const scopesData = [
-  { scope: 'videos:fetch', description: 'Parse single video link' },
+  { scope: 'videos:fetch', description: 'Parse single media link' },
   { scope: 'videos:fetch:batch', description: 'Batch parse multiple links' },
-  { scope: 'videos:videos:read', description: 'List and get video details' },
-  { scope: 'videos:videos:write', description: 'Create and update videos' },
-  { scope: 'videos:search', description: 'Search videos' },
+  { scope: 'videos:videos:read', description: 'List and get media details' },
+  { scope: 'videos:videos:write', description: 'Create and update media' },
+  { scope: 'videos:search', description: 'Search media' },
   { scope: 'videos:statistics', description: 'View statistics' },
   { scope: 'videos:retry', description: 'Retry failed downloads' },
   { scope: 'tags:read', description: 'List tags' },
