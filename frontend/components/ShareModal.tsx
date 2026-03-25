@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { DateTimePicker } from './DateTimePicker';
 import { createShare } from '../services/sharesService';
 import { Share, ShareType } from '../types';
 
@@ -294,11 +295,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   </button>
                 </div>
                 {expirationEnabled && (
-                  <input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={expirationDate}
-                    onChange={(e) => setExpirationDate(e.target.value)}
-                    className="w-full max-w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 transition-colors [color-scheme:dark] box-border"
+                    onChange={setExpirationDate}
                   />
                 )}
 
