@@ -552,7 +552,7 @@ async def access_share_by_code(
             try:
                 res_data = (
                     await client.table("resources")
-                    .select("mime_type, filename, cover_image_path, thumbnail_path, media_id")
+                    .select("mime_type, file_type, filename, cover_image_path, thumbnail_path, media_id")
                     .eq("id", share["resource_id"])
                     .maybe_single()
                     .execute()
@@ -560,6 +560,7 @@ async def access_share_by_code(
                 if res_data.data:
                     resource_meta = {
                         "mime_type": res_data.data.get("mime_type"),
+                        "file_type": res_data.data.get("file_type"),
                         "filename": res_data.data.get("filename"),
                         "cover_image_path": res_data.data.get("cover_image_path"),
                         "thumbnail_path": res_data.data.get("thumbnail_path"),
