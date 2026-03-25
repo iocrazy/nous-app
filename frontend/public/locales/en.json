@@ -739,6 +739,7 @@
     "confirmCancel": "Cancel this share? Recipients will no longer be able to access it.",
     "status": {
       "active": "Active",
+      "inactive": "Inactive",
       "expired": "Expired",
       "cancelled": "Cancelled"
     },

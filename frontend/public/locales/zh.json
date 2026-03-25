@@ -739,6 +739,7 @@
     "confirmCancel": "确定取消此分享？接收者将无法再访问。",
     "status": {
       "active": "活跃",
+      "inactive": "未激活",
       "expired": "已过期",
       "cancelled": "已取消"
     },
