@@ -13,6 +13,7 @@ import { TagsSettings } from './TagsSettings';
 import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
+import { useConfirm } from './ConfirmDialog';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -44,6 +45,7 @@ const DEFAULT_SCOPES = [
 ];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false }) => {
+  const confirmDialog = useConfirm();
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -248,7 +250,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   const handleDeleteKey = async (keyId: string) => {
-    if (!confirm('Are you sure you want to delete this API Key?')) return;
+    const ok = await confirmDialog({
+      title: 'Delete API Key',
+      message: 'This API key will be permanently revoked. Any applications using it will lose access.',
+      confirmLabel: 'Delete Key',
+      variant: 'danger',
+    });
+    if (!ok) return;
 
     try {
       await apiKeyService.deleteApiKey(keyId);
