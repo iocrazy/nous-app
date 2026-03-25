@@ -396,7 +396,6 @@ async def cancel_share(share_id: str, auth: AuthDep):
 async def delete_share_permanent(share_id: str, auth: AuthDep):
     """
     Permanently delete a share record (hard delete).
-    Only allowed for expired or cancelled shares.
 
     Authentication: Bearer Token or API Key
     """
@@ -405,7 +404,7 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
 
         existing = (
             await client.table("shares")
-            .select("id, shared_by, status")
+            .select("id, shared_by")
             .eq("id", share_id)
             .execute()
         )
@@ -417,12 +416,6 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
 
         if share["shared_by"] != auth.user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
-
-        if share["status"] == "active":
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot delete an active share. Cancel it first.",
-            )
 
         await client.table("shares").delete().eq("id", share_id).execute()
 
