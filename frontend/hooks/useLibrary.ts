@@ -26,6 +26,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number>(-1);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -101,6 +102,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
+        if (result.totalCount >= 0) setTotalCount(result.totalCount);
         if (result.data.length === 0) {
           console.log("Supabase connected but returned no data.");
         }
@@ -506,6 +508,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     filteredLibrary,
 
     // Pagination
+    totalCount,
     hasMoreData,
     isLoadingMore,
     loadMoreRef,

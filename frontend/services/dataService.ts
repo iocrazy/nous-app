@@ -260,9 +260,21 @@ export const fetchLibraryPaginated = async (
     const hasMore = rows.length > pageSize;
     const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
+    // Fast total count (only on first page to avoid repeated queries)
+    let totalCount = -1;
+    if (page === 0) {
+      const { count } = await supabase
+        .from('resources')
+        .select('id', { count: 'exact', head: true })
+        .eq('creator_id', userId)
+        .eq('source_type', 'web')
+        .eq('is_trashed', false);
+      totalCount = count ?? -1;
+    }
+
     return {
       data: pageData.map(flattenResourceMedia) as ParsedMedia[],
-      totalCount: -1,  // no longer computed
+      totalCount,
       hasMore,
       page,
     };

@@ -99,6 +99,7 @@ export const DownloadsView: React.FC = () => {
     library,
     isLoadingLibrary,
     libraryError,
+    totalCount,
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
@@ -654,7 +655,7 @@ export const DownloadsView: React.FC = () => {
     <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? '' : 'md:h-full'}`}>
       {/* Toolbar — matches ResourcesView style (hidden on mobile, search via overlay) */}
       <div
-        className="hidden md:block px-6 py-3 border-b border-zinc-800/80"
+        className="hidden md:block px-6 py-2 border-b border-zinc-800/80"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
@@ -662,7 +663,7 @@ export const DownloadsView: React.FC = () => {
             <span className="text-sm text-zinc-200 font-medium truncate">{t('resources.downloads')}</span>
             {!isLoadingLibrary && (
               <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                {filteredLibrary.length} {filteredLibrary.length === 1 ? 'item' : 'items'}
+                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
               </span>
             )}
           </div>
@@ -738,7 +739,7 @@ export const DownloadsView: React.FC = () => {
             <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
             {!isLoadingLibrary && (
               <span className="text-[11px] text-zinc-600 tabular-nums">
-                {filteredLibrary.length} {filteredLibrary.length === 1 ? 'item' : 'items'}
+                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
               </span>
             )}
           </div>
