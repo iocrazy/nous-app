@@ -74,14 +74,7 @@ export const SharedPage: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleCancelShare = async (shareId: string) => {
-    const ok = await confirm({
-      title: 'Cancel Share',
-      message: 'Recipients will no longer be able to access this share.',
-      confirmLabel: 'Cancel Share',
-      variant: 'warning',
-    });
-    if (!ok) return;
+  const handleToggleActive = async (shareId: string) => {
     try {
       await cancelShareApi(shareId);
       await loadShares();
@@ -164,13 +157,24 @@ export const SharedPage: React.FC = () => {
 
               {/* Status + Views + Date — fixed width for alignment */}
               <div className="flex items-center gap-4 shrink-0">
-                <span
-                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${
-                    STATUS_COLORS[share.status as ShareStatus] || STATUS_COLORS.active
-                  }`}
-                >
-                  {t(`shared.status.${share.status}`)}
-                </span>
+                {/* Status badge — clickable to toggle active/inactive */}
+                {share.status === 'active' ? (
+                  <button
+                    onClick={() => handleToggleActive(share.id)}
+                    className="px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
+                    title="Click to deactivate"
+                  >
+                    {t(`shared.status.active`)}
+                  </button>
+                ) : (
+                  <span
+                    className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${
+                      STATUS_COLORS[share.status as ShareStatus] || STATUS_COLORS.active
+                    }`}
+                  >
+                    {t(`shared.status.${share.status}`)}
+                  </span>
+                )}
 
                 <span className="text-xs text-zinc-500 w-16 text-right tabular-nums">
                   {share.view_count || 0} {t('share.views')}
@@ -182,7 +186,7 @@ export const SharedPage: React.FC = () => {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 w-24 justify-end">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 w-20 justify-end">
                 <button
                   onClick={() => handleCopyLink(share)}
                   className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -198,24 +202,13 @@ export const SharedPage: React.FC = () => {
                 >
                   <ExternalLink size={14} />
                 </a>
-                {share.status === 'active' && (
-                  <button
-                    onClick={() => handleCancelShare(share.id)}
-                    className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
-                    title={t('shared.cancelShare')}
-                  >
-                    <XCircle size={14} />
-                  </button>
-                )}
-                {(share.status === 'expired' || share.status === 'cancelled') && (
-                  <button
-                    onClick={() => handleDeleteShare(share.id)}
-                    className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Delete"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+                <button
+                  onClick={() => handleDeleteShare(share.id)}
+                  className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
             </div>
           ))}
