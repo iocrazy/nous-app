@@ -20,11 +20,12 @@ import {
   Copy,
   Check,
   XCircle,
+  Trash2,
   Loader2,
   ExternalLink,
   Filter,
 } from 'lucide-react';
-import { fetchShares, cancelShare as cancelShareApi } from '../services/sharesService';
+import { fetchShares, cancelShare as cancelShareApi, deleteSharePermanent } from '../services/sharesService';
 import { Share, ShareType, ShareStatus } from '../types';
 
 const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
@@ -75,6 +76,16 @@ export const SharedPage: React.FC = () => {
     if (!window.confirm(t('shared.confirmCancel'))) return;
     try {
       await cancelShareApi(shareId);
+      await loadShares();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDeleteShare = async (shareId: string) => {
+    if (!window.confirm('Permanently delete this share?')) return;
+    try {
+      await deleteSharePermanent(shareId);
       await loadShares();
     } catch {
       /* ignore */
@@ -137,27 +148,27 @@ export const SharedPage: React.FC = () => {
                 <p className="text-xs text-zinc-500">{t(`shared.type.${share.share_type}`)}</p>
               </div>
 
-              {/* Status badge */}
-              <span
-                className={`px-2 py-0.5 text-xs font-medium rounded-md border ${
-                  STATUS_COLORS[share.status as ShareStatus] || STATUS_COLORS.active
-                }`}
-              >
-                {t(`shared.status.${share.status}`)}
-              </span>
+              {/* Status + Views + Date — fixed width for alignment */}
+              <div className="flex items-center gap-4 shrink-0">
+                <span
+                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${
+                    STATUS_COLORS[share.status as ShareStatus] || STATUS_COLORS.active
+                  }`}
+                >
+                  {t(`shared.status.${share.status}`)}
+                </span>
 
-              {/* Views */}
-              <span className="text-xs text-zinc-500 w-16 text-right">
-                {share.view_count || 0} {t('share.views')}
-              </span>
+                <span className="text-xs text-zinc-500 w-16 text-right tabular-nums">
+                  {share.view_count || 0} {t('share.views')}
+                </span>
 
-              {/* Date */}
-              <span className="text-xs text-zinc-600 w-24 text-right">
-                {new Date(share.created_at).toLocaleDateString()}
-              </span>
+                <span className="text-xs text-zinc-600 w-20 text-right tabular-nums">
+                  {new Date(share.created_at).toLocaleDateString()}
+                </span>
+              </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 w-24 justify-end">
                 <button
                   onClick={() => handleCopyLink(share)}
                   className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -180,6 +191,15 @@ export const SharedPage: React.FC = () => {
                     title={t('shared.cancelShare')}
                   >
                     <XCircle size={14} />
+                  </button>
+                )}
+                {(share.status === 'expired' || share.status === 'cancelled') && (
+                  <button
+                    onClick={() => handleDeleteShare(share.id)}
+                    className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
                   </button>
                 )}
               </div>

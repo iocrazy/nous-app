@@ -177,6 +177,23 @@ export const cancelShare = async (shareId: string): Promise<void> => {
 };
 
 /**
+ * Permanently delete a share (hard delete, only for expired/cancelled).
+ */
+export const deleteSharePermanent = async (shareId: string): Promise<void> => {
+  const url = `${API_BASE}/api/v1/shares/${shareId}/permanent`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete share' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+};
+
+/**
  * Access a share by its public share code (no auth required for public access).
  * Backend uses POST with JSON body for password verification.
  */
