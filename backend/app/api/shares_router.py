@@ -392,6 +392,50 @@ async def cancel_share(share_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to cancel share")
 
 
+@router.delete("/{share_id}/permanent")
+async def delete_share_permanent(share_id: str, auth: AuthDep):
+    """
+    Permanently delete a share record (hard delete).
+    Only allowed for expired or cancelled shares.
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        client = await get_async_supabase_admin()
+
+        existing = (
+            await client.table("shares")
+            .select("id, shared_by, status")
+            .eq("id", share_id)
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Share not found")
+
+        share = existing.data[0]
+
+        if share["shared_by"] != auth.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        if share["status"] == "active":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete an active share. Cancel it first.",
+            )
+
+        await client.table("shares").delete().eq("id", share_id).execute()
+
+        logger.info(f"Share {share_id} permanently deleted by user {auth.user_id}")
+        return {"success": True, "message": "Share deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete share {share_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete share")
+
+
 # ============================================
 # Public access endpoint
 # ============================================
