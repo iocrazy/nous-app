@@ -311,17 +311,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     setVideo((prev) => (prev ? { ...prev, ...updated } : prev));
   };
 
-  const handleDelete = async (id: string, _deleteFiles: boolean) => {
+  const handleDelete = async (id: string, deleteFiles: boolean) => {
     try {
-      // from=downloads means personal library → trash globally (is_trashed=true)
-      // Otherwise assume team context → only unlink from team
+      // Try resource-level trash first
       if (from === 'downloads' || !teamId) {
         await trashResourceByMediaId(id);
       } else {
         await trashResourceByMediaId(id, 'team', teamId);
       }
-    } catch (err) {
-      console.error('Failed to trash resource:', err);
+    } catch {
+      // Fallback: if no resource exists, delete parsed_media directly
+      try {
+        await deleteItem(id, deleteFiles);
+      } catch (err2) {
+        console.error('Failed to delete:', err2);
+        return; // Don't navigate back on failure
+      }
     }
     handleBack();
   };
