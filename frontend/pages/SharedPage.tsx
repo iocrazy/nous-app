@@ -36,9 +36,10 @@ const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
   delivery: <Package size={16} />,
 };
 
-const STATUS_COLORS: Record<ShareStatus, string> = {
+const STATUS_COLORS: Record<string, string> = {
   active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  expired: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  inactive: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  expired: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   cancelled: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
@@ -94,8 +95,8 @@ export const SharedPage: React.FC = () => {
     try {
       await deleteSharePermanent(shareId);
       await loadShares();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('Failed to delete share:', err);
     }
   };
 
@@ -110,7 +111,7 @@ export const SharedPage: React.FC = () => {
         {/* Filter */}
         <div className="flex items-center gap-2">
           <Filter size={14} className="text-zinc-500" />
-          {(['all', 'active', 'expired', 'cancelled'] as const).map((status) => (
+          {(['all', 'active', 'inactive', 'expired', 'cancelled'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilter(status)}
@@ -157,19 +158,23 @@ export const SharedPage: React.FC = () => {
 
               {/* Status + Views + Date — fixed width for alignment */}
               <div className="flex items-center gap-4 shrink-0">
-                {/* Status badge — clickable to toggle active/inactive */}
-                {share.status === 'active' ? (
+                {/* Status badge — clickable to toggle active ↔ inactive */}
+                {(share.status === 'active' || share.status === 'inactive') ? (
                   <button
                     onClick={() => handleToggleActive(share.id)}
-                    className="px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
-                    title="Click to deactivate"
+                    className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center transition-colors cursor-pointer ${
+                      share.status === 'active'
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20'
+                    }`}
+                    title={share.status === 'active' ? 'Click to deactivate' : 'Click to reactivate'}
                   >
-                    {t(`shared.status.active`)}
+                    {share.status === 'active' ? 'Active' : 'Inactive'}
                   </button>
                 ) : (
                   <span
                     className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${
-                      STATUS_COLORS[share.status as ShareStatus] || STATUS_COLORS.active
+                      STATUS_COLORS[share.status] || STATUS_COLORS.active
                     }`}
                   >
                     {t(`shared.status.${share.status}`)}
