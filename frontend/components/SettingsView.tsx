@@ -11,12 +11,13 @@ import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TasksPanel } from './TasksPanel';
 import { TagsSettings } from './TagsSettings';
 import { ApiDocsPanel } from './ApiDocsPanel';
+import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
@@ -628,6 +629,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Docs Tab */}
       {activeTab === 'docs' && (
         <ApiDocsPanel />
+      )}
+
+      {/* Cookies Tab */}
+      {activeTab === 'cookies' && (
+        <CookiesSettings />
       )}
 
       {/* Wave animation keyframes */}

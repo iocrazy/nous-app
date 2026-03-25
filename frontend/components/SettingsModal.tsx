@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users,
+  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie,
 } from 'lucide-react';
+import { fetchCookieStatuses, CookieStatus } from '../services/cookiesService';
 import { PersonalSettings } from './PersonalSettings';
 import { SettingsView } from './SettingsView';
 import { TeamSettings } from './TeamSettings';
 import { UserSettings, AISettings as AISettingsType, Team } from '../types';
 
-type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs';
+type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -71,6 +72,7 @@ const APP_SETTINGS_SECTION: NavSection = {
     { id: 'tags', label: 'Tags', icon: Tag },
     { id: 'ai', label: 'AI', icon: Sparkles },
     { id: 'docs', label: 'API Docs', icon: FileText },
+    { id: 'cookies', label: 'Cookies', icon: Cookie },
   ],
 };
 
@@ -84,6 +86,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   tags: 'Tags',
   ai: 'AI',
   docs: 'API Docs',
+  cookies: 'Cookies',
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -103,6 +106,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onTeamUpdated,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [hasInvalidCookie, setHasInvalidCookie] = useState(false);
 
   // Build nav sections dynamically — show TEAM section only when in team mode
   const navSections = useMemo<NavSection[]>(() => {
@@ -120,6 +124,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setActiveTab(!currentTeam && initialTab === 'team' ? 'personal' : initialTab);
     }
   }, [isOpen, initialTab, currentTeam]);
+
+  // Fetch cookie statuses to show invalid badge on the Cookies nav item
+  useEffect(() => {
+    if (!isOpen) return;
+    fetchCookieStatuses()
+      .then((statuses: CookieStatus[]) => {
+        setHasInvalidCookie(statuses.some(s => s.has_cookie && !s.is_valid));
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to fetch cookie statuses for badge:', err);
+      });
+  }, [isOpen]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -182,7 +198,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <item.icon size={14} />
+              <span className="relative">
+                <item.icon size={14} />
+                {item.id === 'cookies' && hasInvalidCookie && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </span>
               <span className="whitespace-nowrap">{item.label}</span>
               {activeTab === item.id && (
                 <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-500 rounded-full" />
@@ -230,7 +251,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
                       }`}
                     >
-                      <item.icon size={16} />
+                      <span className="relative flex-shrink-0">
+                        <item.icon size={16} />
+                        {item.id === 'cookies' && hasInvalidCookie && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                        )}
+                      </span>
                       {item.label}
                     </button>
                   ))}
