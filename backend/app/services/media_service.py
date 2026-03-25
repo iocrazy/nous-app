@@ -548,12 +548,20 @@ class MediaService:
                 except (ValueError, IndexError):
                     pass
 
+            # Determine mime_type from media_type
+            media_type = str(parsed_data.get("media_type") or "0")
+            if media_type in ("2", "68"):
+                mime_type = "image/jpeg"
+            else:
+                mime_type = "video/mp4"
+
             resource_data = {
                 "creator_id": user_id,
                 "media_id": media_id,
                 "source_type": "web",
                 "filename": parsed_data.get("title") or "Untitled",
-                "file_type": parsed_data.get("media_type") or "video",
+                "file_type": media_type,
+                "mime_type": mime_type,
                 "file_size_bytes": parsed_data.get("datasize_bytes"),
                 "duration_seconds": duration_seconds,
                 "resolution": parsed_data.get("resolution"),
