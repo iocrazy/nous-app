@@ -265,7 +265,7 @@ export const SharePage: React.FC = () => {
   // Prefer /media/{id} route (supports share_token auth), fallback to resource file URL
   const mediaUrl = getMediaUrl(mediaId) || resourceUrl;
   const coverUrl = getCoverMediaUrl(mediaId) || (thumbnailPath ? `${API_BASE}/media/${share.resource_id}/cover?share_token=${shareCode}` : null);
-  const isVideo = isVideoMime(mimeType);
+  const isVideo = isVideoMime(mimeType) || (!mimeType && !!mediaId);  // If no mime_type but has media_id, assume video
   const isImage = isImageMime(mimeType);
   const isAudio = isAudioMime(mimeType);
 
