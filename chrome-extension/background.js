@@ -38,7 +38,7 @@ async function pushUrl(tabId, url) {
   }
 
   try {
-    const response = await fetch(`${config.apiUrl}/api/v1/videos/fetch`, {
+    const response = await fetch(`${config.apiUrl}/api/v1/media/fetch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

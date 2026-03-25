@@ -33,7 +33,7 @@ from app.schemas.media import MediaTypeFetchRequest
 from app.services.media_service import MediaService
 from app.services.ytdlp_service import YtdlpService
 
-router = APIRouter(prefix="/videos")
+router = APIRouter(prefix="/media")
 
 # API group tags
 TAGS_FETCH = ["Video Fetch"]  # Fetch and parse videos
@@ -941,7 +941,7 @@ async def cleanup_stale_downloads(
         raise HTTPException(status_code=500, detail="Cleanup failed")
 
 
-@router.get("/videos", tags=TAGS_VIDEOS)
+@router.get("", tags=TAGS_VIDEOS)
 async def list_videos(
     auth: AuthDep,
     skip: int = Query(0, ge=0),
@@ -976,7 +976,7 @@ async def list_videos(
         raise HTTPException(status_code=500, detail="Failed to get video list")
 
 
-@router.get("/videos/{platform_id}", tags=TAGS_VIDEOS)
+@router.get("/{platform_id}", tags=TAGS_VIDEOS)
 async def get_video(platform_id: str, auth: AuthDep):
     """
     Get video details
@@ -1018,7 +1018,7 @@ async def get_video(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get video details")
 
 
-@router.delete("/videos/{platform_id}", tags=TAGS_VIDEOS)
+@router.delete("/{platform_id}", tags=TAGS_VIDEOS)
 async def delete_video(
     platform_id: str,
     background_tasks: BackgroundTasks,
@@ -1108,7 +1108,7 @@ async def delete_video(
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
 
-@router.post("/videos/search", tags=TAGS_VIDEOS)
+@router.post("/search", tags=TAGS_VIDEOS)
 async def search_videos(
     request: MediaSearchRequest,
     auth: AuthDep,
