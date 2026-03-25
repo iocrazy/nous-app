@@ -179,7 +179,7 @@ async def list_shares(
     ),
     status: Optional[str] = Query(
         None,
-        pattern="^(active|expired|cancelled)$",
+        pattern="^(active|inactive|expired|cancelled)$",
         description="Filter by status",
     ),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
@@ -344,16 +344,15 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
 
 
 @router.delete("/{share_id}")
-async def cancel_share(share_id: str, auth: AuthDep):
+async def toggle_share_status(share_id: str, auth: AuthDep):
     """
-    Cancel a share (soft-delete by setting status to 'cancelled').
+    Toggle share status: active → inactive, inactive → active.
 
     Authentication: Bearer Token or API Key
     """
     try:
         client = await get_async_supabase_admin()
 
-        # Verify ownership
         existing = (
             await client.table("shares")
             .select("id, shared_by, status")
@@ -367,29 +366,29 @@ async def cancel_share(share_id: str, auth: AuthDep):
         share = existing.data[0]
 
         if share["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to cancel this share")
+            raise HTTPException(status_code=403, detail="Not authorized")
 
-        if share["status"] == "cancelled":
-            raise HTTPException(status_code=400, detail="Share is already cancelled")
+        # Toggle: active → inactive, inactive/cancelled → active
+        new_status = "inactive" if share["status"] == "active" else "active"
 
         result = (
             await client.table("shares")
-            .update({"status": "cancelled"})
+            .update({"status": new_status})
             .eq("id", share_id)
             .execute()
         )
 
         if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to cancel share")
+            raise HTTPException(status_code=500, detail="Failed to update share status")
 
-        logger.info(f"Share {share_id} cancelled by user {auth.user_id}")
-        return {"success": True, "message": "Share cancelled"}
+        logger.info(f"Share {share_id} toggled to {new_status} by user {auth.user_id}")
+        return {"success": True, "message": f"Share {new_status}", "status": new_status}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to cancel share {share_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cancel share")
+        logger.error(f"Failed to toggle share {share_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update share")
 
 
 @router.delete("/{share_id}/permanent")
@@ -465,8 +464,8 @@ async def access_share_by_code(
         share = result.data[0]
 
         # Check status
-        if share["status"] == "cancelled":
-            raise HTTPException(status_code=410, detail="This share has been cancelled")
+        if share["status"] in ("cancelled", "inactive"):
+            raise HTTPException(status_code=410, detail="This share is no longer available")
 
         # Check expiration
         if _is_expired(share):
