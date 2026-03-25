@@ -408,7 +408,8 @@ class DouyinParser:
                     if vid_urls:
                         video_download_urls.append(vid_urls)
                 else:
-                    image_urls = item.get("download_url_list", [])
+                    # Prefer url_list (no watermark) over download_url_list (watermarked)
+                    image_urls = item.get("url_list") or item.get("download_url_list", [])
                     if image_urls:
                         image_download_urls.append(image_urls)
 
