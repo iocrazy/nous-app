@@ -130,10 +130,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!isOpen) return;
     fetchCookieStatuses()
       .then((statuses: CookieStatus[]) => {
-        setHasInvalidCookie(statuses.some(s => s.has_cookie && !s.is_valid));
+        if (Array.isArray(statuses)) {
+          setHasInvalidCookie(statuses.some(s => s.has_cookie && !s.is_valid));
+        }
       })
-      .catch((err: unknown) => {
-        console.error('Failed to fetch cookie statuses for badge:', err);
+      .catch(() => {
+        // Silently ignore — badge is optional
       });
   }, [isOpen]);
 
