@@ -6,13 +6,13 @@ import { useToast } from './Toast';
 interface PlatformConfig {
   id: string;
   name: string;
-  emoji: string;
+  icon: string; // path to SVG in /icons/
 }
 
 const PLATFORMS: PlatformConfig[] = [
-  { id: 'douyin', name: 'Douyin', emoji: '🎵' },
-  { id: 'bilibili', name: 'Bilibili', emoji: '📺' },
-  { id: 'youtube', name: 'YouTube', emoji: '▶️' },
+  { id: 'douyin', name: 'Douyin', icon: '/icons/douyin.svg' },
+  { id: 'bilibili', name: 'Bilibili', icon: '/icons/bilibili.svg' },
+  { id: 'youtube', name: 'YouTube', icon: '/icons/youtube.svg' },
 ];
 
 type InputTab = 'paste' | 'upload';
@@ -236,7 +236,7 @@ export const CookiesSettings: React.FC = () => {
                   className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-zinc-800/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-2xl leading-none flex-shrink-0">{platform.emoji}</span>
+                    <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-white">{platform.name}</p>
                       <div className="mt-1.5">
