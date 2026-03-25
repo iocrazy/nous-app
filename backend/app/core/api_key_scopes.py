@@ -57,46 +57,46 @@ LEGACY_SCOPE_MAP = {
 # Format: (method, path_pattern): [allowed_scopes]
 # Request only needs to match one scope for access
 ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
-    # Video fetch
-    ("POST", "/videos/fetch"): [
+    # Media fetch
+    ("POST", "/media/fetch"): [
         ApiKeyScope.VIDEOS_FETCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    ("POST", "/videos/fetch/batch"): [
+    ("POST", "/media/fetch/batch"): [
         ApiKeyScope.VIDEOS_FETCH_BATCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    # Video read
-    ("GET", "/videos/videos"): [
+    # Media read
+    ("GET", "/media"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    ("GET", "/videos/videos/{platform_id}"): [
+    ("GET", "/media/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    # Video write
-    ("DELETE", "/videos/videos/{platform_id}"): [
+    # Media write
+    ("DELETE", "/media/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Search
-    ("POST", "/videos/videos/search"): [
+    ("POST", "/media/search"): [
         ApiKeyScope.VIDEOS_SEARCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Statistics
-    ("GET", "/videos/statistics"): [
+    ("GET", "/media/statistics"): [
         ApiKeyScope.VIDEOS_STATISTICS.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Pending downloads list
-    ("GET", "/videos/pending"): [
+    ("GET", "/media/pending"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Retry download
-    ("POST", "/videos/retry/{platform_id}"): [
+    ("POST", "/media/retry/{platform_id}"): [
         ApiKeyScope.VIDEOS_RETRY.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
