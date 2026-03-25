@@ -14,6 +14,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { SlidePlayer } from '../components/SlidePlayer';
 import {
   Lock,
   Download,
@@ -259,14 +260,18 @@ export const SharePage: React.FC = () => {
   const resourceUrl = getResourceUrl(share.resource_id);
   const shareAny = share as any;
   const mimeType: string | null = shareAny.mime_type || null;
+  const fileType: string | null = shareAny.file_type || null;
   const mediaId: string | null = shareAny.media_id || null;
   const thumbnailPath: string | null = shareAny.thumbnail_path || null;
 
   // Prefer /media/{id} route (supports share_token auth), fallback to resource file URL
   const mediaUrl = getMediaUrl(mediaId) || resourceUrl;
   const coverUrl = getCoverMediaUrl(mediaId) || (thumbnailPath ? `${API_BASE}/media/${share.resource_id}/cover?share_token=${shareCode}` : null);
-  const isVideo = isVideoMime(mimeType) || (!mimeType && !!mediaId);  // If no mime_type but has media_id, assume video
-  const isImage = isImageMime(mimeType);
+
+  // Content type detection
+  const isAlbum = fileType === '2' || fileType === '68'; // Douyin carousel/image-text
+  const isVideo = !isAlbum && (isVideoMime(mimeType) || (!mimeType && !!mediaId));
+  const isImage = !isAlbum && isImageMime(mimeType);
   const isAudio = isAudioMime(mimeType);
 
   return (
@@ -297,8 +302,17 @@ export const SharePage: React.FC = () => {
       <main className={`flex-1 flex ${share.share_type === 'review' ? 'flex-col md:flex-row' : 'items-center justify-center'} p-4 sm:p-8 gap-6 overflow-hidden`}>
         {/* Preview area */}
         <div className={`${share.share_type === 'review' ? 'flex-1 min-w-0' : 'w-full max-w-4xl'}`}>
-          {/* Video preview */}
-          {isVideo && mediaUrl ? (
+          {/* Album/carousel preview */}
+          {isAlbum && mediaId ? (
+            <div className="bg-zinc-900 rounded-2xl overflow-hidden" style={{ maxHeight: 'calc(100vh - 200px)', aspectRatio: '9/16' }}>
+              <SlidePlayer
+                mediaId={mediaId}
+                mediaToken={shareCode}
+                downloadStatus="completed"
+              />
+            </div>
+          ) : /* Video preview */
+          isVideo && mediaUrl ? (
             <div className="bg-black rounded-2xl overflow-hidden h-full">
               <video
                 ref={videoRef}
