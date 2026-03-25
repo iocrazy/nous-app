@@ -21,7 +21,8 @@ export const fetchCookieStatuses = async (): Promise<CookieStatus[]> => {
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  return data.cookies || [];
 };
 
 // PUT /api/v1/settings/cookies/{platform}
@@ -32,8 +33,8 @@ export const setCookie = async (
 ): Promise<void> => {
   const response = await fetch(`${getApiUrl()}/api/v1/settings/cookies/${platform}`, {
     method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ cookie_text: cookieText, cookie_file: cookieFile }),
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cookie_text: cookieText || null, cookie_file: cookieFile || null }),
   });
 
   if (!response.ok) {
