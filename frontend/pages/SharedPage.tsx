@@ -111,7 +111,7 @@ export const SharedPage: React.FC = () => {
         {/* Filter */}
         <div className="flex items-center gap-2">
           <Filter size={14} className="text-zinc-500" />
-          {(['all', 'active', 'inactive', 'expired', 'cancelled'] as const).map((status) => (
+          {(['all', 'active', 'inactive', 'expired'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilter(status)}
@@ -159,27 +159,32 @@ export const SharedPage: React.FC = () => {
               {/* Status + Views + Date — fixed width for alignment */}
               <div className="flex items-center gap-4 shrink-0">
                 {/* Status badge — clickable to toggle active ↔ inactive */}
-                {(share.status === 'active' || share.status === 'inactive') ? (
-                  <button
-                    onClick={() => handleToggleActive(share.id)}
-                    className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center transition-colors cursor-pointer ${
-                      share.status === 'active'
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20'
-                    }`}
-                    title={share.status === 'active' ? 'Click to deactivate' : 'Click to reactivate'}
-                  >
-                    {share.status === 'active' ? 'Active' : 'Inactive'}
-                  </button>
-                ) : (
-                  <span
-                    className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${
-                      STATUS_COLORS[share.status] || STATUS_COLORS.active
-                    }`}
-                  >
-                    {t(`shared.status.${share.status}`)}
-                  </span>
-                )}
+                {(() => {
+                  const isActive = share.status === 'active';
+                  const isInactive = share.status === 'inactive' || share.status === 'cancelled';
+                  const isExpired = share.status === 'expired';
+                  return (isActive || isInactive) ? (
+                    <button
+                      onClick={() => handleToggleActive(share.id)}
+                      className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                          : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20'
+                      }`}
+                      title={isActive ? 'Click to deactivate' : 'Click to reactivate'}
+                    >
+                      {isActive ? 'Active' : 'Inactive'}
+                    </button>
+                  ) : isExpired ? (
+                    <span className="px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center bg-amber-500/10 text-amber-400 border-amber-500/20">
+                      Expired
+                    </span>
+                  ) : (
+                    <span className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center ${STATUS_COLORS[share.status] || STATUS_COLORS.active}`}>
+                      {share.status}
+                    </span>
+                  );
+                })()}
 
                 <span className="text-xs text-zinc-500 w-16 text-right tabular-nums">
                   {share.view_count || 0} {t('share.views')}
