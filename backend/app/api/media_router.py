@@ -1802,6 +1802,22 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
     return parsed_data, parse_method, parse_method_name
 
 
+async def _mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -> None:
+    """Mark a user's platform cookie as invalid when yt-dlp encounters auth errors."""
+    auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+    if any(kw in error.lower() for kw in auth_keywords):
+        try:
+            from app.repositories.cookies_repository import CookiesRepository
+            repo = CookiesRepository()
+            await repo.mark_invalid(user_id, platform, error[:200])
+            logger.info(
+                f"[Cookie] Marked {platform} cookie as invalid for user {user_id}: "
+                f"{error[:80]}"
+            )
+        except Exception as e:
+            logger.warning(f"[Cookie] Failed to mark cookie invalid: {e}")
+
+
 async def _handle_ytdlp_fetch(
     url: str,
     platform: str,
@@ -1822,6 +1838,23 @@ async def _handle_ytdlp_fetch(
     from app.tasks.parse_tasks import parse_media_task
 
     mgr = get_task_manager()
+
+    # Check cookie availability for platforms that benefit from cookies
+    has_cookie = False
+    if platform in ("douyin", "bilibili", "youtube"):
+        try:
+            has_cookie = await YtdlpService.user_has_cookie(auth.user_id, platform)
+            logger.info(
+                f"[Cookie] Platform={platform}, user={auth.user_id}, "
+                f"has_cookie={has_cookie}"
+            )
+        except Exception as e:
+            logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
+
+    # Douyin without cookie: skip yt-dlp entirely, use LightweightParser directly.
+    # yt-dlp requires a valid Douyin cookie to fetch metadata; without one it will
+    # always fail and waste retries / task-center slots.
+    skip_ytdlp = platform == "douyin" and not has_cookie
 
     # Dedup check for parse (URL as dedup identifier)
     dedup_key = None
@@ -1866,6 +1899,7 @@ async def _handle_ytdlp_fetch(
         cover_bool=True,
         tags=tags,
         tag_ids=tag_ids,
+        skip_ytdlp=skip_ytdlp,
         _unified_task_id=unified_task_id,
         _dedup_key=dedup_key,
     )

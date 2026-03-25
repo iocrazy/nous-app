@@ -512,6 +512,7 @@ def parse_media_task(
     resource_id: str = None,
     tags: list = None,
     tag_ids: list = None,
+    skip_ytdlp: bool = False,
     _unified_task_id: str = None,
     _dedup_key: str = None,
 ):
@@ -550,22 +551,49 @@ def parse_media_task(
             except Exception:
                 pass
 
-        try:
-            ytdlp_info = run_async(YtdlpService.fetch_metadata(url))
+        if skip_ytdlp and platform == "douyin":
+            # Douyin without cookie: go directly to LightweightParser, skip yt-dlp.
+            logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin (no cookie): {url[:60]}")
+            fallback_used = True
+            dispatch_url = None
+            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
             if unified_task_id:
                 try:
                     run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
                 except Exception:
                     pass
-            parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
-        except Exception as e:
-            if platform != "douyin":
-                raise  # Non-Douyin: yt-dlp failure is fatal
-            # Douyin fallback
-            logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
-            fallback_used = True
-            dispatch_url = None
-            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
+        else:
+            try:
+                ytdlp_info = run_async(YtdlpService.fetch_metadata(url, user_id=user_id))
+                if unified_task_id:
+                    try:
+                        run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
+                    except Exception:
+                        pass
+                parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
+            except Exception as e:
+                # Invalidate cookie if yt-dlp failed due to auth error
+                error_str = str(e)
+                auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+                if any(kw in error_str.lower() for kw in auth_keywords):
+                    try:
+                        from app.repositories.cookies_repository import CookiesRepository
+                        cookies_repo = CookiesRepository()
+                        run_async(cookies_repo.mark_invalid(user_id, platform, error_str[:200]))
+                        logger.info(
+                            f"[Cookie] Marked {platform} cookie invalid for user {user_id} "
+                            f"after yt-dlp auth failure"
+                        )
+                    except Exception as cookie_err:
+                        logger.warning(f"[Cookie] Failed to mark cookie invalid: {cookie_err}")
+
+                if platform != "douyin":
+                    raise  # Non-Douyin: yt-dlp failure is fatal
+                # Douyin fallback
+                logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
+                fallback_used = True
+                dispatch_url = None
+                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
 
         if unified_task_id:
             try:
