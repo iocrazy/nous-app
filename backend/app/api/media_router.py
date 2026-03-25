@@ -1687,6 +1687,33 @@ async def get_user_logs(
         raise HTTPException(status_code=500, detail="Failed to get user logs")
 
 
+@router.get("/debug/raw-parse", tags=["Debug"])
+async def debug_raw_parse(
+    auth: AuthDep,
+    url: str = Query(..., description="Share URL to parse"),
+):
+    """
+    Debug endpoint: return raw aweme_detail JSON from LightweightParser.
+    No DB writes, no downloads — just raw parsed data.
+    """
+    aweme_detail = await LightweightParser.parse(url)
+    if not aweme_detail:
+        raise HTTPException(status_code=404, detail="LightweightParser returned None")
+
+    # Also run DouyinParser to show structured output
+    parsed = await DouyinParser.parse_aweme_detail(
+        aweme_detail=aweme_detail,
+        valid_url=url,
+        download_video=False,
+        download_music=False,
+    )
+
+    return {
+        "raw_aweme_detail": aweme_detail,
+        "parsed_data": parsed,
+    }
+
+
 async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]:
     """Douyin parse fallback: LightHTTP → DrissionPage.
 

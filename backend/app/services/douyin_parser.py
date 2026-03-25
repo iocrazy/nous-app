@@ -412,13 +412,22 @@ class DouyinParser:
                     if image_urls:
                         image_download_urls.append(image_urls)
 
-        # Also extract top-level video (animated image posts have video version here)
+        # Top-level video.play_addr: for type 2, this may be audio (.mp3) or video (.mp4)
+        # - If URI ends with .mp3 → background music, use as music_play_urls
+        # - If URI is a real video → animated image video version, add to video_download_urls
+        top_level_music_urls: list = []
         top_video = aweme_detail.get("video", {})
         if top_video and top_video.get("play_addr", {}).get("url_list"):
-            top_video_urls = top_video["play_addr"]["url_list"]
-            if top_video_urls:
-                video_download_urls.append(top_video_urls)
-                logger.info(f"[DouyinParser] Image collection has top-level video: {len(top_video_urls)} URLs")
+            play_addr = top_video["play_addr"]
+            uri = play_addr.get("uri", "")
+            top_urls = play_addr["url_list"]
+            if isinstance(uri, str) and ".mp3" in uri:
+                # It's audio — use URI directly as the best music URL
+                top_level_music_urls = [uri] if uri.startswith("http") else top_urls
+                logger.info(f"[DouyinParser] Image collection top-level video is audio: uri={uri[:80]}")
+            elif top_urls:
+                video_download_urls.append(top_urls)
+                logger.info(f"[DouyinParser] Image collection has top-level video: {len(top_urls)} URLs")
 
         # Build music name
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
@@ -429,8 +438,13 @@ class DouyinParser:
         # Extract cover URLs
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
-        # Extract standalone music play URL (carousel types have separate audio)
-        music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_collection")
+        # Extract standalone music play URL
+        # Priority: top-level video.play_addr (if mp3) > music.mid API > music.play_url
+        if top_level_music_urls:
+            music_play_urls = top_level_music_urls
+            logger.info(f"[DouyinParser/image_collection] Using audio from video.play_addr: {len(music_play_urls)} URLs")
+        else:
+            music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_collection")
 
         return {
             "platform_id": aweme_id,
