@@ -16,6 +16,7 @@ import { LibraryProvider, useLibraryContext } from '../contexts/LibraryContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
+import { ConfirmProvider } from './ConfirmDialog';
 import { UploadProvider } from '../contexts/UploadContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
@@ -183,6 +184,7 @@ function AppLayoutInner() {
 
   return (
     <ToastProvider>
+    <ConfirmProvider>
     <TaskManagerProvider>
     <UploadProvider>
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
@@ -518,6 +520,7 @@ function AppLayoutInner() {
     </div>
     </UploadProvider>
     </TaskManagerProvider>
+    </ConfirmProvider>
     </ToastProvider>
   );
 }

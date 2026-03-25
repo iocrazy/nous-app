@@ -26,6 +26,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { fetchShares, cancelShare as cancelShareApi, deleteSharePermanent } from '../services/sharesService';
+import { useConfirm } from '../components/ConfirmDialog';
 import { Share, ShareType, ShareStatus } from '../types';
 
 const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
@@ -47,6 +48,7 @@ export const SharedPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ShareStatus | 'all'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const loadShares = useCallback(async () => {
     setLoading(true);
@@ -73,7 +75,13 @@ export const SharedPage: React.FC = () => {
   };
 
   const handleCancelShare = async (shareId: string) => {
-    if (!window.confirm(t('shared.confirmCancel'))) return;
+    const ok = await confirm({
+      title: 'Cancel Share',
+      message: 'Recipients will no longer be able to access this share.',
+      confirmLabel: 'Cancel Share',
+      variant: 'warning',
+    });
+    if (!ok) return;
     try {
       await cancelShareApi(shareId);
       await loadShares();
@@ -83,7 +91,13 @@ export const SharedPage: React.FC = () => {
   };
 
   const handleDeleteShare = async (shareId: string) => {
-    if (!window.confirm('Permanently delete this share?')) return;
+    const ok = await confirm({
+      title: 'Delete Share',
+      message: 'This share record will be permanently deleted. This cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteSharePermanent(shareId);
       await loadShares();

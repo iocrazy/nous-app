@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Cookie, Upload, Trash2, AlertCircle, Check, Loader2, ChevronDown } from 'lucide-react';
 import { fetchCookieStatuses, setCookie, deleteCookie, CookieStatus } from '../services/cookiesService';
 import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 interface PlatformConfig {
   id: string;
@@ -76,6 +77,7 @@ function StatusBadge({ status }: { status: CookieStatus | undefined }) {
 
 export const CookiesSettings: React.FC = () => {
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const [statuses, setStatuses] = useState<CookieStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -164,7 +166,14 @@ export const CookiesSettings: React.FC = () => {
   };
 
   const handleDelete = async (platformId: string) => {
-    if (!confirm(`Remove the ${PLATFORMS.find(p => p.id === platformId)?.name} cookie?`)) return;
+    const platformName = PLATFORMS.find(p => p.id === platformId)?.name;
+    const ok = await confirm({
+      title: 'Remove Cookie',
+      message: `Remove the ${platformName} cookie? You can re-add it later.`,
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    });
+    if (!ok) return;
 
     updateCard(platformId, { deleting: true });
     try {
