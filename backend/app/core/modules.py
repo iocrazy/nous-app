@@ -20,7 +20,7 @@ DEFAULT_ENABLED_MODULES: List[str] = list(ALL_MODULE_KEYS)
 
 # Map module keys to API route prefixes (for future backend enforcement)
 MODULE_ROUTE_MAP: Dict[str, List[str]] = {
-    "parser": ["/api/v1/videos"],
+    "parser": ["/api/v1/media"],
     "resources": ["/api/v1/resources"],
     "library": ["/api/v1/libraries"],
     "projects": ["/api/v1/projects"],

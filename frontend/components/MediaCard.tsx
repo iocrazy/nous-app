@@ -374,7 +374,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     doDownload(coverUrl, `${baseName}_cover.jpg`);
   };
 
-  // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)
+  // 重新获取：使用 per-type fetch endpoint (POST /api/v1/media/{platform_id}/fetch)
   // force=true 时跳过已下载检查，强制重新获取
   const onRefetch = async (options: { video?: boolean; cover?: boolean; force?: boolean }) => {
     if (!data.platform_id) {

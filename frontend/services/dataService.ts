@@ -80,21 +80,21 @@ export const saveFrontendConfig = async (config: {
  * Get video download URL via backend API
  */
 export const getDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}`;
 };
 
 /**
  * Get cover download URL
  */
 export const getCoverDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}/cover`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}/cover`;
 };
 
 /**
  * Get music/audio download URL
  */
 export const getMusicDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}/music`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}/music`;
 };
 
 /**
@@ -109,7 +109,7 @@ export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promis
     if (!session?.access_token) return 0;
 
     const response = await fetch(
-      `${getApiUrl()}/api/v1/videos/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
+      `${getApiUrl()}/api/v1/media/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
       {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${session.access_token}` },
@@ -399,7 +399,7 @@ export const deleteItem = async (id: string, deleteFiles: boolean = false): Prom
   }
 
   const response = await fetch(
-    `${getApiUrl()}/api/v1/videos/${id}?delete_files=${deleteFiles}`,
+    `${getApiUrl()}/api/v1/media/${id}?delete_files=${deleteFiles}`,
     {
       method: 'DELETE',
       headers: {
@@ -445,7 +445,7 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
       return [];
     }
 
-    const response = await fetch(`${getApiUrl()}/api/v1/videos/logs?limit=${limit}`, {
+    const response = await fetch(`${getApiUrl()}/api/v1/media/logs?limit=${limit}`, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`
       }

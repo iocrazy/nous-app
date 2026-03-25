@@ -103,7 +103,7 @@ export const parseShareLink = async (
     body.tag_ids = options.tag_ids;
   }
 
-  const response = await fetch(`${apiUrl}/api/v1/videos/fetch`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/fetch`, {
     method: 'POST',
     headers: await buildHeaders(),
     body: JSON.stringify(body),
@@ -142,7 +142,7 @@ export const parseBatchLinks = async (
     batchBody.tag_ids = options.tag_ids;
   }
 
-  const response = await fetch(`${apiUrl}/api/v1/videos/fetch/batch`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/fetch/batch`, {
     method: 'POST',
     headers: await buildHeaders(),
     body: JSON.stringify(batchBody),
@@ -170,7 +170,7 @@ export const fetchVideosFromApi = async (
   const apiUrl = getApiUrl();
 
   const response = await fetch(
-    `${apiUrl}/api/v1/videos?skip=${skip}&limit=${limit}`,
+    `${apiUrl}/api/v1/media?skip=${skip}&limit=${limit}`,
     {
       method: 'GET',
       headers: await buildHeaders(),
@@ -202,7 +202,7 @@ export const fetchStatistics = async (): Promise<{
 }> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/videos/statistics`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/statistics`, {
     method: 'GET',
     headers: await buildHeaders(),
   });
@@ -231,7 +231,7 @@ export const fetchMediaByType = async (
   types: string[],
 ): Promise<TypeFetchResponse> => {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/videos/${platformId}/fetch`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/${platformId}/fetch`, {
     method: 'POST',
     headers: await buildHeaders(),
     body: JSON.stringify({ types }),
@@ -254,7 +254,7 @@ export const extractAudio = async (platformId: string): Promise<{
   message: string;
 }> => {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/videos/${platformId}/extract-audio`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/${platformId}/extract-audio`, {
     method: 'POST',
     headers: await buildHeaders(),
   });
@@ -274,7 +274,7 @@ export const retryDownload = async (platformId: string): Promise<{
 }> => {
   const apiUrl = getApiUrl();
 
-  const response = await fetch(`${apiUrl}/api/v1/videos/retry/${platformId}`, {
+  const response = await fetch(`${apiUrl}/api/v1/media/retry/${platformId}`, {
     method: 'POST',
     headers: await buildHeaders(),
   });
