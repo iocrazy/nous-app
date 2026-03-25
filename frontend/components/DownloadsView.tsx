@@ -850,7 +850,7 @@ export const DownloadsView: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto">
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900">
+            <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b border-zinc-800/80 bg-zinc-900">
               <h3 className="text-sm font-semibold text-white truncate">{t('resources.details', 'Details')}</h3>
               <button
                 onClick={() => setSelectedVideo(null)}
