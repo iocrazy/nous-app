@@ -288,8 +288,7 @@ async def _dedup_and_dispatch(
                 task_id = "background"
 
     return {
-        "task_id": task_id,
-        "unified_task_id": unified_task_id,
+        "task_id": unified_task_id or task_id,
         "types_submitted": types_to_download,
         "types_skipped": types_skipped,
         "types_subscribed": types_subscribed,
@@ -585,7 +584,7 @@ async def fetch_media_by_type(
             "success": True,
             "message": "Fetch submitted",
             "platform_id": platform_id,
-            "download_task_id": dispatch_result["task_id"],
+            "task_id": dispatch_result.get("unified_task_id") or dispatch_result.get("task_id"),
             "types_submitted": dispatch_result["types_submitted"],
             "types_skipped": dispatch_result["types_skipped"],
             "types_subscribed": dispatch_result["types_subscribed"],
@@ -1289,7 +1288,7 @@ async def retry_download(
         return {
             "success": True,
             "message": "Download task resubmitted",
-            "task_id": download_task_id,
+            "task_id": dispatch_result.get("unified_task_id") if isinstance(dispatch_result, dict) else download_task_id,
         }
     except HTTPException:
         raise
@@ -1925,8 +1924,7 @@ async def _handle_ytdlp_fetch(
         "success": True,
         "async": True,
         "message": "Parse task submitted",
-        "parse_task_id": celery_task.id,
-        "unified_task_id": unified_task_id,
+        "task_id": unified_task_id,
     }
 
 
