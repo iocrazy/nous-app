@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Cookie, Upload, Trash2, AlertCircle, Check, Loader2, ChevronDown } from 'lucide-react';
-import { fetchCookieStatuses, setCookie, deleteCookie, CookieStatus } from '../services/cookiesService';
+import { Cookie, Upload, Trash2, AlertCircle, Check, Loader2, ChevronDown, FileCode2 } from 'lucide-react';
+import { fetchCookieStatuses, setCookie, deleteCookie, CookieStatus, fetchHeaders, setHeaders } from '../services/cookiesService';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 
@@ -374,6 +374,143 @@ export const CookiesSettings: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* ── Headers Configuration ── */}
+      <HeadersSection />
+    </div>
+  );
+};
+
+
+// ─── Headers Section ────────────────────────────────────
+
+const HEADER_PLATFORMS = PLATFORMS.filter(p => p.id === 'douyin');
+
+const DEFAULT_DOUYIN_HEADERS = `User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: zh-CN,zh-Hans;q=0.9
+Accept-Encoding: gzip, deflate, br
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: none
+Upgrade-Insecure-Requests: 1`;
+
+const HeadersSection: React.FC = () => {
+  const { addToast } = useToast();
+  const [headersMap, setHeadersMap] = useState<Record<string, string>>({});
+  const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    HEADER_PLATFORMS.forEach(async (p) => {
+      try {
+        const data = await fetchHeaders(p.id);
+        setHeadersMap(prev => ({ ...prev, [p.id]: data.headers_text || '' }));
+      } catch {
+        // Ignore — may not have headers yet
+      }
+    });
+  }, []);
+
+  const handleSave = async (platformId: string) => {
+    const text = headersMap[platformId]?.trim() || '';
+    setSaving(true);
+    try {
+      await setHeaders(platformId, text);
+      addToast('Headers saved', 'success');
+      setExpandedPlatform(null);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to save', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pt-2">
+      <div>
+        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+          <FileCode2 size={18} className="text-cyan-400" />
+          Custom Headers
+        </h2>
+        <p className="text-sm text-zinc-500 mt-1">
+          Configure HTTP headers for LightHTTP parser requests
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {HEADER_PLATFORMS.map((platform) => {
+          const isExpanded = expandedPlatform === platform.id;
+          const hasCustom = !!(headersMap[platform.id]?.trim());
+
+          return (
+            <div
+              key={platform.id}
+              className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+            >
+              <button
+                onClick={() => setExpandedPlatform(isExpanded ? null : platform.id)}
+                className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-zinc-800/40 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">{platform.name}</p>
+                    <span className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                      hasCustom
+                        ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                        : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                    }`}>
+                      {hasCustom ? 'Customized' : 'Default'}
+                    </span>
+                  </div>
+                </div>
+                <ChevronDown
+                  size={16}
+                  className={`flex-shrink-0 text-zinc-500 mt-0.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {isExpanded && (
+                <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <p className="text-xs text-zinc-500">
+                    One header per line in <code className="text-zinc-400">Key: Value</code> format. Leave empty to use defaults.
+                  </p>
+                  <textarea
+                    rows={8}
+                    placeholder={DEFAULT_DOUYIN_HEADERS}
+                    value={headersMap[platform.id] ?? ''}
+                    onChange={(e) => setHeadersMap(prev => ({ ...prev, [platform.id]: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-xs text-zinc-300 placeholder-zinc-700 resize-none outline-none focus:border-cyan-500 transition-colors font-mono"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleSave(platform.id)}
+                      disabled={saving}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    {hasCustom && (
+                      <button
+                        onClick={() => {
+                          setHeadersMap(prev => ({ ...prev, [platform.id]: '' }));
+                          handleSave(platform.id);
+                        }}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs font-semibold rounded-lg transition-colors"
+                      >
+                        <Trash2 size={13} />
+                        Reset to Default
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

@@ -55,3 +55,36 @@ export const deleteCookie = async (platform: string): Promise<void> => {
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 };
+
+// ─── Custom Headers ─────────────────────────────────────
+
+export interface HeadersData {
+  platform: string;
+  headers_text: string;
+}
+
+// GET /api/v1/settings/headers/{platform}
+export const fetchHeaders = async (platform: string): Promise<HeadersData> => {
+  const response = await fetch(`${getApiUrl()}/api/v1/settings/headers/${platform}`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+};
+
+// PUT /api/v1/settings/headers/{platform}
+export const setHeaders = async (platform: string, headersText: string): Promise<void> => {
+  const response = await fetch(`${getApiUrl()}/api/v1/settings/headers/${platform}`, {
+    method: 'PUT',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ headers_text: headersText }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+};
