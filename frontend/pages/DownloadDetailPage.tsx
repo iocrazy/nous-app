@@ -11,7 +11,7 @@ import { SlidePlayer } from '../components/SlidePlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
 import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
-import { trashResourceByMediaId } from '../services/resourceService';
+import { trashResourceByMediaId, trashResourceByPlatformId } from '../services/resourceService';
 import { getVideoUrl, isVideoType, isAlbumType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
@@ -313,29 +313,27 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     setVideo((prev) => (prev ? { ...prev, ...updated } : prev));
   };
 
-  const handleDelete = async (id: string, deleteFiles: boolean) => {
+  const handleDelete = async (_id: string, _deleteFiles: boolean) => {
+    if (!video) return;
     try {
-      // Try resource-level trash first
-      if (from === 'downloads' || !teamId) {
-        await trashResourceByMediaId(id);
+      // Use platform_id for trash (same method as DownloadsView batch delete)
+      if (video.platform_id) {
+        if (teamId) {
+          await trashResourceByPlatformId(video.platform_id, 'team', teamId);
+        } else {
+          await trashResourceByPlatformId(video.platform_id);
+        }
       } else {
-        await trashResourceByMediaId(id, 'team', teamId);
+        // Fallback: try by media_id
+        await trashResourceByMediaId(video.id!, teamId ? 'team' : undefined, teamId);
       }
-    } catch (err1) {
-      console.error('trashResourceByMediaId failed:', err1);
-      // Fallback: if no resource exists, delete parsed_media directly
-      try {
-        await deleteItem(id, deleteFiles);
-      } catch (err2) {
-        console.error('deleteItem also failed:', err2);
-        addToast('Failed to delete', 'error');
-        return; // Don't navigate back on failure
-      }
+    } catch (err) {
+      console.error('Trash failed:', err);
+      addToast('Failed to delete', 'error');
+      return;
     }
     // Remove from library list so user sees it gone when navigating back
-    if (video) {
-      setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
-    }
+    setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
     addToast('Moved to trash', 'success');
     handleBack();
   };
