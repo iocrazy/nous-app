@@ -275,12 +275,31 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         instance.page.get(url, timeout=5)
                         logger.debug("浏览器重新初始化并访问URL成功")
 
+                # Detect captcha / verification page
+                try:
+                    page_html = instance.page.html or ""
+                    captcha_indicators = [
+                        "请完成下列验证后继续",
+                        "按住左边按钮拖动完成上方拼图",
+                        "验证码",
+                        "captcha",
+                    ]
+                    if any(ind in page_html for ind in captcha_indicators):
+                        logger.warning(
+                            f"[DrissionPage] Captcha/verification detected on page: {instance.page.url}"
+                        )
+                    elif "登录后免费畅享高清视频" in page_html and "_ROUTER_DATA" not in page_html:
+                        logger.warning(
+                            f"[DrissionPage] Login wall detected (no video data): {instance.page.url}"
+                        )
+                except Exception:
+                    pass
+
                 # 获取所有网络请求
                 aweme_response = None
 
                 # 获取url中aweme_id
                 redirected_url = instance.page.url
-                # logger.info(f"重定向后的URL: {redirected_url}")
 
                 target_aweme_id = Utils.match_aweme_id(redirected_url)
                 logger.debug(f"提取的aweme_id: {target_aweme_id}")
