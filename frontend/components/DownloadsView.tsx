@@ -314,8 +314,9 @@ export const DownloadsView: React.FC = () => {
     setLastClickedId(platformId);
   }, [lastClickedId, filteredLibrary]);
 
-  // ─── Single click: select ─────────────────────────
+  // ─── Single click: select (delayed to avoid conflict with double-click) ───
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleVideoClick = useCallback((item: Video, e?: React.MouseEvent) => {
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) {
@@ -327,19 +328,30 @@ export const DownloadsView: React.FC = () => {
       handleNavigateToDetail(item);
       return;
     }
-    if (selectedVideo?.platform_id === item.platform_id) {
-      setSelectedVideo(null);
-      setSelectedIds(new Set());
-    } else {
-      setSelectedVideo(item);
-      setMultiSelectMode(false);
-      setSelectedIds(new Set([item.platform_id]));
-      setLastClickedId(item.platform_id);
-    }
+    // Delay single-click selection so double-click can cancel it,
+    // preventing sidebar open → grid reflow → wrong card on second click
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (selectedVideo?.platform_id === item.platform_id) {
+        setSelectedVideo(null);
+        setSelectedIds(new Set());
+      } else {
+        setSelectedVideo(item);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set([item.platform_id]));
+        setLastClickedId(item.platform_id);
+      }
+    }, 250);
   }, [selectedVideo, handleToggleSelect, isMobileDevice, handleNavigateToDetail]);
 
   // ─── Double click: navigate to detail ─────────────
   const handleVideoDoubleClick = useCallback((item: Video) => {
+    // Cancel pending single-click selection to prevent grid reflow
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
     handleNavigateToDetail(item);
   }, [handleNavigateToDetail]);
 
