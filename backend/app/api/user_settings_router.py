@@ -364,7 +364,7 @@ async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep)
 
         data: Dict[str, Any] = {}
         if request.cookie_text is not None:
-            data["cookie_value"] = request.cookie_text
+            data["cookie_text"] = request.cookie_text
         if request.cookie_file is not None:
             data["cookie_file"] = request.cookie_file
 
