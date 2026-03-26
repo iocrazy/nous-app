@@ -18,6 +18,7 @@ import { fetchMediaByType, extractAudio } from '../services/parserService';
 import { updateResource, getVersionHlsUrl } from '../services/resourceService';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useLibraryContext } from '../contexts/LibraryContext';
 import { getSupabaseClient, isSupabaseConfigured, getSupabaseAccessToken } from '../supabaseClient';
 
 const MIN_PANEL_WIDTH = 380;
@@ -57,6 +58,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   );
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
+  const { setLibrary } = useLibraryContext();
   const isDragging = useRef(false);
 
   // Track mobile breakpoint for responsive layout
@@ -319,15 +321,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       } else {
         await trashResourceByMediaId(id, 'team', teamId);
       }
-    } catch {
+    } catch (err1) {
+      console.error('trashResourceByMediaId failed:', err1);
       // Fallback: if no resource exists, delete parsed_media directly
       try {
         await deleteItem(id, deleteFiles);
       } catch (err2) {
-        console.error('Failed to delete:', err2);
+        console.error('deleteItem also failed:', err2);
+        addToast('Failed to delete', 'error');
         return; // Don't navigate back on failure
       }
     }
+    // Remove from library list so user sees it gone when navigating back
+    if (video) {
+      setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
+    }
+    addToast('Moved to trash', 'success');
     handleBack();
   };
 
