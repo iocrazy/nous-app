@@ -411,3 +411,42 @@ async def delete_cookie(platform: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"删除 Cookie 失败: platform={platform}, error={e}")
         raise HTTPException(status_code=500, detail="删除 Cookie 失败")
+
+
+# ─── Custom Headers ───────────────────────────────────────
+
+
+class HeadersUpsertRequest(BaseModel):
+    """Request body for PUT /settings/headers/{platform}"""
+    headers_text: str
+
+
+@router.get("/headers/{platform}")
+async def get_headers(platform: str, auth: AuthDep):
+    """Get custom headers for a platform."""
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+    try:
+        repo = CookiesRepository()
+        row = await repo.get_by_user_and_platform(auth.user_id, platform)
+        return {
+            "platform": platform,
+            "headers_text": row.get("custom_headers", "") if row else "",
+        }
+    except Exception as e:
+        logger.error(f"获取 Headers 失败: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get headers")
+
+
+@router.put("/headers/{platform}")
+async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDep):
+    """Set custom headers for a platform (stored alongside cookies)."""
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+    try:
+        repo = CookiesRepository()
+        await repo.upsert(auth.user_id, platform, {"custom_headers": request.headers_text})
+        return {"success": True, "platform": platform}
+    except Exception as e:
+        logger.error(f"保存 Headers 失败: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save headers")

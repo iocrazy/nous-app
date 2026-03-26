@@ -41,21 +41,41 @@ class LightweightParser:
     TIMEOUT = 15.0
 
     @classmethod
-    async def _get_user_cookie(cls, user_id: Optional[str]) -> Optional[str]:
-        """Fetch user's Douyin cookie from user_cookies table."""
+    async def _get_user_overrides(
+        cls, user_id: Optional[str]
+    ) -> Dict[str, str]:
+        """Fetch user's Douyin cookie and custom headers from user_cookies table.
+
+        Returns a dict of extra headers to merge (may include Cookie header).
+        """
         if not user_id:
-            return None
+            return {}
+        extra: Dict[str, str] = {}
         try:
             from app.repositories.cookies_repository import CookiesRepository
             repo = CookiesRepository()
             row = await repo.get_by_user_and_platform(user_id, "douyin")
-            if row and row.get("cookie_text"):
-                return row["cookie_text"]
-            if row and row.get("cookie_file"):
-                return row["cookie_file"]
+            if not row:
+                return {}
+
+            # Cookie
+            cookie_val = row.get("cookie_text") or row.get("cookie_file")
+            if cookie_val:
+                extra["Cookie"] = cookie_val
+
+            # Custom headers (Key: Value\n format)
+            custom_headers_text = row.get("custom_headers") or ""
+            for line in custom_headers_text.strip().splitlines():
+                line = line.strip()
+                if ":" in line:
+                    key, _, value = line.partition(":")
+                    key, value = key.strip(), value.strip()
+                    if key and value:
+                        extra[key] = value
+
         except Exception as e:
-            logger.debug(f"[LightweightParser] Failed to load user cookie: {e}")
-        return None
+            logger.debug(f"[LightweightParser] Failed to load user overrides: {e}")
+        return extra
 
     @classmethod
     async def parse(
@@ -75,9 +95,8 @@ class LightweightParser:
         try:
             logger.info(f"[LightweightParser] 开始解析: {share_url}")
 
-            # Load user cookie if available
-            cookie_str = await cls._get_user_cookie(user_id)
-            extra_headers = {"Cookie": cookie_str} if cookie_str else {}
+            # Load user cookie + custom headers if available
+            extra_headers = await cls._get_user_overrides(user_id)
 
             # 1. 跟随重定向获取视频 ID 和内容类型
             result = await cls._get_video_id(share_url, extra_headers)
