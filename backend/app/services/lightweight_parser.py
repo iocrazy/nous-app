@@ -49,16 +49,17 @@ class LightweightParser:
         try:
             logger.info(f"[LightweightParser] 开始解析: {share_url}")
 
-            # 1. 跟随重定向获取视频 ID
-            video_id = await cls._get_video_id(share_url)
-            if not video_id:
+            # 1. 跟随重定向获取视频 ID 和内容类型
+            result = await cls._get_video_id(share_url)
+            if not result:
                 logger.warning("[LightweightParser] 无法获取视频 ID")
                 return None
 
-            logger.info(f"[LightweightParser] 获取到视频 ID: {video_id}")
+            video_id, content_type = result
+            logger.info(f"[LightweightParser] 获取到视频 ID: {video_id}, type: {content_type}")
 
             # 2. 访问分享页面获取数据
-            aweme_detail = await cls._fetch_share_page(video_id)
+            aweme_detail = await cls._fetch_share_page(video_id, content_type)
             if not aweme_detail:
                 logger.warning("[LightweightParser] 无法从分享页面获取数据")
                 return None
@@ -73,11 +74,13 @@ class LightweightParser:
             return None
 
     @classmethod
-    async def _get_video_id(cls, share_url: str) -> Optional[str]:
+    async def _get_video_id(cls, share_url: str) -> Optional[tuple[str, str]]:
         """
-        从分享链接获取视频 ID
+        从分享链接获取视频 ID 和内容类型。
 
-        抖音分享链接会重定向到真实页面，从 URL 中提取视频 ID
+        Returns:
+            (video_id, content_type) where content_type is "video", "note", or "slides".
+            None on failure.
         """
         try:
             async with httpx.AsyncClient(
@@ -88,28 +91,23 @@ class LightweightParser:
 
                 logger.info(f"[LightweightParser] 重定向后 URL: {final_url}")
 
-                # 从 URL 中提取视频 ID
-                # 支持格式：
-                # - https://www.douyin.com/video/7123456789
-                # - https://www.douyin.com/note/7123456789
-                # - https://www.iesdouyin.com/share/video/7123456789
-
-                # 提取数字 ID
+                # 提取内容类型和数字 ID
                 patterns = [
-                    r"/video/(\d+)",
-                    r"/note/(\d+)",
-                    r"/share/video/(\d+)",
+                    (r"/share/slides/(\d+)", "slides"),
+                    (r"/share/video/(\d+)", "video"),
+                    (r"/video/(\d+)", "video"),
+                    (r"/note/(\d+)", "note"),
                 ]
 
-                for pattern in patterns:
+                for pattern, content_type in patterns:
                     match = re.search(pattern, final_url)
                     if match:
-                        return match.group(1)
+                        return match.group(1), content_type
 
                 # 尝试从 URL 末尾提取
                 video_id = final_url.split("?")[0].strip("/").split("/")[-1]
                 if video_id.isdigit():
-                    return video_id
+                    return video_id, "video"
 
                 logger.warning(f"[LightweightParser] URL 模式不匹配, final_url={final_url}")
                 return None
@@ -119,11 +117,15 @@ class LightweightParser:
             return None
 
     @classmethod
-    async def _fetch_share_page(cls, video_id: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_share_page(
+        cls, video_id: str, content_type: str = "video"
+    ) -> Optional[Dict[str, Any]]:
         """
-        访问抖音分享页面，提取 _ROUTER_DATA 中的视频数据
+        访问抖音分享页面，提取 _ROUTER_DATA 中的视频数据。
+        content_type: "video", "note", or "slides"
         """
-        share_page_url = f"https://www.iesdouyin.com/share/video/{video_id}"
+        path_segment = "slides" if content_type == "slides" else "video"
+        share_page_url = f"https://www.iesdouyin.com/share/{path_segment}/{video_id}"
 
         try:
             async with httpx.AsyncClient(timeout=cls.TIMEOUT) as client:
@@ -146,25 +148,26 @@ class LightweightParser:
                 router_data = json.loads(json_str)
 
                 # 提取视频数据
-                # 支持两种路由键：视频模式和笔记模式
-                VIDEO_KEY = "video_(id)/page"
-                NOTE_KEY = "note_(id)/page"
+                # 支持三种路由键：视频、笔记、图集模式
+                ROUTE_KEYS = [
+                    "video_(id)/page",
+                    "note_(id)/page",
+                    "slides_(id)/page",
+                ]
 
                 loader_data = router_data.get("loaderData", {})
 
-                if VIDEO_KEY in loader_data:
-                    item_list = (
-                        loader_data[VIDEO_KEY]
-                        .get("videoInfoRes", {})
-                        .get("item_list", [])
-                    )
-                elif NOTE_KEY in loader_data:
-                    item_list = (
-                        loader_data[NOTE_KEY]
-                        .get("videoInfoRes", {})
-                        .get("item_list", [])
-                    )
-                else:
+                item_list = None
+                for key in ROUTE_KEYS:
+                    if key in loader_data:
+                        item_list = (
+                            loader_data[key]
+                            .get("videoInfoRes", {})
+                            .get("item_list", [])
+                        )
+                        break
+
+                if item_list is None:
                     logger.warning(
                         f"[LightweightParser] 未知的路由键: {list(loader_data.keys())}"
                     )
