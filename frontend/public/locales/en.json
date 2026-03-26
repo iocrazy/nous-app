@@ -1022,5 +1022,83 @@
       "wide": "Wide",
       "extremeWide": "Extreme Wide"
     }
+  },
+  "canvas": {
+    "addImage": "+ Add Image",
+    "generate": "Generate",
+    "generateAll": "Generate All",
+    "toolbar": {
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "fitView": "Fit View",
+      "lock": "Lock Canvas",
+      "unlock": "Unlock Canvas",
+      "snapGrid": "Snap to Grid",
+      "delete": "Clear Canvas"
+    }
+  },
+  "modelParams": {
+    "otherParams": "Parameters",
+    "provider": "Provider",
+    "model": "Model",
+    "quality": "Quality",
+    "aspectRatio": "Aspect Ratio",
+    "extraOptions": "Extra Options",
+    "enableWebSearch": "Web Search",
+    "goConfigure": "Configure",
+    "providerKeyRequiredTitle": "API Key Required",
+    "providerKeyRequiredDesc": "An API key for {{provider}} is required to use this model."
+  },
+  "node": {
+    "upload": {
+      "hint": "Click or drop image",
+      "uploadedAlt": "Uploaded image"
+    },
+    "imageEdit": {
+      "promptPlaceholder": "Describe the image you want to generate...",
+      "negativePrompt": "Negative prompt (optional)...",
+      "promptRequired": "Please enter a prompt"
+    },
+    "imageNode": {
+      "waitingResult": "Waiting for result...",
+      "waitingResultDelayed": "Waiting... ({{minutes}}min)",
+      "selectToEdit": "Select to edit",
+      "generationFailed": "Generation failed",
+      "resultAlt": "Result",
+      "generatedAlt": "Generated"
+    },
+    "storyboardGen": {
+      "rowsShort": "R",
+      "colsShort": "C",
+      "framePlaceholder": "Frame {{number}}"
+    },
+    "textAnnotation": {
+      "placeholder": "Type your notes here...",
+      "empty": "Empty note"
+    }
+  },
+  "nodeToolbar": {
+    "copy": "Copy",
+    "download": "Download",
+    "reupload": "Re-upload",
+    "ungroup": "Ungroup",
+    "copyText": "Copy Text",
+    "copyErrorReport": "Copy Error"
+  },
+  "tool": {
+    "crop": "Crop",
+    "annotate": "Annotate",
+    "split": "Split"
+  },
+  "viewer": {
+    "imageAlt": "Image",
+    "next": "Next",
+    "prev": "Previous",
+    "reset": "Reset"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete"
   }
 }

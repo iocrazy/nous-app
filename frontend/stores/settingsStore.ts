@@ -227,7 +227,7 @@ export const useSettingsStore = create<SettingsState>()(
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
-            console.error('failed to hydrate settings storage', error);
+            console.warn('[settingsStore] hydration skipped (first load):', error?.message);
           }
           useSettingsStore.setState({ isHydrated: true });
         };
