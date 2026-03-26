@@ -989,6 +989,8 @@ async def get_video(platform_id: str, auth: AuthDep):
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
+        if not video:
+            video = await repo.get_by_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -1039,8 +1041,10 @@ async def delete_video(
     try:
         repo = MediaRepository()
 
-        # Get video info for logging and file deletion
+        # Get video info — try platform_id first, then by id (Snowflake BIGINT)
         video = await repo.get_by_platform_id(platform_id)
+        if not video:
+            video = await repo.get_by_id(platform_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
 
