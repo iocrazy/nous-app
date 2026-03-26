@@ -22,6 +22,69 @@ from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
 
+# ---------------------------------------------------------------------------
+# Cookie format helpers
+# ---------------------------------------------------------------------------
+
+# Platform → default cookie domain mapping
+_PLATFORM_COOKIE_DOMAINS: dict[str, str] = {
+    "douyin": ".douyin.com",
+    "bilibili": ".bilibili.com",
+    "youtube": ".youtube.com",
+    "tiktok": ".tiktok.com",
+    "twitter": ".twitter.com",
+    "x": ".x.com",
+    "instagram": ".instagram.com",
+    "xiaohongshu": ".xiaohongshu.com",
+    "weibo": ".weibo.com",
+}
+
+_NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n# This file was auto-converted from browser cookie string\n\n"
+
+
+def _is_netscape_format(text: str) -> bool:
+    """Return True if *text* already looks like a Netscape cookie file."""
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # A valid Netscape line has 7 tab-separated fields
+        if len(line.split("\t")) == 7:
+            return True
+        return False
+    return False
+
+
+def _browser_cookie_to_netscape(cookie_str: str, platform: str) -> str:
+    """Convert a browser-style cookie string to Netscape format.
+
+    Browser cookie strings look like: ``key1=value1; key2=value2; ...``
+    Netscape format is one tab-separated line per cookie:
+        domain  include_subdomains  path  secure  expiry  name  value
+
+    If the input is already in Netscape format it is returned as-is.
+    """
+    if _is_netscape_format(cookie_str):
+        return cookie_str
+
+    domain = _PLATFORM_COOKIE_DOMAINS.get(platform, f".{platform}.com")
+    lines = [_NETSCAPE_HEADER]
+
+    for pair in cookie_str.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        name, _, value = pair.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        # domain  flag  path  secure  expiry  name  value
+        lines.append(f"{domain}\tTRUE\t/\tFALSE\t0\t{name}\t{value}")
+
+    return "\n".join(lines) + "\n"
+
+
 class YtdlpService:
     """Universal video download via yt-dlp"""
 
@@ -431,6 +494,11 @@ class YtdlpService:
                         "cookie_text"
                     )
                     if cookie_content:
+                        # Convert browser cookie string to Netscape format
+                        # so yt-dlp can parse it correctly.
+                        cookie_content = _browser_cookie_to_netscape(
+                            cookie_content, platform
+                        )
                         tmp = tempfile.NamedTemporaryFile(
                             mode="w",
                             suffix=f"_{platform}.txt",

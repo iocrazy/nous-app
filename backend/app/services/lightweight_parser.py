@@ -192,6 +192,19 @@ class LightweightParser:
 
                 html_content = response.text
 
+                # Detect captcha / verification page before parsing
+                captcha_indicators = [
+                    "请完成下列验证后继续",
+                    "登录后免费畅享高清视频",
+                ]
+                has_captcha = any(ind in html_content for ind in captcha_indicators)
+                has_router_data = "_ROUTER_DATA" in html_content
+                if has_captcha or ("slardar" in html_content and not has_router_data):
+                    logger.warning(
+                        "[LightweightParser] Captcha/verification page detected, "
+                        "cookie may be expired"
+                    )
+
                 # 解析 window._ROUTER_DATA
                 pattern = re.compile(
                     r"window\._ROUTER_DATA\s*=\s*(.*?)</script>", flags=re.DOTALL
