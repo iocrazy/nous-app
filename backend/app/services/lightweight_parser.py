@@ -86,7 +86,7 @@ class LightweightParser:
                 response = await client.get(share_url, headers=cls.HEADERS)
                 final_url = str(response.url)
 
-                logger.debug(f"[LightweightParser] 重定向后 URL: {final_url}")
+                logger.info(f"[LightweightParser] 重定向后 URL: {final_url}")
 
                 # 从 URL 中提取视频 ID
                 # 支持格式：
@@ -111,6 +111,7 @@ class LightweightParser:
                 if video_id.isdigit():
                     return video_id
 
+                logger.warning(f"[LightweightParser] URL 模式不匹配, final_url={final_url}")
                 return None
 
         except Exception as e:
