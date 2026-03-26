@@ -484,19 +484,41 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                             </button>
                           ) : null}
                           {/* Audio */}
-                          {isCompleted(audioStatus) || hasAudioFile ? (
-                            <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
-                              <Music size={13} className="text-amber-400" /> Audio
-                            </button>
-                          ) : isPending(audioStatus) ? (
-                            <button disabled className={disabledClass}>
-                              <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbumType(video.media_type) ? 'Downloading Audio...' : 'Extracting Audio...'}
-                            </button>
-                          ) : hasVideoFile ? (
-                            <button onClick={() => handleExtractAudio()} className={btnClass}>
-                              <Music size={13} className="text-amber-400" /> Extract Audio
-                            </button>
-                          ) : null}
+                          {(() => {
+                            const isAlbum = isAlbumType(video.media_type);
+                            if (hasAudioFile) {
+                              // File exists → direct download
+                              return (
+                                <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
+                                  <Music size={13} className="text-amber-400" /> Download Audio
+                                </button>
+                              );
+                            }
+                            if (isPending(audioStatus)) {
+                              return (
+                                <button disabled className={disabledClass}>
+                                  <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbum ? 'Downloading Audio...' : 'Extracting Audio...'}
+                                </button>
+                              );
+                            }
+                            if (isAlbum && video.original_url) {
+                              // Album: re-parse to download audio
+                              return (
+                                <button onClick={() => handleFetchMedia({ video: false, cover: false })} className={btnClass}>
+                                  <Music size={13} className="text-amber-400" /> Download Audio
+                                </button>
+                              );
+                            }
+                            if (!isAlbum && hasVideoFile) {
+                              // Video: extract audio from video file
+                              return (
+                                <button onClick={() => handleExtractAudio()} className={btnClass}>
+                                  <Music size={13} className="text-amber-400" /> Extract Audio
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       );
                     })()}
