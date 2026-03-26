@@ -37,7 +37,7 @@ import type { SortBy } from '../contexts/ResourcesContext';
 // ─── Skeleton components ────────────────────────────────
 
 const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
         <div className="h-32 bg-zinc-800" />
@@ -361,6 +361,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Toolbar -- desktop only */}
       <div
         className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
+        style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -637,6 +638,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Content area */}
       <div
         className="flex-1 overflow-y-auto p-3 md:p-6 relative"
+        style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
         onDragLeave={canUploadDrop ? onDragLeave : undefined}
@@ -739,7 +741,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   {sortedItems.length > 0 && (
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
-                  <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                  <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
                     {recycleSubFolders.map((folder) => (
                       <FolderCard
                         key={`trashed-folder-${folder.id}`}
@@ -776,7 +778,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   {viewMode === 'grid' ? (
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
                       {filteredFolders.map((folder) => {
                         const folderNavigate = () => {
                           if (selectedLibraryId) {
@@ -911,7 +913,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     </div>
                   )}
                   {viewMode === 'grid' ? (
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
                       {sortedItems.map((item) => (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
