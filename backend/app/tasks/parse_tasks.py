@@ -573,19 +573,21 @@ def parse_media_task(
                 parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
             except Exception as e:
                 # Invalidate cookie if yt-dlp failed due to auth error
+                # Skip for Douyin — yt-dlp cookie issues don't affect DrissionPage fallback
                 error_str = str(e)
-                auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
-                if any(kw in error_str.lower() for kw in auth_keywords):
-                    try:
-                        from app.repositories.cookies_repository import CookiesRepository
-                        cookies_repo = CookiesRepository()
-                        run_async(cookies_repo.mark_invalid(user_id, platform, error_str[:200]))
-                        logger.info(
-                            f"[Cookie] Marked {platform} cookie invalid for user {user_id} "
-                            f"after yt-dlp auth failure"
-                        )
-                    except Exception as cookie_err:
-                        logger.warning(f"[Cookie] Failed to mark cookie invalid: {cookie_err}")
+                if platform != "douyin":
+                    auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+                    if any(kw in error_str.lower() for kw in auth_keywords):
+                        try:
+                            from app.repositories.cookies_repository import CookiesRepository
+                            cookies_repo = CookiesRepository()
+                            run_async(cookies_repo.mark_invalid(user_id, platform, error_str[:200]))
+                            logger.info(
+                                f"[Cookie] Marked {platform} cookie invalid for user {user_id} "
+                                f"after yt-dlp auth failure"
+                            )
+                        except Exception as cookie_err:
+                            logger.warning(f"[Cookie] Failed to mark cookie invalid: {cookie_err}")
 
                 if platform != "douyin":
                     raise  # Non-Douyin: yt-dlp failure is fatal
