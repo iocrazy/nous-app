@@ -81,8 +81,9 @@ export interface FetchResponse {
   resolution?: string;
   // Download status
   video_download_status?: string;
-  // Progressive download task ID (for polling progress)
-  download_task_id?: string;
+  // Task ID (unified_task_id for tracking)
+  task_id?: string;
+  download_task_id?: string; // legacy
 }
 
 /**

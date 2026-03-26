@@ -229,7 +229,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
           setTaskStatus('Parsing');
           setTaskProgress(30);
 
-          const unifiedTaskId = (response as any).unified_task_id;
+          const unifiedTaskId = (response as any).task_id || (response as any).unified_task_id;
           if (unifiedTaskId) {
             setParseUnifiedTaskId(unifiedTaskId);
             addLog(`Tracking parse progress: ${unifiedTaskId}`, 'info');
@@ -271,12 +271,13 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
         setCurrentResult(parsedResult);
 
-        if (response.download_task_id) {
+        const dlTaskId = response.task_id || response.download_task_id;
+        if (dlTaskId) {
           addLog('Download task submitted to background queue', 'info');
-          addLog(`Tracking download progress: ${response.download_task_id}`, 'info');
+          addLog(`Tracking download progress: ${dlTaskId}`, 'info');
           setTaskStatus('Downloading');
           setTaskProgress(60);
-          setDownloadCeleryId(response.download_task_id);
+          setDownloadCeleryId(dlTaskId);
         } else {
           setTaskProgress(100);
           setTaskStatus('Completed');
