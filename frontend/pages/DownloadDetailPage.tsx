@@ -483,14 +483,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                               <CloudDownload size={13} className="text-emerald-400" /> Fetch Cover
                             </button>
                           ) : null}
-                          {/* Audio — auto-extracted from video, re-extract if missing */}
-                          {isCompleted(audioStatus) ? (
+                          {/* Audio */}
+                          {isCompleted(audioStatus) || hasAudioFile ? (
                             <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
                               <Music size={13} className="text-amber-400" /> Audio
                             </button>
                           ) : isPending(audioStatus) ? (
                             <button disabled className={disabledClass}>
-                              <Loader2 size={13} className="text-amber-400 animate-spin" /> Extracting Audio...
+                              <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbumType(video.media_type) ? 'Downloading Audio...' : 'Extracting Audio...'}
                             </button>
                           ) : hasVideoFile ? (
                             <button onClick={() => handleExtractAudio()} className={btnClass}>
