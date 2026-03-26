@@ -361,7 +361,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Toolbar -- desktop only */}
       <div
         className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
-        style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -638,7 +637,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Content area */}
       <div
         className="flex-1 overflow-y-auto p-3 md:p-6 relative"
-        style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
         onDragLeave={canUploadDrop ? onDragLeave : undefined}

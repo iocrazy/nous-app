@@ -287,10 +287,27 @@ class ThumbnailService:
             logger.warning(f"Image thumbnail failed for {src_path}: {e}")
             return False
 
+    def _is_animated(self, img: Image.Image) -> bool:
+        """Check if a PIL Image has multiple frames (animated GIF/APNG/WebP)."""
+        try:
+            return getattr(img, "is_animated", False) or img.n_frames > 1
+        except Exception:
+            return False
+
     def _resize_image(self, src_path: str, dst_path: str) -> bool:
-        """Synchronous image resize using Pillow."""
+        """Synchronous image resize using Pillow.
+
+        Animated images (GIF/APNG/WebP) are skipped — the cover endpoint
+        will fall back to serving the original file so animation is preserved.
+        """
         try:
             with Image.open(src_path) as img:
+                if self._is_animated(img):
+                    logger.info(
+                        f"Skipping thumbnail for animated image: {src_path}"
+                    )
+                    return False
+
                 if img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
 
