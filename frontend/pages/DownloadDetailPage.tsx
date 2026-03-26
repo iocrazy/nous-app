@@ -313,8 +313,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     setVideo((prev) => (prev ? { ...prev, ...updated } : prev));
   };
 
-  const handleDelete = async (_id: string, _deleteFiles: boolean) => {
+  const handleDelete = async (_id: string, deleteFiles: boolean) => {
     if (!video) return;
+    let trashed = false;
     try {
       // Use platform_id for trash (same method as DownloadsView batch delete)
       if (video.platform_id) {
@@ -323,18 +324,29 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         } else {
           await trashResourceByPlatformId(video.platform_id);
         }
-      } else {
-        // Fallback: try by media_id
-        await trashResourceByMediaId(video.id!, teamId ? 'team' : undefined, teamId);
+      } else if (video.id) {
+        await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
       }
+      trashed = true;
     } catch (err) {
-      console.error('Trash failed:', err);
-      addToast('Failed to delete', 'error');
-      return;
+      console.error('Trash failed, trying direct delete:', err);
+      // Resource may not exist (e.g. previously permanently deleted).
+      // Fall back to deleting the parsed_media record directly.
+      try {
+        if (video.id) {
+          await deleteItem(video.id, deleteFiles);
+        } else {
+          throw new Error('No video id');
+        }
+      } catch (err2) {
+        console.error('Direct delete also failed:', err2);
+        addToast('Failed to delete', 'error');
+        return;
+      }
     }
     // Remove from library list so user sees it gone when navigating back
     setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
-    addToast('Moved to trash', 'success');
+    addToast(trashed ? 'Moved to trash' : 'Deleted', 'success');
     handleBack();
   };
 
