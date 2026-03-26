@@ -713,14 +713,24 @@ def parse_media_task(
         error_msg = str(e)[:300]
         logger.error(f"[Parse/Task] Failed: {url[:50]}..., error: {error_msg}")
 
+        if self.request.retries < self.max_retries:
+            # Will retry — update progress with error info but don't mark as terminal
+            if unified_task_id:
+                try:
+                    run_async(manager.update_progress(
+                        unified_task_id, None,
+                        subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries})...",
+                    ))
+                except Exception:
+                    pass
+            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+
+        # Final failure — no more retries
         if unified_task_id:
             try:
                 run_async(manager.fail(unified_task_id, error_msg))
             except Exception:
                 pass
-
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
 
         run_async(log_user_action(
             user_id=user_id, action="fetch",
