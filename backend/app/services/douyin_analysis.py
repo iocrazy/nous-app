@@ -175,9 +175,51 @@ class DouyinAnalysis(metaclass=SingletonMeta):
         return self._page
 
     @classmethod
-    async def fetch_one_video(cls, url: str):
+    async def _get_user_cookie_text(cls, user_id: str | None) -> str:
+        """Fetch user's Douyin cookie string (async, call before thread)."""
+        if not user_id:
+            return ""
+        try:
+            from app.repositories.cookies_repository import CookiesRepository
+            repo = CookiesRepository()
+            row = await repo.get_by_user_and_platform(user_id, "douyin")
+            if row:
+                return (row.get("cookie_text") or row.get("cookie_file") or "").strip()
+        except Exception as e:
+            logger.debug(f"[DrissionPage] Failed to load user cookie: {e}")
+        return ""
+
+    @classmethod
+    def _inject_cookies(cls, page, cookie_text: str) -> None:
+        """Inject cookie string into browser page (sync, call inside thread)."""
+        if not cookie_text:
+            return
+        try:
+            # Navigate to douyin.com first so cookies are set on the right domain
+            try:
+                page.get("https://www.douyin.com", timeout=5)
+            except Exception:
+                pass
+
+            for part in cookie_text.split(";"):
+                part = part.strip()
+                if "=" in part:
+                    name, _, value = part.partition("=")
+                    try:
+                        page.set.cookies({"name": name.strip(), "value": value.strip(), "domain": ".douyin.com"})
+                    except Exception:
+                        pass
+            logger.info("[DrissionPage] Loaded user cookies for douyin")
+        except Exception as e:
+            logger.debug(f"[DrissionPage] Failed to inject cookies: {e}")
+
+    @classmethod
+    async def fetch_one_video(cls, url: str, user_id: str | None = None):
         """获取单个抖音视频信息（真正的异步版本）"""
         logger.info(f"开始获取抖音视频: {url}")
+
+        # Pre-fetch cookie (async) before entering sync thread
+        cookie_text = await cls._get_user_cookie_text(user_id)
 
         # 定义在线程中执行的同步函数
         def _fetch_in_thread():
@@ -192,15 +234,16 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         logger.debug("浏览器未初始化，开始初始化...")
                         instance._initialize()
                         logger.debug("浏览器初始化完成")
-
-                    # # 检查浏览器连接
-                    # instance.page.run_js('return true')
                 except Exception as e:
                     logger.warning(f"浏览器连接检查失败，重新初始化: {str(e)}")
                     instance._initialized = False
                     instance._page = None
                     instance._initialize()
                     logger.debug("浏览器重新初始化完成")
+
+                # Inject user cookies into browser
+                if cookie_text:
+                    cls._inject_cookies(instance.page, cookie_text)
 
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
