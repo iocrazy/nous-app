@@ -1149,6 +1149,21 @@ export const DownloadsView: React.FC = () => {
             onClick={handleCtxShare}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
           >
+            <Share2 size={14} className="text-zinc-500" />
+            Share
+          </button>
+          <button
+            onClick={() => {
+              if (!contextMenu) return;
+              const url = contextMenu.video.original_url;
+              if (url) {
+                navigator.clipboard.writeText(url);
+                addToast('Link copied', 'success');
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
             <Link size={14} className="text-zinc-500" />
             Copy Link
           </button>
