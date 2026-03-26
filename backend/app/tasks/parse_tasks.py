@@ -362,7 +362,7 @@ def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
     else:
         # LightHTTP first
         try:
-            aweme_detail = run_async(LightweightParser.parse(url))
+            aweme_detail = run_async(LightweightParser.parse(url, user_id=user_id))
             if aweme_detail:
                 parsed = run_async(DouyinParser.parse_aweme_detail(
                     aweme_detail=aweme_detail, valid_url=url,

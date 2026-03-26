@@ -20,27 +20,53 @@ from loguru import logger
 class LightweightParser:
     """轻量级抖音解析器，通过 HTTP 请求解析分享页面"""
 
-    # 模拟 iPhone 浏览器的 User-Agent
+    # 模拟移动端浏览器的完整 headers
     HEADERS = {
         "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/121.0.2277.107 "
-            "Version/17.0 Mobile/15E148 Safari/604.1"
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/17.4 Mobile/15E148 Safari/604.1"
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
     }
 
     # 请求超时设置
     TIMEOUT = 15.0
 
     @classmethod
-    async def parse(cls, share_url: str) -> Optional[Dict[str, Any]]:
+    async def _get_user_cookie(cls, user_id: Optional[str]) -> Optional[str]:
+        """Fetch user's Douyin cookie from user_cookies table."""
+        if not user_id:
+            return None
+        try:
+            from app.repositories.cookies_repository import CookiesRepository
+            repo = CookiesRepository()
+            row = await repo.get_by_user_and_platform(user_id, "douyin")
+            if row and row.get("cookie_text"):
+                return row["cookie_text"]
+            if row and row.get("cookie_file"):
+                return row["cookie_file"]
+        except Exception as e:
+            logger.debug(f"[LightweightParser] Failed to load user cookie: {e}")
+        return None
+
+    @classmethod
+    async def parse(
+        cls, share_url: str, *, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         解析抖音分享链接，返回 aweme_detail 格式的数据
 
         Args:
             share_url: 抖音分享链接 (如 https://v.douyin.com/xxx)
+            user_id: 可选，用于获取用户配置的 Cookie 提高解析成功率
 
         Returns:
             Dict: aweme_detail 格式的数据，与浏览器方案返回格式一致
@@ -49,8 +75,12 @@ class LightweightParser:
         try:
             logger.info(f"[LightweightParser] 开始解析: {share_url}")
 
+            # Load user cookie if available
+            cookie_str = await cls._get_user_cookie(user_id)
+            extra_headers = {"Cookie": cookie_str} if cookie_str else {}
+
             # 1. 跟随重定向获取视频 ID 和内容类型
-            result = await cls._get_video_id(share_url)
+            result = await cls._get_video_id(share_url, extra_headers)
             if not result:
                 logger.warning("[LightweightParser] 无法获取视频 ID")
                 return None
@@ -59,7 +89,9 @@ class LightweightParser:
             logger.info(f"[LightweightParser] 获取到视频 ID: {video_id}, type: {content_type}")
 
             # 2. 访问分享页面获取数据
-            aweme_detail = await cls._fetch_share_page(video_id, content_type)
+            aweme_detail = await cls._fetch_share_page(
+                video_id, content_type, extra_headers
+            )
             if not aweme_detail:
                 logger.warning("[LightweightParser] 无法从分享页面获取数据")
                 return None
@@ -74,7 +106,9 @@ class LightweightParser:
             return None
 
     @classmethod
-    async def _get_video_id(cls, share_url: str) -> Optional[tuple[str, str]]:
+    async def _get_video_id(
+        cls, share_url: str, extra_headers: Optional[Dict[str, str]] = None
+    ) -> Optional[tuple[str, str]]:
         """
         从分享链接获取视频 ID 和内容类型。
 
@@ -83,10 +117,11 @@ class LightweightParser:
             None on failure.
         """
         try:
+            headers = {**cls.HEADERS, **(extra_headers or {})}
             async with httpx.AsyncClient(
                 follow_redirects=True, timeout=cls.TIMEOUT
             ) as client:
-                response = await client.get(share_url, headers=cls.HEADERS)
+                response = await client.get(share_url, headers=headers)
                 final_url = str(response.url)
 
                 logger.info(f"[LightweightParser] 重定向后 URL: {final_url}")
@@ -118,7 +153,10 @@ class LightweightParser:
 
     @classmethod
     async def _fetch_share_page(
-        cls, video_id: str, content_type: str = "video"
+        cls,
+        video_id: str,
+        content_type: str = "video",
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         访问抖音分享页面，提取 _ROUTER_DATA 中的视频数据。
@@ -128,8 +166,9 @@ class LightweightParser:
         share_page_url = f"https://www.iesdouyin.com/share/{path_segment}/{video_id}"
 
         try:
+            headers = {**cls.HEADERS, **(extra_headers or {})}
             async with httpx.AsyncClient(timeout=cls.TIMEOUT) as client:
-                response = await client.get(share_page_url, headers=cls.HEADERS)
+                response = await client.get(share_page_url, headers=headers)
                 response.raise_for_status()
 
                 html_content = response.text
