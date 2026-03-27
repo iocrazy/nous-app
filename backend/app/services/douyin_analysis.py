@@ -218,9 +218,6 @@ class DouyinAnalysis(metaclass=SingletonMeta):
         """获取单个抖音视频信息（真正的异步版本）"""
         logger.info(f"开始获取抖音视频: {url}")
 
-        # Pre-fetch cookie (async) before entering sync thread
-        cookie_text = await cls._get_user_cookie_text(user_id)
-
         # 定义在线程中执行的同步函数
         def _fetch_in_thread():
             try:
@@ -240,10 +237,6 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                     instance._page = None
                     instance._initialize()
                     logger.debug("浏览器重新初始化完成")
-
-                # Inject user cookies into browser
-                if cookie_text:
-                    cls._inject_cookies(instance.page, cookie_text)
 
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
