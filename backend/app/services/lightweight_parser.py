@@ -205,9 +205,20 @@ class LightweightParser:
                     logger.warning(
                         "[LightweightParser] ⚠️ Captcha/verification page detected"
                     )
+                    # Dump page snippet for debugging
+                    snippet = html_content[:2000].replace("\n", " ")
+                    logger.info(f"[LightweightParser] Blocked page HTML (first 2000 chars): {snippet}")
                 elif not has_router_data and "slardar" in html_content:
                     logger.warning(
                         "[LightweightParser] ⚠️ Blocked page detected (slardar present, no _ROUTER_DATA)"
+                    )
+                    snippet = html_content[:2000].replace("\n", " ")
+                    logger.info(f"[LightweightParser] Blocked page HTML (first 2000 chars): {snippet}")
+                elif not has_router_data:
+                    # Unknown blocked page — dump for analysis
+                    snippet = html_content[:2000].replace("\n", " ")
+                    logger.warning(
+                        f"[LightweightParser] ⚠️ No _ROUTER_DATA found, page HTML (first 2000 chars): {snippet}"
                     )
 
                 # 解析 window._ROUTER_DATA
