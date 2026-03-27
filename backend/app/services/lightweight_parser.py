@@ -191,35 +191,29 @@ class LightweightParser:
                 response.raise_for_status()
 
                 html_content = response.text
+                page_len = len(html_content)
 
-                # Detect captcha / verification page before parsing
+                # ── Failure analysis: classify page and log on any failure ──
                 # Reference: Notion doc "抖音验证码检测脚本"
                 has_router_data = "_ROUTER_DATA" in html_content
-                captcha_indicators = [
-                    "captcha_container",        # Primary DOM selector
-                    "verifycenter",             # iframe src keyword
-                    "请完成下列验证后继续",       # Captcha prompt text
-                ]
-                has_captcha = any(ind in html_content for ind in captcha_indicators)
-                if has_captcha:
-                    logger.warning(
-                        "[LightweightParser] ⚠️ Captcha/verification page detected"
-                    )
-                    # Dump page snippet for debugging
-                    snippet = html_content[:2000].replace("\n", " ")
-                    logger.info(f"[LightweightParser] Blocked page HTML (first 2000 chars): {snippet}")
-                elif not has_router_data and "slardar" in html_content:
-                    logger.warning(
-                        "[LightweightParser] ⚠️ Blocked page detected (slardar present, no _ROUTER_DATA)"
-                    )
-                    snippet = html_content[:2000].replace("\n", " ")
-                    logger.info(f"[LightweightParser] Blocked page HTML (first 2000 chars): {snippet}")
-                elif not has_router_data:
-                    # Unknown blocked page — dump for analysis
-                    snippet = html_content[:2000].replace("\n", " ")
-                    logger.warning(
-                        f"[LightweightParser] ⚠️ No _ROUTER_DATA found, page HTML (first 2000 chars): {snippet}"
-                    )
+                captcha_keywords = ["captcha_container", "verifycenter", "请完成下列验证后继续"]
+                has_captcha = any(kw in html_content for kw in captcha_keywords)
+                has_slardar = "slardar" in html_content
+                has_login_wall = "登录后免费畅享高清视频" in html_content
+
+                def _classify_failure() -> str:
+                    """Classify why the page failed to return video data."""
+                    if has_captcha:
+                        return "CAPTCHA"
+                    if has_login_wall and not has_router_data:
+                        return "LOGIN_WALL"
+                    if has_slardar and not has_router_data:
+                        return "BLOCKED_BY_SLARDAR"
+                    if not has_router_data and page_len < 1000:
+                        return "EMPTY_PAGE"
+                    if not has_router_data:
+                        return "NO_ROUTER_DATA"
+                    return ""
 
                 # 解析 window._ROUTER_DATA
                 pattern = re.compile(
@@ -228,14 +222,22 @@ class LightweightParser:
                 match = pattern.search(html_content)
 
                 if not match:
-                    logger.warning("[LightweightParser] 未找到 _ROUTER_DATA")
+                    reason = _classify_failure()
+                    snippet = html_content[:2000].replace("\n", " ")
+                    logger.warning(
+                        f"[LightweightParser] ⚠️ Parse failed | reason={reason} | "
+                        f"status={response.status_code} | size={page_len} | "
+                        f"url={share_page_url}"
+                    )
+                    logger.info(
+                        f"[LightweightParser] Page HTML ({reason}, first 2000 chars): {snippet}"
+                    )
                     return None
 
                 json_str = match.group(1).strip()
                 router_data = json.loads(json_str)
 
                 # 提取视频数据
-                # 支持三种路由键：视频、笔记、图集模式
                 ROUTE_KEYS = [
                     "video_(id)/page",
                     "note_(id)/page",
@@ -256,12 +258,15 @@ class LightweightParser:
 
                 if item_list is None:
                     logger.warning(
-                        f"[LightweightParser] 未知的路由键: {list(loader_data.keys())}"
+                        f"[LightweightParser] ⚠️ Parse failed | reason=UNKNOWN_ROUTE_KEY | "
+                        f"keys={list(loader_data.keys())}"
                     )
                     return None
 
                 if not item_list:
-                    logger.warning("[LightweightParser] item_list 为空")
+                    logger.warning(
+                        f"[LightweightParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
+                    )
                     return None
 
                 # 返回第一个视频数据（与浏览器方案格式一致）
