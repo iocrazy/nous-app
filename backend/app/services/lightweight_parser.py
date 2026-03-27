@@ -1,4 +1,5 @@
 # backend/app/services/lightweight_parser.py
+# Updated: 2026-03-27
 
 """
 轻量级抖音解析服务
