@@ -190,33 +190,44 @@ class DouyinAnalysis(metaclass=SingletonMeta):
         return ""
 
     @classmethod
-    def _inject_cookies(cls, page, cookie_text: str) -> None:
-        """Inject cookie string into browser page (sync, call inside thread)."""
+    def _inject_cookies_cdp(cls, page, cookie_text: str) -> None:
+        """Inject cookie string via CDP Network.setCookie (no page navigation needed)."""
         if not cookie_text:
             return
         try:
-            # Navigate to douyin.com first so cookies are set on the right domain
-            try:
-                page.get("https://www.douyin.com", timeout=5)
-            except Exception:
-                pass
-
+            count = 0
             for part in cookie_text.split(";"):
                 part = part.strip()
-                if "=" in part:
-                    name, _, value = part.partition("=")
-                    try:
-                        page.set.cookies({"name": name.strip(), "value": value.strip(), "domain": ".douyin.com"})
-                    except Exception:
-                        pass
-            logger.info("[DrissionPage] Loaded user cookies for douyin")
+                if "=" not in part:
+                    continue
+                name, _, value = part.partition("=")
+                name, value = name.strip(), value.strip()
+                if not name:
+                    continue
+                try:
+                    page.run_cdp(
+                        "Network.setCookie",
+                        name=name,
+                        value=value,
+                        domain=".douyin.com",
+                        path="/",
+                        url="https://www.douyin.com",
+                    )
+                    count += 1
+                except Exception:
+                    pass
+            if count > 0:
+                logger.info(f"[DrissionPage] Injected {count} cookies via CDP")
         except Exception as e:
-            logger.debug(f"[DrissionPage] Failed to inject cookies: {e}")
+            logger.debug(f"[DrissionPage] CDP cookie injection failed: {e}")
 
     @classmethod
     async def fetch_one_video(cls, url: str, user_id: str | None = None):
         """获取单个抖音视频信息（真正的异步版本）"""
         logger.info(f"开始获取抖音视频: {url}")
+
+        # Pre-fetch cookie (async) before entering sync thread
+        cookie_text = await cls._get_user_cookie_text(user_id)
 
         # 定义在线程中执行的同步函数
         def _fetch_in_thread():
@@ -237,6 +248,10 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                     instance._page = None
                     instance._initialize()
                     logger.debug("浏览器重新初始化完成")
+
+                # Inject cookies via CDP (no page navigation, no captcha trigger)
+                if cookie_text:
+                    cls._inject_cookies_cdp(instance.page, cookie_text)
 
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
