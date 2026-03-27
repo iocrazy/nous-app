@@ -275,25 +275,40 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                         instance.page.get(url, timeout=5)
                         logger.debug("浏览器重新初始化并访问URL成功")
 
-                # Detect captcha / verification page
+                # Detect captcha / verification page using precise DOM selectors
+                # Reference: Notion doc "抖音验证码检测脚本"
+                # Key selectors: #captcha_container, iframe[src*="verifycenter"]
                 try:
-                    page_html = instance.page.html or ""
-                    captcha_indicators = [
-                        "请完成下列验证后继续",
-                        "按住左边按钮拖动完成上方拼图",
-                        "验证码",
-                        "captcha",
-                    ]
-                    if any(ind in page_html for ind in captcha_indicators):
+                    captcha_detected = False
+                    detection_method = ""
+
+                    # Primary: #captcha_container (most reliable)
+                    if instance.page.ele('#captcha_container', timeout=0):
+                        captcha_detected = True
+                        detection_method = "#captcha_container"
+                    # Secondary: iframe with verifycenter
+                    elif instance.page.ele('xpath://iframe[contains(@src,"verifycenter")]', timeout=0):
+                        captcha_detected = True
+                        detection_method = "iframe[verifycenter]"
+                    # Tertiary: iframe with captcha
+                    elif instance.page.ele('xpath://iframe[contains(@src,"captcha")]', timeout=0):
+                        captcha_detected = True
+                        detection_method = "iframe[captcha]"
+
+                    if captcha_detected:
                         logger.warning(
-                            f"[DrissionPage] Captcha/verification detected on page: {instance.page.url}"
+                            f"[DrissionPage] ⚠️ Captcha detected via {detection_method}, "
+                            f"url={instance.page.url}"
                         )
-                    elif "登录后免费畅享高清视频" in page_html and "_ROUTER_DATA" not in page_html:
-                        logger.warning(
-                            f"[DrissionPage] Login wall detected (no video data): {instance.page.url}"
-                        )
-                except Exception:
-                    pass
+                    else:
+                        # Fallback: check HTML text for login wall
+                        page_html = instance.page.html or ""
+                        if "登录后免费畅享高清视频" in page_html:
+                            logger.info(
+                                f"[DrissionPage] Login page detected (no captcha): {instance.page.url}"
+                            )
+                except Exception as det_err:
+                    logger.debug(f"[DrissionPage] Captcha detection check failed: {det_err}")
 
                 # 获取所有网络请求
                 aweme_response = None

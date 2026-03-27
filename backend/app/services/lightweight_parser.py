@@ -193,16 +193,21 @@ class LightweightParser:
                 html_content = response.text
 
                 # Detect captcha / verification page before parsing
+                # Reference: Notion doc "抖音验证码检测脚本"
+                has_router_data = "_ROUTER_DATA" in html_content
                 captcha_indicators = [
-                    "请完成下列验证后继续",
-                    "登录后免费畅享高清视频",
+                    "captcha_container",        # Primary DOM selector
+                    "verifycenter",             # iframe src keyword
+                    "请完成下列验证后继续",       # Captcha prompt text
                 ]
                 has_captcha = any(ind in html_content for ind in captcha_indicators)
-                has_router_data = "_ROUTER_DATA" in html_content
-                if has_captcha or ("slardar" in html_content and not has_router_data):
+                if has_captcha:
                     logger.warning(
-                        "[LightweightParser] Captcha/verification page detected, "
-                        "cookie may be expired"
+                        "[LightweightParser] ⚠️ Captcha/verification page detected"
+                    )
+                elif not has_router_data and "slardar" in html_content:
+                    logger.warning(
+                        "[LightweightParser] ⚠️ Blocked page detected (slardar present, no _ROUTER_DATA)"
                     )
 
                 # 解析 window._ROUTER_DATA
