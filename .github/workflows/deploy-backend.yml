@@ -80,10 +80,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Trigger Watchtower update
+        run: |
+          echo "🔄 Triggering Watchtower to pull new image..."
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            "${{ secrets.WATCHTOWER_URL }}" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Watchtower triggered successfully"
+          else
+            echo "⚠️ Watchtower trigger returned HTTP $HTTP_CODE (will auto-poll in 5min)"
+          fi
+
       - name: Summary
         run: |
           echo "### ✅ Image pushed to ACR" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Registry:** \`${{ secrets.ACR_REGISTRY }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Image:** \`${{ secrets.ACR_NAMESPACE }}/mediahub-backend:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Watchtower** will auto-pull and restart on NAS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Watchtower** triggered to pull and restart on NAS" >> $GITHUB_STEP_SUMMARY
