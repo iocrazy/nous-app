@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
+import { StoryboardApiSettings } from './StoryboardApiSettings';
 
 interface AISettingsProps {
   settings: AISettingsType;
@@ -499,6 +500,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           </div>
         </div>
       </section>
+
+      {/* Storyboard API Section */}
+      <StoryboardApiSettings />
 
       {/* Task Assignment Section */}
       <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${
