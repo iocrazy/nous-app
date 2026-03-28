@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Card, Statistic, Grid, Spin, Typography } from '@arco-design/web-react'
+import { Card, Statistic, Grid, Spin, Typography, Tag, Badge, Tooltip } from '@arco-design/web-react'
 import {
   IconUser,
   IconVideoCamera,
@@ -10,8 +10,11 @@ import {
   IconArrowRise,
   IconSettings,
   IconFile,
+  IconDesktop,
+  IconStorage,
 } from '@arco-design/web-react/icon'
 import { useStats } from '../api/endpoints/stats'
+import { useCeleryWorkers, useCeleryQueues } from '../api/endpoints/celery'
 
 const { Row, Col } = Grid
 const { Title, Text } = Typography
@@ -35,6 +38,122 @@ const quickActions = [
   { to: '/audit-logs', icon: <IconFile style={{ fontSize: 24 }} />, label: 'View Audit Logs' },
   { to: '/settings', icon: <IconSettings style={{ fontSize: 24 }} />, label: 'Settings' },
 ]
+
+function CeleryStatusCards() {
+  const { data: workersData } = useCeleryWorkers()
+  const { data: queuesData } = useCeleryQueues()
+
+  const totalPending = queuesData?.queues.reduce((sum, q) => sum + q.messages, 0) ?? 0
+
+  return (
+    <>
+      <Title heading={6} style={{ marginBottom: 16 }}>
+        Celery Status
+      </Title>
+      <Row gutter={20} style={{ marginBottom: 20 }}>
+        {/* Workers Card */}
+        <Col xs={24} sm={12} lg={8}>
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>Workers</Text>
+                <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+                  <span style={{ color: workersData?.online ? 'rgb(var(--green-6))' : 'rgb(var(--red-6))' }}>
+                    {workersData?.online ?? '-'}
+                  </span>
+                  <Text type="secondary" style={{ fontSize: 14, fontWeight: 400 }}> online</Text>
+                </div>
+              </div>
+              <div
+                style={{
+                  width: 48, height: 48, borderRadius: 8,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: workersData?.online ? '#00B42A1A' : '#F531271A',
+                  color: workersData?.online ? '#00B42A' : '#F53127',
+                }}
+              >
+                <IconDesktop style={{ fontSize: 24 }} />
+              </div>
+            </div>
+            {workersData?.workers && workersData.workers.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {workersData.workers.map((w) => (
+                  <Tooltip key={w.name} content={`Active: ${w.active} | Processed: ${w.processed}`}>
+                    <Tag size="small" color="green">
+                      {w.name.replace('celery@', '')}
+                      {w.active > 0 && <Badge count={w.active} dotStyle={{ fontSize: 10 }} style={{ marginLeft: 4 }} />}
+                    </Tag>
+                  </Tooltip>
+                ))}
+              </div>
+            )}
+          </Card>
+        </Col>
+
+        {/* Queue Summary Card */}
+        <Col xs={24} sm={12} lg={8}>
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>Queue Backlog</Text>
+                <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+                  <span style={{ color: totalPending > 0 ? 'rgb(var(--orange-6))' : 'rgb(var(--green-6))' }}>
+                    {totalPending}
+                  </span>
+                  <Text type="secondary" style={{ fontSize: 14, fontWeight: 400 }}> messages</Text>
+                </div>
+              </div>
+              <div
+                style={{
+                  width: 48, height: 48, borderRadius: 8,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: totalPending > 0 ? '#FF7D001A' : '#00B42A1A',
+                  color: totalPending > 0 ? '#FF7D00' : '#00B42A',
+                }}
+              >
+                <IconStorage style={{ fontSize: 24 }} />
+              </div>
+            </div>
+            {queuesData?.queues && (
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {queuesData.queues.map((q) => (
+                  <Tag key={q.name} size="small" color={q.messages > 0 ? 'orange' : undefined}>
+                    {q.name}: {q.messages}
+                  </Tag>
+                ))}
+              </div>
+            )}
+          </Card>
+        </Col>
+
+        {/* Active Tasks Card */}
+        <Col xs={24} sm={12} lg={8}>
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>Active Tasks</Text>
+                <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+                  {workersData?.workers.reduce((sum, w) => sum + w.active, 0) ?? 0}
+                  <Text type="secondary" style={{ fontSize: 14, fontWeight: 400 }}> running</Text>
+                </div>
+              </div>
+              <div
+                style={{
+                  width: 48, height: 48, borderRadius: 8,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: '#3491FA1A',
+                  color: '#3491FA',
+                }}
+              >
+                <IconThunderbolt style={{ fontSize: 24 }} />
+              </div>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+    </>
+  )
+}
 
 export function Dashboard() {
   const { data: stats, isLoading } = useStats()
@@ -83,6 +202,9 @@ export function Dashboard() {
           </Col>
         ))}
       </Row>
+
+      {/* Celery Status */}
+      <CeleryStatusCards />
 
       {/* Today's Activity */}
       <Title heading={6} style={{ marginBottom: 16 }}>

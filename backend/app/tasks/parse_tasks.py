@@ -597,9 +597,17 @@ def parse_media_task(
                 dispatch_url = None
                 parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
 
+        _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "drissionpage": "DrissionPage"}
+        method_label = _METHOD_LABELS.get(parse_method, parse_method)
+
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 30, subtitle="Enriching data..."))
+                video_title = parsed_data.get("title") or parsed_data.get("description", "")[:50]
+                run_async(manager.update_progress(
+                    unified_task_id, 30,
+                    subtitle=f"via {method_label} · Enriching data...",
+                    title=video_title[:80] if video_title else None,
+                ))
             except Exception:
                 pass
 
@@ -617,7 +625,7 @@ def parse_media_task(
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 40, subtitle="Saving metadata..."))
+                run_async(manager.update_progress(unified_task_id, 40, subtitle=f"via {method_label} · Saving metadata..."))
             except Exception:
                 pass
 
