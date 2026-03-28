@@ -295,11 +295,24 @@ export function ProjectListPage() {
         </div>
       )}
 
+      {/* API Key Warning Banner */}
+      <div className="mx-6 mt-4 flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-3.5 flex-shrink-0">
+        <p className="text-sm text-zinc-400">
+          You have not configured any API keys yet. Please open Settings to configure one.
+        </p>
+        <button
+          type="button"
+          className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+        >
+          Open Settings
+        </button>
+      </div>
+
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="flex flex-col gap-3">
-            {Array.from({ length: 5 }).map((_, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
           </div>
@@ -326,15 +339,14 @@ export function ProjectListPage() {
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {sorted.map((project) => (
               <ProjectCard
                 key={project.id}
                 project={project}
+                selectMode={selectMode}
                 onClick={handleCardClick}
                 onRename={handleRename}
-                onDuplicate={handleDuplicate}
-                onExport={handleExport}
                 onDelete={handleDelete}
               />
             ))}
