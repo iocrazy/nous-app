@@ -3,6 +3,20 @@
 .env.local
 .env.*.local
 
+# Claude Code / Superpowers local config
+.claude/settings.local.json
+.claude/skills/
+.superpowers/
+
+# Local files
+downloads-snapshot.md
+reference/
+release/
+tasks/
+docs/plans/
+docs/superpowers/
+docs/MediaHub-*
+
 # Python
 __pycache__/
 *.py[cod]
@@ -279,3 +293,4 @@ toolkit/
 
 # uv lock file (if not needed)
 # uv.lock
+.gstack/
