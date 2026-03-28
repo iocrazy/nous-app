@@ -1854,9 +1854,8 @@ async def _handle_ytdlp_fetch(
         except Exception as e:
             logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
 
-    # Douyin: always skip yt-dlp, use LightweightParser → DrissionPage directly.
-    # yt-dlp's Douyin support is unreliable (requires fresh cookies, frequent breakage).
-    skip_ytdlp = platform == "douyin"
+    # Douyin: use yt-dlp only when cookie is available, otherwise skip to LightHTTP → DrissionPage.
+    skip_ytdlp = platform == "douyin" and not has_cookie
 
     # Dedup check for parse (URL as dedup identifier)
     dedup_key = None
