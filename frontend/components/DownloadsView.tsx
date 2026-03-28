@@ -536,7 +536,13 @@ export const DownloadsView: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; video: Video } | null>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, video: Video) => {
-    setContextMenu({ x: e.clientX, y: e.clientY, video });
+    const menuHeight = 320; // approximate context menu height
+    const menuWidth = 180;
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+    const y = e.clientY + menuHeight > window.innerHeight
+      ? Math.max(8, e.clientY - menuHeight)
+      : e.clientY;
+    setContextMenu({ x, y, video });
   }, []);
 
   // Close context menu on click outside or Escape
