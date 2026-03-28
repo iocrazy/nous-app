@@ -241,15 +241,17 @@ class UnifiedTaskManager:
         *,
         speed: Optional[int] = None,
         subtitle: Optional[str] = None,
+        title: Optional[str] = None,
         metadata_patch: Optional[dict] = None,
     ) -> None:
         """Update progress (0-100). Throttled to 1 write/sec per task.
 
-        Does not change phase — only updates progress/speed/subtitle.
+        Does not change phase — only updates progress/speed/subtitle/title.
         """
         now = time.time()
         last = self._last_progress.get(task_id, 0)
-        if now - last < self.THROTTLE_INTERVAL:
+        # Skip throttle when title is being updated (important state change)
+        if title is None and now - last < self.THROTTLE_INTERVAL:
             return
         self._last_progress[task_id] = now
         logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%, speed={speed}")
@@ -263,6 +265,8 @@ class UnifiedTaskManager:
             updates["speed"] = speed
         if subtitle is not None:
             updates["subtitle"] = subtitle
+        if title is not None:
+            updates["title"] = title
         if metadata_patch:
             existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
