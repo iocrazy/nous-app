@@ -309,14 +309,17 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                             f"url={instance.page.url}"
                         )
                     else:
-                        # Fallback: check HTML text for login wall
                         page_html = instance.page.html or ""
                         if "登录后免费畅享高清视频" in page_html:
                             logger.info(
-                                f"[DrissionPage] Login page detected (no captcha): {instance.page.url}"
+                                f"[DrissionPage] ✅ No captcha (login page): {instance.page.url}"
+                            )
+                        else:
+                            logger.info(
+                                f"[DrissionPage] ✅ No captcha detected: {instance.page.url}"
                             )
                 except Exception as det_err:
-                    logger.debug(f"[DrissionPage] Captcha detection check failed: {det_err}")
+                    logger.warning(f"[DrissionPage] Captcha detection check failed: {det_err}")
 
                 # 获取所有网络请求
                 aweme_response = None

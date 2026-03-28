@@ -224,7 +224,13 @@ class LightweightParser:
                 )
                 match = pattern.search(html_content)
 
-                if not match:
+                if match:
+                    logger.info(
+                        f"[LightweightParser] ✅ _ROUTER_DATA found | "
+                        f"status={response.status_code} | size={page_len} | "
+                        f"captcha={has_captcha}"
+                    )
+                else:
                     reason = _classify_failure()
                     snippet = html_content[:2000].replace("\n", " ")
                     logger.warning(
