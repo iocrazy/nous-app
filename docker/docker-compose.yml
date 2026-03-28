@@ -140,14 +140,9 @@ services:
       redis:
         condition: service_healthy
 
-  # MediaHub Admin Panel (local build on NAS)
+  # MediaHub Admin Panel (ACR + Watchtower auto-update)
   mediahub-admin:
-    build:
-      context: ../admin
-      args:
-        VITE_SUPABASE_URL: ${SUPABASE_URL}
-        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-    image: mediahub-admin:local
+    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-admin:latest
     container_name: mediahub-admin
     restart: unless-stopped
     ports:

@@ -1,9 +1,11 @@
-# Admin Panel Deploy to NAS (local build)
+# Admin Panel Deploy via Alibaba Cloud ACR + Watchtower
+# Flow: Build → Push to ACR → Watchtower auto-pulls on NAS
+#
 # Triggers:
 #   - Push to master with admin/ changes
 #   - Manual trigger
 
-name: Deploy Admin Panel to NAS
+name: Deploy Admin Panel to ACR
 
 on:
   push:
@@ -17,47 +19,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Build & Deploy on NAS
+  build-and-push:
+    name: Build and Push to ACR
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to NAS via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Alibaba Cloud ACR
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.NAS_HOST }}
-          port: ${{ secrets.NAS_PORT }}
-          username: ${{ secrets.NAS_USER }}
-          key: ${{ secrets.NAS_SSH_KEY }}
-          command_timeout: 30m
-          script: |
-            set -e
-            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-            cd ${{ secrets.NAS_PROJECT_PATH }}
+          registry: ${{ secrets.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-            echo "📥 Pulling latest code..."
-            git fetch origin master
-            git reset --hard origin/master
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin
+          file: ./admin/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/mediahub-admin:latest
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/mediahub-admin:${{ github.sha }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ secrets.ADMIN_SUPABASE_URL }}
+            VITE_SUPABASE_ANON_KEY=${{ secrets.ADMIN_SUPABASE_ANON_KEY }}
+            VITE_API_URL=${{ secrets.ADMIN_API_URL }}
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,mode=max,scope=admin
 
-            echo "📂 Adding admin/ to sparse checkout..."
-            git sparse-checkout add admin
-            ls admin/package.json
+      - name: Trigger Watchtower update
+        run: |
+          echo "🔄 Triggering Watchtower to pull new image..."
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            "${{ secrets.WATCHTOWER_URL }}" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Watchtower triggered successfully"
+          else
+            echo "⚠️ Watchtower trigger returned HTTP $HTTP_CODE (will auto-poll in 5min)"
+          fi
 
-            echo "🔨 Building Admin Panel..."
-            # Read public-facing Supabase URL for browser-side use
-            # Prefer ADMIN_SUPABASE_* (public/reverse-proxy), fallback to SUPABASE_* (internal)
-            export $(grep -E '^(ADMIN_)?SUPABASE_(URL|ANON_KEY)=' docker/.env | xargs)
-            SB_URL="${ADMIN_SUPABASE_URL:-$SUPABASE_URL}"
-            SB_KEY="${ADMIN_SUPABASE_ANON_KEY:-$SUPABASE_ANON_KEY}"
-            echo "  SUPABASE_URL=${SB_URL}"
-            sudo SUPABASE_URL="$SB_URL" SUPABASE_ANON_KEY="$SB_KEY" \
-              docker compose -f docker/docker-compose.yml build --no-cache mediahub-admin
-
-            echo "🚀 Restarting Admin Panel..."
-            sudo SUPABASE_URL="$SB_URL" SUPABASE_ANON_KEY="$SB_KEY" \
-              docker compose -f docker/docker-compose.yml up -d --force-recreate mediahub-admin
-
-            echo "🧹 Cleaning up..."
-            sudo docker image prune -f
-
-            echo "✅ Admin Panel deployed on port 3097"
+      - name: Summary
+        run: |
+          echo "### ✅ Admin image pushed to ACR" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** \`${{ secrets.ACR_REGISTRY }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ secrets.ACR_NAMESPACE }}/mediahub-admin:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Watchtower** triggered to pull and restart on NAS" >> $GITHUB_STEP_SUMMARY
