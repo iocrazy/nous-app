@@ -18,6 +18,7 @@ export interface AdminTaskData {
   resource_id: string | null
   media_id: string | null
   celery_task_id: string | null
+  metadata: Record<string, unknown> | null
   created_at: string
   started_at: string | null
   completed_at: string | null

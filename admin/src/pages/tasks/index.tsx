@@ -436,30 +436,39 @@ export function TaskCenter() {
 
   const expandedRowRender = (row: AdminTaskData) => {
     const statusConfig = STATUS_TAG_CONFIG[row.status] || { color: 'gray', icon: null }
+    const meta = row.metadata || {}
+    const descData = [
+      { label: 'Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.id}</span> },
+      { label: 'Type', value: (
+        <Tag size="small" color={TYPE_TAG_COLORS[row.task_type] || 'gray'}>{row.task_type}</Tag>
+      )},
+      { label: 'Status', value: (
+        <Tag icon={statusConfig.icon} color={statusConfig.color}>{row.status}</Tag>
+      )},
+      { label: 'User', value: row.user_email || '-' },
+      { label: 'Phase', value: row.phase || '-' },
+      { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
+      { label: 'Created', value: formatDateTime(row.created_at) },
+      { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
+      { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
+      { label: 'Celery Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.celery_task_id || '-'}</span> },
+      { label: 'Resource ID', value: row.resource_id || '-' },
+      { label: 'Media ID', value: row.media_id || '-' },
+    ]
+    // Add metadata fields for parse tasks
+    if (meta.original_url) {
+      descData.push({ label: 'Original URL', value: <span style={{ fontSize: 12, wordBreak: 'break-all' }}>{meta.original_url as string}</span> })
+    }
+    if (meta.parse_method) {
+      const methodLabels: Record<string, string> = { ytdlp: 'yt-dlp', lightweight: 'Lightweight', drissionpage: 'DrissionPage' }
+      descData.push({ label: 'Parse Method', value: (
+        <Tag size="small" color="cyan">{methodLabels[meta.parse_method as string] || (meta.parse_method as string)}</Tag>
+      )})
+    }
+
     return (
       <div style={{ padding: '12px 16px' }}>
-        <Descriptions
-          column={3}
-          size="small"
-          data={[
-            { label: 'Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.id}</span> },
-            { label: 'Type', value: (
-              <Tag size="small" color={TYPE_TAG_COLORS[row.task_type] || 'gray'}>{row.task_type}</Tag>
-            )},
-            { label: 'Status', value: (
-              <Tag icon={statusConfig.icon} color={statusConfig.color}>{row.status}</Tag>
-            )},
-            { label: 'User', value: row.user_email || '-' },
-            { label: 'Phase', value: row.phase || '-' },
-            { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
-            { label: 'Created', value: formatDateTime(row.created_at) },
-            { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
-            { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
-            { label: 'Celery Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.celery_task_id || '-'}</span> },
-            { label: 'Resource ID', value: row.resource_id || '-' },
-            { label: 'Media ID', value: row.media_id || '-' },
-          ]}
-        />
+        <Descriptions column={3} size="small" data={descData} />
         {row.subtitle && (
           <div style={{ marginTop: 8 }}>
             <Typography.Text bold style={{ fontSize: 12 }}>Subtitle: </Typography.Text>

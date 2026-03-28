@@ -679,7 +679,11 @@ def parse_media_task(
         # 6. Complete parse task
         if unified_task_id:
             try:
-                run_async(manager.complete(unified_task_id))
+                run_async(manager.complete(
+                    unified_task_id,
+                    subtitle=f"via {method_label}",
+                    metadata_patch={"parse_method": parse_method, "original_url": url},
+                ))
             except Exception:
                 pass
 

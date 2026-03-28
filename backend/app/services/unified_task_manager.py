@@ -276,7 +276,13 @@ class UnifiedTaskManager:
 
     # ── Lifecycle: complete ───────────────────────────────────────────
 
-    async def complete(self, task_id: str, *, metadata_patch: Optional[dict] = None) -> None:
+    async def complete(
+        self,
+        task_id: str,
+        *,
+        subtitle: Optional[str] = None,
+        metadata_patch: Optional[dict] = None,
+    ) -> None:
         """Transition to COMPLETED phase.
 
         Idempotent: already-terminal tasks log a debug message and return.
@@ -292,6 +298,7 @@ class UnifiedTaskManager:
             "status": _PHASE_TO_STATUS[TaskPhase.COMPLETED],
             "progress": 100,
             "completed_at": now_iso,
+            "subtitle": subtitle or "",
         }
         if metadata_patch:
             client = await self._get_client()
