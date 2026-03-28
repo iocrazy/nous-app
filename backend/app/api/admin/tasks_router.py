@@ -77,7 +77,7 @@ async def list_tasks(
         .select(
             "id, user_id, task_type, status, phase, title, subtitle, "
             "progress, speed, total_bytes, error_msg, error_code, "
-            "resource_id, media_id, celery_task_id, "
+            "resource_id, media_id, celery_task_id, metadata, "
             "created_at, started_at, completed_at",
             count="exact",
         )
@@ -133,6 +133,7 @@ async def list_tasks(
             resource_id=str(row["resource_id"]) if row.get("resource_id") else None,
             media_id=str(row["media_id"]) if row.get("media_id") else None,
             celery_task_id=row.get("celery_task_id"),
+            metadata=row.get("metadata"),
             created_at=row.get("created_at") or "",
             started_at=row.get("started_at"),
             completed_at=row.get("completed_at"),
