@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
   Search,
   Layers,
-  ChevronDown,
-  MousePointerClick,
-  Palette,
+  ArrowUpDown,
+  Check,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -85,7 +84,8 @@ export function ProjectListPage() {
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [showNewDialog, setShowNewDialog] = useState(false);
-  const [selectMode, setSelectMode] = useState(false);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
 
   // ─── Load projects ─────────────────────────────────────────────────────────
 
@@ -198,93 +198,99 @@ export function ProjectListPage() {
     <div className="flex flex-col h-full bg-zinc-950 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl font-bold text-zinc-100">Projects</h1>
-
-          {/* Sort field pill */}
-          <div className="relative">
-            <select
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value as SortField)}
-              className="appearance-none cursor-pointer rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-8 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
-            >
-              <option value="created_at">Creation date</option>
-              <option value="updated_at">Modified date</option>
-              <option value="name">Name</option>
-            </select>
-            <ChevronDown
-              size={12}
-              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
-            />
-          </div>
-
-          {/* Sort order pill */}
-          <div className="relative">
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-              className="appearance-none cursor-pointer rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-8 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
-            >
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-            <ChevronDown
-              size={12}
-              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
-            />
-          </div>
+        {/* Left: title + count */}
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold text-zinc-100">Projects</h1>
+          {!loading && (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-800 text-zinc-400">
+              {sorted.length}
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Select Mode */}
-          <button
-            type="button"
-            onClick={() => setSelectMode((prev) => !prev)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-              selectMode
-                ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300'
-                : 'border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
-            }`}
-          >
-            <MousePointerClick size={14} />
-            Select Mode
-          </button>
+        {/* Right: toolbar */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Search */}
+          <div className="relative w-48">
+            <Search
+              size={14}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('storyboard.search')}
+              className="w-full pl-8 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
 
-          {/* Style Template */}
-          <button
-            type="button"
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-zinc-700"
-          >
-            <Palette size={14} />
-            Style Template
-          </button>
+          {/* Sort dropdown */}
+          <div className="relative" ref={sortRef}>
+            <button
+              type="button"
+              onClick={() => setShowSortMenu((prev) => !prev)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                sortField !== 'created_at' || sortOrder !== 'desc'
+                  ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+              title={`${SORT_FIELD_LABELS[sortField]} (${sortOrder === 'desc' ? 'Desc' : 'Asc'})`}
+            >
+              <ArrowUpDown size={14} />
+            </button>
+            {showSortMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
+                <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
+                  {/* Sort field options */}
+                  {(Object.entries(SORT_FIELD_LABELS) as [SortField, string][]).map(([field, label]) => (
+                    <button
+                      key={field}
+                      type="button"
+                      onClick={() => { setSortField(field); setShowSortMenu(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
+                        sortField === field
+                          ? 'bg-indigo-500/10 text-indigo-400'
+                          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                      }`}
+                    >
+                      <span>{label}</span>
+                      {sortField === field && <Check size={12} className="text-indigo-400" />}
+                    </button>
+                  ))}
+                  {/* Divider */}
+                  <div className="mx-2.5 my-1.5 border-t border-zinc-700/60" />
+                  {/* Sort order options */}
+                  {([['desc', 'Newest first'], ['asc', 'Oldest first']] as const).map(([order, label]) => (
+                    <button
+                      key={order}
+                      type="button"
+                      onClick={() => { setSortOrder(order); setShowSortMenu(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
+                        sortOrder === order
+                          ? 'bg-indigo-500/10 text-indigo-400'
+                          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                      }`}
+                    >
+                      <span>{label}</span>
+                      {sortOrder === order && <Check size={12} className="text-indigo-400" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
           {/* New Project */}
           <button
             type="button"
             onClick={() => setShowNewDialog(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
           >
-            <Plus size={16} />
+            <Plus size={14} />
             New Project
           </button>
-        </div>
-      </div>
-
-      {/* Search bar */}
-      <div className="px-6 py-3 border-b border-zinc-800 flex-shrink-0">
-        <div className="relative max-w-xs">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
-          />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('storyboard.search')}
-            className="w-full pl-8 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
-          />
         </div>
       </div>
 
@@ -294,19 +300,6 @@ export function ProjectListPage() {
           {error}
         </div>
       )}
-
-      {/* API Key Warning Banner */}
-      <div className="mx-6 mt-4 flex items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-3.5 flex-shrink-0">
-        <p className="text-sm text-zinc-400">
-          You have not configured any API keys yet. Please open Settings to configure one.
-        </p>
-        <button
-          type="button"
-          className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
-        >
-          Open Settings
-        </button>
-      </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -344,7 +337,7 @@ export function ProjectListPage() {
               <ProjectCard
                 key={project.id}
                 project={project}
-                selectMode={selectMode}
+                selectMode={false}
                 onClick={handleCardClick}
                 onRename={handleRename}
                 onDelete={handleDelete}
