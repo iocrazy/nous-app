@@ -12,7 +12,6 @@ import {
   Space,
   Message,
   Modal,
-  Descriptions,
 } from '@arco-design/web-react'
 import {
   IconCheckCircle,
@@ -311,9 +310,9 @@ export function TaskCenter() {
         filterable: true,
         size: 160,
         cell: (row) => (
-          <Typography.Text ellipsis style={{ maxWidth: 140 }}>
+          <span style={{ ...ellipsisStyle, maxWidth: 140, display: 'block' }}>
             {row.user_email || '-'}
-          </Typography.Text>
+          </span>
         ),
       },
       {
@@ -354,9 +353,9 @@ export function TaskCenter() {
         cell: (row) => {
           const isRunning = row.status === 'processing'
           return (
-            <Typography.Text type={isRunning ? undefined : 'secondary'} style={{ fontSize: 12 }}>
+            <span style={{ fontSize: 12, color: isRunning ? undefined : 'var(--color-text-3)' }}>
               {formatRuntime(row.started_at, row.completed_at)}
-            </Typography.Text>
+            </span>
           )
         },
       },
@@ -428,57 +427,27 @@ export function TaskCenter() {
   })
 
   const expandedRowRender = (row: AdminTaskData) => {
-    const statusConfig = STATUS_TAG_CONFIG[row.status] || { color: 'gray', icon: null }
+    const labelStyle: React.CSSProperties = { color: 'var(--color-text-3)', fontSize: 12, minWidth: 90, display: 'inline-block' }
+    const valueStyle: React.CSSProperties = { fontSize: 12, fontFamily: 'monospace' }
+    const rowStyle: React.CSSProperties = { display: 'flex', gap: 8, marginBottom: 4 }
     return (
-      <div style={{ padding: '12px 16px' }}>
-        <Descriptions
-          column={3}
-          size="small"
-          data={[
-            { label: 'Task ID', value: (
-              <Typography.Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 12, margin: 0 }}>
-                {row.id}
-              </Typography.Paragraph>
-            )},
-            { label: 'Type', value: (
-              <Tag size="small" color={TYPE_TAG_COLORS[row.task_type] || 'gray'}>
-                {row.task_type}
-              </Tag>
-            )},
-            { label: 'Status', value: (
-              <Tag icon={statusConfig.icon} color={statusConfig.color}>
-                {row.status}
-              </Tag>
-            )},
-            { label: 'User', value: row.user_email || '-' },
-            { label: 'Phase', value: row.phase || '-' },
-            { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
-            { label: 'Created', value: formatDateTime(row.created_at) },
-            { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
-            { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
-            { label: 'Celery Task ID', value: row.celery_task_id ? (
-              <Typography.Paragraph copyable style={{ fontFamily: 'monospace', fontSize: 12, margin: 0 }}>
-                {row.celery_task_id}
-              </Typography.Paragraph>
-            ) : '-' },
-            { label: 'Resource ID', value: row.resource_id || '-' },
-            { label: 'Media ID', value: row.media_id || '-' },
-          ]}
-        />
+      <div style={{ padding: '12px 16px', fontSize: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px 24px' }}>
+        <div style={rowStyle}><span style={labelStyle}>Task ID</span><span style={valueStyle}>{row.id}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Type</span><span>{row.task_type}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Status</span><span>{row.status} {row.phase ? `(${row.phase})` : ''}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>User</span><span>{row.user_email || '-'}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Runtime</span><span>{formatRuntime(row.started_at, row.completed_at)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Created</span><span>{formatDateTime(row.created_at)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Started</span><span>{row.started_at ? formatDateTime(row.started_at) : '-'}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Completed</span><span>{row.completed_at ? formatDateTime(row.completed_at) : '-'}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Celery ID</span><span style={valueStyle}>{row.celery_task_id || '-'}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Resource ID</span><span style={valueStyle}>{row.resource_id || '-'}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Media ID</span><span style={valueStyle}>{row.media_id || '-'}</span></div>
         {row.subtitle && (
-          <div style={{ marginTop: 8 }}>
-            <Typography.Text bold style={{ fontSize: 12 }}>Subtitle: </Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{row.subtitle}</Typography.Text>
-          </div>
+          <div style={{ ...rowStyle, gridColumn: '1 / -1' }}><span style={labelStyle}>Subtitle</span><span style={{ color: 'var(--color-text-3)' }}>{row.subtitle}</span></div>
         )}
         {row.error_msg && (
-          <div style={{ marginTop: 8 }}>
-            <Typography.Text bold style={{ fontSize: 12 }}>Error: </Typography.Text>
-            <Typography.Text type="error" style={{ fontSize: 12 }}>{row.error_msg}</Typography.Text>
-            {row.error_code && (
-              <Tag size="small" color="red" style={{ marginLeft: 8 }}>{row.error_code}</Tag>
-            )}
-          </div>
+          <div style={{ ...rowStyle, gridColumn: '1 / -1' }}><span style={labelStyle}>Error</span><span style={{ color: 'rgb(var(--red-6))' }}>{row.error_msg}{row.error_code ? ` [${row.error_code}]` : ''}</span></div>
         )}
       </div>
     )
