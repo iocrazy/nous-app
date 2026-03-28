@@ -76,6 +76,8 @@ class LightweightParser:
 
         except Exception as e:
             logger.debug(f"[LightweightParser] Failed to load user overrides: {e}")
+        if extra:
+            logger.info(f"[LightweightParser] Loaded user overrides: {list(extra.keys())}")
         return extra
 
     @classmethod
