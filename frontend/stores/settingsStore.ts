@@ -11,11 +11,13 @@ export type UiRadiusPreset = 'compact' | 'default' | 'large';
 export type ThemeTonePreset = 'neutral' | 'warm' | 'cool';
 export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
 export type ProviderApiKeys = Record<string, string>;
+export type ProviderEndpoints = Record<string, string>;
 export const DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL = 'nano-banana-pro';
 
 interface SettingsState {
   isHydrated: boolean;
   apiKeys: ProviderApiKeys;
+  providerEndpoints: ProviderEndpoints;
   grsaiNanoBananaProModel: string;
   hideProviderGuidePopover: boolean;
   useUploadFilenameAsNodeTitle: boolean;
@@ -36,6 +38,7 @@ interface SettingsState {
   accentColor: string;
   downloadPresetPaths: string[];
   setProviderApiKey: (providerId: string, key: string) => void;
+  setProviderEndpoint: (providerId: string, url: string) => void;
   setGrsaiNanoBananaProModel: (model: string) => void;
   setHideProviderGuidePopover: (hide: boolean) => void;
   setUseUploadFilenameAsNodeTitle: (enabled: boolean) => void;
@@ -159,6 +162,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       isHydrated: false,
       apiKeys: {},
+      providerEndpoints: {},
       grsaiNanoBananaProModel: DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL,
       hideProviderGuidePopover: false,
       useUploadFilenameAsNodeTitle: true,
@@ -183,6 +187,13 @@ export const useSettingsStore = create<SettingsState>()(
           apiKeys: {
             ...state.apiKeys,
             [providerId]: normalizeApiKey(key),
+          },
+        })),
+      setProviderEndpoint: (providerId, url) =>
+        set((state) => ({
+          providerEndpoints: {
+            ...state.providerEndpoints,
+            [providerId]: url.trim(),
           },
         })),
       setGrsaiNanoBananaProModel: (model) =>
