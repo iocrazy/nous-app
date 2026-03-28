@@ -2,7 +2,7 @@ version: '3.8'
 
 # MediaHub Docker Compose Configuration
 # Usage: cd docker && docker-compose up -d
-# Image: imheygo/mediahub:latest
+# Image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
 
 services:
   # Redis - Message queue and result storage
@@ -23,7 +23,7 @@ services:
 
   # MediaHub Main Service (FastAPI)
   mediahub:
-    image: imheygo/mediahub:latest
+    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub
     restart: unless-stopped
     ports:
@@ -54,7 +54,7 @@ services:
 
   # Celery Worker - Task executor (downloads, parsing, transcription, analysis)
   celery-worker:
-    image: imheygo/mediahub:latest
+    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub-celery-worker
     restart: unless-stopped
     command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,transcription,analysis,scheduled,celery
@@ -92,7 +92,7 @@ services:
 
   # Celery Beat - Scheduled task scheduler
   celery-beat:
-    image: imheygo/mediahub:latest
+    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub-celery-beat
     restart: unless-stopped
     command: uv run celery -A app.celery_app beat -l info
