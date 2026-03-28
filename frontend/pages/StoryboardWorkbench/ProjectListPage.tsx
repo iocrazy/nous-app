@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Loader2, Layers } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Layers,
+  ChevronDown,
+  MousePointerClick,
+  Palette,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStoryboardStore } from '../../stores/storyboardStore';
@@ -17,30 +24,47 @@ import { ProjectSummary } from '../../types';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type SortField = 'name' | 'created_at' | 'updated_at';
+type SortOrder = 'asc' | 'desc';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function sortProjects(projects: ProjectSummary[], sortField: SortField): ProjectSummary[] {
+function sortProjects(
+  projects: ProjectSummary[],
+  sortField: SortField,
+  sortOrder: SortOrder,
+): ProjectSummary[] {
   return [...projects].sort((a, b) => {
+    let cmp: number;
     if (sortField === 'name') {
-      return a.name.localeCompare(b.name);
+      cmp = a.name.localeCompare(b.name);
+    } else {
+      const aTime = new Date(
+        sortField === 'created_at' ? a.created_at : a.updated_at,
+      ).getTime();
+      const bTime = new Date(
+        sortField === 'created_at' ? b.created_at : b.updated_at,
+      ).getTime();
+      cmp = bTime - aTime;
     }
-    const aTime = new Date(sortField === 'created_at' ? a.created_at : a.updated_at).getTime();
-    const bTime = new Date(sortField === 'created_at' ? b.created_at : b.updated_at).getTime();
-    return bTime - aTime;
+    return sortOrder === 'desc' ? cmp : -cmp;
   });
 }
 
-// ─── Skeleton card ────────────────────────────────────────────────────────────
+const SORT_FIELD_LABELS: Record<SortField, string> = {
+  name: 'Name',
+  created_at: 'Creation date',
+  updated_at: 'Modified date',
+};
 
-function SkeletonCard() {
+// ─── Skeleton row ─────────────────────────────────────────────────────────────
+
+function SkeletonRow() {
   return (
-    <div className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden animate-pulse">
-      <div className="h-36 bg-zinc-700" />
-      <div className="px-4 py-3 space-y-2">
-        <div className="h-3 bg-zinc-700 rounded w-3/4" />
-        <div className="h-2 bg-zinc-700 rounded w-1/2" />
-        <div className="h-2 bg-zinc-700 rounded w-1/3" />
+    <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5 animate-pulse">
+      <div className="h-10 w-10 rounded-lg bg-zinc-800" />
+      <div className="flex-1 space-y-2">
+        <div className="h-3.5 w-48 rounded bg-zinc-800" />
+        <div className="h-2.5 w-32 rounded bg-zinc-800" />
       </div>
     </div>
   );
@@ -58,8 +82,10 @@ export function ProjectListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [sortField, setSortField] = useState<SortField>('updated_at');
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
 
   // ─── Load projects ─────────────────────────────────────────────────────────
 
@@ -85,9 +111,9 @@ export function ProjectListPage() {
   // ─── Derived state ─────────────────────────────────────────────────────────
 
   const filtered = (projectList ?? []).filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
+    p.name.toLowerCase().includes(search.toLowerCase()),
   );
-  const sorted = sortProjects(filtered, sortField);
+  const sorted = sortProjects(filtered, sortField, sortOrder);
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
@@ -95,7 +121,7 @@ export function ProjectListPage() {
     (id: string) => {
       navigate(`/team/${teamId}/storyboard/${id}`);
     },
-    [navigate, teamId]
+    [navigate, teamId],
   );
 
   const handleDelete = useCallback(
@@ -108,7 +134,7 @@ export function ProjectListPage() {
         setError(message);
       }
     },
-    [loadProjects]
+    [loadProjects],
   );
 
   const handleRename = useCallback(
@@ -125,7 +151,7 @@ export function ProjectListPage() {
         setError(message);
       }
     },
-    [projectList, loadProjects]
+    [projectList, loadProjects],
   );
 
   const handleDuplicate = useCallback(
@@ -143,7 +169,7 @@ export function ProjectListPage() {
         setError(message);
       }
     },
-    [projectList, selectedTeamId, loadProjects]
+    [projectList, selectedTeamId, loadProjects],
   );
 
   const handleExport = useCallback((_id: string) => {
@@ -163,7 +189,7 @@ export function ProjectListPage() {
         setError(message);
       }
     },
-    [selectedTeamId, loadProjects, setCurrentProject]
+    [selectedTeamId, loadProjects, setCurrentProject],
   );
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -172,22 +198,82 @@ export function ProjectListPage() {
     <div className="flex flex-col h-full bg-zinc-950 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
-        <h1 className="text-xl font-semibold text-zinc-100">
-          {t('storyboard.title')}
-        </h1>
-        <button
-          type="button"
-          onClick={() => setShowNewDialog(true)}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-        >
-          <Plus size={16} />
-          {t('storyboard.newProject')}
-        </button>
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold text-zinc-100">Projects</h1>
+
+          {/* Sort field pill */}
+          <div className="relative">
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as SortField)}
+              className="appearance-none cursor-pointer rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-8 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+            >
+              <option value="created_at">Creation date</option>
+              <option value="updated_at">Modified date</option>
+              <option value="name">Name</option>
+            </select>
+            <ChevronDown
+              size={12}
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
+            />
+          </div>
+
+          {/* Sort order pill */}
+          <div className="relative">
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+              className="appearance-none cursor-pointer rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-8 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+            <ChevronDown
+              size={12}
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Select Mode */}
+          <button
+            type="button"
+            onClick={() => setSelectMode((prev) => !prev)}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+              selectMode
+                ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300'
+                : 'border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+            }`}
+          >
+            <MousePointerClick size={14} />
+            Select Mode
+          </button>
+
+          {/* Style Template */}
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-zinc-700"
+          >
+            <Palette size={14} />
+            Style Template
+          </button>
+
+          {/* New Project */}
+          <button
+            type="button"
+            onClick={() => setShowNewDialog(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+          >
+            <Plus size={16} />
+            New Project
+          </button>
+        </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800 flex-shrink-0">
-        <div className="relative flex-1 max-w-xs">
+      {/* Search bar */}
+      <div className="px-6 py-3 border-b border-zinc-800 flex-shrink-0">
+        <div className="relative max-w-xs">
           <Search
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
@@ -197,21 +283,8 @@ export function ProjectListPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('storyboard.search')}
-            className="w-full pl-8 pr-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full pl-8 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500">{t('storyboard.sortBy')}</span>
-          <select
-            value={sortField}
-            onChange={(e) => setSortField(e.target.value as SortField)}
-            className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
-          >
-            <option value="name">{t('storyboard.sort.name', 'Name')}</option>
-            <option value="created_at">{t('storyboard.sort.created', 'Created')}</option>
-            <option value="updated_at">{t('storyboard.sort.updated', 'Updated')}</option>
-          </select>
         </div>
       </div>
 
@@ -225,9 +298,9 @@ export function ProjectListPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <SkeletonCard key={i} />
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} />
             ))}
           </div>
         ) : sorted.length === 0 ? (
@@ -248,12 +321,12 @@ export function ProjectListPage() {
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
               >
                 <Plus size={14} />
-                {t('storyboard.newProject')}
+                New Project
               </button>
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-3">
             {sorted.map((project) => (
               <ProjectCard
                 key={project.id}
