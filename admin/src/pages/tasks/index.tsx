@@ -155,24 +155,30 @@ function StatsCards() {
   )
 }
 
+const ellipsisStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap' as const,
+}
+
 function TitleCell({ record }: { record: AdminTaskData }) {
   return (
     <div style={{ lineHeight: 1.4 }}>
-      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, maxWidth: '100%' }}>
-        <Typography.Text ellipsis style={{ maxWidth: 220, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ ...ellipsisStyle, maxWidth: 220, flexShrink: 0 }}>
           {record.title || 'Untitled'}
-        </Typography.Text>
+        </span>
         {record.subtitle && (
-          <Typography.Text type="secondary" style={{ fontSize: 11 }} ellipsis>
+          <span style={{ ...ellipsisStyle, fontSize: 11, color: 'var(--color-text-3)', minWidth: 0 }}>
             {record.subtitle}
-          </Typography.Text>
+          </span>
         )}
-      </span>
+      </div>
       {record.error_msg && (
         <Tooltip content={record.error_msg}>
-          <Typography.Text type="error" style={{ fontSize: 11, display: 'block', marginTop: 1 }} ellipsis={{ rows: 1 }}>
+          <div style={{ ...ellipsisStyle, fontSize: 11, color: 'rgb(var(--red-6))', marginTop: 1 }}>
             {record.error_msg}
-          </Typography.Text>
+          </div>
         </Tooltip>
       )}
     </div>
