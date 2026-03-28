@@ -512,6 +512,8 @@ export interface AISettings {
     transcription: string;  // provider key
     summarization: string;
     visual_analysis: string;
+    image_generation?: string;  // storyboard image provider
+    script_generation?: string;  // storyboard script/prompt LLM
   };
 }
 
