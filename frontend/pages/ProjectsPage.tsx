@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { FolderOpen, KanbanSquare, Share2, Trash2 } from 'lucide-react';
-import { Project, ProjectFile } from '../types';
+import { FolderOpen, KanbanSquare, Share2, Trash2, Clapperboard, FileText, Download } from 'lucide-react';
+import { Project, ProjectFile, ProjectTab } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { fetchProjects } from '../services/projectsService';
@@ -14,8 +14,9 @@ import { CreateProjectModal } from '../components/CreateProjectModal';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { ProjectTrashView } from '../components/ProjectTrashView';
 import { ProjectSharesView } from '../components/ProjectSharesView';
-
-type ProjectTab = 'files' | 'tasks' | 'shares' | 'trash';
+import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
+import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
+import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -98,6 +99,9 @@ export function ProjectsPage() {
         <div className="flex items-center gap-4 mb-4 border-b border-zinc-800">
           {([
             { tab: 'files' as ProjectTab, icon: <FolderOpen size={15} />, label: t('projects.tabs.files', 'Files') },
+            { tab: 'scripts' as ProjectTab, icon: <FileText size={15} />, label: t('projects.tabs.scripts', 'Scripts') },
+            { tab: 'storyboard' as ProjectTab, icon: <Clapperboard size={15} />, label: t('projects.tabs.storyboard', 'Storyboard') },
+            { tab: 'output' as ProjectTab, icon: <Download size={15} />, label: t('projects.tabs.output', 'Output') },
             { tab: 'tasks' as ProjectTab, icon: <KanbanSquare size={15} />, label: t('projects.tabs.tasks', 'Tasks') },
             { tab: 'shares' as ProjectTab, icon: <Share2 size={15} />, label: t('projects.tabs.shares', 'Shares'), count: shareCount },
             { tab: 'trash' as ProjectTab, icon: <Trash2 size={15} />, label: t('projects.tabs.trash', 'Trash'), count: trashCount },
@@ -134,6 +138,15 @@ export function ProjectsPage() {
               navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
             }}
           />
+        )}
+        {activeTab === 'scripts' && (
+          <ProjectScriptsTab projectId={selectedProject.id} />
+        )}
+        {activeTab === 'storyboard' && (
+          <ProjectStoryboardTab projectId={selectedProject.id} />
+        )}
+        {activeTab === 'output' && (
+          <ProjectOutputTab projectId={selectedProject.id} />
         )}
         {activeTab === 'tasks' && (
           <KanbanBoard
