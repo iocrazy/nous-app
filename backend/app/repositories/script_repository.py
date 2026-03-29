@@ -30,7 +30,8 @@ class ScriptProjectRepository(BaseRepository):
                 .neq("status", "deleted")
             )
             if search:
-                count_query = count_query.ilike("name", f"%{search}%")
+                escaped = search.replace("%", r"\%").replace("_", r"\_")
+                count_query = count_query.ilike("name", f"%{escaped}%")
             count_result = await count_query.execute()
             total = count_result.count or 0
 
@@ -43,7 +44,8 @@ class ScriptProjectRepository(BaseRepository):
                 .range(offset, offset + limit - 1)
             )
             if search:
-                data_query = data_query.ilike("name", f"%{search}%")
+                escaped = search.replace("%", r"\%").replace("_", r"\_")
+                data_query = data_query.ilike("name", f"%{escaped}%")
             data_result = await data_query.execute()
 
             return {

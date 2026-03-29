@@ -105,14 +105,23 @@ class ScriptAIService:
         if not isinstance(chapters, list):
             raise ValueError("LLM did not return a JSON array")
 
-        return [
-            {
-                "title": ch.get("title", f"Chapter {i + 1}")[:MAX_TITLE_LENGTH],
-                "summary": ch.get("summary", "")[:MAX_SUMMARY_LENGTH],
-            }
-            for i, ch in enumerate(chapters)
-            if isinstance(ch, dict)
-        ]
+        sanitized: List[Dict[str, str]] = []
+        for i, ch in enumerate(chapters):
+            if not isinstance(ch, dict):
+                continue
+            # Ensure values are strings, not nested structures
+            title = ch.get("title", f"Chapter {i + 1}")
+            if not isinstance(title, str):
+                title = str(title)[:MAX_TITLE_LENGTH]
+            else:
+                title = title[:MAX_TITLE_LENGTH]
+            summary = ch.get("summary", "")
+            if not isinstance(summary, str):
+                summary = str(summary)[:MAX_SUMMARY_LENGTH]
+            else:
+                summary = summary[:MAX_SUMMARY_LENGTH]
+            sanitized.append({"title": title, "summary": summary})
+        return sanitized
 
     async def expand_chapter(
         self,
@@ -188,15 +197,32 @@ class ScriptAIService:
         if not isinstance(branches, list):
             raise ValueError("LLM did not return a JSON array")
 
-        return [
-            {
-                "title": b.get("title", f"Branch {i + 1}")[:MAX_TITLE_LENGTH],
-                "summary": b.get("summary", "")[:MAX_SUMMARY_LENGTH],
-                "branch_label": b.get("branch_label", f"Path {i + 1}")[:MAX_BRANCH_LABEL_LENGTH],
-            }
-            for i, b in enumerate(branches[:branch_count])
-            if isinstance(b, dict)
-        ]
+        sanitized: List[Dict[str, str]] = []
+        for i, b in enumerate(branches[:branch_count]):
+            if not isinstance(b, dict):
+                continue
+            # Ensure values are strings, not nested structures
+            title = b.get("title", f"Branch {i + 1}")
+            if not isinstance(title, str):
+                title = str(title)[:MAX_TITLE_LENGTH]
+            else:
+                title = title[:MAX_TITLE_LENGTH]
+            summary = b.get("summary", "")
+            if not isinstance(summary, str):
+                summary = str(summary)[:MAX_SUMMARY_LENGTH]
+            else:
+                summary = summary[:MAX_SUMMARY_LENGTH]
+            branch_label = b.get("branch_label", f"Path {i + 1}")
+            if not isinstance(branch_label, str):
+                branch_label = str(branch_label)[:MAX_BRANCH_LABEL_LENGTH]
+            else:
+                branch_label = branch_label[:MAX_BRANCH_LABEL_LENGTH]
+            sanitized.append({
+                "title": title,
+                "summary": summary,
+                "branch_label": branch_label,
+            })
+        return sanitized
 
     async def split_chapter_to_scenes(
         self,

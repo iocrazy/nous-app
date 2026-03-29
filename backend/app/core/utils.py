@@ -12,8 +12,8 @@ from loguru import logger
 
 from app.core.config import settings
 
-# Domain allowlist for URL extraction (SSRF prevention)
-ALLOWED_URL_DOMAINS: frozenset[str] = frozenset({
+# Default domain allowlist for URL extraction (SSRF prevention)
+_DEFAULT_ALLOWED_DOMAINS: frozenset[str] = frozenset({
     "douyin.com",
     "iesdouyin.com",
     "tiktok.com",
@@ -28,6 +28,23 @@ ALLOWED_URL_DOMAINS: frozenset[str] = frozenset({
     "twitter.com",
     "x.com",
 })
+
+
+def _load_allowed_domains() -> frozenset[str]:
+    """Load URL allowlist from config.yml, falling back to hardcoded defaults."""
+    try:
+        config_path = Path(__file__).parent.parent.parent / "config.yml"
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        domains = config.get("url_allowlist", [])
+        if domains:
+            return frozenset(domains)
+    except Exception:
+        pass
+    return _DEFAULT_ALLOWED_DOMAINS
+
+
+ALLOWED_URL_DOMAINS: frozenset[str] = _load_allowed_domains()
 
 # 服务器配置文件路径
 SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"

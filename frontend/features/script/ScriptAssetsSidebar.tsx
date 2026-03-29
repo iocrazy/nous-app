@@ -31,6 +31,8 @@ export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
   const [expandedTypes, setExpandedTypes] = useState<Set<ScriptAssetType>>(new Set(['character']));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [creatingType, setCreatingType] = useState<ScriptAssetType | null>(null);
+  const [newAssetName, setNewAssetName] = useState('');
 
   const loadAssets = useCallback(async () => {
     if (!scriptId) return;
@@ -53,16 +55,26 @@ export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
     });
   };
 
-  const handleCreate = async (type: ScriptAssetType) => {
-    if (!scriptId) return;
-    const name = window.prompt(`New ${type} name:`);
-    if (!name?.trim()) return;
+  const handleStartCreate = (type: ScriptAssetType) => {
+    setCreatingType(type);
+    setNewAssetName('');
+  };
+
+  const handleConfirmCreate = async () => {
+    if (!scriptId || !creatingType || !newAssetName.trim()) return;
     try {
-      await createScriptAsset({ script_id: scriptId, asset_type: type, name: name.trim() });
+      await createScriptAsset({ script_id: scriptId, asset_type: creatingType, name: newAssetName.trim() });
+      setCreatingType(null);
+      setNewAssetName('');
       await loadAssets();
     } catch (err) {
       console.error('Failed to create asset:', err);
     }
+  };
+
+  const handleCancelCreate = () => {
+    setCreatingType(null);
+    setNewAssetName('');
   };
 
   const handleDelete = async (assetId: string) => {
@@ -131,13 +143,43 @@ export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
                 <span className="flex-1 text-left">{label}</span>
                 <span className="text-[10px] text-zinc-600">{items.length}</span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleCreate(type); }}
+                  onClick={(e) => { e.stopPropagation(); handleStartCreate(type); }}
                   className="p-0.5 text-zinc-600 hover:text-indigo-400 rounded"
                   title={`Add ${label}`}
                 >
                   <Plus size={11} />
                 </button>
               </button>
+
+              {isExpanded && creatingType === type && (
+                <div className="ml-4 px-3 py-1.5 flex items-center gap-1">
+                  <input
+                    type="text"
+                    className="flex-1 bg-zinc-800 text-xs text-zinc-300 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    placeholder={`New ${label.toLowerCase()} name...`}
+                    value={newAssetName}
+                    onChange={(e) => setNewAssetName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmCreate();
+                      if (e.key === 'Escape') handleCancelCreate();
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleConfirmCreate}
+                    className="p-0.5 text-green-500 hover:text-green-400"
+                    disabled={!newAssetName.trim()}
+                  >
+                    <Check size={11} />
+                  </button>
+                  <button
+                    onClick={handleCancelCreate}
+                    className="p-0.5 text-zinc-500 hover:text-zinc-300"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              )}
 
               {isExpanded && items.length > 0 && (
                 <div className="ml-4 border-l border-zinc-800">

@@ -11,8 +11,6 @@ from app.schemas.style_template import StyleTemplateCreate, StyleTemplateUpdate
 
 router = APIRouter(prefix="/style-templates")
 
-_repo = StyleTemplateRepository()
-
 
 @router.post("/")
 async def create_style_template(
@@ -20,13 +18,14 @@ async def create_style_template(
 ) -> Dict[str, Any]:
     """Create a new style template (requires auth + team membership)."""
     try:
+        repo = StyleTemplateRepository()
         team_id = await require_team_id(auth.user_id)
         data = {
             **body.model_dump(exclude_none=True),
             "team_id": team_id,
             "created_by": auth.user_id,
         }
-        template = await _repo.create(data)
+        template = await repo.create(data)
         return {"success": True, "data": template}
     except HTTPException:
         raise
@@ -44,8 +43,9 @@ async def list_style_templates(
 ) -> Dict[str, Any]:
     """List style templates: own team's templates + public templates."""
     try:
+        repo = StyleTemplateRepository()
         team_id = await get_team_id_for_user(auth.user_id)
-        templates = await _repo.list_templates(
+        templates = await repo.list_templates(
             team_id=team_id,
             category=category,
             include_public=True,
@@ -64,7 +64,8 @@ async def update_style_template(
 ) -> Dict[str, Any]:
     """Update a style template (owner only)."""
     try:
-        existing = await _repo.get_by_id(template_id)
+        repo = StyleTemplateRepository()
+        existing = await repo.get_by_id(template_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Style template not found")
         if existing.get("created_by") != auth.user_id:
@@ -72,7 +73,7 @@ async def update_style_template(
                 status_code=403, detail="Only the template owner can update"
             )
 
-        template = await _repo.update(
+        template = await repo.update(
             template_id, body.model_dump(exclude_none=True)
         )
         return {"success": True, "data": template}
@@ -93,7 +94,8 @@ async def delete_style_template(
 ) -> Dict[str, Any]:
     """Delete a style template (owner only)."""
     try:
-        existing = await _repo.get_by_id(template_id)
+        repo = StyleTemplateRepository()
+        existing = await repo.get_by_id(template_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Style template not found")
         if existing.get("created_by") != auth.user_id:
@@ -101,7 +103,7 @@ async def delete_style_template(
                 status_code=403, detail="Only the template owner can delete"
             )
 
-        await _repo.delete(template_id)
+        await repo.delete(template_id)
         return {"success": True}
     except HTTPException:
         raise
