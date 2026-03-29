@@ -99,6 +99,7 @@ class StoryboardService:
         user_id: str,
         name: str,
         description: Optional[str] = None,
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a storyboard project and provision its NAS directory tree.
@@ -108,6 +109,7 @@ class StoryboardService:
             user_id: UUID of the creating user.
             name: Human-readable project name.
             description: Optional project description.
+            project_id: Optional parent project ID.
 
         Returns:
             Created project row dict.
@@ -120,6 +122,8 @@ class StoryboardService:
             }
             if description is not None:
                 project_data["description"] = description
+            if project_id is not None:
+                project_data["project_id"] = project_id
 
             project = await self.project_repo.create(project_data)
             project_id = project.get("id", "")
@@ -198,6 +202,7 @@ class StoryboardService:
         search: Optional[str] = None,
         sort_by: str = "updated_at",
         sort_order: str = "desc",
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Paginated list of active storyboard projects for a team.
@@ -211,6 +216,7 @@ class StoryboardService:
             search: Optional name substring filter.
             sort_by: Column to sort by.
             sort_order: 'asc' or 'desc'.
+            project_id: Optional parent project ID filter.
 
         Returns:
             Dict with keys: items, total, page, limit.
@@ -223,6 +229,7 @@ class StoryboardService:
                 search=search,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                project_id=project_id,
             )
         except Exception as exc:
             logger.error(

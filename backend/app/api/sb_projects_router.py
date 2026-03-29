@@ -58,6 +58,7 @@ async def create_project(auth: AuthDep, body: StoryboardProjectCreate) -> Dict[s
             user_id=auth.user_id,
             name=body.name,
             description=body.description,
+            project_id=body.project_id,
         )
         return {"success": True, "data": project}
     except Exception as exc:
@@ -78,6 +79,7 @@ async def list_projects(
     search: Optional[str] = Query(None, max_length=200),
     sort_by: str = Query("updated_at", pattern="^(updated_at|created_at|name)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    project_id: Optional[int] = Query(None),
 ) -> Dict[str, Any]:
     """List storyboard projects for the authenticated user's team."""
     team_id = await _require_team_id(auth.user_id)
@@ -90,6 +92,7 @@ async def list_projects(
             search=search,
             sort_by=sort_by,
             sort_order=sort_order,
+            project_id=project_id,
         )
         return {"success": True, "data": result}
     except Exception as exc:
