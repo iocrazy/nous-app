@@ -318,9 +318,11 @@ export function ProjectListPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="flex flex-wrap gap-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonRow key={i} />
+              <div key={i} className="w-[280px]">
+                <SkeletonRow />
+              </div>
             ))}
           </div>
         ) : sorted.length === 0 ? (
@@ -346,16 +348,17 @@ export function ProjectListPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="flex flex-wrap gap-4">
             {sorted.map((project) => (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                selectMode={false}
-                onClick={handleCardClick}
-                onRename={handleRename}
-                onDelete={handleDelete}
-              />
+              <div key={project.id} className="w-[280px]">
+                <ProjectCard
+                  project={project}
+                  selectMode={false}
+                  onClick={handleCardClick}
+                  onRename={handleRename}
+                  onDelete={handleDelete}
+                />
+              </div>
             ))}
           </div>
         )}
