@@ -156,8 +156,28 @@ class DouyinParser:
                 download_cover,
             )
         else:
-            logger.warning(f"不支持的媒体类型: {aweme_type}")
-            raise ValueError(f"不支持的媒体类型: {aweme_type}")
+            # Fallback: detect type from data structure
+            has_images = bool(aweme_detail.get("images"))
+            has_video = bool(aweme_detail.get("video", {}).get("play_addr"))
+            if has_images:
+                logger.info(
+                    f"未知媒体类型 {aweme_type}，检测到 images 字段，按图文处理: aweme_id={aweme_id}"
+                )
+                return await DouyinParser._parse_image_text(
+                    aweme_detail, aweme_id, valid_url,
+                    download_video, download_music, download_cover,
+                )
+            elif has_video:
+                logger.info(
+                    f"未知媒体类型 {aweme_type}，检测到 video 字段，按视频处理: aweme_id={aweme_id}"
+                )
+                return await DouyinParser._parse_video(
+                    aweme_detail, aweme_id, valid_url,
+                    download_video, download_music, download_cover,
+                )
+            else:
+                logger.warning(f"不支持的媒体类型: {aweme_type}, aweme_id={aweme_id}")
+                raise ValueError(f"不支持的媒体类型: {aweme_type}")
 
     @staticmethod
     def _extract_cover_urls(aweme_detail: Dict[str, Any]) -> Dict[str, Any]:
