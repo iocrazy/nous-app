@@ -464,7 +464,8 @@ def _dispatch_download_deduped(
                 types_to_download.append(dtype)
             else:
                 logger.info(f"[Parse/Download] {dtype}={result['action']} for {platform_id}")
-        except Exception:
+        except Exception as e:
+            logger.error(f"[Parse/Download] Dedup check silent exception for {dtype}: {e}")
             types_to_download.append(dtype)
 
     if not types_to_download:
@@ -504,8 +505,8 @@ def _dispatch_download_deduped(
     if unified_task_id:
         try:
             run_async(mgr._atomic_update(unified_task_id, {"celery_task_id": celery_task.id}))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[Parse/Download] Write celery_task_id silent exception: {e}")
 
     # Publish download_started event via Redis WebSocket (no Realtime dependency)
     try:
@@ -578,8 +579,8 @@ def parse_media_task(
         if unified_task_id:
             try:
                 run_async(manager.update_progress(unified_task_id, 5, subtitle="Fetching metadata..."))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Update progress (fetching) silent exception: {e}")
 
         # Check admin toggle for yt-dlp on Douyin
         douyin_flags = _get_douyin_method_flags() if platform == "douyin" else {}
@@ -595,16 +596,16 @@ def parse_media_task(
             if unified_task_id:
                 try:
                     run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Parse/Task] Update progress (parsing, fallback) silent exception: {e}")
         else:
             try:
                 ytdlp_info = run_async(YtdlpService.fetch_metadata(url, user_id=user_id))
                 if unified_task_id:
                     try:
                         run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(f"[Parse/Task] Update progress (parsing, ytdlp) silent exception: {e}")
                 parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
             except Exception as e:
                 # Invalidate cookie if yt-dlp failed due to auth error
@@ -643,8 +644,8 @@ def parse_media_task(
                     subtitle=f"via {method_label} · Enriching data...",
                     title=video_title[:80] if video_title else None,
                 ))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Update progress (enriching) silent exception: {e}")
 
         # 3. Enrich Bilibili stats
         if platform == "bilibili":
@@ -661,8 +662,8 @@ def parse_media_task(
         if unified_task_id:
             try:
                 run_async(manager.update_progress(unified_task_id, 40, subtitle=f"via {method_label} · Saving metadata..."))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Update progress (saving) silent exception: {e}")
 
         # 4. Save metadata to database
         platform_id = parsed_data["platform_id"]
@@ -708,8 +709,8 @@ def parse_media_task(
         if unified_task_id and platform_id:
             try:
                 run_async(manager._atomic_update(unified_task_id, {"media_id": platform_id}))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Update media_id silent exception: {e}")
 
         # 6. Complete parse task
         if unified_task_id:
@@ -719,8 +720,8 @@ def parse_media_task(
                     subtitle=f"via {method_label}",
                     metadata_patch={"parse_method": parse_method, "original_url": url},
                 ))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Complete unified task silent exception: {e}")
 
         # 7. Dispatch download
         media_type = int(parsed_data.get("media_type", 0))
@@ -770,16 +771,16 @@ def parse_media_task(
                         unified_task_id, None,
                         subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries})...",
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Parse/Task] Update retry progress silent exception: {e}")
             raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
 
         # Final failure — no more retries
         if unified_task_id:
             try:
                 run_async(manager.fail(unified_task_id, error_msg))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Parse/Task] Fail unified task silent exception: {e}")
 
         run_async(log_user_action(
             user_id=user_id, action="fetch",

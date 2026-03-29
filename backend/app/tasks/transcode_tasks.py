@@ -85,8 +85,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         resource = run_async(repo.get_resource_by_id(resource_id))
         if resource and resource.get("filename"):
             resource_title = resource["filename"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[Transcode] Resolve resource title silent exception: {e}")
 
     # ── Unified task tracking ──
     unified_task_id = _unified_task_id
@@ -127,8 +127,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                     await get_task_manager().update_progress(
                         unified_task_id, progress, subtitle=subtitle,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Transcode] Progress report silent exception: {e}")
 
             on_progress = _report_progress
 
@@ -140,8 +140,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 try:
                     from app.services.unified_task_manager import get_task_manager
                     run_async(get_task_manager().complete(unified_task_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Transcode] Complete unified task silent exception: {e}")
             # Log success
             if user_id:
                 run_async(log_user_action(
@@ -163,8 +163,8 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 try:
                     from app.services.unified_task_manager import get_task_manager
                     run_async(get_task_manager().fail(unified_task_id, "Transcode returned no output"))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Transcode] Fail unified task silent exception: {e}")
             # Log failure
             if user_id:
                 run_async(log_user_action(
@@ -206,15 +206,15 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
             try:
                 from app.services.unified_task_manager import get_task_manager
                 run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Transcode] Fail unified task after retries silent exception: {e}")
 
         try:
             from app.repositories.resources_repository import ResourcesRepository
             repo = ResourcesRepository()
             run_async(repo.update_version(version_id, {"transcode_status": "failed"}))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[Transcode] Update version status silent exception: {e}")
 
         # Log failure after max retries
         if user_id:

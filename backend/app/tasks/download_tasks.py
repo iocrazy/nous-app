@@ -1236,8 +1236,8 @@ def download_unified_task(
                     if unified_task_id:
                         try:
                             run_async(manager.complete(unified_task_id))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.error(f"[Download] Complete unified task (cache hit) silent exception: {e}")
                     # Update resource file paths from global media
                     path_updates = {}
                     if global_media.get("download_path"):
@@ -1287,15 +1287,15 @@ def download_unified_task(
             if unified_task_id:
                 try:
                     run_async(manager.fail(unified_task_id, warn_msg))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Download] Fail unified task (partial) silent exception: {e}")
         else:
             tracker.complete()
             if unified_task_id:
                 try:
                     run_async(manager.complete(unified_task_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Download] Complete unified task silent exception: {e}")
             logger.success(f"[Download/Done] All types completed: {platform_id}")
 
         # Log success
@@ -1438,8 +1438,8 @@ def download_unified_task(
                 if download_cover:
                     fail_updates["cover_download_status"] = "failed"
                 run_async(_res_repo3.update_download_status(resource_id, fail_updates))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Download] Update resource fail status silent exception: {e}")
 
         # Celery retry with exponential backoff — do NOT mark as failed yet
         if self.request.retries < self.max_retries:
@@ -1457,20 +1457,20 @@ def download_unified_task(
                         progress=0,
                         subtitle=f"Retrying ({retry_num}/{self.max_retries})...",
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[Download] Update retry progress silent exception: {e}")
             raise self.retry(exc=e, countdown=countdown)
 
         # ── Max retries exhausted — NOW mark as permanently failed ──
         try:
             tracker.failed(error_msg)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[Download] Tracker failed silent exception: {e}")
         if unified_task_id:
             try:
                 run_async(manager.fail(unified_task_id, error_msg))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[Download] Fail unified task silent exception: {e}")
 
         # Log failure after max retries
         run_async(
