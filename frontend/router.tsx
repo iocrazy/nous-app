@@ -91,8 +91,7 @@ export const router = createBrowserRouter([
           { path: 'todolist', element: <TodolistPage /> },
           { path: 'shared', element: <SharedPage /> },
           { path: 'player/:displayId', element: <PlayerPage /> },
-          { path: 'storyboard', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
-          { path: 'storyboard/:projectId', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
+          { path: 'projects/:projectId/storyboard/:storyboardId', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
         ],
       },
 

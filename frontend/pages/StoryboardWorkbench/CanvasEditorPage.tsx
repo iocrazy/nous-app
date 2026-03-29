@@ -81,7 +81,7 @@ function mapBackendEdgesToCanvas(
 export function CanvasEditorPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { teamId, projectId } = useParams<{ teamId: string; projectId?: string }>();
+  const { teamId, storyboardId: projectId } = useParams<{ teamId: string; storyboardId?: string }>();
 
   const setCanvasData = useCanvasStore((state) => state.setCanvasData);
   const setCurrentProject = useStoryboardStore((state) => state.setCurrentProject);
