@@ -10,12 +10,12 @@ and character management. Delegates data access to the repository layer.
 import asyncio
 import hashlib
 import os
-import logging
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
+from loguru import logger
 
 from app.repositories.storyboard_repository import (
     StoryboardProjectRepository,
@@ -26,8 +26,6 @@ from app.repositories.storyboard_repository import (
     StoryboardAssetRepository,
 )
 from app.schemas.storyboard import CanvasSyncRequest
-
-logger = logging.getLogger(__name__)
 
 # NAS directory sub-structure created for every new storyboard project
 _PROJECT_SUBDIRS = [
