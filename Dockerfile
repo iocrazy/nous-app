@@ -83,12 +83,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run as non-root user
-RUN useradd -m -r -s /bin/false appuser && \
-    chown -R appuser:appuser /app && \
-    mkdir -p /home/appuser/.cache/uv && \
-    chown -R appuser:appuser /home/appuser
-USER appuser
 
 # Start command
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
