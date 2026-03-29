@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { X, Sparkles } from 'lucide-react';
-import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
+import { useParams } from 'react-router-dom';
+import { generateOutline } from '../../services/scriptService';
 
 interface Props {
   isOpen: boolean;
@@ -8,47 +9,30 @@ interface Props {
 }
 
 export function CreateStoryDialog({ isOpen, onClose }: Props) {
-  const addChapterNode = useScriptCanvasStore((s) => s.addChapterNode);
-  const clearCanvas = useScriptCanvasStore((s) => s.clearCanvas);
+  const { scriptId } = useParams<{ scriptId: string }>();
 
   const [premise, setPremise] = useState('');
   const [chapterCount, setChapterCount] = useState(5);
   const [generating, setGenerating] = useState(false);
 
   const handleGenerate = useCallback(async () => {
-    if (!premise.trim()) return;
+    if (!premise.trim() || !scriptId) return;
     setGenerating(true);
 
     try {
-      // P2: Local outline generation (placeholder for AI in P3)
-      clearCanvas();
-
-      const chapters = Array.from({ length: chapterCount }, (_, i) => ({
-        title: `Chapter ${i + 1}`,
-        summary: i === 0
-          ? `Opening: ${premise.slice(0, 100)}...`
-          : i === chapterCount - 1
-          ? 'Conclusion and resolution.'
-          : `Development of the story — part ${i + 1}.`,
-        chapterNumber: i + 1,
-      }));
-
-      const VERTICAL_GAP = 200;
-      const START_X = 400;
-      const START_Y = 100;
-
-      for (const ch of chapters) {
-        addChapterNode(
-          { x: START_X, y: START_Y + (ch.chapterNumber - 1) * VERTICAL_GAP },
-          ch,
-        );
-      }
-
+      await generateOutline({
+        script_id: scriptId,
+        premise: premise.trim(),
+        chapter_count: chapterCount,
+      });
+      // Async task dispatched — user sees progress in TaskManager
       onClose();
+    } catch (err) {
+      console.error('[CreateStoryDialog] Failed to dispatch outline generation:', err);
     } finally {
       setGenerating(false);
     }
-  }, [premise, chapterCount, addChapterNode, clearCanvas, onClose]);
+  }, [premise, chapterCount, scriptId, onClose]);
 
   if (!isOpen) return null;
 

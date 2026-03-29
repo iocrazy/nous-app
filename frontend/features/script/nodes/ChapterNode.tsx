@@ -6,6 +6,8 @@ import { type ChapterNodeData, useScriptCanvasStore, type ScriptNode } from '../
 export const ChapterNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) => {
   const updateNodeData = useScriptCanvasStore((s) => s.updateNodeData);
   const deleteNode = useScriptCanvasStore((s) => s.deleteNode);
+  const openExpandDialog = useScriptCanvasStore((s) => s.openExpandDialog);
+  const openBranchDialog = useScriptCanvasStore((s) => s.openBranchDialog);
   const [editing, setEditing] = useState(false);
   const [titleInput, setTitleInput] = useState(data.title);
   const [expanded, setExpanded] = useState(data.isExpanded ?? true);
@@ -80,17 +82,17 @@ export const ChapterNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) 
 
           <div className="flex items-center gap-1.5">
             <button
+              onClick={() => openExpandDialog(id, data.title, data.summary)}
               className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-indigo-400 px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors"
-              title="Expand with AI (P3)"
-              disabled
+              title="Expand with AI"
             >
               <BookOpen size={12} />
               Expand
             </button>
             <button
+              onClick={() => openBranchDialog(id, data.title, data.summary)}
               className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-amber-400 px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors"
-              title="Create branch (P3)"
-              disabled
+              title="Create branch"
             >
               <GitBranch size={12} />
               Branch

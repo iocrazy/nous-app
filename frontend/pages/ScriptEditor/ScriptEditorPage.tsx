@@ -5,6 +5,8 @@ import { useScriptCanvasStore, type ScriptNode } from '../../stores/scriptCanvas
 import { ScriptCanvas } from '../../features/script/ScriptCanvas';
 import { ScriptToolbar } from '../../features/script/ScriptToolbar';
 import { CreateStoryDialog } from '../../features/script/CreateStoryDialog';
+import { ExpandChapterDialog } from '../../features/script/ExpandChapterDialog';
+import { CreateBranchDialog } from '../../features/script/CreateBranchDialog';
 import {
   fetchScriptProject,
   updateScriptProject,
@@ -52,6 +54,10 @@ export function ScriptEditorPage() {
   const setCanvasData = useScriptCanvasStore((s) => s.setCanvasData);
   const nodes = useScriptCanvasStore((s) => s.nodes);
   const viewport = useScriptCanvasStore((s) => s.currentViewport);
+  const expandDialog = useScriptCanvasStore((s) => s.expandDialog);
+  const closeExpandDialog = useScriptCanvasStore((s) => s.closeExpandDialog);
+  const branchDialog = useScriptCanvasStore((s) => s.branchDialog);
+  const closeBranchDialog = useScriptCanvasStore((s) => s.closeBranchDialog);
 
   const [scriptName, setScriptName] = useState('Untitled Script');
   const [editingName, setEditingName] = useState(false);
@@ -206,6 +212,28 @@ export function ScriptEditorPage() {
         isOpen={showCreateStory}
         onClose={() => setShowCreateStory(false)}
       />
+
+      {/* AI Expand Dialog */}
+      {expandDialog && (
+        <ExpandChapterDialog
+          isOpen={expandDialog.isOpen}
+          onClose={closeExpandDialog}
+          chapterId={expandDialog.chapterId}
+          title={expandDialog.title}
+          summary={expandDialog.summary}
+        />
+      )}
+
+      {/* AI Branch Dialog */}
+      {branchDialog && (
+        <CreateBranchDialog
+          isOpen={branchDialog.isOpen}
+          onClose={closeBranchDialog}
+          chapterId={branchDialog.chapterId}
+          title={branchDialog.title}
+          summary={branchDialog.summary}
+        />
+      )}
     </div>
   );
 }

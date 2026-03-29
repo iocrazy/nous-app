@@ -52,6 +52,14 @@ interface ScriptCanvasState {
 
   setViewportState: (viewport: { x: number; y: number; zoom: number }) => void;
 
+  // AI dialog state
+  expandDialog: { isOpen: boolean; chapterId: string; title: string; summary: string } | null;
+  branchDialog: { isOpen: boolean; chapterId: string; title: string; summary: string } | null;
+  openExpandDialog: (chapterId: string, title: string, summary: string) => void;
+  closeExpandDialog: () => void;
+  openBranchDialog: (chapterId: string, title: string, summary: string) => void;
+  closeBranchDialog: () => void;
+
   undo: () => boolean;
   redo: () => boolean;
 }
@@ -71,6 +79,8 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
   selectedNodeId: null,
   history: { past: [], future: [] },
   currentViewport: { x: 0, y: 0, zoom: 1 },
+  expandDialog: null,
+  branchDialog: null,
 
   onNodesChange: (changes) => {
     set((state) => ({
@@ -149,6 +159,13 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
   setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
 
   setViewportState: (viewport) => set({ currentViewport: viewport }),
+
+  openExpandDialog: (chapterId, title, summary) =>
+    set({ expandDialog: { isOpen: true, chapterId, title, summary } }),
+  closeExpandDialog: () => set({ expandDialog: null }),
+  openBranchDialog: (chapterId, title, summary) =>
+    set({ branchDialog: { isOpen: true, chapterId, title, summary } }),
+  closeBranchDialog: () => set({ branchDialog: null }),
 
   undo: () => {
     const { history, nodes, edges } = get();
