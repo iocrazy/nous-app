@@ -129,12 +129,12 @@ async def hybrid_search(
 
 @router.get("/similar/{media_id}", response_model=SearchResponse)
 async def find_similar_media(
+    auth: AuthDep,
     media_id: int,
     limit: int = Query(10, ge=1, le=50, description="Maximum number of similar media"),
     threshold: float = Query(
         0.6, ge=0.0, le=1.0, description="Minimum similarity threshold"
     ),
-    auth: AuthDep,
 ):
     """
     Find media similar to a given media item.
@@ -201,9 +201,9 @@ async def find_similar_media(
 
 @router.get("/quick")
 async def quick_search(
+    auth: AuthDep,
     q: str = Query(..., min_length=1, max_length=200, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
-    auth: AuthDep,
 ):
     """
     Quick search endpoint for search bar.

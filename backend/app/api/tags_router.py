@@ -55,13 +55,13 @@ async def list_tag_groups(auth: AuthDep):
 
 @router.get("", response_model=TagListResponse)
 async def list_tags(
+    auth: AuthDep,
     type_filter: Optional[str] = Query(
         None, description="Filter by tag type: system, user, time"
     ),
     enabled_only: bool = Query(
         False, description="If true, only return enabled tags (for Shortcuts/public API)"
     ),
-    auth: AuthDep,
 ):
     """
     List all available tags.
@@ -80,8 +80,8 @@ async def list_tags(
 
 @router.get("/statistics", response_model=TagStatisticsResponse)
 async def get_tag_statistics(
-    limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
     auth: AuthDep,
+    limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
 ):
     """
     Get tag usage statistics for the current user.
@@ -106,8 +106,8 @@ async def get_tag_statistics(
 
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
 async def create_tag(
-    tag: TagCreate,
     auth: AuthDep,
+    tag: TagCreate,
 ):
     """
     Create a new user tag.
@@ -159,8 +159,8 @@ async def update_tag_preferences(
 
 @router.get("/{tag_id}", response_model=TagResponse)
 async def get_tag(
-    tag_id: str,
     auth: AuthDep,
+    tag_id: str,
 ):
     """Get a specific tag by ID."""
     repo = TagsRepository()
@@ -182,9 +182,9 @@ async def get_tag(
 
 @router.put("/{tag_id}", response_model=TagResponse)
 async def update_tag(
+    auth: AuthDep,
     tag_id: str,
     tag_update: TagUpdate,
-    auth: AuthDep,
 ):
     """
     Update a tag.
@@ -231,8 +231,8 @@ async def update_tag(
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tag(
-    tag_id: str,
     auth: AuthDep,
+    tag_id: str,
 ):
     """
     Delete a user tag.

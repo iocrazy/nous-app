@@ -19,8 +19,8 @@ router = APIRouter(prefix="/collections", tags=["Collections"])
 
 @router.get("", response_model=CollectionListResponse)
 async def list_collections(
-    include_presets: bool = Query(True, description="Include preset collections"),
     auth: AuthDep,
+    include_presets: bool = Query(True, description="Include preset collections"),
 ):
     """
     List all smart collections for the current user.
@@ -62,8 +62,8 @@ async def list_collections(
 
 @router.post("", response_model=CollectionResponse, status_code=status.HTTP_201_CREATED)
 async def create_collection(
-    collection: CollectionCreate,
     auth: AuthDep,
+    collection: CollectionCreate,
 ):
     """
     Create a new smart collection.
@@ -105,8 +105,8 @@ async def create_collection(
 
 @router.get("/{collection_id}", response_model=CollectionResponse)
 async def get_collection(
-    collection_id: str,
     auth: AuthDep,
+    collection_id: str,
 ):
     """Get a specific collection by ID."""
     repo = CollectionsRepository()
@@ -140,9 +140,9 @@ async def get_collection(
 
 @router.put("/{collection_id}", response_model=CollectionResponse)
 async def update_collection(
+    auth: AuthDep,
     collection_id: str,
     update: CollectionUpdate,
-    auth: AuthDep,
 ):
     """
     Update a collection.
@@ -202,8 +202,8 @@ async def update_collection(
 
 @router.delete("/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_collection(
-    collection_id: str,
     auth: AuthDep,
+    collection_id: str,
 ):
     """
     Delete a collection.
@@ -234,11 +234,11 @@ async def delete_collection(
 
 @router.get("/{collection_id}/media", response_model=CollectionMediaResponse)
 async def get_collection_media(
+    auth: AuthDep,
     collection_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     refresh: bool = Query(False, description="Force refresh cache"),
-    auth: AuthDep,
 ):
     """
     Get videos matching a collection's rules.
@@ -274,8 +274,8 @@ async def get_collection_media(
 
 @router.post("/{collection_id}/refresh")
 async def refresh_collection(
-    collection_id: str,
     auth: AuthDep,
+    collection_id: str,
 ):
     """Force refresh a collection's cache."""
     repo = CollectionsRepository()

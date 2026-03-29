@@ -21,11 +21,11 @@ router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
 
 @router.get("/data", response_model=CleanupDataResponse)
 async def get_cleanup_data(
+    auth: AuthDep,
     limit: int = Query(50, ge=1, le=200),
     include_duplicates: bool = Query(
         True, description="Include potential duplicate detection"
     ),
-    auth: AuthDep,
 ):
     """
     Get all cleanup data in a single optimized call.
@@ -80,11 +80,11 @@ async def get_cleanup_data(
 
 @router.get("/suggestions", response_model=CleanupSuggestionsResponse)
 async def get_cleanup_suggestions(
+    auth: AuthDep,
     limit: int = Query(50, ge=1, le=200),
     include_duplicates: bool = Query(
         True, description="Include potential duplicate detection"
     ),
-    auth: AuthDep,
 ):
     """
     Get cleanup suggestions for the current user.
@@ -142,9 +142,9 @@ async def get_cleanup_stats(auth: AuthDep):
 
 @router.post("/media/{media_id}/action")
 async def take_cleanup_action(
+    auth: AuthDep,
     media_id: int,
     action: CleanupAction,
-    auth: AuthDep,
 ):
     """
     Take action on a cleanup suggestion.
@@ -189,8 +189,8 @@ async def take_cleanup_action(
 
 @router.post("/batch")
 async def batch_cleanup_action(
-    action: CleanupBatchAction,
     auth: AuthDep,
+    action: CleanupBatchAction,
 ):
     """
     Take action on multiple cleanup suggestions at once.
@@ -242,8 +242,8 @@ async def batch_cleanup_action(
 
 @router.post("/media/{media_id}/keep")
 async def mark_keep_forever(
-    media_id: int,
     auth: AuthDep,
+    media_id: int,
 ):
     """Shortcut to mark a media item as keep forever."""
     service = CleanupService()
@@ -257,8 +257,8 @@ async def mark_keep_forever(
 
 @router.delete("/media/{media_id}/keep")
 async def unmark_keep_forever(
-    media_id: int,
     auth: AuthDep,
+    media_id: int,
 ):
     """Remove keep forever mark from a media item."""
     service = CleanupService()
