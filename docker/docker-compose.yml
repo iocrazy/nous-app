@@ -32,6 +32,7 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config/config.yml:/app/config.yml
+      - ./config/frontend_config.yml:/app/frontend_config.yml
       - ${COOKIES_HOST_PATH:-./config/cookies}:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
@@ -62,6 +63,7 @@ services:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
       - ./config/config.yml:/app/config.yml
+      - ./config/frontend_config.yml:/app/frontend_config.yml
       - ${COOKIES_HOST_PATH:-./config/cookies}:/app/cookies:ro
     environment:
       - TZ=Asia/Shanghai
