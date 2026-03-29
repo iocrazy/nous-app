@@ -9,7 +9,6 @@ import { Video, Tag } from '../types';
 import { fetchTags, createTag } from '../services/tagsService';
 import { MediaCard } from '../components/MediaCard';
 import { CompactMediaCard } from '../components/CompactMediaCard';
-import { ParseModeCard } from '../components/ParseModeCard';
 import { EagleTagPicker } from '../components/EagleTagPicker';
 import { TaskMonitor } from '../components/TaskMonitor';
 import { useAuth } from '../contexts/AuthContext';
@@ -289,7 +288,6 @@ export function ParserPage() {
                 {showActiveTasks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
            </button>
-           <ParseModeCard />
            <div className="p-3 md:p-5 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors text-center flex flex-col items-center justify-center min-h-0">
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                 systemStatus?.storage.status === 'ok' ? 'bg-purple-900/30 text-purple-400' :
