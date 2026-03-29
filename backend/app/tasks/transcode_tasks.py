@@ -267,25 +267,26 @@ def maybe_trigger_transcode(
 
             file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-            # H.264 fast path: copy-only segmentation has no CPU cost, bypass gating
+            # Check minimum file size (applies to ALL codecs, including H.264)
             video_codec = _probe_codec_sync(str(file_path))
             is_h264 = video_codec in ("h264",)
+            min_size = settings.TRANSCODE_MIN_SIZE_MB
 
-            if is_h264:
-                logger.info(
-                    f"[Transcode] H.264 detected — fast segment mode, "
-                    f"bypass gating ({file_size_mb:.0f}MB) for version {version_id}"
-                )
-            else:
+            if file_size_mb < min_size:
                 duration_sec = _probe_duration_sync(str(file_path))
-                min_size = settings.TRANSCODE_MIN_SIZE_MB
-                if file_size_mb < min_size and (duration_sec or 0) < MIN_DURATION_SEC:
+                if (duration_sec or 0) < MIN_DURATION_SEC:
                     logger.info(
-                        f"[Transcode] Skip: non-H.264 ({video_codec}) too small "
-                        f"({file_size_mb:.0f}MB, {duration_sec or '?'}s) "
+                        f"[Transcode] Skip: {video_codec} too small "
+                        f"({file_size_mb:.0f}MB < {min_size}MB, {duration_sec or '?'}s) "
                         f"for version {version_id}"
                     )
                     return
+
+            if is_h264:
+                logger.info(
+                    f"[Transcode] H.264 detected — fast segment mode "
+                    f"({file_size_mb:.0f}MB) for version {version_id}"
+                )
 
                 logger.info(
                     f"[Transcode] Gating passed: {file_size_mb:.0f}MB, "
