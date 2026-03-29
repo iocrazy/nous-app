@@ -18,7 +18,7 @@ router = APIRouter(prefix="/search", tags=["Search"])
 @router.post("/semantic", response_model=SearchResponse)
 async def semantic_search(
     request: SemanticSearchRequest,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Search videos using natural language.
@@ -72,7 +72,7 @@ async def semantic_search(
 @router.post("/hybrid", response_model=SearchResponse)
 async def hybrid_search(
     request: HybridSearchRequest,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Combined search with semantic similarity and filters.
@@ -134,7 +134,7 @@ async def find_similar_media(
     threshold: float = Query(
         0.6, ge=0.0, le=1.0, description="Minimum similarity threshold"
     ),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Find media similar to a given media item.
@@ -203,7 +203,7 @@ async def find_similar_media(
 async def quick_search(
     q: str = Query(..., min_length=1, max_length=200, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Quick search endpoint for search bar.

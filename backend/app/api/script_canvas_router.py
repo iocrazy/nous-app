@@ -31,7 +31,7 @@ async def create_chapter(
         return {"success": True, "data": chapter}
     except Exception as exc:
         logger.error("[Scripts] create_chapter failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to create chapter: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create chapter")
 
 
 @router.put("/chapters/{chapter_id}")
@@ -44,7 +44,7 @@ async def update_chapter(
         return {"success": True, "data": chapter}
     except Exception as exc:
         logger.error("[Scripts] update_chapter %s failed: %s", chapter_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to update chapter: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to update chapter")
 
 
 @router.delete("/chapters/{chapter_id}")
@@ -55,7 +55,7 @@ async def delete_chapter(auth: AuthDep, chapter_id: str) -> Dict[str, Any]:
         return {"success": True}
     except Exception as exc:
         logger.error("[Scripts] delete_chapter %s failed: %s", chapter_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to delete chapter: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to delete chapter")
 
 
 @router.post("/{script_id}/canvas/sync")
@@ -75,4 +75,4 @@ async def sync_canvas(
         return {"success": True, "data": result}
     except Exception as exc:
         logger.error("[Scripts] sync_canvas %s failed: %s", script_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to sync canvas: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to sync canvas")

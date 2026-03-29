@@ -36,7 +36,7 @@ async def create_asset(
     except Exception as exc:
         logger.error("[ScriptAssets] create_asset failed: %s", exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to create asset: {exc}"
+            status_code=500, detail="Failed to create asset"
         )
 
 
@@ -57,7 +57,7 @@ async def list_assets(
     except Exception as exc:
         logger.error("[ScriptAssets] list_assets failed: %s", exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to list assets: {exc}"
+            status_code=500, detail="Failed to list assets"
         )
 
 
@@ -75,7 +75,7 @@ async def update_asset(
     except Exception as exc:
         logger.error("[ScriptAssets] update_asset %s failed: %s", asset_id, exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to update asset: {exc}"
+            status_code=500, detail="Failed to update asset"
         )
 
 
@@ -89,5 +89,5 @@ async def delete_asset(auth: AuthDep, asset_id: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.error("[ScriptAssets] delete_asset %s failed: %s", asset_id, exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to delete asset: {exc}"
+            status_code=500, detail="Failed to delete asset"
         )

@@ -19,10 +19,10 @@ class ScriptProjectRepository:
         try:
             client = await self._get_client()
             result = await client.table(self.TABLE_NAME).insert(data).execute()
-            logger.info(f"Created script project: {data.get('name')}")
+            logger.info("Created script project: %s", data.get('name'))
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create script project: {e}")
+            logger.error("Failed to create script project: %s", e)
             raise
 
     async def update(self, script_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,7 +36,7 @@ class ScriptProjectRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update script project {script_id}: {e}")
+            logger.error("Failed to update script project %s: %s", script_id, e)
             raise
 
     async def get_by_id(self, script_id: str) -> Optional[Dict[str, Any]]:
@@ -50,7 +50,7 @@ class ScriptProjectRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get script project {script_id}: {e}")
+            logger.error("Failed to get script project %s: %s", script_id, e)
             return None
 
     async def list_by_project(
@@ -94,7 +94,7 @@ class ScriptProjectRepository:
                 "limit": limit,
             }
         except Exception as e:
-            logger.error(f"Failed to list script projects for project {project_id}: {e}")
+            logger.error("Failed to list script projects for project %s: %s", project_id, e)
             return {"items": [], "total": 0, "page": page, "limit": limit}
 
     async def soft_delete(self, script_id: str) -> None:
@@ -106,9 +106,9 @@ class ScriptProjectRepository:
                 .eq("id", script_id)
                 .execute()
             )
-            logger.info(f"Soft-deleted script project {script_id}")
+            logger.info("Soft-deleted script project %s", script_id)
         except Exception as e:
-            logger.error(f"Failed to soft-delete script project {script_id}: {e}")
+            logger.error("Failed to soft-delete script project %s: %s", script_id, e)
             raise
 
 
@@ -133,10 +133,10 @@ class ScriptChapterRepository:
                 .upsert(rows, on_conflict="id")
                 .execute()
             )
-            logger.info(f"Bulk-upserted {len(rows)} chapters for script {script_id}")
+            logger.info("Bulk-upserted %d chapters for script %s", len(rows), script_id)
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to bulk-upsert chapters for script {script_id}: {e}")
+            logger.error("Failed to bulk-upsert chapters for script %s: %s", script_id, e)
             raise
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -145,7 +145,7 @@ class ScriptChapterRepository:
             result = await client.table(self.TABLE_NAME).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create chapter: {e}")
+            logger.error("Failed to create chapter: %s", e)
             raise
 
     async def update(self, chapter_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -159,7 +159,7 @@ class ScriptChapterRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update chapter {chapter_id}: {e}")
+            logger.error("Failed to update chapter %s: %s", chapter_id, e)
             raise
 
     async def delete(self, chapter_id: str) -> None:
@@ -171,9 +171,9 @@ class ScriptChapterRepository:
                 .eq("id", chapter_id)
                 .execute()
             )
-            logger.info(f"Deleted chapter {chapter_id}")
+            logger.info("Deleted chapter %s", chapter_id)
         except Exception as e:
-            logger.error(f"Failed to delete chapter {chapter_id}: {e}")
+            logger.error("Failed to delete chapter %s: %s", chapter_id, e)
             raise
 
     async def get_by_id(self, chapter_id: str) -> Optional[Dict[str, Any]]:
@@ -187,7 +187,7 @@ class ScriptChapterRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get chapter {chapter_id}: {e}")
+            logger.error("Failed to get chapter %s: %s", chapter_id, e)
             return None
 
     async def get_by_script(self, script_id: str) -> List[Dict[str, Any]]:
@@ -202,7 +202,7 @@ class ScriptChapterRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get chapters for script {script_id}: {e}")
+            logger.error("Failed to get chapters for script %s: %s", script_id, e)
             return []
 
 
@@ -220,7 +220,7 @@ class ScriptAssetRepository:
             result = await client.table(self.TABLE_NAME).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create script asset: {e}")
+            logger.error("Failed to create script asset: %s", e)
             raise
 
     async def update(self, asset_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -234,7 +234,7 @@ class ScriptAssetRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update script asset {asset_id}: {e}")
+            logger.error("Failed to update script asset %s: %s", asset_id, e)
             raise
 
     async def delete(self, asset_id: str) -> None:
@@ -242,7 +242,7 @@ class ScriptAssetRepository:
             client = await self._get_client()
             await client.table(self.TABLE_NAME).delete().eq("id", asset_id).execute()
         except Exception as e:
-            logger.error(f"Failed to delete script asset {asset_id}: {e}")
+            logger.error("Failed to delete script asset %s: %s", asset_id, e)
             raise
 
     async def list_by_script(
@@ -261,7 +261,7 @@ class ScriptAssetRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list assets for script {script_id}: {e}")
+            logger.error("Failed to list assets for script %s: %s", script_id, e)
             return []
 
     async def get_by_id(self, asset_id: str) -> Optional[Dict[str, Any]]:
@@ -275,7 +275,7 @@ class ScriptAssetRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get script asset {asset_id}: {e}")
+            logger.error("Failed to get script asset %s: %s", asset_id, e)
             return None
 
 
@@ -293,7 +293,7 @@ class ScriptStoryboardLinkRepository:
             result = await client.table(self.TABLE_NAME).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create script-storyboard link: {e}")
+            logger.error("Failed to create script-storyboard link: %s", e)
             raise
 
     async def delete(self, link_id: str) -> None:
@@ -301,7 +301,7 @@ class ScriptStoryboardLinkRepository:
             client = await self._get_client()
             await client.table(self.TABLE_NAME).delete().eq("id", link_id).execute()
         except Exception as e:
-            logger.error(f"Failed to delete script-storyboard link {link_id}: {e}")
+            logger.error("Failed to delete script-storyboard link %s: %s", link_id, e)
             raise
 
     async def list_by_chapter(self, chapter_id: str) -> List[Dict[str, Any]]:
@@ -316,7 +316,7 @@ class ScriptStoryboardLinkRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list links for chapter {chapter_id}: {e}")
+            logger.error("Failed to list links for chapter %s: %s", chapter_id, e)
             return []
 
     async def list_by_storyboard(
@@ -334,6 +334,6 @@ class ScriptStoryboardLinkRepository:
             return result.data or []
         except Exception as e:
             logger.error(
-                f"Failed to list links for storyboard {storyboard_project_id}: {e}"
+                "Failed to list links for storyboard %s: %s", storyboard_project_id, e
             )
             return []

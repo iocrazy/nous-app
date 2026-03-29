@@ -33,7 +33,7 @@ async def create_style_template(
     except Exception as exc:
         logger.error("[StyleTemplates] create failed: %s", exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to create style template: {exc}"
+            status_code=500, detail="Failed to create style template"
         )
 
 
@@ -54,7 +54,7 @@ async def list_style_templates(
     except Exception as exc:
         logger.error("[StyleTemplates] list failed: %s", exc)
         raise HTTPException(
-            status_code=500, detail=f"Failed to list style templates: {exc}"
+            status_code=500, detail="Failed to list style templates"
         )
 
 
@@ -83,7 +83,7 @@ async def update_style_template(
             "[StyleTemplates] update %s failed: %s", template_id, exc
         )
         raise HTTPException(
-            status_code=500, detail=f"Failed to update style template: {exc}"
+            status_code=500, detail="Failed to update style template"
         )
 
 
@@ -110,5 +110,5 @@ async def delete_style_template(
             "[StyleTemplates] delete %s failed: %s", template_id, exc
         )
         raise HTTPException(
-            status_code=500, detail=f"Failed to delete style template: {exc}"
+            status_code=500, detail="Failed to delete style template"
         )

@@ -47,7 +47,7 @@ class ScriptService:
                 project["id"], {"display_code": display_code}
             )
         except Exception as exc:
-            logger.warning(f"Failed to generate display_code for script: {exc}")
+            logger.warning("Failed to generate display_code for script: %s", exc)
 
         return project
 

@@ -65,7 +65,7 @@ class TaskStatusResponse(BaseModel):
 
 
 @router.get("/stats", response_model=AnalysisStatsResponse)
-async def get_analysis_stats(auth: AuthDep = None):
+async def get_analysis_stats(auth: AuthDep):
     """
     Get analysis statistics.
     Shows counts by analysis level and total cost.
@@ -111,7 +111,7 @@ async def get_analysis_queue(
     limit: int = Query(
         50, le=100, description="Maximum number of pending videos to return"
     ),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Get videos pending analysis.
@@ -126,7 +126,7 @@ async def get_analysis_queue(
 @router.get("/{media_id}", response_model=AnalysisResponse)
 async def get_media_analysis(
     media_id: int,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Get analysis results for a media item.
@@ -163,7 +163,7 @@ async def get_media_analysis(
 async def trigger_analysis(
     media_id: int,
     request: AnalyzeRequest,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Trigger analysis for a video.
@@ -257,7 +257,7 @@ async def trigger_analysis(
 @router.post("/batch", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_batch_analysis(
     request: BatchAnalyzeRequest,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Trigger batch analysis for multiple videos.
@@ -289,7 +289,7 @@ async def trigger_batch_analysis(
 @router.post("/analyze-pending", status_code=status.HTTP_202_ACCEPTED)
 async def analyze_pending_videos(
     limit: int = Query(50, le=100, description="Maximum number of videos to analyze"),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Analyze all pending videos (videos without analysis).
@@ -306,7 +306,7 @@ async def analyze_pending_videos(
 @router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_media_analysis(
     media_id: int,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Delete analysis for a media item.

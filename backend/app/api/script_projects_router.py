@@ -29,7 +29,7 @@ async def create_script_project(
         return {"success": True, "data": project}
     except Exception as exc:
         logger.error("[Scripts] create_project failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to create script: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create script")
 
 
 @router.get("/")
@@ -51,7 +51,7 @@ async def list_script_projects(
         return {"success": True, "data": result}
     except Exception as exc:
         logger.error("[Scripts] list_projects failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to list scripts: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to list scripts")
 
 
 @router.get("/{script_id}")
@@ -66,7 +66,7 @@ async def get_script_project(auth: AuthDep, script_id: str) -> Dict[str, Any]:
         raise
     except Exception as exc:
         logger.error("[Scripts] get_project %s failed: %s", script_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to get script: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to get script")
 
 
 @router.put("/{script_id}")
@@ -79,7 +79,7 @@ async def update_script_project(
         return {"success": True, "data": updated}
     except Exception as exc:
         logger.error("[Scripts] update_project %s failed: %s", script_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to update script: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to update script")
 
 
 @router.delete("/{script_id}")
@@ -90,7 +90,7 @@ async def delete_script_project(auth: AuthDep, script_id: str) -> Dict[str, Any]
         return {"success": True}
     except Exception as exc:
         logger.error("[Scripts] delete_project %s failed: %s", script_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to delete script: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to delete script")
 
 
 @router.patch("/{script_id}/viewport")
@@ -103,4 +103,4 @@ async def update_viewport(
         return {"success": True}
     except Exception as exc:
         logger.error("[Scripts] update_viewport %s failed: %s", script_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to update viewport: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to update viewport")

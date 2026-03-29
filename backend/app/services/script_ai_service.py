@@ -91,8 +91,8 @@ class ScriptAIService:
 
         return [
             {
-                "title": ch.get("title", f"Chapter {i + 1}"),
-                "summary": ch.get("summary", ""),
+                "title": ch.get("title", f"Chapter {i + 1}")[:200],
+                "summary": ch.get("summary", "")[:5000],
             }
             for i, ch in enumerate(chapters)
         ]
@@ -121,7 +121,8 @@ class ScriptAIService:
             {"role": "user", "content": user_prompt},
         ]
 
-        return await self._call_llm(messages, temperature=0.8, max_tokens=4096)
+        content = await self._call_llm(messages, temperature=0.8, max_tokens=4096)
+        return content[:50000]  # safety limit
 
     async def create_branches(
         self,
@@ -164,9 +165,9 @@ class ScriptAIService:
 
         return [
             {
-                "title": b.get("title", f"Branch {i + 1}"),
-                "summary": b.get("summary", ""),
-                "branch_label": b.get("branch_label", f"Path {i + 1}"),
+                "title": b.get("title", f"Branch {i + 1}")[:200],
+                "summary": b.get("summary", "")[:5000],
+                "branch_label": b.get("branch_label", f"Path {i + 1}")[:100],
             }
             for i, b in enumerate(branches[:branch_count])
         ]

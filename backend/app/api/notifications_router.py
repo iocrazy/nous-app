@@ -16,7 +16,7 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
 @router.get("", response_model=NotificationListResponse)
-async def list_notifications(auth: AuthDep = None):
+async def list_notifications(auth: AuthDep):
     """List all notifications for the current user."""
     repo = NotificationRepository()
     notifications = await repo.get_user_notifications(auth.user_id)
@@ -42,7 +42,7 @@ async def list_notifications(auth: AuthDep = None):
 
 
 @router.put("/{notification_id}/read", response_model=MarkReadResponse)
-async def mark_as_read(notification_id: str, auth: AuthDep = None):
+async def mark_as_read(notification_id: str, auth: AuthDep):
     """Mark a notification as read."""
     repo = NotificationRepository()
     success = await repo.mark_as_read(notification_id, auth.user_id)
@@ -57,7 +57,7 @@ async def mark_as_read(notification_id: str, auth: AuthDep = None):
 
 
 @router.put("/read-all", response_model=MarkReadResponse)
-async def mark_all_as_read(auth: AuthDep = None):
+async def mark_all_as_read(auth: AuthDep):
     """Mark all notifications as read."""
     repo = NotificationRepository()
     count = await repo.mark_all_as_read(auth.user_id)
@@ -69,7 +69,7 @@ async def mark_all_as_read(auth: AuthDep = None):
 
 
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_notification(notification_id: str, auth: AuthDep = None):
+async def delete_notification(notification_id: str, auth: AuthDep):
     """Delete (dismiss) a notification."""
     repo = NotificationRepository()
     deleted = await repo.delete_notification(notification_id, auth.user_id)
@@ -82,7 +82,7 @@ async def delete_notification(notification_id: str, auth: AuthDep = None):
 
 
 @router.get("/unread-count")
-async def get_unread_count(auth: AuthDep = None):
+async def get_unread_count(auth: AuthDep):
     """Get count of unread notifications."""
     repo = NotificationRepository()
     count = await repo.get_unread_count(auth.user_id)

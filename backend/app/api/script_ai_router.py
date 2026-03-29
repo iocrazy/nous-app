@@ -43,7 +43,7 @@ async def generate_outline(auth: AuthDep, body: GenerateOutlineRequest) -> Dict[
         return {"success": True, "task_id": task_id}
     except Exception as exc:
         logger.error("[ScriptAI] generate_outline failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to generate outline: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to generate outline")
 
 
 @router.post("/expand-chapter")
@@ -66,7 +66,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
         return {"success": True, "data": {"content": content, "chapter": updated}}
     except Exception as exc:
         logger.error("[ScriptAI] expand_chapter failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to expand chapter: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to expand chapter")
 
 
 @router.post("/create-branches")
@@ -110,7 +110,7 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
         return {"success": True, "data": {"branches": created}}
     except Exception as exc:
         logger.error("[ScriptAI] create_branches failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to create branches: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create branches")
 
 
 @router.post("/convert-to-storyboard")
@@ -188,5 +188,5 @@ async def convert_to_storyboard(
         logger.error("[ScriptAI] convert_to_storyboard failed: %s", exc)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to convert chapter to storyboard: {exc}",
+            detail="Failed to convert chapter to storyboard",
         )

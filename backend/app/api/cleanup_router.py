@@ -25,7 +25,7 @@ async def get_cleanup_data(
     include_duplicates: bool = Query(
         True, description="Include potential duplicate detection"
     ),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Get all cleanup data in a single optimized call.
@@ -84,7 +84,7 @@ async def get_cleanup_suggestions(
     include_duplicates: bool = Query(
         True, description="Include potential duplicate detection"
     ),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Get cleanup suggestions for the current user.
@@ -128,7 +128,7 @@ async def get_cleanup_suggestions(
 
 
 @router.get("/stats", response_model=CleanupStats)
-async def get_cleanup_stats(auth: AuthDep = None):
+async def get_cleanup_stats(auth: AuthDep):
     """
     Get overall cleanup statistics.
 
@@ -144,7 +144,7 @@ async def get_cleanup_stats(auth: AuthDep = None):
 async def take_cleanup_action(
     media_id: int,
     action: CleanupAction,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Take action on a cleanup suggestion.
@@ -190,7 +190,7 @@ async def take_cleanup_action(
 @router.post("/batch")
 async def batch_cleanup_action(
     action: CleanupBatchAction,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Take action on multiple cleanup suggestions at once.
@@ -243,7 +243,7 @@ async def batch_cleanup_action(
 @router.post("/media/{media_id}/keep")
 async def mark_keep_forever(
     media_id: int,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """Shortcut to mark a media item as keep forever."""
     service = CleanupService()
@@ -258,7 +258,7 @@ async def mark_keep_forever(
 @router.delete("/media/{media_id}/keep")
 async def unmark_keep_forever(
     media_id: int,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """Remove keep forever mark from a media item."""
     service = CleanupService()
@@ -271,7 +271,7 @@ async def unmark_keep_forever(
 
 
 @router.get("/storage")
-async def get_storage_breakdown(auth: AuthDep = None):
+async def get_storage_breakdown(auth: AuthDep):
     """
     Get storage usage breakdown.
 

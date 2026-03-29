@@ -37,7 +37,7 @@ class TagGroupsListResponse(BaseModel):
 
 
 @router.get("/groups", response_model=TagGroupsListResponse)
-async def list_tag_groups(auth: AuthDep = None):
+async def list_tag_groups(auth: AuthDep):
     """List all tag groups (for frontend tag picker grouping)."""
     client = await get_async_supabase_admin()
     result = (
@@ -61,7 +61,7 @@ async def list_tags(
     enabled_only: bool = Query(
         False, description="If true, only return enabled tags (for Shortcuts/public API)"
     ),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     List all available tags.
@@ -81,7 +81,7 @@ async def list_tags(
 @router.get("/statistics", response_model=TagStatisticsResponse)
 async def get_tag_statistics(
     limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Get tag usage statistics for the current user.
@@ -107,7 +107,7 @@ async def get_tag_statistics(
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
 async def create_tag(
     tag: TagCreate,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Create a new user tag.
@@ -160,7 +160,7 @@ async def update_tag_preferences(
 @router.get("/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: str,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """Get a specific tag by ID."""
     repo = TagsRepository()
@@ -184,7 +184,7 @@ async def get_tag(
 async def update_tag(
     tag_id: str,
     tag_update: TagUpdate,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Update a tag.
@@ -232,7 +232,7 @@ async def update_tag(
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tag(
     tag_id: str,
-    auth: AuthDep = None,
+    auth: AuthDep,
 ):
     """
     Delete a user tag.
