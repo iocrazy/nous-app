@@ -14,6 +14,7 @@
     "resources": "Resources",
     "projects": "Projects",
     "todolist": "Todolist",
+    "storyboard": "Storyboard",
     "management": "Management",
     "members": "Members",
     "billing": "Billing",
@@ -934,5 +935,171 @@
       "uploading": "Uploading...",
       "upload": "Upload New Version"
     }
+  },
+  "storyboard": {
+    "title": "Storyboard Workbench",
+    "newProject": "New Project",
+    "blankProject": "Blank Project",
+    "fromScript": "From Script",
+    "fromVideo": "From Video",
+    "projectName": "Project Name",
+    "search": "Search projects...",
+    "sortBy": "Sort by",
+    "noProjects": "No storyboard projects yet",
+    "createFirst": "Create your first project to get started",
+    "back": "Back",
+    "sort": {
+      "name": "Name",
+      "created": "Created",
+      "updated": "Updated"
+    },
+    "canvas": {
+      "addNode": "Add Node",
+      "fitView": "Fit View",
+      "lock": "Lock",
+      "unlock": "Unlock",
+      "undo": "Undo",
+      "redo": "Redo",
+      "export": "Export",
+      "characters": "Characters",
+      "emptyCanvas": "Drop nodes here to start building your storyboard"
+    },
+    "nodes": {
+      "upload": "Upload Image",
+      "imageEdit": "AI Generate",
+      "storyboardSplit": "Storyboard Split",
+      "storyboardGen": "Batch Generate",
+      "imageToVideo": "Image to Video",
+      "textAnnotation": "Text Note",
+      "group": "Group",
+      "export": "Export"
+    },
+    "chat": {
+      "title": "AI Assistant",
+      "placeholder": "Ask AI...",
+      "selectedFrame": "Selected: Frame {{number}}",
+      "applyToFrame": "Apply to Frame",
+      "regenerate": "Regenerate"
+    },
+    "timeline": {
+      "play": "Play",
+      "pause": "Pause",
+      "stop": "Stop",
+      "speed": "Speed",
+      "preview": "Preview"
+    },
+    "characters": {
+      "title": "Characters",
+      "newCharacter": "New Character",
+      "editCharacter": "Edit Character",
+      "noCharacters": "No characters yet",
+      "usedInFrames": "Used in {{count}} frames"
+    },
+    "tools": {
+      "crop": "Crop",
+      "annotate": "Annotate",
+      "split": "Split",
+      "shotInfo": "Shot Info",
+      "apply": "Apply",
+      "cancel": "Cancel"
+    },
+    "export": {
+      "title": "Export Storyboard",
+      "pngGrid": "PNG Grid",
+      "pdfDocument": "PDF Document",
+      "zipBundle": "ZIP Bundle",
+      "includeFrameNumbers": "Include frame numbers",
+      "includeAnnotations": "Include annotations",
+      "columns": "Columns",
+      "exporting": "Exporting...",
+      "downloadReady": "Download Ready"
+    },
+    "shot": {
+      "extremeCloseUp": "Extreme Close-up",
+      "closeUp": "Close-up",
+      "mediumCloseUp": "Medium Close-up",
+      "medium": "Medium",
+      "mediumWide": "Medium Wide",
+      "wide": "Wide",
+      "extremeWide": "Extreme Wide"
+    }
+  },
+  "canvas": {
+    "addImage": "+ Add Image",
+    "generate": "Generate",
+    "generateAll": "Generate All",
+    "toolbar": {
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "fitView": "Fit View",
+      "lock": "Lock Canvas",
+      "unlock": "Unlock Canvas",
+      "snapGrid": "Snap to Grid",
+      "delete": "Clear Canvas"
+    }
+  },
+  "modelParams": {
+    "otherParams": "Parameters",
+    "provider": "Provider",
+    "model": "Model",
+    "quality": "Quality",
+    "aspectRatio": "Aspect Ratio",
+    "extraOptions": "Extra Options",
+    "enableWebSearch": "Web Search",
+    "goConfigure": "Configure",
+    "providerKeyRequiredTitle": "API Key Required",
+    "providerKeyRequiredDesc": "An API key for {{provider}} is required to use this model."
+  },
+  "node": {
+    "upload": {
+      "hint": "Click or drop image",
+      "uploadedAlt": "Uploaded image"
+    },
+    "imageEdit": {
+      "promptPlaceholder": "Describe the image you want to generate...",
+      "negativePrompt": "Negative prompt (optional)...",
+      "promptRequired": "Please enter a prompt"
+    },
+    "imageNode": {
+      "waitingResult": "Waiting for result...",
+      "waitingResultDelayed": "Waiting... ({{minutes}}min)",
+      "selectToEdit": "Select to edit",
+      "generationFailed": "Generation failed",
+      "resultAlt": "Result",
+      "generatedAlt": "Generated"
+    },
+    "storyboardGen": {
+      "rowsShort": "R",
+      "colsShort": "C",
+      "framePlaceholder": "Frame {{number}}"
+    },
+    "textAnnotation": {
+      "placeholder": "Type your notes here...",
+      "empty": "Empty note"
+    }
+  },
+  "nodeToolbar": {
+    "copy": "Copy",
+    "download": "Download",
+    "reupload": "Re-upload",
+    "ungroup": "Ungroup",
+    "copyText": "Copy Text",
+    "copyErrorReport": "Copy Error"
+  },
+  "tool": {
+    "crop": "Crop",
+    "annotate": "Annotate",
+    "split": "Split"
+  },
+  "viewer": {
+    "imageAlt": "Image",
+    "next": "Next",
+    "prev": "Previous",
+    "reset": "Reset"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete"
   }
 }

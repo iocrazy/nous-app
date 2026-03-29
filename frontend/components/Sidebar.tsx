@@ -8,6 +8,7 @@ import {
   Layers,
   Users,
   Sparkles,
+  Clapperboard,
   ChevronDown,
   FolderOpen,
   ListTodo,
@@ -177,6 +178,45 @@ const VersionFooter: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => vo
 // ---------------------------------------------------------------------------
 
 const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" />;
+
+// ---------------------------------------------------------------------------
+// URL ↔ ViewState mapping (local to avoid circular dep with AppLayout)
+// ---------------------------------------------------------------------------
+
+const VIEW_PATH_MAP: Record<string, string> = {
+  parser: '/parser',
+  library: '/library',
+  dashboard: '/dashboard',
+  settings: '/settings',
+  cleanup: '/cleanup',
+  mediatrack: '/projects',
+  points: '/points',
+  billing: '/billing',
+  members: '/members',
+  resources: '/resources',
+  todolist: '/todolist',
+  shared: '/shared',
+  storyboard: '/storyboard',
+};
+
+function viewFromPathname(pathname: string): ViewState {
+  // Strip /team/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
+  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/dashboard')) return 'dashboard';
+  if (stripped.startsWith('/settings')) return 'settings';
+  if (stripped.startsWith('/cleanup')) return 'cleanup';
+  if (stripped.startsWith('/projects')) return 'mediatrack';
+  if (stripped.startsWith('/points')) return 'points';
+  if (stripped.startsWith('/billing')) return 'billing';
+  if (stripped.startsWith('/members')) return 'members';
+  if (stripped.startsWith('/resources')) return 'resources';
+  if (stripped.startsWith('/todolist')) return 'todolist';
+  if (stripped.startsWith('/shared')) return 'shared';
+  if (stripped.startsWith('/storyboard')) return 'storyboard';
+  if (stripped.startsWith('/player')) return 'resources';
+  return 'parser';
+}
 
 // ---------------------------------------------------------------------------
 // Main Sidebar export
@@ -384,6 +424,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {isViewEnabled('mediatrack') && (
           <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
         )}
+        <SidebarItem icon={Clapperboard} label={t('sidebar.storyboard')} active={currentView === 'storyboard'} onClick={() => handleNav('storyboard')} collapsed={collapsed} />
         <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
         <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
 

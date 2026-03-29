@@ -23,9 +23,12 @@ import {
   Moon,
   MessageSquare,
   Cloud,
+  ImageIcon,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
+import { StoryboardApiSettings } from './StoryboardApiSettings';
+import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
   settings: AISettingsType;
@@ -183,7 +186,23 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
   },
 };
 
+type ProviderTab = 'text' | 'image';
+type TaskTab = 'media' | 'storyboard';
+
+const IMAGE_PROVIDERS = [
+  { id: 'kie', name: 'KIE' },
+  { id: 'ppio', name: 'PPIO' },
+  { id: 'fal', name: 'fal' },
+  { id: 'grsai', name: 'GRSAI' },
+  { id: 'comfly', name: 'Comfly' },
+  { id: 'runninghub', name: 'RunningHub' },
+  { id: 'zhenzhen', name: 'Zhenzhen' },
+] as const;
+
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
+  const [providerTab, setProviderTab] = useState<ProviderTab>('text');
+  const [taskTab, setTaskTab] = useState<TaskTab>('media');
+  const enabledSbProviders = useSettingsStore((s) => s.enabledSbProviders);
   const [localSettings, setLocalSettings] = useState<AISettingsType>(() => ({
     ...settings,
   }));
@@ -514,8 +533,37 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           </div>
         </div>
 
-        <div className="p-6 space-y-5">
-          {/* Transcription */}
+        {/* Task Tab Switcher */}
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex gap-1 p-1 bg-zinc-950 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setTaskTab('media')}
+              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                taskTab === 'media'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Media
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskTab('storyboard')}
+              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                taskTab === 'storyboard'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Storyboard
+            </button>
+          </div>
+        </div>
+
+        {/* Media Tasks */}
+        {taskTab === 'media' && (
+        <div className="px-6 pb-6 pt-2 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-zinc-400" />
@@ -535,7 +583,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
           </div>
 
-          {/* Summarization */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-zinc-400" />
@@ -555,7 +602,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
           </div>
 
-          {/* Visual Analysis */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-zinc-400" />
@@ -575,6 +621,77 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
           </div>
         </div>
+        )}
+
+        {/* Storyboard Tasks */}
+        {taskTab === 'storyboard' && (
+        <div className="px-6 pb-6 pt-2 space-y-5">
+          {/* Image Generation — multi-select, only shows enabled providers */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <ImageIcon size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Image Generation</span>
+              <span className="text-[11px] text-zinc-600">(select per node in canvas)</span>
+            </div>
+            {(() => {
+              const enabledImageProviders = IMAGE_PROVIDERS.filter(({ id }) => enabledSbProviders[id]);
+              if (enabledImageProviders.length === 0) {
+                return (
+                  <p className="text-xs text-zinc-600 py-2">
+                    No image providers enabled. Enable them in AI Providers → Image Generation below.
+                  </p>
+                );
+              }
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {enabledImageProviders.map(({ id, name }) => {
+                    const selected = (localSettings.task_assignment.image_generation ?? '').split(',').filter(Boolean).includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          const current = (localSettings.task_assignment.image_generation ?? '').split(',').filter(Boolean);
+                          const next = selected ? current.filter((x) => x !== id) : [...current, id];
+                          updateTaskAssignment('image_generation' as keyof typeof localSettings.task_assignment, next.join(','));
+                        }}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border flex items-center gap-2 ${
+                          selected
+                            ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                            : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-700 hover:text-zinc-300'
+                        }`}
+                      >
+                        {selected && <Check size={12} />}
+                        {name}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Script / Prompt — single select from text LLMs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FileText size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Script / Prompt</span>
+            </div>
+            <div className="relative">
+              <select
+                value={localSettings.task_assignment.script_generation ?? ''}
+                onChange={(e) => updateTaskAssignment('script_generation' as keyof typeof localSettings.task_assignment, e.target.value)}
+                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+              >
+                {getTaskOptions('summarization').map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          </div>
+        </div>
+        )}
       </section>
 
       {/* Provider Cards Section */}
@@ -583,13 +700,43 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
             <Settings size={20} />
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="font-semibold text-zinc-200">AI Providers</h2>
             <p className="text-xs text-zinc-500">Configure API keys and connections for each provider</p>
           </div>
         </div>
 
-        <div className="p-6 space-y-4">
+        {/* Provider Type Tabs */}
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex gap-1 p-1 bg-zinc-950 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setProviderTab('text')}
+              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                providerTab === 'text'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Text / LLM
+            </button>
+            <button
+              type="button"
+              onClick={() => setProviderTab('image')}
+              className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                providerTab === 'image'
+                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              Image Generation
+            </button>
+          </div>
+        </div>
+
+        {/* Text / LLM Providers */}
+        {providerTab === 'text' && (
+        <div className="p-6 pt-2 space-y-4">
           {Object.entries(PROVIDER_META).map(([providerKey, meta]) => {
             const config = getProviderConfig(providerKey);
             const colors = COLOR_MAP[meta.color] || COLOR_MAP.blue;
@@ -797,6 +944,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             );
           })}
         </div>
+        )}
+
+        {/* Image Generation Providers */}
+        {providerTab === 'image' && (
+          <div className="p-6 pt-2">
+            <StoryboardApiSettings />
+          </div>
+        )}
       </section>
 
       {/* Save Button */}
