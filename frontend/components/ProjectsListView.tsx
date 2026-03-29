@@ -290,6 +290,9 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
                       <span className="text-sm text-white font-medium">{project.name}</span>
+                      {project.display_code && (
+                        <span className="text-[11px] font-mono text-zinc-500">{project.display_code}</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3">

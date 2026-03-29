@@ -59,7 +59,22 @@ class ProjectsService:
             Created project dict.
         """
         data["owner_id"] = user_id
-        return await self.repo.create_project(data)
+        project = await self.repo.create_project(data)
+
+        # Generate display code if project belongs to a team
+        team_id = project.get("team_id")
+        if team_id:
+            try:
+                from app.services.display_code_service import generate_display_code
+
+                display_code = await generate_display_code(int(team_id), "P")
+                project = await self.repo.update_project(
+                    project["id"], {"display_code": display_code}
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to generate display_code: {exc}")
+
+        return project
 
     async def update_project(self, project_id: str, user_id: str, data: dict) -> dict:
         """
