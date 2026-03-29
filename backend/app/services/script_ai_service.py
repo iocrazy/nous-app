@@ -8,6 +8,18 @@ from loguru import logger
 
 from app.core.config import settings
 
+# LLM generation defaults
+DEFAULT_OUTLINE_TEMPERATURE = 0.7
+DEFAULT_EXPAND_TEMPERATURE = 0.8
+DEFAULT_BRANCH_TEMPERATURE = 0.9
+DEFAULT_MAX_TOKENS = 4096
+
+# Output safety limits
+MAX_TITLE_LENGTH = 200
+MAX_SUMMARY_LENGTH = 5000
+MAX_CONTENT_LENGTH = 50000
+MAX_BRANCH_LABEL_LENGTH = 100
+
 
 class ScriptAIService:
     """AI operations for the script editor module."""
@@ -83,7 +95,11 @@ class ScriptAIService:
             {"role": "user", "content": user_prompt},
         ]
 
-        response = await self._call_llm(messages, temperature=0.7, max_tokens=4096)
+        response = await self._call_llm(
+            messages,
+            temperature=DEFAULT_OUTLINE_TEMPERATURE,
+            max_tokens=DEFAULT_MAX_TOKENS,
+        )
         chapters = self._extract_json(response)
 
         if not isinstance(chapters, list):
@@ -91,8 +107,8 @@ class ScriptAIService:
 
         return [
             {
-                "title": ch.get("title", f"Chapter {i + 1}")[:200],
-                "summary": ch.get("summary", "")[:5000],
+                "title": ch.get("title", f"Chapter {i + 1}")[:MAX_TITLE_LENGTH],
+                "summary": ch.get("summary", "")[:MAX_SUMMARY_LENGTH],
             }
             for i, ch in enumerate(chapters)
         ]
@@ -121,8 +137,12 @@ class ScriptAIService:
             {"role": "user", "content": user_prompt},
         ]
 
-        content = await self._call_llm(messages, temperature=0.8, max_tokens=4096)
-        return content[:50000]  # safety limit
+        content = await self._call_llm(
+            messages,
+            temperature=DEFAULT_EXPAND_TEMPERATURE,
+            max_tokens=DEFAULT_MAX_TOKENS,
+        )
+        return content[:MAX_CONTENT_LENGTH]
 
     async def create_branches(
         self,
@@ -157,7 +177,11 @@ class ScriptAIService:
             {"role": "user", "content": user_prompt},
         ]
 
-        response = await self._call_llm(messages, temperature=0.9, max_tokens=4096)
+        response = await self._call_llm(
+            messages,
+            temperature=DEFAULT_BRANCH_TEMPERATURE,
+            max_tokens=DEFAULT_MAX_TOKENS,
+        )
         branches = self._extract_json(response)
 
         if not isinstance(branches, list):
@@ -165,9 +189,9 @@ class ScriptAIService:
 
         return [
             {
-                "title": b.get("title", f"Branch {i + 1}")[:200],
-                "summary": b.get("summary", "")[:5000],
-                "branch_label": b.get("branch_label", f"Path {i + 1}")[:100],
+                "title": b.get("title", f"Branch {i + 1}")[:MAX_TITLE_LENGTH],
+                "summary": b.get("summary", "")[:MAX_SUMMARY_LENGTH],
+                "branch_label": b.get("branch_label", f"Path {i + 1}")[:MAX_BRANCH_LABEL_LENGTH],
             }
             for i, b in enumerate(branches[:branch_count])
         ]
@@ -204,7 +228,11 @@ class ScriptAIService:
             {"role": "user", "content": user_prompt},
         ]
 
-        response = await self._call_llm(messages, temperature=0.7, max_tokens=4096)
+        response = await self._call_llm(
+            messages,
+            temperature=DEFAULT_OUTLINE_TEMPERATURE,
+            max_tokens=DEFAULT_MAX_TOKENS,
+        )
         scenes = self._extract_json(response)
 
         if not isinstance(scenes, list):
