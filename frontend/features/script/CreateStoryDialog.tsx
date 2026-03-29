@@ -14,10 +14,12 @@ export function CreateStoryDialog({ isOpen, onClose }: Props) {
   const [premise, setPremise] = useState('');
   const [chapterCount, setChapterCount] = useState(5);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async () => {
     if (!premise.trim() || !scriptId) return;
     setGenerating(true);
+    setError(null);
 
     try {
       await generateOutline({
@@ -25,10 +27,11 @@ export function CreateStoryDialog({ isOpen, onClose }: Props) {
         premise: premise.trim(),
         chapter_count: chapterCount,
       });
-      // Async task dispatched — user sees progress in TaskManager
       onClose();
     } catch (err) {
-      console.error('[CreateStoryDialog] Failed to dispatch outline generation:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      console.error('[CreateStoryDialog] Failed:', message);
     } finally {
       setGenerating(false);
     }
@@ -63,6 +66,10 @@ export function CreateStoryDialog({ isOpen, onClose }: Props) {
             />
             <p className="text-[11px] text-zinc-600 mt-1">{premise.length} / 10,000</p>
           </div>
+
+          {error && (
+            <p className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">{error}</p>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-zinc-400 mb-1.5">

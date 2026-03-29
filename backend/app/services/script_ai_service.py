@@ -111,6 +111,7 @@ class ScriptAIService:
                 "summary": ch.get("summary", "")[:MAX_SUMMARY_LENGTH],
             }
             for i, ch in enumerate(chapters)
+            if isinstance(ch, dict)
         ]
 
     async def expand_chapter(
@@ -194,6 +195,7 @@ class ScriptAIService:
                 "branch_label": b.get("branch_label", f"Path {i + 1}")[:MAX_BRANCH_LABEL_LENGTH],
             }
             for i, b in enumerate(branches[:branch_count])
+            if isinstance(b, dict)
         ]
 
     async def split_chapter_to_scenes(

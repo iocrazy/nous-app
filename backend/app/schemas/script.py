@@ -57,7 +57,7 @@ class ScriptChapterCreate(BaseModel):
 
     title: Optional[str] = Field(None, max_length=200)
     summary: Optional[str] = Field(None, max_length=5000)
-    content: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=100000)
     chapter_number: Optional[int] = None
     parent_chapter_id: Optional[str] = None
     branch_label: Optional[str] = Field(None, max_length=100)
@@ -75,7 +75,7 @@ class ScriptChapterUpdate(BaseModel):
 
     title: Optional[str] = Field(None, max_length=200)
     summary: Optional[str] = Field(None, max_length=5000)
-    content: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=100000)
     chapter_number: Optional[int] = None
     parent_chapter_id: Optional[str] = None
     branch_label: Optional[str] = Field(None, max_length=100)
@@ -158,7 +158,7 @@ class ScriptAssetCreate(BaseModel):
         ..., pattern="^(worldview|character|location|prop|plot_point)$"
     )
     name: str = Field(..., min_length=1, max_length=200)
-    content: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=100000)
     data_json: Dict[str, Any] = Field(default_factory=dict)
     sort_order: int = Field(default=0)
 
@@ -167,7 +167,7 @@ class ScriptAssetUpdate(BaseModel):
     """Request body for updating a script asset."""
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
-    content: Optional[str] = None
+    content: Optional[str] = Field(None, max_length=100000)
     data_json: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
 

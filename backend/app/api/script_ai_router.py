@@ -5,7 +5,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthDep, get_team_id_for_user
 from app.schemas.script import (
     ConvertToStoryboardRequest,
     CreateBranchesRequest,
@@ -19,10 +19,22 @@ from app.services.unified_task_manager import get_task_manager
 router = APIRouter(prefix="/scripts")
 
 
+async def _verify_script_access(script_id: str, user_id: str) -> None:
+    """Verify the authenticated user has access to this script (via team membership)."""
+    svc = ScriptService()
+    project = await svc.project_repo.get_by_id(script_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Script project not found")
+    user_team = await get_team_id_for_user(user_id)
+    if str(user_team) != str(project.get("team_id")):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 @router.post("/generate-outline")
 async def generate_outline(auth: AuthDep, body: GenerateOutlineRequest) -> Dict[str, Any]:
     """Dispatch async outline generation. Returns task_id immediately."""
     try:
+        await _verify_script_access(body.script_id, auth.user_id)
         mgr = get_task_manager()
         task_id = await mgr.create(
             user_id=auth.user_id,
@@ -50,6 +62,7 @@ async def generate_outline(auth: AuthDep, body: GenerateOutlineRequest) -> Dict[
 async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str, Any]:
     """Synchronously expand a chapter summary into full prose."""
     try:
+        await _verify_script_access(body.script_id, auth.user_id)
         ai_svc = ScriptAIService()
         content = await ai_svc.expand_chapter(
             title=body.title,
@@ -73,6 +86,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
 async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[str, Any]:
     """Synchronously generate story branches and create chapter nodes."""
     try:
+        await _verify_script_access(body.script_id, auth.user_id)
         ai_svc = ScriptAIService()
         branches = await ai_svc.create_branches(
             title=body.title,

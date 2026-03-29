@@ -96,10 +96,9 @@ async def _generate_outline_async(
         return result_data
 
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[ScriptTasks] generate_outline failed: {error_msg}")
-        await _fail_unified(task_id, error_msg)
-        return {"status": "failed", "error": error_msg}
+        logger.error("[ScriptTasks] generate_outline failed: %s", e)
+        await _fail_unified(task_id, "Outline generation failed")
+        return {"status": "failed", "error": "Outline generation failed"}
 
 
 @shared_task(

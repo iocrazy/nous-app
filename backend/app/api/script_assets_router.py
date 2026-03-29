@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthDep, get_team_id_for_user
 from app.schemas.script import ScriptAssetCreate, ScriptAssetUpdate
 from app.services.script_service import ScriptService
 
@@ -18,6 +18,9 @@ async def _verify_script_access(script_id: str, user_id: str) -> None:
     project = await svc.project_repo.get_by_id(script_id)
     if not project:
         raise HTTPException(status_code=404, detail="Script project not found")
+    user_team = await get_team_id_for_user(user_id)
+    if str(user_team) != str(project.get("team_id")):
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 @router.post("/{script_id}/assets")

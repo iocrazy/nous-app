@@ -19,8 +19,10 @@ class BaseRepository:
         try:
             client = await self._get_client()
             result = await client.table(self.TABLE_NAME).insert(data).execute()
+            if not result.data:
+                raise RuntimeError(f"Insert into {self.TABLE_NAME} returned no data")
             logger.info("Created %s record", self.TABLE_NAME)
-            return result.data[0] if result.data else {}
+            return result.data[0]
         except Exception as e:
             logger.error("Failed to create %s: %s", self.TABLE_NAME, e)
             raise
