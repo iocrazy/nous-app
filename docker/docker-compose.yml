@@ -127,21 +127,6 @@ services:
     depends_on:
       - mediahub
 
-  # Flower - Task monitoring Web UI
-  flower:
-    image: mher/flower:2.0
-    container_name: mediahub-flower
-    restart: unless-stopped
-    ports:
-      - "${FLOWER_PORT:-5555}:5555"
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - FLOWER_PORT=5555
-      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
-    depends_on:
-      redis:
-        condition: service_healthy
-
   # MediaHub Admin Panel (ACR + Watchtower auto-update)
   mediahub-admin:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-admin:latest

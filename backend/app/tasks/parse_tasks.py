@@ -478,7 +478,7 @@ def _dispatch_download_deduped(
         unified_task_id = run_async(mgr.create(
             user_id=user_id,
             task_type="download",
-            title=video_title[:50] or platform_id,
+            title=f"Download {video_title[:50] or platform_id}",
             subtitle=" + ".join(dl_parts),
             media_id=platform_id,
             resource_id=resource_id,
@@ -642,7 +642,7 @@ def parse_media_task(
                 run_async(manager.update_progress(
                     unified_task_id, 30,
                     subtitle=f"via {method_label} · Enriching data...",
-                    title=video_title[:80] if video_title else None,
+                    title=f"Parse {video_title[:70]}" if video_title else None,
                 ))
             except Exception as e:
                 logger.error(f"[Parse/Task] Update progress (enriching) silent exception: {e}")

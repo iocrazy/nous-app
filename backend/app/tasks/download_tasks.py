@@ -1162,7 +1162,7 @@ def download_unified_task(
             unified_task_id = run_async(manager.create(
                 user_id=user_id,
                 task_type="download",
-                title=video_title or platform_id,
+                title=f"Download {video_title or platform_id}",
                 subtitle=dl_subtitle,
                 media_id=platform_id,
                 celery_task_id=task_id,

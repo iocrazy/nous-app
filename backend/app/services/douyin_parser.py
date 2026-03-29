@@ -156,8 +156,28 @@ class DouyinParser:
                 download_cover,
             )
         else:
-            logger.warning(f"不支持的媒体类型: {aweme_type}")
-            raise ValueError(f"不支持的媒体类型: {aweme_type}")
+            # Fallback: detect type from data structure
+            has_images = bool(aweme_detail.get("images"))
+            has_video = bool(aweme_detail.get("video", {}).get("play_addr"))
+            if has_images:
+                logger.info(
+                    f"未知媒体类型 {aweme_type}，检测到 images 字段，按图文处理: aweme_id={aweme_id}"
+                )
+                return await DouyinParser._parse_image_text(
+                    aweme_detail, aweme_id, valid_url,
+                    download_video, download_music, download_cover,
+                )
+            elif has_video:
+                logger.info(
+                    f"未知媒体类型 {aweme_type}，检测到 video 字段，按视频处理: aweme_id={aweme_id}"
+                )
+                return await DouyinParser._parse_video(
+                    aweme_detail, aweme_id, valid_url,
+                    download_video, download_music, download_cover,
+                )
+            else:
+                logger.warning(f"不支持的媒体类型: {aweme_type}, aweme_id={aweme_id}")
+                raise ValueError(f"不支持的媒体类型: {aweme_type}")
 
     @staticmethod
     def _extract_cover_urls(aweme_detail: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,24 +237,32 @@ class DouyinParser:
             Dict[str, Any]: Structured image-text data
         """
         # Extract image and video URLs
+        # Douyin frontend shows N elements total (e.g. 16 = 8 images + 8 Live Photos).
+        # For items WITH embedded video: save video only (image is just a preview thumbnail).
+        # For items WITHOUT video: save the image.
         images = aweme_detail.get("images", [])
         image_download_urls = []
         video_download_urls = []
 
         if images:
             for item in images:
-                if not item.get("video", {}):
-                    image_urls = item.get("download_url_list", [])
-                    image_download_urls.append(image_urls)
-                    logger.debug(f"image_url_list: {image_download_urls}")
-                if item.get("video", {}):
-                    video_urls = (
-                        item.get("video", {}).get("play_addr", {}).get("url_list", [])
-                    )
-                    video_download_urls.append(video_urls)
-                    logger.debug(f"video_url_list: {video_download_urls}")
+                video_play_addr = (item.get("video") or {}).get("play_addr", {})
+                vid_urls = video_play_addr.get("url_list", [])
 
-        logger.debug(f"image_download_urls: {image_download_urls}")
+                if vid_urls:
+                    # Live Photo: save video, skip preview image
+                    video_download_urls.append(vid_urls)
+                else:
+                    # Pure image: save image
+                    image_urls = item.get("url_list") or item.get("download_url_list", [])
+                    if image_urls:
+                        image_download_urls.append(image_urls)
+
+        logger.info(
+            f"[DouyinParser/image_text] images={len(image_download_urls)}, "
+            f"videos={len(video_download_urls)} (Live Photo), "
+            f"total={len(image_download_urls) + len(video_download_urls)} elements"
+        )
         # Build music name
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
         music_title = aweme_detail.get("music", {}).get("title", "undefined")
@@ -244,8 +272,23 @@ class DouyinParser:
         # Extract cover URLs
         cover_data = DouyinParser._extract_cover_urls(aweme_detail)
 
-        # Extract standalone music play URL (carousel types have separate audio)
-        music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_text")
+        # Top-level video.play_addr may be audio (.mp3) for image-text types
+        top_level_music_urls: list = []
+        top_video = aweme_detail.get("video", {})
+        if top_video and top_video.get("play_addr", {}).get("url_list"):
+            play_addr = top_video["play_addr"]
+            uri = play_addr.get("uri", "")
+            top_urls = play_addr["url_list"]
+            if isinstance(uri, str) and ".mp3" in uri:
+                top_level_music_urls = [uri] if uri.startswith("http") else top_urls
+                logger.info(f"[DouyinParser/image_text] Top-level video is audio: uri={uri[:80]}")
+
+        # Extract standalone music play URL
+        if top_level_music_urls:
+            music_play_urls = top_level_music_urls
+            logger.info(f"[DouyinParser/image_text] Using audio from video.play_addr: {len(music_play_urls)} URLs")
+        else:
+            music_play_urls = await DouyinParser._extract_music_play_urls(aweme_detail, "image_text")
 
         # Build return data
         return {
