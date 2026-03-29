@@ -10,7 +10,7 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
-import { fetchVideoByDisplayId, updateItem, deleteItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
+import { fetchVideoByDisplayId, updateItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { trashResourceByMediaId, trashResourceByPlatformId } from '../services/resourceService';
 import { getVideoUrl, isVideoType, isAlbumType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
@@ -329,18 +329,18 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       }
       trashed = true;
     } catch (err) {
-      console.error('Trash failed, trying direct delete:', err);
-      // Resource may not exist (e.g. previously permanently deleted).
-      // Fall back to deleting the parsed_media record directly.
+      console.error('Trash failed:', err);
+      // Try by media_id as fallback (resource might exist with different lookup)
       try {
         if (video.id) {
-          await deleteItem(video.id, deleteFiles);
+          await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
+          trashed = true;
         } else {
           throw new Error('No video id');
         }
       } catch (err2) {
-        console.error('Direct delete also failed:', err2);
-        addToast('Failed to delete', 'error');
+        console.error('Trash by media_id also failed:', err2);
+        addToast('Failed to move to trash', 'error');
         return;
       }
     }
