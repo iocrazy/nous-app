@@ -42,10 +42,19 @@ class ProjectsService:
         Returns:
             List of project dicts, each with a ``file_count`` key.
         """
+        import asyncio
+
         projects = await self.repo.get_user_projects(user_id)
-        for p in projects:
-            p["file_count"] = await self.repo.get_project_file_count(p["id"])
-        return projects
+        if not projects:
+            return []
+
+        counts = await asyncio.gather(
+            *(self.repo.get_project_file_count(p["id"]) for p in projects)
+        )
+        return [
+            {**p, "file_count": count}
+            for p, count in zip(projects, counts)
+        ]
 
     async def create_project(self, user_id: str, data: dict) -> dict:
         """
