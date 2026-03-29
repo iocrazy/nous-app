@@ -26,7 +26,7 @@ from app.repositories.user_settings_repository import UserSettingsRepository
 from app.repositories.media_repository import MediaRepository
 from app.services.drissionpage_parser import DrissionPageParser
 from app.services.douyin_formatter import DouyinFormatter
-from app.services.ies_douyin_parser import IesDouyinFormatter
+from app.services.ies_douyin_parser import IesDouyinParser
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
 from app.schemas.media import MediaTypeFetchRequest
