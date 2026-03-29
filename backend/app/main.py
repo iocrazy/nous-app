@@ -27,24 +27,36 @@ async def lifespan(app: FastAPI):
 
     # app.state.redis = await init_redis() # 在启动时初始化redis
 
-    # Load persisted transcode settings from frontend_config.yml
+    # Load persisted transcode settings from database (system_settings)
     try:
-        config = load_frontend_config()
-        transcode = config.get("transcode", {})
-        if transcode.get("encoder"):
-            settings.FFMPEG_ENCODER = transcode["encoder"]
-        if transcode.get("preset"):
-            settings.FFMPEG_PRESET = transcode["preset"]
-        if "parallel_tiers" in transcode:
-            settings.TRANSCODE_PARALLEL_TIERS = transcode["parallel_tiers"]
-        if "min_size_mb" in transcode:
-            settings.TRANSCODE_MIN_SIZE_MB = transcode["min_size_mb"]
+        from app.db import get_async_supabase_admin
+        supabase = await get_async_supabase_admin()
+        result = await (
+            supabase.table("system_settings")
+            .select("key, value")
+            .like("key", "transcode_%")
+            .execute()
+        )
+        db_map = {row["key"]: row["value"] for row in (result.data or [])}
+        if "transcode_enabled" in db_map:
+            settings.TRANSCODE_ENABLED = db_map["transcode_enabled"]
+        if "transcode_tiers" in db_map:
+            settings.TRANSCODE_TIERS = db_map["transcode_tiers"]
+        if "transcode_encoder" in db_map:
+            settings.FFMPEG_ENCODER = db_map["transcode_encoder"]
+        if "transcode_preset" in db_map:
+            settings.FFMPEG_PRESET = db_map["transcode_preset"]
+        if "transcode_parallel_tiers" in db_map:
+            settings.TRANSCODE_PARALLEL_TIERS = db_map["transcode_parallel_tiers"]
+        if "transcode_min_size_mb" in db_map:
+            settings.TRANSCODE_MIN_SIZE_MB = db_map["transcode_min_size_mb"]
         logger.info(
-            f"Transcode config loaded: encoder={settings.FFMPEG_ENCODER}, "
-            f"preset={settings.FFMPEG_PRESET}, parallel={settings.TRANSCODE_PARALLEL_TIERS}"
+            f"Transcode config loaded from DB: enabled={settings.TRANSCODE_ENABLED}, "
+            f"tiers={settings.TRANSCODE_TIERS}, encoder={settings.FFMPEG_ENCODER}, "
+            f"min_size_mb={settings.TRANSCODE_MIN_SIZE_MB}"
         )
     except Exception as e:
-        logger.warning(f"Failed to load transcode config from frontend_config.yml: {e}")
+        logger.warning(f"Failed to load transcode config from database: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
