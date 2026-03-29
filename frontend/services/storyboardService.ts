@@ -44,10 +44,14 @@ async function unwrapResponse<T>(res: Response): Promise<T> {
 export async function fetchProjects(
   teamId: string,
   page = 1,
-  limit = 20
+  limit = 20,
+  projectId?: string
 ): Promise<{ data: ProjectSummary[]; total: number }> {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
+  if (projectId) {
+    params.set('project_id', projectId);
+  }
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
   const result = await unwrapResponse<{ items: ProjectSummary[]; total: number }>(res);
   return { data: result?.items ?? [], total: result?.total ?? 0 };
@@ -75,6 +79,7 @@ export async function createProject(data: {
   team_id: string;
   name: string;
   description?: string;
+  project_id?: string;
 }): Promise<StoryboardProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects`, {

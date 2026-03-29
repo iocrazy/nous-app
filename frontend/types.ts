@@ -593,6 +593,8 @@ export interface Project {
   is_starred: boolean;
   color_label: string | null;
   file_count: number;
+  display_code?: string;
+  modules_enabled?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -751,10 +753,14 @@ export interface StoryboardProject {
   cover_image_url?: string;
   viewport_json?: { x: number; y: number; zoom: number };
   settings_json?: Record<string, unknown>;
+  project_id?: string;
+  display_code?: string;
   status: 'active' | 'archived' | 'deleted';
   created_at: string;
   updated_at: string;
 }
+
+export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
 
 export interface StoryboardNode {
   id: string;
