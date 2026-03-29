@@ -19,6 +19,7 @@ import { SharePage } from './pages/SharePage';
 import { SharedPage } from './pages/SharedPage';
 import { ShortcutsTagsPage } from './pages/ShortcutsTagsPage';
 import { StoryboardWorkbench } from './pages/StoryboardWorkbench';
+import { ScriptEditor } from './pages/ScriptEditor';
 
 export const router = createBrowserRouter([
   // Public routes (no auth required)
@@ -92,6 +93,7 @@ export const router = createBrowserRouter([
           { path: 'shared', element: <SharedPage /> },
           { path: 'player/:displayId', element: <PlayerPage /> },
           { path: 'projects/:projectId/storyboard/:storyboardId', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
+          { path: 'projects/:projectId/scripts/:scriptId', element: <ScriptEditor /> },
         ],
       },
 
