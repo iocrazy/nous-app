@@ -18,7 +18,7 @@ import httpx
 from loguru import logger
 
 
-class LightweightParser:
+class IesDouyinParser:
     """轻量级抖音解析器，通过 HTTP 请求解析分享页面"""
 
     # 模拟移动端浏览器的完整 headers
@@ -75,9 +75,9 @@ class LightweightParser:
                         extra[key] = value
 
         except Exception as e:
-            logger.debug(f"[LightweightParser] Failed to load user overrides: {e}")
+            logger.debug(f"[IesDouyinParser] Failed to load user overrides: {e}")
         if extra:
-            logger.info(f"[LightweightParser] Loaded user overrides: {list(extra.keys())}")
+            logger.info(f"[IesDouyinParser] Loaded user overrides: {list(extra.keys())}")
         return extra
 
     @classmethod
@@ -96,7 +96,7 @@ class LightweightParser:
             None: 解析失败
         """
         try:
-            logger.info(f"[LightweightParser] 开始解析: {share_url}")
+            logger.info(f"[IesDouyinParser] 开始解析: {share_url}")
 
             # Load user cookie + custom headers if available
             extra_headers = await cls._get_user_overrides(user_id)
@@ -104,27 +104,27 @@ class LightweightParser:
             # 1. 跟随重定向获取视频 ID 和内容类型
             result = await cls._get_video_id(share_url, extra_headers)
             if not result:
-                logger.warning("[LightweightParser] 无法获取视频 ID")
+                logger.warning("[IesDouyinParser] 无法获取视频 ID")
                 return None
 
             video_id, content_type = result
-            logger.info(f"[LightweightParser] 获取到视频 ID: {video_id}, type: {content_type}")
+            logger.info(f"[IesDouyinParser] 获取到视频 ID: {video_id}, type: {content_type}")
 
             # 2. 访问分享页面获取数据
             aweme_detail = await cls._fetch_share_page(
                 video_id, content_type, extra_headers
             )
             if not aweme_detail:
-                logger.warning("[LightweightParser] 无法从分享页面获取数据")
+                logger.warning("[IesDouyinParser] 无法从分享页面获取数据")
                 return None
 
             logger.success(
-                f"[LightweightParser] 解析成功: aweme_id={aweme_detail.get('aweme_id')}"
+                f"[IesDouyinParser] 解析成功: aweme_id={aweme_detail.get('aweme_id')}"
             )
             return aweme_detail
 
         except Exception as e:
-            logger.error(f"[LightweightParser] 解析失败: {e}")
+            logger.error(f"[IesDouyinParser] 解析失败: {e}")
             return None
 
     @classmethod
@@ -146,7 +146,7 @@ class LightweightParser:
                 response = await client.get(share_url, headers=headers)
                 final_url = str(response.url)
 
-                logger.info(f"[LightweightParser] 重定向后 URL: {final_url}")
+                logger.info(f"[IesDouyinParser] 重定向后 URL: {final_url}")
 
                 # 提取内容类型和数字 ID
                 patterns = [
@@ -166,11 +166,11 @@ class LightweightParser:
                 if video_id.isdigit():
                     return video_id, "video"
 
-                logger.warning(f"[LightweightParser] URL 模式不匹配, final_url={final_url}")
+                logger.warning(f"[IesDouyinParser] URL 模式不匹配, final_url={final_url}")
                 return None
 
         except Exception as e:
-            logger.error(f"[LightweightParser] 获取视频 ID 失败: {e}")
+            logger.error(f"[IesDouyinParser] 获取视频 ID 失败: {e}")
             return None
 
     @classmethod
@@ -226,7 +226,7 @@ class LightweightParser:
 
                 if match:
                     logger.info(
-                        f"[LightweightParser] ✅ _ROUTER_DATA found | "
+                        f"[IesDouyinParser] ✅ _ROUTER_DATA found | "
                         f"status={response.status_code} | size={page_len} | "
                         f"captcha={has_captcha}"
                     )
@@ -234,12 +234,12 @@ class LightweightParser:
                     reason = _classify_failure()
                     snippet = html_content[:2000].replace("\n", " ")
                     logger.warning(
-                        f"[LightweightParser] ⚠️ Parse failed | reason={reason} | "
+                        f"[IesDouyinParser] ⚠️ Parse failed | reason={reason} | "
                         f"status={response.status_code} | size={page_len} | "
                         f"url={share_page_url}"
                     )
                     logger.info(
-                        f"[LightweightParser] Page HTML ({reason}, first 2000 chars): {snippet}"
+                        f"[IesDouyinParser] Page HTML ({reason}, first 2000 chars): {snippet}"
                     )
                     return None
 
@@ -267,14 +267,14 @@ class LightweightParser:
 
                 if item_list is None:
                     logger.warning(
-                        f"[LightweightParser] ⚠️ Parse failed | reason=UNKNOWN_ROUTE_KEY | "
+                        f"[IesDouyinParser] ⚠️ Parse failed | reason=UNKNOWN_ROUTE_KEY | "
                         f"keys={list(loader_data.keys())}"
                     )
                     return None
 
                 if not item_list:
                     logger.warning(
-                        f"[LightweightParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
+                        f"[IesDouyinParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
                     )
                     return None
 
@@ -287,13 +287,13 @@ class LightweightParser:
                 return aweme_detail
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"[LightweightParser] HTTP 错误: {e.response.status_code}")
+            logger.error(f"[IesDouyinParser] HTTP 错误: {e.response.status_code}")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"[LightweightParser] JSON 解析错误: {e}")
+            logger.error(f"[IesDouyinParser] JSON 解析错误: {e}")
             return None
         except Exception as e:
-            logger.error(f"[LightweightParser] 获取分享页面失败: {e}")
+            logger.error(f"[IesDouyinParser] 获取分享页面失败: {e}")
             return None
 
     @classmethod
@@ -333,7 +333,7 @@ class LightweightParser:
                         br_play_addr["url_list"] = br_processed
 
         except Exception as e:
-            logger.warning(f"[LightweightParser] 处理视频 URL 时出错: {e}")
+            logger.warning(f"[IesDouyinParser] 处理视频 URL 时出错: {e}")
 
 
 # 便捷函数
@@ -347,4 +347,4 @@ async def lightweight_parse(share_url: str) -> Optional[Dict[str, Any]]:
     Returns:
         aweme_detail 数据或 None
     """
-    return await LightweightParser.parse(share_url)
+    return await IesDouyinParser.parse(share_url)

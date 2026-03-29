@@ -8,7 +8,7 @@ from loguru import logger
 from app.core.utils import SingletonMeta, Utils
 
 
-class DouyinAnalysis(metaclass=SingletonMeta):
+class DrissionPageParser(metaclass=SingletonMeta):
     """抖音服务 - 单例模式实现"""
 
     _lock = threading.Lock()
@@ -234,7 +234,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
             try:
                 # 获取单例实例
                 instance = cls()
-                logger.debug("获取DouyinAnalysis单例实例成功")
+                logger.debug("获取DrissionPageParser单例实例成功")
 
                 # 确保浏览器已初始化
                 try:

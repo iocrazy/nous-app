@@ -24,9 +24,9 @@ from app.core.utils import Utils
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.repositories.media_repository import MediaRepository
-from app.services.douyin_analysis import DouyinAnalysis
-from app.services.douyin_parser import DouyinParser
-from app.services.lightweight_parser import LightweightParser
+from app.services.drissionpage_parser import DrissionPageParser
+from app.services.douyin_formatter import DouyinFormatter
+from app.services.ies_douyin_parser import IesDouyinFormatter
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
 from app.schemas.media import MediaTypeFetchRequest
@@ -512,10 +512,10 @@ async def fetch_media_by_type(
         #       CDN URLs expire in hours; stale URLs cause download failures.
         if platform in ("douyin", "tiktok"):
             try:
-                aweme_detail = await LightweightParser._fetch_share_page(platform_id)
+                aweme_detail = await IesDouyinParser._fetch_share_page(platform_id)
                 if aweme_detail:
-                    LightweightParser._process_video_urls(aweme_detail)
-                    new_parsed = await DouyinParser.parse_aweme_detail(
+                    IesDouyinParser._process_video_urls(aweme_detail)
+                    new_parsed = await DouyinFormatter.parse_aweme_detail(
                         aweme_detail=aweme_detail,
                         valid_url=media.get("original_url", ""),
                         download_video=True,
@@ -776,25 +776,25 @@ async def fetch_videos_batch(
             if user_parse_mode == "drissionpage":
                 # User selected DrissionPage, use browser parsing directly
                 try:
-                    aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                    aweme_detail = await DrissionPageParser.fetch_one_video(url)
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
             else:
                 # Default mode: try LightHTTP first, then fallback
                 try:
-                    aweme_detail = await LightweightParser.parse(url)
+                    aweme_detail = await IesDouyinParser.parse(url)
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Lightweight parsing failed: {e}")
 
                 # Fallback to browser automation
                 if not aweme_detail:
                     try:
-                        aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                        aweme_detail = await DrissionPageParser.fetch_one_video(url)
                     except Exception as e:
                         logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
 
             if aweme_detail:
-                parsed_data = await DouyinParser.parse_aweme_detail(
+                parsed_data = await DouyinFormatter.parse_aweme_detail(
                     aweme_detail=aweme_detail,
                     valid_url=url,
                     download_video=request.video_bool,
@@ -1696,15 +1696,15 @@ async def debug_raw_parse(
     url: str = Query(..., description="Share URL to parse"),
 ):
     """
-    Debug endpoint: return raw aweme_detail JSON from LightweightParser.
+    Debug endpoint: return raw aweme_detail JSON from IesDouyinParser.
     No DB writes, no downloads — just raw parsed data.
     """
-    aweme_detail = await LightweightParser.parse(url)
+    aweme_detail = await IesDouyinParser.parse(url)
     if not aweme_detail:
-        raise HTTPException(status_code=404, detail="LightweightParser returned None")
+        raise HTTPException(status_code=404, detail="IesDouyinParser returned None")
 
-    # Also run DouyinParser to show structured output
-    parsed = await DouyinParser.parse_aweme_detail(
+    # Also run DouyinFormatter to show structured output
+    parsed = await DouyinFormatter.parse_aweme_detail(
         aweme_detail=aweme_detail,
         valid_url=url,
         download_video=False,
@@ -1750,7 +1750,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         # User selected DrissionPage — use browser parsing directly
         try:
             logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
-            aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+            aweme_detail = await DrissionPageParser.fetch_one_video(url)
             if aweme_detail:
                 parse_method = "browser_auto"
                 parse_method_name = "BrowserAuto"
@@ -1762,7 +1762,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         # Default (lighthttp): LightHTTP first, then DrissionPage fallback
         try:
             logger.info(f"[LightHTTP] Attempting parse: {url}")
-            aweme_detail = await LightweightParser.parse(url)
+            aweme_detail = await IesDouyinParser.parse(url)
             if aweme_detail:
                 parse_method = "light_http"
                 parse_method_name = "LightHTTP"
@@ -1777,7 +1777,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         if not aweme_detail:
             try:
                 logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
-                aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                aweme_detail = await DrissionPageParser.fetch_one_video(url)
                 if aweme_detail:
                     parse_method = "browser_auto"
                     parse_method_name = "BrowserAuto"
@@ -1792,7 +1792,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         )
 
     # Convert raw aweme_detail to our parsed_data format
-    parsed_data = await DouyinParser.parse_aweme_detail(
+    parsed_data = await DouyinFormatter.parse_aweme_detail(
         aweme_detail=aweme_detail,
         valid_url=url,
         download_video=True,

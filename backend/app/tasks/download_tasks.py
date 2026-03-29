@@ -360,23 +360,23 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         return media
 
     try:
-        from app.services.lightweight_parser import LightweightParser
-        from app.services.douyin_parser import DouyinParser
+        from app.services.ies_douyin_parser import IesDouyinFormatter
+        from app.services.douyin_formatter import DouyinFormatter
 
-        # --- Attempt 1: LightweightParser (fast HTTP, no browser) ---
-        aweme_detail = run_async(LightweightParser.parse(original_url))
+        # --- Attempt 1: IesDouyinFormatter (fast HTTP, no browser) ---
+        aweme_detail = run_async(IesDouyinFormatter.parse(original_url))
         parse_method = "LightHTTP"
 
         # If short URL failed, try directly with platform_id (bypass URL redirect)
         if not aweme_detail and platform_id:
             logger.info(f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}")
-            aweme_detail = run_async(LightweightParser._fetch_share_page(platform_id))
+            aweme_detail = run_async(IesDouyinFormatter._fetch_share_page(platform_id))
             if aweme_detail:
-                LightweightParser._process_video_urls(aweme_detail)
+                IesDouyinFormatter._process_video_urls(aweme_detail)
                 parse_method = "LightHTTP-directID"
 
         if aweme_detail:
-            new_parsed = run_async(DouyinParser.parse_aweme_detail(
+            new_parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail,
                 valid_url=original_url,
                 download_video=True,
@@ -396,19 +396,19 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         else:
             still_missing = list(missing_types)
 
-        # --- Attempt 2: DouyinAnalysis browser fallback (if still missing) ---
+        # --- Attempt 2: DrissionPageParser browser fallback (if still missing) ---
         if still_missing:
             logger.info(
                 f"[Download/URL] LightHTTP still missing {still_missing}, "
                 f"falling back to BrowserAuto for {platform_id}"
             )
             try:
-                from app.services.douyin_analysis import DouyinAnalysis
+                from app.services.drissionpage_parser import DrissionPageParser
 
-                browser_detail = run_async(DouyinAnalysis.fetch_one_video(original_url))
+                browser_detail = run_async(DrissionPageParser.fetch_one_video(original_url))
                 if browser_detail:
                     parse_method = "BrowserAuto"
-                    browser_parsed = run_async(DouyinParser.parse_aweme_detail(
+                    browser_parsed = run_async(DouyinFormatter.parse_aweme_detail(
                         aweme_detail=browser_detail,
                         valid_url=original_url,
                         download_video=True,
@@ -780,18 +780,18 @@ def _do_douyin_download(
                         f"(DrissionPage) to get fresh URLs for {platform_id}"
                     )
                     try:
-                        from app.services.douyin_analysis import DouyinAnalysis
-                        from app.services.douyin_parser import DouyinParser
+                        from app.services.drissionpage_parser import DrissionPageParser
+                        from app.services.douyin_formatter import DouyinFormatter
                         from app.repositories.media_repository import (
                             MediaRepository as _MR_browser,
                         )
 
                         browser_detail = run_async(
-                            DouyinAnalysis.fetch_one_video(original_url)
+                            DrissionPageParser.fetch_one_video(original_url)
                         )
                         if browser_detail:
                             browser_parsed = run_async(
-                                DouyinParser.parse_aweme_detail(
+                                DouyinFormatter.parse_aweme_detail(
                                     aweme_detail=browser_detail,
                                     valid_url=original_url,
                                     download_video=True,
@@ -902,19 +902,19 @@ def _do_douyin_download(
 
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
-                    from app.services.douyin_parser import DouyinParser
-                    from app.services.lightweight_parser import LightweightParser
+                    from app.services.douyin_formatter import DouyinFormatter
+                    from app.services.ies_douyin_parser import IesDouyinFormatter
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
                     )
                     aweme_detail = run_async(
-                        LightweightParser._fetch_share_page(platform_id)
+                        IesDouyinFormatter._fetch_share_page(platform_id)
                     )
                     if aweme_detail:
-                        LightweightParser._process_video_urls(aweme_detail)
+                        IesDouyinFormatter._process_video_urls(aweme_detail)
                         new_parsed = run_async(
-                            DouyinParser.parse_aweme_detail(
+                            DouyinFormatter.parse_aweme_detail(
                                 aweme_detail=aweme_detail,
                                 valid_url=media.get("original_url", ""),
                                 download_video=True,

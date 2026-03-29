@@ -16,7 +16,7 @@ from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
-from app.services.douyin_analysis import DouyinAnalysis
+from app.services.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
 Utils.setup_logging()
@@ -69,10 +69,10 @@ async def lifespan(app: FastAPI):
         #     await app.state.redis.close()
         #     logger.info("Redis连接已关闭")
 
-        # 关闭 DouyinAnalysis 浏览器资源
+        # 关闭 DrissionPageParser 浏览器资源
 
         logger.info("正在关闭抖音分析浏览器...")
-        DouyinAnalysis().close()
+        DrissionPageParser().close()
         logger.info("抖音分析浏览器已关闭")
     except Exception as e:
         logger.error(f"关闭抖音解析下载服务时出错: {str(e)}")

@@ -35,15 +35,15 @@ def _fetch_and_parse(valid_url: str, video_bool: bool,
     Returns (aweme_detail, parsed_data) tuple.
     Raises RuntimeError if fetch or parse fails.
     """
-    from app.services.douyin_analysis import DouyinAnalysis
-    from app.services.douyin_parser import DouyinParser
+    from app.services.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_formatter import DouyinFormatter
 
-    aweme_detail = run_async(DouyinAnalysis.fetch_one_video(valid_url))
+    aweme_detail = run_async(DrissionPageParser.fetch_one_video(valid_url))
     if not aweme_detail:
         raise RuntimeError("Cannot fetch video info")
 
     parsed_data = run_async(
-        DouyinParser.parse_aweme_detail(
+        DouyinFormatter.parse_aweme_detail(
             aweme_detail=aweme_detail,
             valid_url=valid_url,
             download_video=video_bool,
@@ -356,13 +356,13 @@ def _get_douyin_method_flags() -> dict[str, bool]:
 
 def _try_lighthttp(url: str, user_id: str):
     """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
-    from app.services.lightweight_parser import LightweightParser
-    from app.services.douyin_parser import DouyinParser
+    from app.services.ies_douyin_parser import IesDouyinFormatter
+    from app.services.douyin_formatter import DouyinFormatter
 
     try:
-        aweme_detail = run_async(LightweightParser.parse(url, user_id=user_id))
+        aweme_detail = run_async(IesDouyinParser.parse(url, user_id=user_id))
         if aweme_detail:
-            parsed = run_async(DouyinParser.parse_aweme_detail(
+            parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail, valid_url=url,
                 download_video=True, download_music=False, download_cover=True,
             ))
@@ -375,13 +375,13 @@ def _try_lighthttp(url: str, user_id: str):
 
 def _try_drissionpage(url: str, user_id: str):
     """Attempt DrissionPage parse. Returns (parsed, method, name) or None."""
-    from app.services.douyin_analysis import DouyinAnalysis
-    from app.services.douyin_parser import DouyinParser
+    from app.services.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_formatter import DouyinFormatter
 
     try:
-        aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url, user_id=user_id))
+        aweme_detail = run_async(DrissionPageParser.fetch_one_video(url, user_id=user_id))
         if aweme_detail:
-            parsed = run_async(DouyinParser.parse_aweme_detail(
+            parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail, valid_url=url,
                 download_video=True, download_music=False, download_cover=True,
             ))
