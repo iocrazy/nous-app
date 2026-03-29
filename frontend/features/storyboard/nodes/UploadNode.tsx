@@ -1,0 +1,376 @@
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type SyntheticEvent,
+} from 'react';
+import {
+  Handle,
+  Position,
+  useUpdateNodeInternals,
+  useViewport,
+  type NodeProps,
+} from '@xyflow/react';
+import { AlertCircle, FileImage, Loader2, RefreshCw, Upload } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+import {
+  CANVAS_NODE_TYPES,
+  EXPORT_RESULT_NODE_MIN_HEIGHT,
+  EXPORT_RESULT_NODE_MIN_WIDTH,
+  type UploadImageNodeData,
+} from '../domain/canvasNodes';
+import {
+  resolveMinEdgeFittedSize,
+  resolveResizeMinConstraintsByAspect,
+} from '../application/imageNodeSizing';
+import {
+  isNodeUsingDefaultDisplayName,
+  resolveNodeDisplayName,
+} from '../domain/nodeDisplay';
+import { canvasEventBus } from '../application/canvasServices';
+import { NodeHeader, NODE_HEADER_FLOATING_POSITION_CLASS } from '../ui/NodeHeader';
+import { NodeResizeHandle } from '../ui/NodeResizeHandle';
+import {
+  prepareNodeImageFromFile,
+  resolveImageDisplayUrl,
+  shouldUseOriginalImageByZoom,
+} from '../application/imageData';
+import { CanvasNodeImage } from '../ui/CanvasNodeImage';
+import { useCanvasStore } from '../../../stores/canvasStore';
+
+type UploadNodeProps = NodeProps & {
+  id: string;
+  data: UploadImageNodeData;
+  selected?: boolean;
+};
+
+function resolveNodeDimension(value: number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 1) {
+    return Math.round(value);
+  }
+  return fallback;
+}
+
+function resolveDroppedImageFile(event: DragEvent<HTMLElement>): File | null {
+  const directFile = event.dataTransfer.files?.[0];
+  if (directFile) {
+    return directFile;
+  }
+
+  const item = Array.from(event.dataTransfer.items || []).find(
+    (candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/')
+  );
+  return item?.getAsFile() ?? null;
+}
+
+export const UploadNode = memo(({ id, data, selected, width, height }: UploadNodeProps) => {
+  const { t } = useTranslation();
+  const updateNodeInternals = useUpdateNodeInternals();
+  const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const { zoom } = useViewport();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const uploadSequenceRef = useRef(0);
+  const [transientPreviewUrl, setTransientPreviewUrl] = useState<string | null>(null);
+  const [isDragHovering, setIsDragHovering] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const resolvedAspectRatio = data.aspectRatio || '1:1';
+  const compactSize = resolveMinEdgeFittedSize(resolvedAspectRatio, {
+    minWidth: EXPORT_RESULT_NODE_MIN_WIDTH,
+    minHeight: EXPORT_RESULT_NODE_MIN_HEIGHT,
+  });
+  const resolvedWidth = resolveNodeDimension(width, compactSize.width);
+  const resolvedHeight = resolveNodeDimension(height, compactSize.height);
+  const resizeConstraints = resolveResizeMinConstraintsByAspect(resolvedAspectRatio, {
+    minWidth: EXPORT_RESULT_NODE_MIN_WIDTH,
+    minHeight: EXPORT_RESULT_NODE_MIN_HEIGHT,
+  });
+  const resizeMinWidth = resizeConstraints.minWidth;
+  const resizeMinHeight = resizeConstraints.minHeight;
+  // Use upload filename as title if using default display name
+  const useUploadFilenameAsNodeTitle = true;
+  const resolvedTitle = useMemo(() => {
+    const sourceFileName = typeof data.sourceFileName === 'string' ? data.sourceFileName.trim() : '';
+    if (
+      useUploadFilenameAsNodeTitle
+      && sourceFileName
+      && isNodeUsingDefaultDisplayName(CANVAS_NODE_TYPES.upload, data)
+    ) {
+      return sourceFileName;
+    }
+
+    return resolveNodeDisplayName(CANVAS_NODE_TYPES.upload, data);
+  }, [data]);
+
+  const clearTransientPreview = useCallback(() => {
+    setTransientPreviewUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      return null;
+    });
+  }, []);
+
+  const processFile = useCallback(
+    async (file: File) => {
+      const sequence = uploadSequenceRef.current + 1;
+      uploadSequenceRef.current = sequence;
+      clearTransientPreview();
+      setLoadError(false);
+      setIsUploading(true);
+      const optimisticPreviewUrl = URL.createObjectURL(file);
+      setTransientPreviewUrl(optimisticPreviewUrl);
+
+      try {
+        const prepared = await prepareNodeImageFromFile(file);
+        const nextData: Partial<UploadImageNodeData> = {
+          imageUrl: prepared.imageUrl,
+          previewImageUrl: prepared.previewImageUrl,
+          aspectRatio: prepared.aspectRatio || '1:1',
+          sourceFileName: file.name,
+        };
+        if (useUploadFilenameAsNodeTitle) {
+          nextData.displayName = file.name;
+        }
+        updateNodeData(id, nextData);
+      } catch (error) {
+        if (uploadSequenceRef.current === sequence) {
+          clearTransientPreview();
+        }
+        console.error(`[upload] processFile failed nodeId=${id}`, error);
+        throw error;
+      } finally {
+        if (uploadSequenceRef.current === sequence) {
+          setIsUploading(false);
+        }
+      }
+    },
+    [clearTransientPreview, id, updateNodeData]
+  );
+
+  const handleImageLoad = useCallback((_event: SyntheticEvent<HTMLImageElement>) => {
+    // Performance tracking removed for web migration
+  }, []);
+
+  const handleDrop = useCallback(
+    async (event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const file = resolveDroppedImageFile(event);
+      if (!file || !file.type.startsWith('image/')) {
+        return;
+      }
+
+      await processFile(file);
+    },
+    [processFile]
+  );
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleDragEnter = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragHovering(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragHovering(false);
+  }, []);
+
+  const handleImageError = useCallback(() => {
+    setLoadError(true);
+  }, []);
+
+  const handleRetryUpload = useCallback(() => {
+    setLoadError(false);
+    inputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file || !file.type.startsWith('image/')) {
+        return;
+      }
+
+      await processFile(file);
+      event.target.value = '';
+    },
+    [processFile]
+  );
+
+  useEffect(() => {
+    return canvasEventBus.subscribe('upload-node/reupload', ({ nodeId }) => {
+      if (nodeId !== id) {
+        return;
+      }
+      inputRef.current?.click();
+    });
+  }, [id]);
+
+  useEffect(() => {
+    return canvasEventBus.subscribe('upload-node/paste-image', ({ nodeId, file }) => {
+      if (nodeId !== id || !file.type.startsWith('image/')) {
+        return;
+      }
+      void processFile(file);
+    });
+  }, [id, processFile]);
+
+  const handleNodeClick = useCallback(() => {
+    setSelectedNode(id);
+    if (!data.imageUrl && !transientPreviewUrl) {
+      inputRef.current?.click();
+    }
+  }, [data.imageUrl, id, setSelectedNode, transientPreviewUrl]);
+
+  useEffect(() => () => {
+    clearTransientPreview();
+  }, [clearTransientPreview]);
+
+  const imageSource = useMemo(() => {
+    if (transientPreviewUrl) {
+      return transientPreviewUrl;
+    }
+    const preferOriginal = shouldUseOriginalImageByZoom(zoom);
+    const picked = preferOriginal
+      ? data.imageUrl || data.previewImageUrl
+      : data.previewImageUrl || data.imageUrl;
+    return picked ? resolveImageDisplayUrl(picked) : null;
+  }, [data.imageUrl, data.previewImageUrl, transientPreviewUrl, zoom]);
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, resolvedHeight, resolvedWidth, updateNodeInternals]);
+
+  return (
+    <div
+      className={`
+        group relative overflow-visible rounded-[var(--node-radius)] border bg-surface-dark/85 p-0 transition-colors duration-150
+        ${selected
+          ? 'border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.32)]'
+          : 'border-[rgba(15,23,42,0.22)] hover:border-[rgba(15,23,42,0.34)] dark:border-[rgba(255,255,255,0.22)] dark:hover:border-[rgba(255,255,255,0.34)]'}
+      `}
+      style={{ width: resolvedWidth, height: resolvedHeight }}
+      onClick={handleNodeClick}
+      onDrop={(e) => { setIsDragHovering(false); void handleDrop(e); }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+    >
+      <NodeHeader
+        className={NODE_HEADER_FLOATING_POSITION_CLASS}
+        icon={<Upload className="h-4 w-4" />}
+        titleText={resolvedTitle}
+        editable
+        onTitleChange={(nextTitle) => updateNodeData(id, { displayName: nextTitle })}
+      />
+
+      {/* Drag hover pulse border */}
+      {isDragHovering && (
+        <div className="pointer-events-none absolute inset-0 z-20 rounded-[var(--node-radius)] border-2 border-dashed border-indigo-400 animate-pulse" />
+      )}
+
+      {/* Upload progress indicator */}
+      {isUploading && (
+        <div className="absolute inset-x-0 top-0 z-30 h-1 overflow-hidden rounded-t-[var(--node-radius)]">
+          <div className="h-full w-full animate-pulse bg-gradient-to-r from-indigo-600 via-indigo-400 to-indigo-600 bg-[length:200%_100%]" />
+        </div>
+      )}
+
+      {data.imageUrl || transientPreviewUrl ? (
+        loadError ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-[var(--node-radius)] bg-bg-dark">
+            <AlertCircle className="h-6 w-6 text-red-400/70" />
+            <span className="text-[11px] text-red-400/70">Failed to load image</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleRetryUpload(); }}
+              className="flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-300 hover:bg-red-500/20 transition-colors"
+            >
+              <RefreshCw className="h-2.5 w-2.5" /> Retry
+            </button>
+          </div>
+        ) : (
+          <div className="block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-bg-dark">
+            <CanvasNodeImage
+              src={imageSource ?? ''}
+              viewerSourceUrl={data.imageUrl ? resolveImageDisplayUrl(data.imageUrl) : null}
+              alt={t('node.upload.uploadedAlt', 'Uploaded image')}
+              className="h-full w-full object-contain"
+              onLoad={handleImageLoad}
+              onError={handleImageError}
+            />
+          </div>
+        )
+      ) : (
+        <label
+          className={`block h-full w-full overflow-hidden rounded-[var(--node-radius)] bg-bg-dark transition-colors ${
+            isDragHovering ? 'bg-indigo-900/20' : ''
+          }`}
+        >
+          <div className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-2 text-text-muted/85">
+            <Upload className={`h-7 w-7 opacity-60 transition-transform ${isDragHovering ? 'scale-110' : ''}`} />
+            <span className="px-3 text-center text-[12px] leading-6">{t('node.upload.hint', 'Click or drop image')}</span>
+          </div>
+        </label>
+      )}
+
+      {/* Replace image button when image is loaded */}
+      {data.imageUrl && !isUploading && !loadError && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
+          className="absolute left-1 top-1 z-20 flex items-center gap-0.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white opacity-0 transition-all duration-150 hover:bg-black/75 group-hover:opacity-100"
+          title="Replace image"
+        >
+          <RefreshCw className="h-2.5 w-2.5" />
+        </button>
+      )}
+      {/* File info bar */}
+      {data.sourceFileName && (
+        <div className="absolute bottom-0 left-0 right-0 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 text-[9px] text-zinc-300 backdrop-blur-sm rounded-b-[var(--node-radius)]">
+          <FileImage className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate">{data.sourceFileName}</span>
+          {resolvedAspectRatio !== '1:1' && <span className="ml-auto shrink-0">{resolvedAspectRatio}</span>}
+        </div>
+      )}
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      <Handle
+        type="source"
+        id="source"
+        position={Position.Right}
+        className="!h-2 !w-2 !border-surface-dark !bg-accent"
+      />
+      <NodeResizeHandle
+        minWidth={resizeMinWidth}
+        minHeight={resizeMinHeight}
+        maxWidth={1400}
+        maxHeight={1400}
+      />
+    </div>
+  );
+});
+
+UploadNode.displayName = 'UploadNode';

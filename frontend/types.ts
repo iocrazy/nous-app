@@ -512,6 +512,8 @@ export interface AISettings {
     transcription: string;  // provider key
     summarization: string;
     visual_analysis: string;
+    image_generation?: string;  // storyboard image provider
+    script_generation?: string;  // storyboard script/prompt LLM
   };
 }
 
@@ -734,4 +736,93 @@ export interface Share {
   watermark: boolean;
   status: ShareStatus;
   created_at: string;
+}
+
+// ============================================
+// Storyboard Types
+// ============================================
+
+export interface StoryboardProject {
+  id: string;
+  team_id: string;
+  created_by: string;
+  name: string;
+  description?: string;
+  cover_image_url?: string;
+  viewport_json?: { x: number; y: number; zoom: number };
+  settings_json?: Record<string, unknown>;
+  status: 'active' | 'archived' | 'deleted';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryboardNode {
+  id: string;
+  project_id: string;
+  node_type: 'upload' | 'image' | 'image_edit' | 'storyboard_split' | 'storyboard_gen' | 'text_annotation' | 'group' | 'export' | 'image_to_video';
+  position_x: number;
+  position_y: number;
+  width?: number;
+  height?: number;
+  data_json: Record<string, unknown>;
+  sort_order: number;
+  locked: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryboardEdge {
+  id: string;
+  project_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  source_handle?: string;
+  target_handle?: string;
+  edge_type: string;
+  created_at: string;
+}
+
+export interface StoryboardFrame {
+  id: string;
+  node_id: string;
+  project_id: string;
+  frame_index: number;
+  image_url?: string;
+  thumbnail_url?: string;
+  note?: string;
+  shot_type?: string;
+  camera_angle?: string;
+  camera_movement?: string;
+  focal_length?: string;
+  lighting?: string;
+  duration_seconds: number;
+  transition_type: 'cut' | 'fade' | 'dissolve';
+  annotations_json?: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryboardCharacter {
+  id: string;
+  project_id: string;
+  name: string;
+  description?: string;
+  reference_image_url?: string;
+  thumbnail_url?: string;
+  visual_traits?: Record<string, string>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  cover_image_url?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  frame_count?: number;
+  character_count?: number;
 }
