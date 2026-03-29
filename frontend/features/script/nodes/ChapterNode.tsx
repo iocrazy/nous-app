@@ -1,6 +1,6 @@
 import { memo, useState, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { BookOpen, GitBranch, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { BookOpen, GitBranch, ChevronDown, ChevronUp, Trash2, Clapperboard } from 'lucide-react';
 import { type ChapterNodeData, useScriptCanvasStore, type ScriptNode } from '../../../stores/scriptCanvasStore';
 
 export const ChapterNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) => {
@@ -96,6 +96,14 @@ export const ChapterNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) 
             >
               <GitBranch size={12} />
               Branch
+            </button>
+            <button
+              className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-blue-400 px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors"
+              title="Convert to Storyboard (P4)"
+              disabled
+            >
+              <Clapperboard size={12} />
+              Storyboard
             </button>
             <div className="flex-1" />
             <button

@@ -204,3 +204,136 @@ class ScriptChapterRepository:
         except Exception as e:
             logger.error(f"Failed to get chapters for script {script_id}: {e}")
             return []
+
+
+class ScriptAssetRepository:
+    """CRUD for script_assets."""
+
+    TABLE_NAME = "script_assets"
+
+    async def _get_client(self):
+        return await get_async_supabase_admin()
+
+    async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_NAME).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create script asset: {e}")
+            raise
+
+    async def update(self, asset_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .update(data)
+                .eq("id", asset_id)
+                .execute()
+            )
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to update script asset {asset_id}: {e}")
+            raise
+
+    async def delete(self, asset_id: str) -> None:
+        try:
+            client = await self._get_client()
+            await client.table(self.TABLE_NAME).delete().eq("id", asset_id).execute()
+        except Exception as e:
+            logger.error(f"Failed to delete script asset {asset_id}: {e}")
+            raise
+
+    async def list_by_script(
+        self, script_id: str, asset_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            query = (
+                client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("script_id", script_id)
+                .order("sort_order")
+            )
+            if asset_type:
+                query = query.eq("asset_type", asset_type)
+            result = await query.execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to list assets for script {script_id}: {e}")
+            return []
+
+    async def get_by_id(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("id", asset_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get script asset {asset_id}: {e}")
+            return None
+
+
+class ScriptStoryboardLinkRepository:
+    """CRUD for script_storyboard_links."""
+
+    TABLE_NAME = "script_storyboard_links"
+
+    async def _get_client(self):
+        return await get_async_supabase_admin()
+
+    async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE_NAME).insert(data).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Failed to create script-storyboard link: {e}")
+            raise
+
+    async def delete(self, link_id: str) -> None:
+        try:
+            client = await self._get_client()
+            await client.table(self.TABLE_NAME).delete().eq("id", link_id).execute()
+        except Exception as e:
+            logger.error(f"Failed to delete script-storyboard link {link_id}: {e}")
+            raise
+
+    async def list_by_chapter(self, chapter_id: str) -> List[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("chapter_id", chapter_id)
+                .order("created_at")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to list links for chapter {chapter_id}: {e}")
+            return []
+
+    async def list_by_storyboard(
+        self, storyboard_project_id: str
+    ) -> List[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("storyboard_project_id", storyboard_project_id)
+                .order("created_at")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(
+                f"Failed to list links for storyboard {storyboard_project_id}: {e}"
+            )
+            return []

@@ -143,3 +143,43 @@ class CreateBranchesRequest(BaseModel):
     branch_count: int = Field(default=2, ge=2, le=4)
     branch_type: str = Field(default="choice", pattern="^(choice|condition)$")
     context: Optional[str] = Field(None, max_length=10000)
+
+
+# ---------------------------------------------------------------------------
+# Script Asset schemas
+# ---------------------------------------------------------------------------
+
+
+class ScriptAssetCreate(BaseModel):
+    """Request body for creating a script asset."""
+
+    script_id: str
+    asset_type: str = Field(
+        ..., pattern="^(worldview|character|location|prop|plot_point)$"
+    )
+    name: str = Field(..., min_length=1, max_length=200)
+    content: Optional[str] = None
+    data_json: Dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = Field(default=0)
+
+
+class ScriptAssetUpdate(BaseModel):
+    """Request body for updating a script asset."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    content: Optional[str] = None
+    data_json: Optional[Dict[str, Any]] = None
+    sort_order: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Script-to-Storyboard conversion
+# ---------------------------------------------------------------------------
+
+
+class ConvertToStoryboardRequest(BaseModel):
+    """Request body for converting a chapter to storyboard scenes."""
+
+    script_id: str
+    chapter_id: str
+    storyboard_project_id: Optional[str] = None

@@ -170,3 +170,50 @@ class ScriptAIService:
             }
             for i, b in enumerate(branches[:branch_count])
         ]
+
+    async def split_chapter_to_scenes(
+        self,
+        title: str,
+        summary: str,
+        content: Optional[str] = None,
+        style_guide: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Split a chapter into 3-8 visual scenes for storyboard conversion."""
+        system_prompt = (
+            "You are a professional storyboard artist and visual storyteller. "
+            "Split the given story chapter into 3-8 distinct visual scenes "
+            "suitable for a storyboard.\n\n"
+            "Each scene object must have:\n"
+            '- "scene_number": int (sequential starting from 1)\n'
+            '- "description": string (detailed visual description of the scene, '
+            "what is happening, who is present, setting details)\n"
+            '- "camera_notes": string (camera angle, shot type, mood, '
+            "lighting suggestions)\n\n"
+            "Return ONLY a JSON array, no other text."
+        )
+
+        user_prompt = f"Chapter title: {title}\nSummary: {summary}"
+        if content:
+            user_prompt += f"\n\nFull content:\n{content}"
+        if style_guide:
+            user_prompt += f"\n\nStyle guide:\n{style_guide}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        response = await self._call_llm(messages, temperature=0.7, max_tokens=4096)
+        scenes = self._extract_json(response)
+
+        if not isinstance(scenes, list):
+            raise ValueError("LLM did not return a JSON array")
+
+        return [
+            {
+                "scene_number": s.get("scene_number", i + 1),
+                "description": s.get("description", ""),
+                "camera_notes": s.get("camera_notes", ""),
+            }
+            for i, s in enumerate(scenes[:8])
+        ]

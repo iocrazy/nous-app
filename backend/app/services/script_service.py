@@ -5,18 +5,22 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from app.repositories.script_repository import (
+    ScriptAssetRepository,
     ScriptChapterRepository,
     ScriptProjectRepository,
+    ScriptStoryboardLinkRepository,
 )
 from app.services.display_code_service import generate_display_code
 
 
 class ScriptService:
-    """Orchestrates script project and chapter operations."""
+    """Orchestrates script project, chapter, asset, and link operations."""
 
     def __init__(self) -> None:
         self.project_repo = ScriptProjectRepository()
         self.chapter_repo = ScriptChapterRepository()
+        self.asset_repo = ScriptAssetRepository()
+        self.link_repo = ScriptStoryboardLinkRepository()
 
     async def create_project(
         self,
@@ -120,3 +124,36 @@ class ScriptService:
 
         chapters = await self.chapter_repo.get_by_script(script_id)
         return {"chapters": chapters}
+
+    # ─── Asset operations ────────────────────────────────────────────
+
+    async def create_asset(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return await self.asset_repo.create(data)
+
+    async def update_asset(
+        self, asset_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return await self.asset_repo.update(asset_id, data)
+
+    async def delete_asset(self, asset_id: str) -> None:
+        await self.asset_repo.delete(asset_id)
+
+    async def list_assets(
+        self, script_id: str, asset_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        return await self.asset_repo.list_by_script(script_id, asset_type=asset_type)
+
+    # ─── Script-Storyboard link operations ───────────────────────────
+
+    async def create_storyboard_link(
+        self, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return await self.link_repo.create(data)
+
+    async def delete_storyboard_link(self, link_id: str) -> None:
+        await self.link_repo.delete(link_id)
+
+    async def list_links_by_chapter(
+        self, chapter_id: str
+    ) -> List[Dict[str, Any]]:
+        return await self.link_repo.list_by_chapter(chapter_id)

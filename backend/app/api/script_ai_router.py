@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.schemas.script import (
+    ConvertToStoryboardRequest,
     CreateBranchesRequest,
     ExpandChapterRequest,
     GenerateOutlineRequest,
@@ -110,3 +111,82 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
     except Exception as exc:
         logger.error("[ScriptAI] create_branches failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to create branches: {exc}")
+
+
+@router.post("/convert-to-storyboard")
+async def convert_to_storyboard(
+    auth: AuthDep, body: ConvertToStoryboardRequest
+) -> Dict[str, Any]:
+    """Convert a script chapter into storyboard scenes via AI."""
+    try:
+        script_svc = ScriptService()
+
+        # 1. Read chapter content/summary
+        chapter = await script_svc.chapter_repo.get_by_id(body.chapter_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
+        # 2. Get script project for style_guide
+        project = await script_svc.project_repo.get_by_id(body.script_id)
+        style_guide = None
+        if project and project.get("settings_json"):
+            style_guide = project["settings_json"].get("style_guide")
+
+        # 3. AI: split chapter into visual scenes
+        ai_svc = ScriptAIService()
+        scenes = await ai_svc.split_chapter_to_scenes(
+            title=chapter.get("title", ""),
+            summary=chapter.get("summary", ""),
+            content=chapter.get("content"),
+            style_guide=style_guide,
+        )
+
+        # 4. Create storyboard nodes if a target project is specified
+        created_nodes = []
+        if body.storyboard_project_id:
+            from app.repositories.storyboard_repository import StoryboardNodeRepository
+
+            node_repo = StoryboardNodeRepository()
+            NODE_Y_SPACING = 300
+
+            for scene in scenes:
+                node_data = {
+                    "project_id": body.storyboard_project_id,
+                    "scene_number": scene["scene_number"],
+                    "description": scene["description"],
+                    "camera_notes": scene.get("camera_notes", ""),
+                    "position_x": 100,
+                    "position_y": scene["scene_number"] * NODE_Y_SPACING,
+                    "data_json": {"source": "script_conversion"},
+                }
+                rows = await node_repo.bulk_upsert(
+                    body.storyboard_project_id, [node_data]
+                )
+                if rows:
+                    created_nodes.append(rows[0])
+
+            # 5. Record link in script_storyboard_links
+            for node in created_nodes:
+                await script_svc.create_storyboard_link(
+                    {
+                        "chapter_id": body.chapter_id,
+                        "storyboard_project_id": body.storyboard_project_id,
+                        "storyboard_node_id": node.get("id"),
+                    }
+                )
+
+        return {
+            "success": True,
+            "data": {
+                "scenes": scenes,
+                "created_nodes": created_nodes,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[ScriptAI] convert_to_storyboard failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to convert chapter to storyboard: {exc}",
+        )

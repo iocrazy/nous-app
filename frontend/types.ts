@@ -807,6 +807,33 @@ export interface ScriptProjectSummary {
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
 
+export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
+
+export interface ScriptAsset {
+  id: string;
+  script_id: string;
+  asset_type: ScriptAssetType;
+  name: string;
+  content?: string;
+  data_json: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StyleTemplate {
+  id: string;
+  team_id?: string;
+  name: string;
+  description?: string;
+  prompt_content: string;
+  category?: string;
+  is_public: boolean;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StoryboardNode {
   id: string;
   project_id: string;

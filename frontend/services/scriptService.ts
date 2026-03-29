@@ -1,6 +1,6 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
-import { ScriptProject, ScriptChapter, ScriptProjectSummary } from '../types';
+import { ScriptProject, ScriptChapter, ScriptProjectSummary, ScriptAsset, ScriptAssetType } from '../types';
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -162,4 +162,76 @@ export async function createBranches(data: {
     body: JSON.stringify(data),
   });
   return unwrapResponse<{ branches: ScriptChapter[] }>(res);
+}
+
+export async function convertToStoryboard(data: {
+  script_id: string;
+  chapter_id: string;
+  storyboard_project_id?: string;
+}): Promise<{ task_id?: string; nodes?: Record<string, unknown>[] }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/convert-to-storyboard`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<{ task_id?: string; nodes?: Record<string, unknown>[] }>(res);
+}
+
+// ─── Script Assets ───────────────────────────────────────────────────────────
+
+export async function fetchScriptAssets(
+  scriptId: string,
+  assetType?: ScriptAssetType,
+): Promise<ScriptAsset[]> {
+  const headers = await getAuthHeaders();
+  const params = new URLSearchParams();
+  if (assetType) params.set('asset_type', assetType);
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/${scriptId}/assets?${params}`,
+    { headers },
+  );
+  return unwrapResponse<ScriptAsset[]>(res);
+}
+
+export async function createScriptAsset(data: {
+  script_id: string;
+  asset_type: ScriptAssetType;
+  name: string;
+  content?: string;
+}): Promise<ScriptAsset> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/${data.script_id}/assets`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  );
+  return unwrapResponse<ScriptAsset>(res);
+}
+
+export async function updateScriptAsset(
+  assetId: string,
+  data: Partial<Pick<ScriptAsset, 'name' | 'content' | 'data_json' | 'sort_order'>>,
+): Promise<ScriptAsset> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`,
+    {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  );
+  return unwrapResponse<ScriptAsset>(res);
+}
+
+export async function deleteScriptAsset(assetId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  await fetch(`${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`, {
+    method: 'DELETE',
+    headers,
+  });
 }

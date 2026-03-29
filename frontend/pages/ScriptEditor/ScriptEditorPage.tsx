@@ -7,6 +7,7 @@ import { ScriptToolbar } from '../../features/script/ScriptToolbar';
 import { CreateStoryDialog } from '../../features/script/CreateStoryDialog';
 import { ExpandChapterDialog } from '../../features/script/ExpandChapterDialog';
 import { CreateBranchDialog } from '../../features/script/CreateBranchDialog';
+import { ScriptAssetsSidebar } from '../../features/script/ScriptAssetsSidebar';
 import {
   fetchScriptProject,
   updateScriptProject,
@@ -202,9 +203,12 @@ export function ScriptEditorPage() {
       {/* Toolbar */}
       <ScriptToolbar onCreateStory={() => setShowCreateStory(true)} />
 
-      {/* Canvas */}
-      <div className="flex-1 relative">
-        <ScriptCanvas />
+      {/* Sidebar + Canvas */}
+      <div className="flex-1 flex overflow-hidden">
+        <ScriptAssetsSidebar />
+        <div className="flex-1 relative">
+          <ScriptCanvas />
+        </div>
       </div>
 
       {/* Create Story Dialog */}
