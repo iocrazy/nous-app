@@ -237,29 +237,31 @@ class DouyinParser:
             Dict[str, Any]: Structured image-text data
         """
         # Extract image and video URLs
-        # Each image item always has a static image (url_list / download_url_list).
-        # Some items also have an embedded video (Live Photo effect).
-        # We extract BOTH: image for static display, video for playback.
+        # Douyin frontend shows N elements total (e.g. 16 = 8 images + 8 Live Photos).
+        # For items WITH embedded video: save video only (image is just a preview thumbnail).
+        # For items WITHOUT video: save the image.
         images = aweme_detail.get("images", [])
         image_download_urls = []
         video_download_urls = []
 
         if images:
             for item in images:
-                # Always extract image URL (every item has one)
-                image_urls = item.get("url_list") or item.get("download_url_list", [])
-                if image_urls:
-                    image_download_urls.append(image_urls)
-
-                # Extract embedded video if present (Live Photo)
                 video_play_addr = (item.get("video") or {}).get("play_addr", {})
                 vid_urls = video_play_addr.get("url_list", [])
+
                 if vid_urls:
+                    # Live Photo: save video, skip preview image
                     video_download_urls.append(vid_urls)
+                else:
+                    # Pure image: save image
+                    image_urls = item.get("url_list") or item.get("download_url_list", [])
+                    if image_urls:
+                        image_download_urls.append(image_urls)
 
         logger.info(
             f"[DouyinParser/image_text] images={len(image_download_urls)}, "
-            f"videos={len(video_download_urls)} (Live Photo)"
+            f"videos={len(video_download_urls)} (Live Photo), "
+            f"total={len(image_download_urls) + len(video_download_urls)} elements"
         )
         # Build music name
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
