@@ -1,20 +1,7 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
 import { ScriptProject, ScriptChapter, ScriptProjectSummary, ScriptAsset, ScriptAssetType } from '../types';
-
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API error ${res.status}: ${text}`);
-  }
-  if (res.status === 204) return undefined as unknown as T;
-  return res.json() as Promise<T>;
-}
-
-async function unwrapResponse<T>(res: Response): Promise<T> {
-  const body = await handleResponse<{ success: boolean; data: T }>(res);
-  return body.data;
-}
 
 // ─── Script Project CRUD ─────────────────────────────────────────────────────
 

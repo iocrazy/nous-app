@@ -8,8 +8,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
+import { getApiUrl } from '../utils/apiConfig';
 
 export interface ReviewComment {
   id: string;
@@ -24,7 +23,7 @@ export interface ReviewComment {
  * Fetch comments for a share by share code.
  */
 export const fetchShareComments = async (shareCode: string): Promise<ReviewComment[]> => {
-  const url = `${API_BASE}/api/v1/shares/code/${shareCode}/comments`;
+  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}/comments`;
 
   const response = await fetch(url, { method: 'GET' });
 
@@ -49,7 +48,7 @@ export const createShareComment = async (
   },
 ): Promise<ReviewComment> => {
   const headers = await getAuthHeaders();
-  const url = `${API_BASE}/api/v1/shares/code/${shareCode}/comments`;
+  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}/comments`;
 
   const response = await fetch(url, {
     method: 'POST',

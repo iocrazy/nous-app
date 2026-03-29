@@ -1,4 +1,6 @@
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
+import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
 import {
   StoryboardProject,
   StoryboardNode,
@@ -7,37 +9,6 @@ import {
   StoryboardCharacter,
   ProjectSummary,
 } from '../types';
-
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
-
-// ─── Response helpers ─────────────────────────────────────────────────────────
-
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API error ${res.status}: ${text}`);
-  }
-  if (res.status === 204) {
-    return undefined as unknown as T;
-  }
-  return res.json() as Promise<T>;
-}
-
-/**
- * Unwrap the backend envelope `{ success, data: T }` → `T`.
- * All storyboard API endpoints return this envelope format.
- */
-async function unwrapResponse<T>(res: Response): Promise<T> {
-  const body = await handleResponse<{ success: boolean; data: T }>(res);
-  return body.data;
-}
 
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
