@@ -255,3 +255,29 @@ CurrentUserDep = Annotated[dict, Depends(get_current_user)]
 # 新的认证依赖
 AuthDep = Annotated[AuthContext, Depends(get_auth)]
 OptionalAuthDep = Annotated[Optional[AuthContext], Depends(get_optional_auth)]
+
+
+# ============================================
+# Team membership helpers
+# ============================================
+
+
+async def get_team_id_for_user(user_id: str) -> Optional[str]:
+    """Return the first team_id for a user, or None."""
+    admin = await _get_async_supabase_admin()
+    result = (
+        await admin.table("team_members")
+        .select("team_id")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0]["team_id"] if result.data else None
+
+
+async def require_team_id(user_id: str) -> str:
+    """Return team_id or raise 400 if user belongs to no team."""
+    team_id = await get_team_id_for_user(user_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="User has no associated team")
+    return team_id

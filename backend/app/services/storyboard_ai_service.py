@@ -16,13 +16,13 @@ configured via environment variables (LLM_API_URL, LLM_API_KEY).
 
 import asyncio
 import json
-import logging
-import os
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 import httpx
+from loguru import logger
 
+from app.core.config import settings
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
 from app.services.storyboard_service import StoryboardService
 from app.services.video_providers import (
@@ -30,17 +30,6 @@ from app.services.video_providers import (
     VideoGenResult,
     provider_registry,
 )
-
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# LLM config constants
-# ---------------------------------------------------------------------------
-
-_LLM_API_URL = os.environ.get("LLM_API_URL", "http://localhost:8000/v1")
-_LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-_LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
-_LLM_TIMEOUT_SECONDS = 120.0
 
 # ---------------------------------------------------------------------------
 # Scene schema description (used in LLM prompts)
@@ -97,20 +86,20 @@ class StoryboardAIService:
             RuntimeError: If the HTTP request fails or returns an error status.
         """
         headers = {"Content-Type": "application/json"}
-        if _LLM_API_KEY:
-            headers["Authorization"] = f"Bearer {_LLM_API_KEY}"
+        if settings.LLM_API_KEY:
+            headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
 
         payload = {
-            "model": _LLM_MODEL,
+            "model": settings.LLM_MODEL,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
 
         try:
-            async with httpx.AsyncClient(timeout=_LLM_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
                 response = await client.post(
-                    f"{_LLM_API_URL}/chat/completions",
+                    f"{settings.LLM_API_URL}/chat/completions",
                     json=payload,
                     headers=headers,
                 )

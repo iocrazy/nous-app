@@ -7,39 +7,16 @@ CRUD endpoints for storyboard projects: create, list, get, update, soft-delete,
 and viewport persistence.
 """
 
-import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
-from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.core.deps import AuthDep, require_team_id
 from app.schemas.storyboard import StoryboardProjectCreate, StoryboardProjectUpdate
 from app.services.storyboard_service import StoryboardService
 
 router = APIRouter(prefix="/storyboard/projects")
-
-
-async def _get_team_id_for_user(user_id: str) -> Optional[str]:
-    """Return the first team_id for a user, or None."""
-    admin = await get_async_supabase_admin()
-    result = (
-        await admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return result.data[0]["team_id"] if result.data else None
-
-
-async def _require_team_id(user_id: str) -> str:
-    """Return team_id or raise 400 if user belongs to no team."""
-    team_id = await _get_team_id_for_user(user_id)
-    if not team_id:
-        raise HTTPException(status_code=400, detail="User has no associated team")
-    return team_id
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +27,7 @@ async def _require_team_id(user_id: str) -> str:
 @router.post("/")
 async def create_project(auth: AuthDep, body: StoryboardProjectCreate) -> Dict[str, Any]:
     """Create a new storyboard project for the authenticated user's team."""
-    team_id = await _require_team_id(auth.user_id)
+    team_id = await require_team_id(auth.user_id)
     try:
         svc = StoryboardService()
         project = await svc.create_project(
@@ -82,7 +59,7 @@ async def list_projects(
     project_id: Optional[int] = Query(None),
 ) -> Dict[str, Any]:
     """List storyboard projects for the authenticated user's team."""
-    team_id = await _require_team_id(auth.user_id)
+    team_id = await require_team_id(auth.user_id)
     try:
         svc = StoryboardService()
         result = await svc.list_projects(

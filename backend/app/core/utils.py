@@ -5,11 +5,29 @@ import random
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 from loguru import logger
 
 from app.core.config import settings
+
+# Domain allowlist for URL extraction (SSRF prevention)
+ALLOWED_URL_DOMAINS: frozenset[str] = frozenset({
+    "douyin.com",
+    "iesdouyin.com",
+    "tiktok.com",
+    "xiaohongshu.com",
+    "xhslink.com",
+    "weibo.com",
+    "bilibili.com",
+    "b23.tv",
+    "youtube.com",
+    "youtu.be",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+})
 
 # 服务器配置文件路径
 SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"
@@ -56,19 +74,34 @@ class Utils:
     """URL处理工具类"""
 
     @classmethod
+    def _is_allowed_domain(cls, hostname: str) -> bool:
+        """Check if hostname matches an allowed domain (including subdomains)."""
+        if not hostname:
+            return False
+        for domain in ALLOWED_URL_DOMAINS:
+            if hostname == domain or hostname.endswith(f".{domain}"):
+                return True
+        return False
+
+    @classmethod
     def extract_valid_url(cls, text: str) -> list[str]:
-        """从文本中提取并验证URL"""
+        """从文本中提取并验证URL（仅允许白名单域名）"""
         urls = re.findall(r"(https?://[^\s]+)", text)
         if not urls:
             raise ValueError("未找到有效的URL")
 
         valid_urls = []
         for url in urls:
-            if url.startswith("http://") or url.startswith("https://"):
-                valid_urls.append(url)
+            if not (url.startswith("http://") or url.startswith("https://")):
+                continue
+            hostname = urlparse(url).hostname
+            if not cls._is_allowed_domain(hostname):
+                logger.warning("Blocked URL with disallowed domain: %s", hostname)
+                continue
+            valid_urls.append(url)
 
         if not valid_urls:
-            raise ValueError("未找到有效的HTTP或HTTPS URL")
+            raise ValueError("未找到有效的HTTP或HTTPS URL，或域名不在允许列表中")
 
         return valid_urls
 

@@ -5,38 +5,18 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
-from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.core.deps import AuthDep, require_team_id
 from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate, ViewportUpdate
 from app.services.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
 
 
-async def _get_team_id_for_user(user_id: str) -> Optional[str]:
-    admin = await get_async_supabase_admin()
-    result = (
-        await admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return result.data[0]["team_id"] if result.data else None
-
-
-async def _require_team_id(user_id: str) -> str:
-    team_id = await _get_team_id_for_user(user_id)
-    if not team_id:
-        raise HTTPException(status_code=400, detail="User has no associated team")
-    return team_id
-
-
 @router.post("/")
 async def create_script_project(
     auth: AuthDep, body: ScriptProjectCreate
 ) -> Dict[str, Any]:
-    team_id = await _require_team_id(auth.user_id)
+    team_id = await require_team_id(auth.user_id)
     try:
         svc = ScriptService()
         project = await svc.create_project(

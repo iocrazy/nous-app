@@ -13,10 +13,10 @@ class ScriptAIService:
     """AI operations for the script editor module."""
 
     def __init__(self) -> None:
-        self.api_url = getattr(settings, "LLM_API_URL", "http://localhost:8000/v1")
-        self.api_key = getattr(settings, "LLM_API_KEY", "")
-        self.model = getattr(settings, "LLM_MODEL", "gpt-4o")
-        self.timeout = float(getattr(settings, "LLM_TIMEOUT_SECONDS", 120))
+        self.api_url = settings.LLM_API_URL
+        self.api_key = settings.LLM_API_KEY
+        self.model = settings.LLM_MODEL
+        self.timeout = settings.LLM_TIMEOUT_SECONDS
 
     async def _call_llm(
         self,
