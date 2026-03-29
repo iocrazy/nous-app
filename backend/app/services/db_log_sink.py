@@ -108,7 +108,7 @@ class DatabaseLogSink:
                 pass
 
     def _flush_sync(self) -> None:
-        """Drain queue and insert entries using asyncio.run() for the async Supabase client."""
+        """Drain queue and insert entries. Creates a fresh event loop for async Supabase client."""
         entries: list[dict[str, Any]] = []
         while len(entries) < self.BATCH_SIZE:
             try:
@@ -122,7 +122,12 @@ class DatabaseLogSink:
         # Suppress all logs generated during DB insertion (prevents recursion)
         _flushing.active = True
         try:
-            asyncio.run(self._insert_entries(entries))
+            # Use a dedicated event loop (asyncio.run fails if another loop is running)
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(self._insert_entries(entries))
+            finally:
+                loop.close()
         except Exception:
             # Silently drop — we can't log here without recursion
             pass
