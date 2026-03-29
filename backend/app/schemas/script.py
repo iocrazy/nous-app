@@ -121,3 +121,25 @@ class GenerateOutlineRequest(BaseModel):
     premise: str = Field(..., min_length=10, max_length=10000)
     chapter_count: int = Field(default=5, ge=2, le=20)
     style_guide: Optional[str] = Field(None, max_length=2000)
+
+
+class ExpandChapterRequest(BaseModel):
+    """Request body for AI chapter expansion."""
+
+    script_id: str
+    chapter_id: str
+    title: str = Field(..., max_length=200)
+    summary: str = Field(..., min_length=1, max_length=5000)
+    context: Optional[str] = Field(None, max_length=10000)
+
+
+class CreateBranchesRequest(BaseModel):
+    """Request body for AI story branching."""
+
+    script_id: str
+    chapter_id: str
+    title: str = Field(..., max_length=200)
+    summary: str = Field(..., min_length=1, max_length=5000)
+    branch_count: int = Field(default=2, ge=2, le=4)
+    branch_type: str = Field(default="choice", pattern="^(choice|condition)$")
+    context: Optional[str] = Field(None, max_length=10000)

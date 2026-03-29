@@ -176,6 +176,20 @@ class ScriptChapterRepository:
             logger.error(f"Failed to delete chapter {chapter_id}: {e}")
             raise
 
+    async def get_by_id(self, chapter_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_NAME)
+                .select("*")
+                .eq("id", chapter_id)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get chapter {chapter_id}: {e}")
+            return None
+
     async def get_by_script(self, script_id: str) -> List[Dict[str, Any]]:
         try:
             client = await self._get_client()
