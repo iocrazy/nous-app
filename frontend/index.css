@@ -404,3 +404,10 @@ body {
 .react-flow__background pattern circle {
   opacity: 0.6;
 }
+
+/* Downloads grid: mobile 2 cols (Tailwind), desktop auto-fill fixed-width cards */
+@media (min-width: 768px) {
+  .downloads-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 220px)) !important;
+  }
+}

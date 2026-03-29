@@ -791,7 +791,7 @@ export const DownloadsView: React.FC = () => {
           <>
             {/* Grid view */}
             {libraryViewMode === 'grid' && (
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(160px, 45%), 220px))' }}>
+              <div className="grid grid-cols-2 gap-3 downloads-grid">
                 {filteredLibrary.map((item) => (
                   <CompactMediaCard
                     key={item.platform_id}
