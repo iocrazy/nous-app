@@ -215,7 +215,7 @@ const FeedItem = ({
         // Not loaded yet — show cover placeholder
         <div className="w-full h-full flex items-center justify-center bg-black">
           {coverUrl ? (
-            <img src={coverUrl} alt="" className="w-full h-full object-contain" />
+            <img src={coverUrl} alt="" className="w-full h-full object-contain" loading="lazy" />
           ) : (
             <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
           )}
@@ -223,7 +223,7 @@ const FeedItem = ({
       ) : (
         <div className="w-full h-full relative flex items-center justify-center bg-black">
             {imageUrl ? (
-              <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" />
+              <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" loading="lazy" />
             ) : (
               <div className="flex items-center justify-center">
                 <ImageIcon size={48} className="text-zinc-700" />

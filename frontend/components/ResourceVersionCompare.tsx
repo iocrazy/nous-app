@@ -177,7 +177,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
                 playsInline
               />
             ) : urlA ? (
-              <img src={urlA} alt={`V${versionA.version_number}`} className="max-w-full max-h-full object-contain" />
+              <img src={urlA} alt={`V${versionA.version_number}`} className="max-w-full max-h-full object-contain" loading="lazy" />
             ) : (
               <p className="text-zinc-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
             )}
@@ -205,7 +205,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
                 muted
               />
             ) : urlB ? (
-              <img src={urlB} alt={`V${versionB.version_number}`} className="max-w-full max-h-full object-contain" />
+              <img src={urlB} alt={`V${versionB.version_number}`} className="max-w-full max-h-full object-contain" loading="lazy" />
             ) : (
               <p className="text-zinc-500 text-sm">{t('resources.noPreview', 'Preview not available')}</p>
             )}
