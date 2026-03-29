@@ -256,7 +256,7 @@ class DouyinAnalysis(metaclass=SingletonMeta):
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
 
-                api_patterns = ["aweme/post/", "aweme/detail/"]
+                api_patterns = ["aweme/post/", "aweme/detail/", "note/", "slides/"]
                 instance.page.listen.start(api_patterns)
 
                 logger.debug("API请求监听已启动")
