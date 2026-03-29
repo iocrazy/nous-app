@@ -64,8 +64,8 @@ def _start_unified(task_id: str):
     try:
         from app.services.unified_task_manager import get_task_manager
         run_async(get_task_manager().start(task_id))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[AI] _start_unified silent exception: {e}")
 
 
 def _update_unified_progress(unified_task_id: str, progress: int, subtitle: str = None):
@@ -88,8 +88,8 @@ def _complete_unified(unified_task_id: str):
     try:
         from app.services.unified_task_manager import get_task_manager
         run_async(get_task_manager().complete(unified_task_id))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[AI] _complete_unified silent exception: {e}")
 
 
 def _fail_unified(unified_task_id: str, error_msg: str):
@@ -98,8 +98,8 @@ def _fail_unified(unified_task_id: str, error_msg: str):
     try:
         from app.services.unified_task_manager import get_task_manager
         run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[AI] _fail_unified silent exception: {e}")
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)

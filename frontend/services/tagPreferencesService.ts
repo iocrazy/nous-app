@@ -1,6 +1,5 @@
 import { getAuthHeaders } from './parserService';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { getApiUrl } from '../utils/apiConfig';
 
 export interface PickerSettings {
   layout: 'list' | 'grid';
@@ -47,7 +46,7 @@ export async function fetchTagPreferences(): Promise<TagPreferences> {
 
   _fetchPromise = (async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/tags/preferences`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/tags/preferences`, {
         headers: await getAuthHeaders(),
       });
       if (!res.ok) return { ...DEFAULTS };
@@ -72,7 +71,7 @@ export function invalidatePreferencesCache() {
 export async function updateTagPreferences(
   updates: Partial<TagPreferences>,
 ): Promise<TagPreferences> {
-  const res = await fetch(`${API_BASE}/api/v1/tags/preferences`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/tags/preferences`, {
     method: 'PATCH',
     headers: {
       ...(await getAuthHeaders()),

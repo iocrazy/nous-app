@@ -8,9 +8,8 @@
  */
 
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 import { Share } from '../types';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
 
 /**
  * Create a new share.
@@ -28,7 +27,7 @@ export const createShare = async (data: {
   max_views?: number;
   watermark?: boolean;
 }): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares`;
+  const url = `${getApiUrl()}/api/v1/shares`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -75,7 +74,7 @@ export const fetchShares = async (params?: {
   if (params?.offset != null) searchParams.set('offset', String(params.offset));
 
   const query = searchParams.toString();
-  const url = `${API_BASE}/api/v1/shares${query ? `?${query}` : ''}`;
+  const url = `${getApiUrl()}/api/v1/shares${query ? `?${query}` : ''}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -98,7 +97,7 @@ export const fetchShares = async (params?: {
  * Get a single share by ID.
  */
 export const getShare = async (shareId: string): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -131,7 +130,7 @@ export const updateShare = async (
     watermark?: boolean;
   }
 ): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'PUT',
@@ -158,7 +157,7 @@ export const updateShare = async (
  * Cancel (soft-delete) a share.
  */
 export const cancelShare = async (shareId: string): Promise<void> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'DELETE',
@@ -180,7 +179,7 @@ export const cancelShare = async (shareId: string): Promise<void> => {
  * Permanently delete a share (hard delete, only for expired/cancelled).
  */
 export const deleteSharePermanent = async (shareId: string): Promise<void> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}/permanent`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}/permanent`;
 
   const response = await fetch(url, {
     method: 'DELETE',
@@ -201,7 +200,7 @@ export const accessShare = async (
   shareCode: string,
   password?: string
 ): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/code/${shareCode}`;
+  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}`;
 
   const response = await fetch(url, {
     method: 'POST',

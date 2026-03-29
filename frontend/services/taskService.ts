@@ -7,9 +7,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-
-// 空字符串表示使用相对路径（通过 Vite 代理）
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
+import { getApiUrl } from '../utils/apiConfig';
 
 // 任务状态类型
 export type TaskStatus = 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED';
@@ -51,7 +49,7 @@ export interface QueueStats {
  * 获取任务状态
  */
 export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
-  const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -67,7 +65,7 @@ export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse>
  * 取消任务
  */
 export const cancelTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
-  const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
@@ -91,7 +89,7 @@ export const getActiveTasks = async (queue?: string, limit: number = 100): Promi
   if (queue) params.append('queue', queue);
   params.append('limit', limit.toString());
 
-  const response = await fetch(`${API_BASE}/api/v1/tasks/?${params}`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/?${params}`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -111,7 +109,7 @@ export const getWorkerStats = async (): Promise<{
   worker_count: number;
   workers: WorkerStats[];
 }> => {
-  const response = await fetch(`${API_BASE}/api/v1/tasks/stats/workers`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/stats/workers`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -131,7 +129,7 @@ export const getQueueStats = async (): Promise<{
   queues: QueueStats;
   total: number;
 }> => {
-  const response = await fetch(`${API_BASE}/api/v1/tasks/stats/queues`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/stats/queues`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });
@@ -291,7 +289,7 @@ export interface DownloadProgressResponse {
  * Get download progress for a task
  */
 export const getDownloadProgress = async (taskId: string): Promise<DownloadProgressResponse> => {
-  const response = await fetch(`${API_BASE}/api/v1/tasks/${taskId}/progress`, {
+  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}/progress`, {
     method: 'GET',
     headers: await getAuthHeaders(),
   });

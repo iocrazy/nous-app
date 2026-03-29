@@ -18,7 +18,7 @@ router = APIRouter(prefix="/invites", tags=["Invites"])
 
 
 @router.get("", response_model=InviteListResponse)
-async def list_invites(team_id: str, auth: AuthDep = None):
+async def list_invites(team_id: str, auth: AuthDep):
     """List all invites for a team."""
     repo = InviteRepository()
 
@@ -51,7 +51,7 @@ async def list_invites(team_id: str, auth: AuthDep = None):
 
 
 @router.post("", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
-async def create_invite(invite: InviteCreate, auth: AuthDep = None):
+async def create_invite(invite: InviteCreate, auth: AuthDep):
     """Create a new team invite."""
     repo = InviteRepository()
 
@@ -90,7 +90,7 @@ async def create_invite(invite: InviteCreate, auth: AuthDep = None):
 
 
 @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_invite(invite_id: str, auth: AuthDep = None):
+async def delete_invite(invite_id: str, auth: AuthDep):
     """Delete an invite."""
     repo = InviteRepository()
     deleted = await repo.delete_invite(invite_id, auth.user_id)
@@ -103,7 +103,7 @@ async def delete_invite(invite_id: str, auth: AuthDep = None):
 
 
 @router.post("/accept", response_model=AcceptInviteResponse)
-async def accept_invite(request: AcceptInviteRequest, auth: AuthDep = None):
+async def accept_invite(request: AcceptInviteRequest, auth: AuthDep):
     """Accept an invite and join the team."""
     repo = InviteRepository()
 

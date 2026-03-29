@@ -1,4 +1,6 @@
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
+import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
 import {
   StoryboardProject,
   StoryboardNode,
@@ -8,46 +10,19 @@ import {
   ProjectSummary,
 } from '../types';
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
-
-// ─── Response helpers ─────────────────────────────────────────────────────────
-
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API error ${res.status}: ${text}`);
-  }
-  if (res.status === 204) {
-    return undefined as unknown as T;
-  }
-  return res.json() as Promise<T>;
-}
-
-/**
- * Unwrap the backend envelope `{ success, data: T }` → `T`.
- * All storyboard API endpoints return this envelope format.
- */
-async function unwrapResponse<T>(res: Response): Promise<T> {
-  const body = await handleResponse<{ success: boolean; data: T }>(res);
-  return body.data;
-}
-
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 export async function fetchProjects(
   teamId: string,
   page = 1,
-  limit = 20
+  limit = 20,
+  projectId?: string
 ): Promise<{ data: ProjectSummary[]; total: number }> {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
+  if (projectId) {
+    params.set('project_id', projectId);
+  }
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
   const result = await unwrapResponse<{ items: ProjectSummary[]; total: number }>(res);
   return { data: result?.items ?? [], total: result?.total ?? 0 };
@@ -75,6 +50,7 @@ export async function createProject(data: {
   team_id: string;
   name: string;
   description?: string;
+  project_id?: string;
 }): Promise<StoryboardProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects`, {

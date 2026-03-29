@@ -137,6 +137,18 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # LLM Configuration (Script / Storyboard AI)
+    # ============================================
+    LLM_API_URL: str = Field(
+        default="http://localhost:8000/v1", description="LLM API base URL"
+    )
+    LLM_API_KEY: str = Field(default="", description="LLM API key")
+    LLM_MODEL: str = Field(default="gpt-4o", description="LLM model name")
+    LLM_TIMEOUT_SECONDS: float = Field(
+        default=120.0, description="LLM request timeout in seconds"
+    )
+
+    # ============================================
     # AI Provider Configuration
     # ============================================
     DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")

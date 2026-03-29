@@ -8,15 +8,14 @@
  */
 
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 import { PointPackage, PaymentOrder } from '../types';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
 
 /**
  * Fetch all available point packages for purchase.
  */
 export const fetchPackages = async (): Promise<PointPackage[]> => {
-  const url = `${API_BASE}/api/v1/payment/packages`;
+  const url = `${getApiUrl()}/api/v1/payment/packages`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -43,7 +42,7 @@ export const createOrder = async (
   paymentMethod: 'wechat' | 'alipay',
   teamId: string
 ): Promise<PaymentOrder> => {
-  const url = `${API_BASE}/api/v1/payment/create-order`;
+  const url = `${getApiUrl()}/api/v1/payment/create-order`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -74,7 +73,7 @@ export const createOrder = async (
 export const pollOrderStatus = async (
   orderId: string
 ): Promise<{ payment_status: string; points_amount: number; paid_at: string | null }> => {
-  const url = `${API_BASE}/api/v1/payment/order/${orderId}/status`;
+  const url = `${getApiUrl()}/api/v1/payment/order/${orderId}/status`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -106,7 +105,7 @@ export const fetchOrders = async (
   params.set('limit', String(limit));
   params.set('offset', String(offset));
 
-  const url = `${API_BASE}/api/v1/payment/orders?${params.toString()}`;
+  const url = `${getApiUrl()}/api/v1/payment/orders?${params.toString()}`;
 
   const response = await fetch(url, {
     method: 'GET',

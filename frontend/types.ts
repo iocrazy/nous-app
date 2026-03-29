@@ -593,6 +593,8 @@ export interface Project {
   is_starred: boolean;
   color_label: string | null;
   file_count: number;
+  display_code?: string;
+  modules_enabled?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -751,7 +753,83 @@ export interface StoryboardProject {
   cover_image_url?: string;
   viewport_json?: { x: number; y: number; zoom: number };
   settings_json?: Record<string, unknown>;
+  project_id?: string;
+  display_code?: string;
   status: 'active' | 'archived' | 'deleted';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScriptProject {
+  id: string;
+  project_id: string;
+  team_id: string;
+  created_by: string;
+  name: string;
+  description?: string;
+  display_code?: string;
+  settings_json?: Record<string, unknown>;
+  viewport_json?: { x: number; y: number; zoom: number };
+  status: 'active' | 'archived' | 'deleted';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScriptChapter {
+  id: string;
+  script_id: string;
+  parent_chapter_id?: string;
+  chapter_number?: number;
+  title?: string;
+  summary?: string;
+  content?: string;
+  branch_label?: string;
+  branch_type?: 'condition' | 'choice';
+  position_x: number;
+  position_y: number;
+  width?: number;
+  height?: number;
+  data_json: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScriptProjectSummary {
+  id: string;
+  name: string;
+  display_code?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  chapter_count?: number;
+}
+
+export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
+
+export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
+
+export interface ScriptAsset {
+  id: string;
+  script_id: string;
+  asset_type: ScriptAssetType;
+  name: string;
+  content?: string;
+  data_json: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StyleTemplate {
+  id: string;
+  team_id?: string;
+  name: string;
+  description?: string;
+  prompt_content: string;
+  category?: string;
+  is_public: boolean;
+  created_by?: string;
   created_at: string;
   updated_at: string;
 }

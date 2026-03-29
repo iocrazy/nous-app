@@ -360,19 +360,19 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         return media
 
     try:
-        from app.services.ies_douyin_parser import IesDouyinFormatter
+        from app.services.ies_douyin_parser import IesDouyinParser
         from app.services.douyin_formatter import DouyinFormatter
 
-        # --- Attempt 1: IesDouyinFormatter (fast HTTP, no browser) ---
-        aweme_detail = run_async(IesDouyinFormatter.parse(original_url))
+        # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
+        aweme_detail = run_async(IesDouyinParser.parse(original_url))
         parse_method = "LightHTTP"
 
         # If short URL failed, try directly with platform_id (bypass URL redirect)
         if not aweme_detail and platform_id:
             logger.info(f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}")
-            aweme_detail = run_async(IesDouyinFormatter._fetch_share_page(platform_id))
+            aweme_detail = run_async(IesDouyinParser._fetch_share_page(platform_id))
             if aweme_detail:
-                IesDouyinFormatter._process_video_urls(aweme_detail)
+                IesDouyinParser._process_video_urls(aweme_detail)
                 parse_method = "LightHTTP-directID"
 
         if aweme_detail:
@@ -903,16 +903,16 @@ def _do_douyin_download(
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
                     from app.services.douyin_formatter import DouyinFormatter
-                    from app.services.ies_douyin_parser import IesDouyinFormatter
+                    from app.services.ies_douyin_parser import IesDouyinParser
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
                     )
                     aweme_detail = run_async(
-                        IesDouyinFormatter._fetch_share_page(platform_id)
+                        IesDouyinParser._fetch_share_page(platform_id)
                     )
                     if aweme_detail:
-                        IesDouyinFormatter._process_video_urls(aweme_detail)
+                        IesDouyinParser._process_video_urls(aweme_detail)
                         new_parsed = run_async(
                             DouyinFormatter.parse_aweme_detail(
                                 aweme_detail=aweme_detail,

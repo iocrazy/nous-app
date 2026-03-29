@@ -25,8 +25,6 @@ Utils.setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # app.state.redis = await init_redis() # 在启动时初始化redis
-
     # Load persisted transcode settings from database (system_settings)
     try:
         from app.db import get_async_supabase_admin
@@ -61,14 +59,6 @@ async def lifespan(app: FastAPI):
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     try:
-        # 关闭 db 数据库引擎
-
-        # # 关闭 redis 连接
-        # if hasattr(app.state, "redis") and app.state.redis:
-        #     logger.info("正在关闭Redis连接...")
-        #     await app.state.redis.close()
-        #     logger.info("Redis连接已关闭")
-
         # 关闭 DrissionPageParser 浏览器资源
 
         logger.info("正在关闭抖音分析浏览器...")

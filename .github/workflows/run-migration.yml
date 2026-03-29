@@ -2,6 +2,11 @@ name: Run SQL Migration on NAS
 
 on:
   workflow_dispatch:
+    inputs:
+      migration_file:
+        description: "Path to migration SQL file (relative to repo root, e.g. supabase/migrations/102_add_tags_enabled.sql)"
+        required: true
+        type: string
 
 jobs:
   migrate:
@@ -9,6 +14,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate migration file exists
+        run: |
+          if [ ! -f "${{ inputs.migration_file }}" ]; then
+            echo "::error::Migration file not found: ${{ inputs.migration_file }}"
+            exit 1
+          fi
+          echo "Migration file: ${{ inputs.migration_file }}"
+          echo "--- Contents ---"
+          cat "${{ inputs.migration_file }}"
+
       - name: Run migration via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -21,21 +39,20 @@ jobs:
             set -e
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-            echo "🔍 Finding Supabase DB container..."
+            echo "Finding Supabase DB container..."
             DB_CONTAINER="mediahub-db"
             echo "Using DB container: $DB_CONTAINER"
 
-            echo "🔧 Running migration 102: Add enabled column to tags..."
-            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -c "
-              ALTER TABLE tags ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
-              CREATE INDEX IF NOT EXISTS idx_tags_enabled ON tags(enabled);
-              COMMENT ON COLUMN tags.enabled IS 'Whether this tag is visible in the frontend API.';
-            "
+            MIGRATION_FILE="${{ inputs.migration_file }}"
+            echo "Running migration: $MIGRATION_FILE"
 
-            echo "✅ Migration complete!"
+            cd ${{ secrets.NAS_PROJECT_PATH }}
+            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$MIGRATION_FILE"
 
-            echo "🔄 Reloading PostgREST schema cache..."
+            echo "Migration complete!"
+
+            echo "Reloading PostgREST schema cache..."
             sudo docker kill --signal=SIGUSR1 mediahub-rest 2>/dev/null || true
             echo "Reloaded PostgREST: mediahub-rest"
 
-            echo "✅ Done!"
+            echo "Done!"

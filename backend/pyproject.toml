@@ -55,6 +55,10 @@ dev = [
     "flake8>=6.0.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
 [project.scripts]
 mediahub = "app.main:main"
 

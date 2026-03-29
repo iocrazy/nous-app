@@ -156,6 +156,7 @@ class StoryboardProjectRepository:
         search: Optional[str] = None,
         sort_by: str = "updated_at",
         sort_order: str = "desc",
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Paginated list of storyboard projects for a team.
@@ -167,6 +168,7 @@ class StoryboardProjectRepository:
             search: Optional name substring filter (case-insensitive).
             sort_by: Column to sort by (default ``updated_at``).
             sort_order: ``"asc"`` or ``"desc"`` (default ``"desc"``).
+            project_id: Optional parent project ID filter.
 
         Returns:
             Dict with keys ``items`` (list), ``total`` (int),
@@ -183,8 +185,11 @@ class StoryboardProjectRepository:
                 .eq("team_id", team_id)
                 .neq("status", "deleted")
             )
+            if project_id is not None:
+                count_query = count_query.eq("project_id", project_id)
             if search:
-                count_query = count_query.ilike("name", f"%{search}%")
+                escaped = search.replace("%", r"\%").replace("_", r"\_")
+                count_query = count_query.ilike("name", f"%{escaped}%")
             count_result = await count_query.execute()
             total = count_result.count or 0
 
@@ -198,8 +203,11 @@ class StoryboardProjectRepository:
                 .order(sort_by, desc=desc)
                 .range(offset, offset + limit - 1)
             )
+            if project_id is not None:
+                data_query = data_query.eq("project_id", project_id)
             if search:
-                data_query = data_query.ilike("name", f"%{search}%")
+                escaped = search.replace("%", r"\%").replace("_", r"\_")
+                data_query = data_query.ilike("name", f"%{escaped}%")
             data_result = await data_query.execute()
 
             return {

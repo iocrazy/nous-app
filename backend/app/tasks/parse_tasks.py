@@ -356,7 +356,7 @@ def _get_douyin_method_flags() -> dict[str, bool]:
 
 def _try_lighthttp(url: str, user_id: str):
     """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
-    from app.services.ies_douyin_parser import IesDouyinFormatter
+    from app.services.ies_douyin_parser import IesDouyinParser
     from app.services.douyin_formatter import DouyinFormatter
 
     try:

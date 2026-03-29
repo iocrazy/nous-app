@@ -43,3 +43,19 @@ COOKIES_DIR: ""
 
 # 每日免费积分（每用户）
 DAILY_FREE_POINTS: 100
+
+# URL domain allowlist for SSRF prevention
+url_allowlist:
+  - douyin.com
+  - iesdouyin.com
+  - tiktok.com
+  - xiaohongshu.com
+  - xhslink.com
+  - weibo.com
+  - bilibili.com
+  - b23.tv
+  - youtube.com
+  - youtu.be
+  - instagram.com
+  - twitter.com
+  - x.com
