@@ -1883,7 +1883,7 @@ async def _handle_ytdlp_fetch(
         unified_task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="parse",
-            title=f"Parsing {url[:40]}...",
+            title=f"Parse {url[:50]}",
             subtitle="Initializing...",
             dedup_key=dedup_key,
         )

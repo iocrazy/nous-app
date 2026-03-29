@@ -159,7 +159,7 @@ async def upload_resource(
             unified_task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="upload",
-                title=file.filename or "Upload",
+                title=f"Upload {file.filename or 'file'}",
                 total_bytes=file.size,
             )
             await tracker.start(unified_task_id)
