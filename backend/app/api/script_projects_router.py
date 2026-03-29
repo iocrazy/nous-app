@@ -7,7 +7,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
-from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate
+from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate, ViewportUpdate
 from app.services.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
@@ -115,11 +115,11 @@ async def delete_script_project(auth: AuthDep, script_id: str) -> Dict[str, Any]
 
 @router.patch("/{script_id}/viewport")
 async def update_viewport(
-    auth: AuthDep, script_id: str, body: Dict[str, Any]
+    auth: AuthDep, script_id: str, body: ViewportUpdate
 ) -> Dict[str, Any]:
     try:
         svc = ScriptService()
-        await svc.update_viewport(script_id, body)
+        await svc.update_viewport(script_id, body.model_dump())
         return {"success": True}
     except Exception as exc:
         logger.error("[Scripts] update_viewport %s failed: %s", script_id, exc)

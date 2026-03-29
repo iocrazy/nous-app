@@ -106,6 +106,14 @@ class ScriptCanvasSyncRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ViewportUpdate(BaseModel):
+    """Viewport position and zoom for canvas."""
+
+    x: float = 0
+    y: float = 0
+    zoom: float = Field(default=1, ge=0.1, le=10)
+
+
 class GenerateOutlineRequest(BaseModel):
     """Request body for AI-generated story outline."""
 

@@ -1,14 +1,6 @@
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 import { ScriptProject, ScriptChapter, ScriptProjectSummary } from '../types';
-
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
