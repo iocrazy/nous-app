@@ -52,13 +52,15 @@ const STATUS_FILTER_OPTIONS = [
 ]
 
 function getCoverSrc(record: VideoData): string | null {
+  // Prefer CDN URL (no auth needed, avoids cross-origin ORB blocking)
+  if (record.cover_url) return record.cover_url
   if (record.cover_download_path) {
     const path = record.cover_download_path.startsWith('/')
       ? record.cover_download_path
       : `/${record.cover_download_path}`
     return `${API_URL}/media${path}`
   }
-  return record.cover_url || null
+  return null
 }
 
 function StatusTag({ status }: { status: string }) {
