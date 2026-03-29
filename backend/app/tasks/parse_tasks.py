@@ -324,69 +324,99 @@ def parse_batch_links_task(
 # ---------------------------------------------------------------------------
 
 
-def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
-    """Sync Douyin fallback: LightHTTP → DrissionPage.
+def _get_douyin_method_flags() -> dict[str, bool]:
+    """Read Douyin parse method toggles from system_settings."""
+    flags = {"ytdlp": True, "lighthttp": True, "drissionpage": True}
+    try:
+        from app.db import get_async_supabase_admin
+        client = run_async(get_async_supabase_admin())
+        result = run_async(
+            client.table("system_settings")
+            .select("key, value")
+            .in_("key", [
+                "douyin_ytdlp_enabled",
+                "douyin_lighthttp_enabled",
+                "douyin_drissionpage_enabled",
+            ])
+            .execute()
+        )
+        for row in (result.data or []):
+            key_map = {
+                "douyin_ytdlp_enabled": "ytdlp",
+                "douyin_lighthttp_enabled": "lighthttp",
+                "douyin_drissionpage_enabled": "drissionpage",
+            }
+            short_key = key_map.get(row["key"])
+            if short_key:
+                flags[short_key] = row["value"] is True or row["value"] == "true"
+    except Exception as e:
+        logger.warning(f"[Douyin] Failed to read method flags, using defaults: {e}")
+    return flags
 
-    Returns (parsed_data, parse_method, parse_method_name).
-    Raises RuntimeError if all methods fail.
-    """
+
+def _try_lighthttp(url: str, user_id: str):
+    """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
+    from app.services.lightweight_parser import LightweightParser
+    from app.services.douyin_parser import DouyinParser
+
+    try:
+        aweme_detail = run_async(LightweightParser.parse(url, user_id=user_id))
+        if aweme_detail:
+            parsed = run_async(DouyinParser.parse_aweme_detail(
+                aweme_detail=aweme_detail, valid_url=url,
+                download_video=True, download_music=False, download_cover=True,
+            ))
+            if parsed:
+                return parsed, "lightweight", "Lightweight"
+    except Exception as e:
+        logger.warning(f"[Douyin] LightHTTP failed: {e}")
+    return None
+
+
+def _try_drissionpage(url: str, user_id: str):
+    """Attempt DrissionPage parse. Returns (parsed, method, name) or None."""
     from app.services.douyin_analysis import DouyinAnalysis
     from app.services.douyin_parser import DouyinParser
-    from app.services.lightweight_parser import LightweightParser
-    from app.repositories.user_settings_repository import UserSettingsRepository
 
-    # Read user's parse mode setting
-    user_parse_mode = "lighthttp"
     try:
-        settings_repo = UserSettingsRepository()
-        user_settings = run_async(settings_repo.get_by_user_id(user_id))
-        if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+        aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url, user_id=user_id))
+        if aweme_detail:
+            parsed = run_async(DouyinParser.parse_aweme_detail(
+                aweme_detail=aweme_detail, valid_url=url,
+                download_video=True, download_music=False, download_cover=True,
+            ))
+            if parsed:
+                return parsed, "drissionpage", "DrissionPage"
     except Exception as e:
-        logger.warning(f"[Douyin Fallback] Failed to read parse mode: {e}")
+        logger.warning(f"[Douyin] DrissionPage failed: {e}")
+    return None
 
-    aweme_detail = None
 
-    if user_parse_mode == "drissionpage":
-        try:
-            aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url, user_id=user_id))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "browser_auto", "BrowserAuto"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] DrissionPage failed: {e}")
-    else:
-        # LightHTTP first
-        try:
-            aweme_detail = run_async(LightweightParser.parse(url, user_id=user_id))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "light_http", "LightHTTP"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] LightHTTP failed: {e}")
+def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
+    """Sync Douyin fallback: LightHTTP → DrissionPage (respects admin toggles).
 
-        # DrissionPage fallback
-        try:
-            aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url, user_id=user_id))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "browser_auto", "BrowserAuto"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] DrissionPage failed: {e}")
+    Returns (parsed_data, parse_method, parse_method_name).
+    Raises RuntimeError if all enabled methods fail.
+    """
+    flags = _get_douyin_method_flags()
+    logger.info(f"[Douyin Fallback] Method flags: {flags}")
 
-    raise RuntimeError("All Douyin parse methods failed")
+    methods = []
+    if flags["lighthttp"]:
+        methods.append(("LightHTTP", _try_lighthttp))
+    if flags["drissionpage"]:
+        methods.append(("DrissionPage", _try_drissionpage))
+
+    if not methods:
+        raise RuntimeError("All Douyin parse methods are disabled in admin settings")
+
+    for name, fn in methods:
+        logger.info(f"[Douyin Fallback] Trying {name}...")
+        result = fn(url, user_id)
+        if result:
+            return result
+
+    raise RuntimeError("All enabled Douyin parse methods failed")
 
 
 def _dispatch_download_deduped(
@@ -551,9 +581,14 @@ def parse_media_task(
             except Exception:
                 pass
 
-        if skip_ytdlp and platform == "douyin":
-            # Douyin without cookie: go directly to LightweightParser, skip yt-dlp.
-            logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin (no cookie): {url[:60]}")
+        # Check admin toggle for yt-dlp on Douyin
+        douyin_flags = _get_douyin_method_flags() if platform == "douyin" else {}
+        ytdlp_disabled_by_admin = platform == "douyin" and not douyin_flags.get("ytdlp", True)
+
+        if (skip_ytdlp or ytdlp_disabled_by_admin) and platform == "douyin":
+            # Douyin: skip yt-dlp (no cookie or admin disabled)
+            reason = "admin disabled" if ytdlp_disabled_by_admin else "no cookie"
+            logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin ({reason}): {url[:60]}")
             fallback_used = True
             dispatch_url = None
             parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
@@ -597,7 +632,7 @@ def parse_media_task(
                 dispatch_url = None
                 parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
 
-        _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "drissionpage": "DrissionPage"}
+        _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "light_http": "LightHTTP", "drissionpage": "DrissionPage", "browser_auto": "DrissionPage"}
         method_label = _METHOD_LABELS.get(parse_method, parse_method)
 
         if unified_task_id:
