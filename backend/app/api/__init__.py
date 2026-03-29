@@ -47,6 +47,8 @@ from app.api.sb_canvas_router import router as sb_canvas_router
 from app.api.sb_characters_router import router as sb_characters_router
 from app.api.sb_ai_router import router as sb_ai_router
 from app.api.sb_export_router import router as sb_export_router
+from app.api.script_projects_router import router as script_projects_router
+from app.api.script_canvas_router import router as script_canvas_router
 
 api_router = APIRouter()
 
@@ -124,3 +126,6 @@ api_router.include_router(router=sb_canvas_router, tags=["Storyboard Canvas"])
 api_router.include_router(router=sb_characters_router, tags=["Storyboard Characters"])
 api_router.include_router(router=sb_ai_router, tags=["Storyboard AI"])
 api_router.include_router(router=sb_export_router, tags=["Storyboard Export"])
+
+api_router.include_router(router=script_projects_router, tags=["Scripts"])
+api_router.include_router(router=script_canvas_router, tags=["Scripts"])
