@@ -573,4 +573,18 @@ class MediaService:
                 "image_download_status": image_status,
             }
             result = await resources_repo.create_resource(resource_data)
-            return result.get("id") if result else None
+            resource_id = result.get("id") if result else None
+
+            # Create resource_item for user's personal scope
+            if resource_id:
+                try:
+                    await resources_repo.create_resource_item({
+                        "resource_id": resource_id,
+                        "scope_type": "personal",
+                        "scope_id": user_id,
+                        "added_by": user_id,
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to create resource_item for resource {resource_id}: {e}")
+
+            return resource_id
