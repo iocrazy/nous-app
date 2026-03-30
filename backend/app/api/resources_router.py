@@ -626,21 +626,25 @@ async def trash_resource_by_platform_id(
         resource_id = str(resource["id"])
 
         if scope_type == "team" and scope_id:
-            # Team context: just unlink from team, don't trash the resource
-            await svc.remove_from_library(
-                resource_id=resource_id,
-                user_id=auth.user_id,
-                scope_type="team",
-                scope_id=scope_id,
-            )
-            return {"success": True, "message": "Resource removed from team library"}
-        else:
-            # Personal context: trash the resource globally
-            await svc.trash_resource(
-                resource_id=resource_id,
-                user_id=auth.user_id,
-            )
-            return {"success": True, "message": "Resource moved to trash"}
+            # Team context: try to unlink from team first
+            try:
+                await svc.remove_from_library(
+                    resource_id=resource_id,
+                    user_id=auth.user_id,
+                    scope_type="team",
+                    scope_id=scope_id,
+                )
+                return {"success": True, "message": "Resource removed from team library"}
+            except Exception:
+                # No team link found, fall through to trash
+                pass
+
+        # Personal context or team unlink failed: trash the resource globally
+        await svc.trash_resource(
+            resource_id=resource_id,
+            user_id=auth.user_id,
+        )
+        return {"success": True, "message": "Resource moved to trash"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except PermissionError as e:
@@ -671,19 +675,22 @@ async def trash_resource_by_media_id(
         resource_id = str(resource["id"])
 
         if scope_type == "team" and scope_id:
-            await svc.remove_from_library(
-                resource_id=resource_id,
-                user_id=auth.user_id,
-                scope_type="team",
-                scope_id=scope_id,
-            )
-            return {"success": True, "message": "Resource removed from team library"}
-        else:
-            await svc.trash_resource(
-                resource_id=resource_id,
-                user_id=auth.user_id,
-            )
-            return {"success": True, "message": "Resource moved to trash"}
+            try:
+                await svc.remove_from_library(
+                    resource_id=resource_id,
+                    user_id=auth.user_id,
+                    scope_type="team",
+                    scope_id=scope_id,
+                )
+                return {"success": True, "message": "Resource removed from team library"}
+            except Exception:
+                pass
+
+        await svc.trash_resource(
+            resource_id=resource_id,
+            user_id=auth.user_id,
+        )
+        return {"success": True, "message": "Resource moved to trash"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except PermissionError as e:
