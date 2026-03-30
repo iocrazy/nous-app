@@ -37,7 +37,7 @@ import type { SortBy } from '../contexts/ResourcesContext';
 // ─── Skeleton components ────────────────────────────────
 
 const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
+  <div className="grid grid-cols-2 gap-4 downloads-grid">
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
         <div className="h-32 bg-zinc-800" />
@@ -741,7 +741,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   {sortedItems.length > 0 && (
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
-                  <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
+                  <div className="grid grid-cols-2 gap-3 downloads-grid">
                     {recycleSubFolders.map((folder) => (
                       <FolderCard
                         key={`trashed-folder-${folder.id}`}
@@ -778,7 +778,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   {viewMode === 'grid' ? (
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
+                    <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {filteredFolders.map((folder) => {
                         const folderNavigate = () => {
                           if (selectedLibraryId) {
@@ -913,7 +913,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     </div>
                   )}
                   {viewMode === 'grid' ? (
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 220px))' }}>
+                    <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {sortedItems.map((item) => (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
