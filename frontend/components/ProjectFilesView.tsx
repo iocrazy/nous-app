@@ -256,13 +256,6 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         {/* Header */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-            <button
-              onClick={onBack}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <h1 className="text-2xl font-bold text-white">{project.name}</h1>
             {project.announcement && (
               <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded-lg max-w-[200px] truncate">
                 {project.announcement}

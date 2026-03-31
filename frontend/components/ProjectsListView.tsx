@@ -250,15 +250,16 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
       {/* Grid view */}
       {filteredProjects.length > 0 && viewMode === 'grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="flex flex-wrap gap-4">
           {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onClick={() => onProjectSelect(project)}
-              onToggleStar={(e) => handleToggleStar(e, project)}
-              onContextMenu={(e) => handleContextMenu(e, project)}
-            />
+            <div key={project.id} className="w-[260px]">
+              <ProjectCard
+                project={project}
+                onClick={() => onProjectSelect(project)}
+                onToggleStar={(e) => handleToggleStar(e, project)}
+                onContextMenu={(e) => handleContextMenu(e, project)}
+              />
+            </div>
           ))}
         </div>
       )}

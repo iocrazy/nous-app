@@ -129,7 +129,8 @@ export function ProjectNavSidebar({
 
   const filteredStarred = filterProjects(starredProjects);
   const filteredRecent = filterProjects(recentProjects);
-  const metaText = `Active · ${project.file_count ?? 0} files`;
+  const fileCount = project.file_count ?? 0;
+  const metaText = `${fileCount} files`;
 
   return (
     <div className="w-48 h-full flex flex-col bg-zinc-900 border-r border-zinc-800">
@@ -227,15 +228,15 @@ export function ProjectNavSidebar({
               onClick={() => onSectionChange(section.key)}
               className={`flex items-center gap-2.5 w-full px-2.5 py-1.5 rounded-md text-sm transition-colors duration-120 ${
                 isActive
-                  ? 'bg-indigo-500/10 text-indigo-300 border-l-2 border-indigo-500 pl-2'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  ? 'text-zinc-100 bg-zinc-800/80'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <Icon size={16} className="shrink-0" />
               <span className="flex-1 text-left">{section.label}</span>
               {count != null && count > 0 && (
                 <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
-                  isActive ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-500'
+                  isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-500'
                 }`}>
                   {count}
                 </span>
