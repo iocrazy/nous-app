@@ -1,12 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChevronLeft, Loader2, Pencil, Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Loader2, Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from '../../features/storyboard/Canvas';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { useStoryboardStore } from '../../stores/storyboardStore';
-import { fetchProject, updateProject } from '../../services/storyboardService';
+import { fetchProject } from '../../services/storyboardService';
 import { CharacterPanel } from '../../features/storyboard/ui/CharacterPanel';
 import ChatPanel from '../../features/storyboard/ui/ChatPanel';
 import { FrameTimeline } from '../../features/storyboard/ui/FrameTimeline';
@@ -86,16 +85,11 @@ function mapBackendEdgesToCanvas(
 }
 
 export function CanvasEditorPage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { teamId, storyboardId: projectId } = useParams<{ teamId: string; storyboardId?: string }>();
+  const { storyboardId: projectId } = useParams<{ storyboardId?: string }>();
 
   const setCanvasData = useCanvasStore((state) => state.setCanvasData);
   const setCurrentProject = useStoryboardStore((state) => state.setCurrentProject);
 
-  const [projectName, setProjectName] = useState('Untitled Project');
-  const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -124,7 +118,6 @@ export function CanvasEditorPage() {
       try {
         const project = await fetchProject(projectId);
         if (cancelled) return;
-        setProjectName(project.name);
         setCanvasData(
           mapBackendNodesToCanvas(project.nodes),
           mapBackendEdgesToCanvas(project.edges),
@@ -152,42 +145,6 @@ export function CanvasEditorPage() {
     };
   }, [setCurrentProject]);
 
-  // ─── Handlers ──────────────────────────────────────────────────────────
-
-  const handleBack = useCallback(() => {
-    navigate(`/team/${teamId}/storyboard`);
-  }, [navigate, teamId]);
-
-  const handleNameSubmit = useCallback(async () => {
-    const trimmed = nameInput.trim();
-    if (!trimmed || trimmed === projectName) {
-      setEditingName(false);
-      setNameInput(projectName);
-      return;
-    }
-    setProjectName(trimmed);
-    setEditingName(false);
-
-    if (projectId) {
-      try {
-        await updateProject(projectId, { name: trimmed });
-      } catch (err) {
-        console.error('[CanvasEditorPage] Failed to update name:', err);
-      }
-    }
-  }, [nameInput, projectName, projectId]);
-
-  const handleNameKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') void handleNameSubmit();
-      if (e.key === 'Escape') {
-        setEditingName(false);
-        setNameInput(projectName);
-      }
-    },
-    [handleNameSubmit, projectName]
-  );
-
   // ─── Render ───────────────────────────────────────────────────────────
 
   if (loading) {
@@ -203,106 +160,61 @@ export function CanvasEditorPage() {
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-zinc-950">
         <p className="text-sm text-red-400">Failed to load project</p>
         <p className="text-xs text-zinc-500">{loadError}</p>
-        <button
-          type="button"
-          onClick={handleBack}
-          className="text-sm text-indigo-400 hover:text-indigo-300"
-        >
-          Back to projects
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950 overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 flex-shrink-0 bg-zinc-900">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
-        >
-          <ChevronLeft size={16} />
-          <span className="hidden sm:inline">{t('storyboard.back', 'Back')}</span>
-        </button>
-
-        <div className="w-px h-4 bg-zinc-700" />
-
-        {editingName ? (
-          <input
-            type="text"
-            value={nameInput}
-            autoFocus
-            onChange={(e) => setNameInput(e.target.value)}
-            onBlur={() => void handleNameSubmit()}
-            onKeyDown={handleNameKeyDown}
-            className="px-2 py-0.5 bg-zinc-800 border border-indigo-500 rounded text-sm font-medium text-zinc-100 focus:outline-none min-w-0 max-w-xs"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setEditingName(true); setNameInput(projectName); }}
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-200 hover:text-white transition-colors group"
-          >
-            <span className="truncate max-w-xs">{projectName}</span>
-            <Pencil size={12} className="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
-          </button>
-        )}
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Toolbar buttons */}
-        <div className="flex items-center gap-1">
-          <ToolbarButton
-            icon={<FileText size={15} />}
-            label="Script"
-            onClick={() => setShowScriptImport(true)}
-          />
-          <ToolbarButton
-            icon={<Film size={15} />}
-            label="Timeline"
-            active={showTimeline}
-            onClick={() => setShowTimeline((v) => !v)}
-          />
-          <ToolbarButton
-            icon={<Users size={15} />}
-            label="Characters"
-            active={sidePanel === 'characters'}
-            onClick={() => toggleSidePanel('characters')}
-          />
-          <ToolbarButton
-            icon={<MessageCircle size={15} />}
-            label="Chat"
-            active={sidePanel === 'chat'}
-            onClick={() => toggleSidePanel('chat')}
-          />
-          <ToolbarButton
-            icon={<Download size={15} />}
-            label="Export"
-            onClick={() => setShowExport(true)}
-          />
-        </div>
-      </div>
-
-      {/* Main area: Canvas + optional side panel */}
+    <div className="h-full flex flex-col bg-zinc-950 overflow-hidden relative">
+      {/* Canvas fills everything */}
       <div className="flex-1 flex min-h-0">
-        {/* Canvas */}
         <div className="flex-1 relative overflow-hidden min-h-0">
           <ReactFlowProvider>
             <Canvas />
           </ReactFlowProvider>
+
+          {/* Floating panel toolbar — left side vertical */}
+          <div className="absolute top-3 left-3 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+            <FloatingIconButton
+              icon={<FileText size={16} />}
+              tooltip="Script Import"
+              onClick={() => setShowScriptImport(true)}
+            />
+            <FloatingIconButton
+              icon={<Users size={16} />}
+              tooltip="Characters"
+              active={sidePanel === 'characters'}
+              onClick={() => toggleSidePanel('characters')}
+            />
+            <FloatingIconButton
+              icon={<Film size={16} />}
+              tooltip="Timeline"
+              active={showTimeline}
+              onClick={() => setShowTimeline((v) => !v)}
+            />
+            <FloatingIconButton
+              icon={<MessageCircle size={16} />}
+              tooltip="Chat"
+              active={sidePanel === 'chat'}
+              onClick={() => toggleSidePanel('chat')}
+            />
+            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
+            <FloatingIconButton
+              icon={<Download size={16} />}
+              tooltip="Export"
+              onClick={() => setShowExport(true)}
+            />
+          </div>
         </div>
 
         {/* Right side panel */}
         {sidePanel === 'characters' && projectId && (
-          <div className="w-80 flex-shrink-0 border-l border-zinc-800 overflow-y-auto">
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
             <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
           </div>
         )}
         {sidePanel === 'chat' && projectId && (
-          <div className="w-80 flex-shrink-0 border-l border-zinc-800 overflow-y-auto">
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
             <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
           </div>
         )}
@@ -332,16 +244,16 @@ export function CanvasEditorPage() {
   );
 }
 
-// ─── Toolbar button ──────────────────────────────────────────────────────────
+// ─── Floating icon button ────────────────────────────────────────────────────
 
-function ToolbarButton({
+function FloatingIconButton({
   icon,
-  label,
+  tooltip,
   active,
   onClick,
 }: {
   icon: React.ReactNode;
-  label: string;
+  tooltip: string;
   active?: boolean;
   onClick: () => void;
 }) {
@@ -349,15 +261,14 @@ function ToolbarButton({
     <button
       type="button"
       onClick={onClick}
-      title={label}
-      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+      title={tooltip}
+      className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
         active
-          ? 'bg-indigo-600/20 text-indigo-400'
-          : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
+          ? 'bg-zinc-700 text-zinc-100'
+          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80'
       }`}
     >
       {icon}
-      <span className="hidden lg:inline">{label}</span>
     </button>
   );
 }
