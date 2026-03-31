@@ -165,7 +165,7 @@ export function CanvasEditorPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950 overflow-hidden relative">
+    <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col bg-zinc-950 overflow-hidden" style={{ height: 'calc(100vh)' }}>
       {/* Canvas fills everything */}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 relative overflow-hidden min-h-0">
@@ -174,7 +174,7 @@ export function CanvasEditorPage() {
           </ReactFlowProvider>
 
           {/* Floating panel toolbar — left side vertical */}
-          <div className="absolute top-3 left-3 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+          <div className="absolute top-14 left-3 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
             <FloatingIconButton
               icon={<FileText size={16} />}
               tooltip="Script Import"
