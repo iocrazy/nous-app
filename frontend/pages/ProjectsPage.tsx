@@ -187,7 +187,7 @@ export function ProjectsPage() {
     if (trashCount > 0) sectionCounts.trash = trashCount;
 
     return (
-      <div className="flex h-full">
+      <div className="flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8" style={{ height: '100vh' }}>
         <ProjectNavSidebar
           project={selectedProject}
           activeSection={TAB_TO_SECTION[activeTab] || 'files'}
@@ -225,7 +225,7 @@ export function ProjectsPage() {
   // ─── Project List View ──────────────────────────────────────
   return (
     <>
-      <div className="flex h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ height: '100vh' }}>
         <ProjectFilterSidebar
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}

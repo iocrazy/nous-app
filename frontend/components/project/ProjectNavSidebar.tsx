@@ -135,7 +135,7 @@ export function ProjectNavSidebar({
   const metaText = `${fileCount} files`;
 
   return (
-    <div className="w-48 h-full flex flex-col border-r border-zinc-800/40">
+    <div className="w-48 h-full flex flex-col border-r border-zinc-800/40 pt-14">
       {/* Header */}
       <div className="relative p-3" ref={dropdownRef}>
         <div className="flex items-center gap-2">
@@ -216,7 +216,7 @@ export function ProjectNavSidebar({
       </div>
 
       {/* Nav Menu */}
-      <nav className="px-2 py-1">
+      <nav className="px-1 py-1">
         {NAV_SECTIONS.map(section => {
           if (section.key.startsWith('divider')) {
             return <div key={section.key} className="my-1.5 mx-2 border-t border-zinc-800/50" />;
@@ -228,7 +228,7 @@ export function ProjectNavSidebar({
             <button
               key={section.key}
               onClick={() => onSectionChange(section.key)}
-              className={`flex items-center gap-2.5 w-full px-2.5 py-1.5 rounded-md text-sm transition-colors duration-120 ${
+              className={`flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md text-sm transition-colors duration-120 ${
                 isActive
                   ? 'text-zinc-100 bg-zinc-800/80'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
