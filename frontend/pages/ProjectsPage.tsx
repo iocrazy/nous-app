@@ -115,29 +115,30 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {/* Tabs — compact strip */}
-          <div className="flex items-center gap-1 px-5 pt-3 pb-2 border-b border-zinc-800/60 bg-zinc-950/40">
-            <div className="flex items-center gap-0.5 rounded-lg bg-zinc-900/80 p-0.5">
-              {tabs.map(({ tab, icon, label, count }) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
-                    activeTab === tab
-                      ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40'
-                  }`}
-                >
-                  {icon}
-                  {label}
-                  {count != null && count > 0 && (
-                    <span className="text-[10px] bg-zinc-700/80 text-zinc-400 px-1.5 py-0.5 rounded-full leading-none">
-                      {count}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
+          {/* Tabs — refined underline */}
+          <div className="flex items-center gap-0 px-5 border-b border-zinc-800/50">
+            {tabs.map(({ tab, icon, label, count }) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors relative ${
+                  activeTab === tab
+                    ? 'text-zinc-100'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {icon}
+                {label}
+                {count != null && count > 0 && (
+                  <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full leading-none">
+                    {count}
+                  </span>
+                )}
+                {activeTab === tab && (
+                  <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-indigo-500 rounded-full" />
+                )}
+              </button>
+            ))}
           </div>
 
           {/* Content */}
