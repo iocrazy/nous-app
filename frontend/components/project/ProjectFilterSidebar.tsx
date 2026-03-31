@@ -88,18 +88,6 @@ export function ProjectFilterSidebar({
         <span className="text-sm font-semibold text-zinc-200">Projects</span>
       </div>
 
-      {/* Collapse toggle — bottom right corner */}
-      <div className="flex-1" />
-      <div className="flex justify-end px-2 pb-3">
-        <button
-          onClick={onToggleCollapse}
-          className="w-6 h-6 flex items-center justify-center rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-          title="Collapse sidebar"
-        >
-          <ChevronLeft size={14} />
-        </button>
-      </div>
-
       {/* View filters */}
       <div className="px-2">
         <SectionLabel>View</SectionLabel>
@@ -121,7 +109,7 @@ export function ProjectFilterSidebar({
       {folders.length > 0 && (
         <>
           <div className="mx-3 my-2 border-t border-zinc-800/80" />
-          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+          <div className="px-2 pb-2 space-y-0.5">
             <SectionLabel>Folders</SectionLabel>
             <div className="mt-1 flex flex-col gap-0.5">
               {folders.map((folder) => (
@@ -138,6 +126,18 @@ export function ProjectFilterSidebar({
           </div>
         </>
       )}
+
+      {/* Spacer + collapse */}
+      <div className="flex-1" />
+      <div className="flex justify-end px-2 pb-3">
+        <button
+          onClick={onToggleCollapse}
+          className="w-6 h-6 flex items-center justify-center rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          title="Collapse sidebar"
+        >
+          <ChevronLeft size={14} />
+        </button>
+      </div>
     </div>
   );
 }
