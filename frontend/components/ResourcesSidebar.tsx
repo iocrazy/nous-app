@@ -136,7 +136,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           className={sidebarItemClass(isSharedView)}
         >
           <Share2 size={15} className="shrink-0 opacity-70" />
-          <span>{t('resources.sharedManagement')}</span>
+          <span className="flex-1">{t('resources.sharedManagement')}</span>
         </button>
 
         <button
@@ -144,7 +144,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           className={sidebarItemClass(isRecycleView)}
         >
           <Trash2 size={15} className="shrink-0 opacity-70" />
-          <span>{t('resources.recycleBin')}</span>
+          <span className="flex-1">{t('resources.recycleBin')}</span>
         </button>
 
         {/* ── Divider ── */}
@@ -161,6 +161,9 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               >
                 <BookOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.library')}</span>
+                {libraries.length > 0 && (
+                  <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{libraries.length}</span>
+                )}
                 <ChevronDown
                   size={12}
                   className={`shrink-0 text-zinc-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
@@ -282,6 +285,9 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           >
             <Zap size={15} className="shrink-0 opacity-70" />
             <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
+            {smartFolders.length > 0 && (
+              <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{smartFolders.length}</span>
+            )}
             <ChevronDown
               size={12}
               className={`shrink-0 text-zinc-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
