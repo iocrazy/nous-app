@@ -80,7 +80,7 @@ export function ProjectFilterSidebar({
   return (
     <div className="flex w-52 flex-col border-r border-zinc-800/40 pt-16">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3">
         <span className="text-sm font-semibold text-zinc-200">Projects</span>
         <div className="flex items-center gap-1">
           <button onClick={onCreateProject} className={iconBtnClass} title="Create project">
@@ -113,7 +113,7 @@ export function ProjectFilterSidebar({
       {folders.length > 0 && (
         <>
           <div className="mx-3 my-2 border-t border-zinc-800/80" />
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
+          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
             <SectionLabel>Folders</SectionLabel>
             <div className="mt-1 flex flex-col gap-0.5">
               {folders.map((folder) => (

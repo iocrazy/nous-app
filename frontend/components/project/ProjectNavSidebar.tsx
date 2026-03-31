@@ -137,7 +137,7 @@ export function ProjectNavSidebar({
   return (
     <div className="w-52 h-full flex flex-col border-r border-zinc-800/40 pt-16">
       {/* Header */}
-      <div className="relative p-3" ref={dropdownRef}>
+      <div className="relative px-3 pt-4 pb-3" ref={dropdownRef}>
         <div className="flex items-center gap-2">
           <button
             onClick={onBackToList}
@@ -216,10 +216,10 @@ export function ProjectNavSidebar({
       </div>
 
       {/* Nav Menu */}
-      <nav className="px-1 py-1">
+      <nav className="px-2 py-2 space-y-0.5">
         {NAV_SECTIONS.map(section => {
           if (section.key.startsWith('divider')) {
-            return <div key={section.key} className="my-1.5 mx-2 border-t border-zinc-800/50" />;
+            return <div key={section.key} className="my-2.5 mx-3 border-t border-zinc-800/40" />;
           }
           const Icon = section.icon!;
           const isActive = activeSection === section.key;
