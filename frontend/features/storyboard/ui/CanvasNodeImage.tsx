@@ -1,4 +1,5 @@
-import { memo, useCallback, type ImgHTMLAttributes, type MouseEvent } from 'react';
+import { memo, useCallback, useState, type ImgHTMLAttributes, type MouseEvent } from 'react';
+import { Loader2 } from 'lucide-react';
 
 import { useCanvasStore } from '../../../stores/canvasStore';
 
@@ -34,9 +35,12 @@ export const CanvasNodeImage = memo(({
   disableViewer = false,
   onDoubleClick,
   src,
+  className,
   ...props
 }: CanvasNodeImageProps) => {
   const openImageViewer = useCanvasStore((state) => state.openImageViewer);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
 
   const handleDoubleClick = useCallback((event: MouseEvent<HTMLImageElement>) => {
     onDoubleClick?.(event);
@@ -59,16 +63,35 @@ export const CanvasNodeImage = memo(({
   }, [disableViewer, onDoubleClick, openImageViewer, src, viewerImageList, viewerSourceUrl]);
 
   return (
-    <img
-      {...props}
-      src={src}
-      data-viewer-src={
-        typeof viewerSourceUrl === 'string' && viewerSourceUrl.trim().length > 0
-          ? viewerSourceUrl.trim()
-          : undefined
-      }
-      onDoubleClick={handleDoubleClick}
-    />
+    <div className="relative">
+      {/* Loading spinner */}
+      {!loaded && !error && src && (
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/50">
+          <Loader2 size={20} className="animate-spin text-zinc-500" />
+        </div>
+      )}
+      <img
+        {...props}
+        src={src}
+        loading="lazy"
+        className={`${className ?? ''} transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        data-viewer-src={
+          typeof viewerSourceUrl === 'string' && viewerSourceUrl.trim().length > 0
+            ? viewerSourceUrl.trim()
+            : undefined
+        }
+        onDoubleClick={handleDoubleClick}
+        onLoad={(e) => {
+          setLoaded(true);
+          props.onLoad?.(e);
+        }}
+        onError={(e) => {
+          setError(true);
+          setLoaded(true);
+          props.onError?.(e);
+        }}
+      />
+    </div>
   );
 });
 

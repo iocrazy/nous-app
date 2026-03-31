@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Handle,
   Position,
@@ -133,13 +133,28 @@ export const ImageNode = memo(({ id, data, selected, type, width, height }: Imag
     return t('node.imageNode.waitingResultDelayed', { minutes: waitedMinutes, defaultValue: `Waiting... (${waitedMinutes}min)` });
   }, [isExportResultNode, isGenerating, t, waitedMinutes]);
 
-  const imageSource = useMemo(() => {
+  const computeImageSource = useCallback(() => {
     const preferOriginal = shouldUseOriginalImageByZoom(zoom);
     const picked = preferOriginal
       ? data.imageUrl || data.previewImageUrl
       : data.previewImageUrl || data.imageUrl;
     return picked ? resolveImageDisplayUrl(picked) : null;
   }, [data.imageUrl, data.previewImageUrl, zoom]);
+
+  const [imageSource, setImageSource] = useState(computeImageSource);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => {
+      setImageSource(computeImageSource());
+    }, 150);
+
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [computeImageSource]);
 
   const originalImageUrl = useMemo(() => {
     if (!data.imageUrl) return null;

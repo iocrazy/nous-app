@@ -23,6 +23,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { useShallow } from 'zustand/shallow';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { canvasAiGateway, canvasEventBus } from './application/canvasServices';
 import {
@@ -200,28 +201,62 @@ export function Canvas() {
     moved: boolean;
   } | null>(null);
 
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
-  const applyNodesChange = useCanvasStore((state) => state.onNodesChange);
-  const applyEdgesChange = useCanvasStore((state) => state.onEdgesChange);
-  const connectNodes = useCanvasStore((state) => state.onConnect);
-  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const addNode = useCanvasStore((state) => state.addNode);
-  const setSelectedNode = useCanvasStore((state) => state.setSelectedNode);
-  const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
-  const deleteEdge = useCanvasStore((state) => state.deleteEdge);
-  const deleteNode = useCanvasStore((state) => state.deleteNode);
-  const deleteNodes = useCanvasStore((state) => state.deleteNodes);
-  const groupNodes = useCanvasStore((state) => state.groupNodes);
-  const undo = useCanvasStore((state) => state.undo);
-  const redo = useCanvasStore((state) => state.redo);
-  const openToolDialog = useCanvasStore((state) => state.openToolDialog);
-  const closeToolDialog = useCanvasStore((state) => state.closeToolDialog);
-  const setViewportState = useCanvasStore((state) => state.setViewportState);
-  const setCanvasViewportSize = useCanvasStore((state) => state.setCanvasViewportSize);
-  const imageViewer = useCanvasStore((state) => state.imageViewer);
-  const closeImageViewer = useCanvasStore((state) => state.closeImageViewer);
-  const navigateImageViewer = useCanvasStore((state) => state.navigateImageViewer);
+  // Group 1: Core canvas state
+  const { nodes, edges, selectedNodeId } = useCanvasStore(
+    useShallow((state) => ({
+      nodes: state.nodes,
+      edges: state.edges,
+      selectedNodeId: state.selectedNodeId,
+    }))
+  );
+
+  // Group 2: Node & edge change handlers
+  const {
+    applyNodesChange, applyEdgesChange, connectNodes,
+    updateNodeData, addNode, setSelectedNode,
+    deleteEdge, deleteNode, deleteNodes, groupNodes,
+  } = useCanvasStore(
+    useShallow((state) => ({
+      applyNodesChange: state.onNodesChange,
+      applyEdgesChange: state.onEdgesChange,
+      connectNodes: state.onConnect,
+      updateNodeData: state.updateNodeData,
+      addNode: state.addNode,
+      setSelectedNode: state.setSelectedNode,
+      deleteEdge: state.deleteEdge,
+      deleteNode: state.deleteNode,
+      deleteNodes: state.deleteNodes,
+      groupNodes: state.groupNodes,
+    }))
+  );
+
+  // Group 3: Canvas operations (undo/redo, viewport, dialogs)
+  const {
+    undo, redo, openToolDialog, closeToolDialog,
+    setViewportState, setCanvasViewportSize,
+  } = useCanvasStore(
+    useShallow((state) => ({
+      undo: state.undo,
+      redo: state.redo,
+      openToolDialog: state.openToolDialog,
+      closeToolDialog: state.closeToolDialog,
+      setViewportState: state.setViewportState,
+      setCanvasViewportSize: state.setCanvasViewportSize,
+    }))
+  );
+
+  // Group 4: Image viewer
+  const { imageViewer, closeImageViewer, navigateImageViewer } = useCanvasStore(
+    useShallow((state) => ({
+      imageViewer: state.imageViewer,
+      closeImageViewer: state.closeImageViewer,
+      navigateImageViewer: state.navigateImageViewer,
+    }))
+  );
+
+  // Keep a ref to current nodes for polling without re-triggering effects
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   useEffect(() => {
     const unsubOpen = canvasEventBus.subscribe('tool-dialog/open', (payload) => openToolDialog(payload));
@@ -717,18 +752,22 @@ export function Canvas() {
   );
 
   // ─── AI Generation Job Polling ────────────────────────────────────────────
+  // Subscribe to store changes to detect new generating nodes without
+  // putting `nodes` in a useEffect dependency array (which would reset all polls).
   useEffect(() => {
     const POLL_INTERVAL_MS = 1400;
     const sleep = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms); });
 
-    const pendingExportNodes = nodes.filter((node) => {
-      if (node.type !== CANVAS_NODE_TYPES.exportImage) return false;
-      const d = node.data as Record<string, unknown>;
-      return d.isGenerating === true && typeof d.generationJobId === 'string' && (d.generationJobId as string).length > 0;
-    });
+    function findPendingExportNodes(storeNodes: CanvasNode[]) {
+      return storeNodes.filter((node) => {
+        if (node.type !== CANVAS_NODE_TYPES.exportImage) return false;
+        const d = node.data as Record<string, unknown>;
+        return d.isGenerating === true && typeof d.generationJobId === 'string' && (d.generationJobId as string).length > 0;
+      });
+    }
 
-    for (const pendingNode of pendingExportNodes) {
-      if (activeGenerationPollNodeIdsRef.current.has(pendingNode.id)) continue;
+    function startPollingForNode(pendingNode: CanvasNode) {
+      if (activeGenerationPollNodeIdsRef.current.has(pendingNode.id)) return;
       activeGenerationPollNodeIdsRef.current.add(pendingNode.id);
 
       void (async () => {
@@ -751,9 +790,10 @@ export function Canvas() {
               continue;
             }
 
+            const storeUpdateNodeData = useCanvasStore.getState().updateNodeData;
             if (status.status === 'succeeded' && typeof status.result === 'string' && status.result.trim()) {
               const prepared = await prepareNodeImage(status.result);
-              updateNodeData(pendingNode.id, {
+              storeUpdateNodeData(pendingNode.id, {
                 imageUrl: prepared.imageUrl,
                 previewImageUrl: prepared.previewImageUrl,
                 aspectRatio: prepared.aspectRatio,
@@ -767,7 +807,7 @@ export function Canvas() {
             }
 
             const errorMessage = status.error ?? (status.status === 'not_found' ? 'Job not found' : 'Generation failed');
-            updateNodeData(pendingNode.id, {
+            storeUpdateNodeData(pendingNode.id, {
               isGenerating: false,
               generationStartedAt: null,
               generationJobId: null,
@@ -781,7 +821,21 @@ export function Canvas() {
         }
       })();
     }
-  }, [nodes, updateNodeData]);
+
+    // Check initial state on mount
+    for (const pendingNode of findPendingExportNodes(useCanvasStore.getState().nodes)) {
+      startPollingForNode(pendingNode);
+    }
+
+    // Subscribe to store changes — only start polling for new generating nodes
+    const unsubscribe = useCanvasStore.subscribe((state) => {
+      for (const pendingNode of findPendingExportNodes(state.nodes)) {
+        startPollingForNode(pendingNode);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full">

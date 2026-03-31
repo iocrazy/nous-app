@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, RotateCcw, X } from 'lucide-react';
 import { useImageViewerTransform } from '../hooks/useImageViewerTransform';
 
 const UI_CONTENT_OVERLAY_INSET_CLASS = 'inset-0';
@@ -21,13 +21,14 @@ export function ImageViewerModal({
   currentIndex,
   onClose,
   onNavigate,
-}: ImageViewerModalProps): JSX.Element | null {
+}: ImageViewerModalProps): React.ReactElement | null {
   const { t } = useTranslation();
   const viewerControlClass =
     'inline-flex h-10 items-center justify-center rounded-full border border-white/20 bg-black/60 px-4 text-sm text-white backdrop-blur-xl';
   const [isVisible, setIsVisible] = useState(false);
   const [overlayOpacity, setOverlayOpacity] = useState(0);
   const [displayImageUrl, setDisplayImageUrl] = useState(imageUrl);
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
 
   const {
@@ -43,6 +44,14 @@ export function ImageViewerModal({
     handleImageLoad,
     isPointOnImageContent,
   } = useImageViewerTransform(open && isVisible);
+
+  const onImageLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      setIsImageLoaded(true);
+      handleImageLoad(e);
+    },
+    [handleImageLoad],
+  );
 
   useEffect(() => {
     if (!isVisible) return;
@@ -84,8 +93,21 @@ export function ImageViewerModal({
     if (!open || !imageUrl) {
       return;
     }
+    setIsImageLoaded(false);
     setDisplayImageUrl(imageUrl);
   }, [open, imageUrl]);
+
+  // Prefetch adjacent images
+  useEffect(() => {
+    if (!open || imageList.length <= 1) return;
+    const adjacentIndices = [currentIndex - 1, currentIndex + 1];
+    adjacentIndices.forEach((idx) => {
+      if (idx >= 0 && idx < imageList.length) {
+        const img = new Image();
+        img.src = imageList[idx];
+      }
+    });
+  }, [open, currentIndex, imageList]);
 
   useEffect(() => {
     return () => {
@@ -139,19 +161,24 @@ export function ImageViewerModal({
         }}
       >
         <div className="relative">
+          {!isImageLoaded && displayImageUrl && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-white/70" />
+            </div>
+          )}
           <img
             ref={imageRef}
             src={displayImageUrl}
             alt={t('viewer.imageAlt', 'Image')}
             className="select-none transition-opacity duration-300"
             style={{
-              opacity: viewerOpacity * overlayOpacity,
+              opacity: isImageLoaded ? viewerOpacity * overlayOpacity : 0,
               transformOrigin: 'center',
               width: '95vw',
               height: '95vh',
               objectFit: 'contain',
             }}
-            onLoad={handleImageLoad}
+            onLoad={onImageLoad}
             onMouseDown={handleImageMouseDown}
             onMouseMove={handleImageMouseMove}
             onClick={(e) => {
