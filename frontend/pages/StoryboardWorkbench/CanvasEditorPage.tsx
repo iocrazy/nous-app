@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Loader2, Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
-import { useParams } from 'react-router-dom';
+import { Loader2, Users, MessageCircle, Film, FileText, Download, ArrowLeft } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from '../../features/storyboard/Canvas';
 import { useCanvasStore } from '../../stores/canvasStore';
@@ -85,7 +85,8 @@ function mapBackendEdgesToCanvas(
 }
 
 export function CanvasEditorPage() {
-  const { storyboardId: projectId } = useParams<{ storyboardId?: string }>();
+  const navigate = useNavigate();
+  const { teamId, projectId: parentProjectId, storyboardId: projectId } = useParams<{ teamId?: string; projectId?: string; storyboardId?: string }>();
 
   const setCanvasData = useCanvasStore((state) => state.setCanvasData);
   const setCurrentProject = useStoryboardStore((state) => state.setCurrentProject);
@@ -175,6 +176,12 @@ export function CanvasEditorPage() {
 
           {/* Floating panel toolbar — left side vertical */}
           <div className="absolute top-14 left-3 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+            <FloatingIconButton
+              icon={<ArrowLeft size={16} />}
+              tooltip="Back to project"
+              onClick={() => navigate(teamId ? `/team/${teamId}/projects/${parentProjectId}?tab=storyboard` : '/projects')}
+            />
+            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
             <FloatingIconButton
               icon={<FileText size={16} />}
               tooltip="Script Import"
