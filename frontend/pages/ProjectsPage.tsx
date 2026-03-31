@@ -93,6 +93,16 @@ export function ProjectsPage() {
 
   // If viewing a project (files or tasks)
   if (selectedProject) {
+    const tabs = [
+      { tab: 'files' as ProjectTab, icon: <FolderOpen size={14} />, label: t('projects.tabs.files', 'Files') },
+      { tab: 'scripts' as ProjectTab, icon: <FileText size={14} />, label: t('projects.tabs.scripts', 'Scripts') },
+      { tab: 'storyboard' as ProjectTab, icon: <Clapperboard size={14} />, label: t('projects.tabs.storyboard', 'Storyboard') },
+      { tab: 'output' as ProjectTab, icon: <Download size={14} />, label: t('projects.tabs.output', 'Output') },
+      { tab: 'tasks' as ProjectTab, icon: <KanbanSquare size={14} />, label: t('projects.tabs.tasks', 'Tasks') },
+      { tab: 'shares' as ProjectTab, icon: <Share2 size={14} />, label: t('projects.tabs.shares', 'Shares'), count: shareCount },
+      { tab: 'trash' as ProjectTab, icon: <Trash2 size={14} />, label: t('projects.tabs.trash', 'Trash'), count: trashCount },
+    ];
+
     return (
       <div className="flex h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
         <ProjectsSidebar
@@ -104,78 +114,75 @@ export function ProjectsPage() {
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
-        <div className="flex-1 min-w-0 px-6 py-4">
-          {/* Tab bar */}
-          <div className="flex items-center gap-4 mb-4 border-b border-zinc-800">
-            {([
-              { tab: 'files' as ProjectTab, icon: <FolderOpen size={15} />, label: t('projects.tabs.files', 'Files') },
-              { tab: 'scripts' as ProjectTab, icon: <FileText size={15} />, label: t('projects.tabs.scripts', 'Scripts') },
-              { tab: 'storyboard' as ProjectTab, icon: <Clapperboard size={15} />, label: t('projects.tabs.storyboard', 'Storyboard') },
-              { tab: 'output' as ProjectTab, icon: <Download size={15} />, label: t('projects.tabs.output', 'Output') },
-              { tab: 'tasks' as ProjectTab, icon: <KanbanSquare size={15} />, label: t('projects.tabs.tasks', 'Tasks') },
-              { tab: 'shares' as ProjectTab, icon: <Share2 size={15} />, label: t('projects.tabs.shares', 'Shares'), count: shareCount },
-              { tab: 'trash' as ProjectTab, icon: <Trash2 size={15} />, label: t('projects.tabs.trash', 'Trash'), count: trashCount },
-            ]).map(({ tab, icon, label, count }) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex items-center gap-1.5 pb-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab
-                    ? 'border-indigo-500 text-white'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                {icon}
-                {label}
-                {count != null && count > 0 && (
-                  <span className="text-[10px] bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded-full">
-                    {count}
-                  </span>
-                )}
-              </button>
-            ))}
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+          {/* Tabs — compact strip */}
+          <div className="flex items-center gap-1 px-5 pt-3 pb-2 border-b border-zinc-800/60 bg-zinc-950/40">
+            <div className="flex items-center gap-0.5 rounded-lg bg-zinc-900/80 p-0.5">
+              {tabs.map(({ tab, icon, label, count }) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
+                    activeTab === tab
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40'
+                  }`}
+                >
+                  {icon}
+                  {label}
+                  {count != null && count > 0 && (
+                    <span className="text-[10px] bg-zinc-700/80 text-zinc-400 px-1.5 py-0.5 rounded-full leading-none">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {activeTab === 'files' && (
-            <ProjectFilesView
-              project={selectedProject}
-              onBack={() => {
-                setSelectedProject(null);
-                navigate(teamId ? `/team/${teamId}/projects` : '/projects');
-              }}
-              onFileReview={(file) => {
-                setReviewFile(file);
-                navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
-              }}
-            />
-          )}
-          {activeTab === 'scripts' && (
-            <ProjectScriptsTab projectId={selectedProject.id} />
-          )}
-          {activeTab === 'storyboard' && (
-            <ProjectStoryboardTab projectId={selectedProject.id} />
-          )}
-          {activeTab === 'output' && (
-            <ProjectOutputTab projectId={selectedProject.id} />
-          )}
-          {activeTab === 'tasks' && (
-            <KanbanBoard
-              projectId={selectedProject.id}
-              teamId={selectedTeamId || undefined}
-            />
-          )}
-          {activeTab === 'shares' && (
-            <ProjectSharesView
-              projectId={selectedProject.id}
-              onCountChange={setShareCount}
-            />
-          )}
-          {activeTab === 'trash' && (
-            <ProjectTrashView
-              projectId={selectedProject.id}
-              onCountChange={setTrashCount}
-            />
-          )}
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            {activeTab === 'files' && (
+              <ProjectFilesView
+                project={selectedProject}
+                onBack={() => {
+                  setSelectedProject(null);
+                  navigate(teamId ? `/team/${teamId}/projects` : '/projects');
+                }}
+                onFileReview={(file) => {
+                  setReviewFile(file);
+                  navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
+                }}
+              />
+            )}
+            {activeTab === 'scripts' && (
+              <ProjectScriptsTab projectId={selectedProject.id} />
+            )}
+            {activeTab === 'storyboard' && (
+              <ProjectStoryboardTab projectId={selectedProject.id} />
+            )}
+            {activeTab === 'output' && (
+              <ProjectOutputTab projectId={selectedProject.id} />
+            )}
+            {activeTab === 'tasks' && (
+              <KanbanBoard
+                projectId={selectedProject.id}
+                teamId={selectedTeamId || undefined}
+              />
+            )}
+            {activeTab === 'shares' && (
+              <ProjectSharesView
+                projectId={selectedProject.id}
+                onCountChange={setShareCount}
+              />
+            )}
+            {activeTab === 'trash' && (
+              <ProjectTrashView
+                projectId={selectedProject.id}
+                onCountChange={setTrashCount}
+              />
+            )}
+          </div>
         </div>
       </div>
     );
