@@ -55,54 +55,53 @@ export function ProjectStoryboardTab({ projectId }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-zinc-400">
-          {items.length} storyboard{items.length !== 1 ? 's' : ''}
-        </h3>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-100">Storyboards</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">{items.length} item{items.length !== 1 ? 's' : ''}</p>
+        </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
         >
-          <Plus size={14} />
+          <Plus size={15} />
           New Storyboard
         </button>
       </div>
 
       {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-center">
-          <Clapperboard size={40} className="text-zinc-700" />
-          <p className="text-sm text-zinc-500">No storyboards yet</p>
+        <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 flex items-center justify-center">
+            <Clapperboard size={28} className="text-zinc-600" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-zinc-400">No storyboards yet</p>
+            <p className="text-xs text-zinc-600 mt-1">Create a storyboard to start visual storytelling</p>
+          </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors mt-2"
           >
-            <Plus size={14} />
+            <Plus size={15} />
             Create First Storyboard
           </button>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-4">
+        <div className="flex flex-wrap gap-5">
           {items.map((sb) => (
             <button
               key={sb.id}
               onClick={() => handleOpen(sb.id)}
-              className="w-[280px] text-left group relative flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-600 cursor-pointer"
+              className="w-[260px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
             >
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600/20">
-                  <Layers size={18} className="text-blue-400" />
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+                  <Layers size={18} className="text-indigo-400" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <h4 className="truncate text-sm font-semibold text-zinc-100">{sb.name}</h4>
+                  <p className="text-xs text-zinc-500 mt-1">{sb.frame_count ?? 0} frames</p>
                 </div>
-              </div>
-              <div className="mt-2.5">
-                <span className="rounded-full border border-blue-800/50 bg-blue-900/40 px-2 py-0.5 text-[11px] text-blue-400">
-                  Storyboard
-                </span>
-              </div>
-              <div className="mt-2 text-xs text-zinc-500">
-                {sb.frame_count ?? 0} frames
               </div>
             </button>
           ))}
