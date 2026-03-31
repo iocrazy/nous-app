@@ -94,78 +94,89 @@ export function ProjectsPage() {
   // If viewing a project (files or tasks)
   if (selectedProject) {
     return (
-      <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-        {/* Tab bar */}
-        <div className="flex items-center gap-4 mb-4 border-b border-zinc-800">
-          {([
-            { tab: 'files' as ProjectTab, icon: <FolderOpen size={15} />, label: t('projects.tabs.files', 'Files') },
-            { tab: 'scripts' as ProjectTab, icon: <FileText size={15} />, label: t('projects.tabs.scripts', 'Scripts') },
-            { tab: 'storyboard' as ProjectTab, icon: <Clapperboard size={15} />, label: t('projects.tabs.storyboard', 'Storyboard') },
-            { tab: 'output' as ProjectTab, icon: <Download size={15} />, label: t('projects.tabs.output', 'Output') },
-            { tab: 'tasks' as ProjectTab, icon: <KanbanSquare size={15} />, label: t('projects.tabs.tasks', 'Tasks') },
-            { tab: 'shares' as ProjectTab, icon: <Share2 size={15} />, label: t('projects.tabs.shares', 'Shares'), count: shareCount },
-            { tab: 'trash' as ProjectTab, icon: <Trash2 size={15} />, label: t('projects.tabs.trash', 'Trash'), count: trashCount },
-          ]).map(({ tab, icon, label, count }) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex items-center gap-1.5 pb-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab
-                  ? 'border-indigo-500 text-white'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {icon}
-              {label}
-              {count != null && count > 0 && (
-                <span className="text-[10px] bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded-full">
-                  {count}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+      <div className="flex h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <ProjectsSidebar
+          projects={projects}
+          starredProjects={projects.filter(p => p.is_starred)}
+          selectedProjectId={selectedProject.id}
+          onProjectSelect={handleProjectSelect}
+          onCreateProject={() => setIsCreateProjectModalOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+        <div className="flex-1 min-w-0 px-6 py-4">
+          {/* Tab bar */}
+          <div className="flex items-center gap-4 mb-4 border-b border-zinc-800">
+            {([
+              { tab: 'files' as ProjectTab, icon: <FolderOpen size={15} />, label: t('projects.tabs.files', 'Files') },
+              { tab: 'scripts' as ProjectTab, icon: <FileText size={15} />, label: t('projects.tabs.scripts', 'Scripts') },
+              { tab: 'storyboard' as ProjectTab, icon: <Clapperboard size={15} />, label: t('projects.tabs.storyboard', 'Storyboard') },
+              { tab: 'output' as ProjectTab, icon: <Download size={15} />, label: t('projects.tabs.output', 'Output') },
+              { tab: 'tasks' as ProjectTab, icon: <KanbanSquare size={15} />, label: t('projects.tabs.tasks', 'Tasks') },
+              { tab: 'shares' as ProjectTab, icon: <Share2 size={15} />, label: t('projects.tabs.shares', 'Shares'), count: shareCount },
+              { tab: 'trash' as ProjectTab, icon: <Trash2 size={15} />, label: t('projects.tabs.trash', 'Trash'), count: trashCount },
+            ]).map(({ tab, icon, label, count }) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex items-center gap-1.5 pb-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab
+                    ? 'border-indigo-500 text-white'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {icon}
+                {label}
+                {count != null && count > 0 && (
+                  <span className="text-[10px] bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded-full">
+                    {count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
 
-        {activeTab === 'files' && (
-          <ProjectFilesView
-            project={selectedProject}
-            onBack={() => {
-              setSelectedProject(null);
-              navigate(teamId ? `/team/${teamId}/projects` : '/projects');
-            }}
-            onFileReview={(file) => {
-              setReviewFile(file);
-              navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
-            }}
-          />
-        )}
-        {activeTab === 'scripts' && (
-          <ProjectScriptsTab projectId={selectedProject.id} />
-        )}
-        {activeTab === 'storyboard' && (
-          <ProjectStoryboardTab projectId={selectedProject.id} />
-        )}
-        {activeTab === 'output' && (
-          <ProjectOutputTab projectId={selectedProject.id} />
-        )}
-        {activeTab === 'tasks' && (
-          <KanbanBoard
-            projectId={selectedProject.id}
-            teamId={selectedTeamId || undefined}
-          />
-        )}
-        {activeTab === 'shares' && (
-          <ProjectSharesView
-            projectId={selectedProject.id}
-            onCountChange={setShareCount}
-          />
-        )}
-        {activeTab === 'trash' && (
-          <ProjectTrashView
-            projectId={selectedProject.id}
-            onCountChange={setTrashCount}
-          />
-        )}
+          {activeTab === 'files' && (
+            <ProjectFilesView
+              project={selectedProject}
+              onBack={() => {
+                setSelectedProject(null);
+                navigate(teamId ? `/team/${teamId}/projects` : '/projects');
+              }}
+              onFileReview={(file) => {
+                setReviewFile(file);
+                navigate(teamId ? `/team/${teamId}/projects/${selectedProject.id}/review/${file.id}` : `/projects/${selectedProject.id}/review/${file.id}`);
+              }}
+            />
+          )}
+          {activeTab === 'scripts' && (
+            <ProjectScriptsTab projectId={selectedProject.id} />
+          )}
+          {activeTab === 'storyboard' && (
+            <ProjectStoryboardTab projectId={selectedProject.id} />
+          )}
+          {activeTab === 'output' && (
+            <ProjectOutputTab projectId={selectedProject.id} />
+          )}
+          {activeTab === 'tasks' && (
+            <KanbanBoard
+              projectId={selectedProject.id}
+              teamId={selectedTeamId || undefined}
+            />
+          )}
+          {activeTab === 'shares' && (
+            <ProjectSharesView
+              projectId={selectedProject.id}
+              onCountChange={setShareCount}
+            />
+          )}
+          {activeTab === 'trash' && (
+            <ProjectTrashView
+              projectId={selectedProject.id}
+              onCountChange={setTrashCount}
+            />
+          )}
+        </div>
       </div>
     );
   }
