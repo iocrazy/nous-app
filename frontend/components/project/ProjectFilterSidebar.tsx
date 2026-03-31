@@ -82,20 +82,23 @@ export function ProjectFilterSidebar({
   }
 
   return (
-    <div className="group relative flex w-52 flex-col border-r border-zinc-800/40 pt-16">
+    <div className="flex w-52 flex-col border-r border-zinc-800/40 pt-16">
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <span className="text-sm font-semibold text-zinc-200">Projects</span>
       </div>
 
-      {/* Collapse toggle — right edge, vertically centered */}
-      <button
-        onClick={onToggleCollapse}
-        className="absolute top-1/2 -translate-y-1/2 -right-3 z-10 w-6 h-6 flex items-center justify-center rounded-md bg-zinc-800 border border-zinc-700/50 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors shadow-sm opacity-0 hover:opacity-100 group-hover:opacity-100"
-        title="Collapse sidebar"
-      >
-        <ChevronLeft size={14} />
-      </button>
+      {/* Collapse toggle — bottom right corner */}
+      <div className="flex-1" />
+      <div className="flex justify-end px-2 pb-3">
+        <button
+          onClick={onToggleCollapse}
+          className="w-6 h-6 flex items-center justify-center rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          title="Collapse sidebar"
+        >
+          <ChevronLeft size={14} />
+        </button>
+      </div>
 
       {/* View filters */}
       <div className="px-2">

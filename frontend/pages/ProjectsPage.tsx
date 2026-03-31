@@ -198,7 +198,7 @@ export function ProjectsPage() {
           onProjectSwitch={handleProjectSelect}
           sectionCounts={sectionCounts}
         />
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden animate-in fade-in duration-300">
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
           <div className="flex-1 overflow-y-auto px-8 pt-20 pb-8">
             {activeTab === 'files' && (
               <ProjectFilesView
@@ -225,7 +225,7 @@ export function ProjectsPage() {
   // ─── Project List View ──────────────────────────────────────
   return (
     <>
-      <div className="flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ height: '100vh' }}>
+      <div className="flex -mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8" style={{ height: '100vh' }}>
         <ProjectFilterSidebar
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
