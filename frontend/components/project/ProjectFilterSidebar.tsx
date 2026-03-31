@@ -69,13 +69,13 @@ export function ProjectFilterSidebar({
 }: ProjectFilterSidebarProps) {
   if (collapsed) {
     return (
-      <div className="relative w-0">
+      <div className="relative w-4 flex-shrink-0">
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 -right-3 z-10 w-6 h-6 flex items-center justify-center rounded-md bg-zinc-800 border border-zinc-700/50 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors shadow-sm"
+          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
           title="Expand sidebar"
         >
-          <ChevronRight size={14} />
+          <ChevronRight size={12} />
         </button>
       </div>
     );
