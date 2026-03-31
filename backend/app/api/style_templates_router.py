@@ -12,7 +12,7 @@ from app.schemas.style_template import StyleTemplateCreate, StyleTemplateUpdate
 router = APIRouter(prefix="/style-templates")
 
 
-@router.post("/")
+@router.post("")
 async def create_style_template(
     auth: AuthDep, body: StyleTemplateCreate
 ) -> Dict[str, Any]:
@@ -36,7 +36,7 @@ async def create_style_template(
         )
 
 
-@router.get("/")
+@router.get("")
 async def list_style_templates(
     auth: AuthDep,
     category: Optional[str] = Query(None),

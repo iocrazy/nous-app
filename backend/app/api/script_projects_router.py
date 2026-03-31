@@ -12,7 +12,7 @@ from app.services.script_service import ScriptService
 router = APIRouter(prefix="/scripts/projects")
 
 
-@router.post("/")
+@router.post("")
 async def create_script_project(
     auth: AuthDep, body: ScriptProjectCreate
 ) -> Dict[str, Any]:
@@ -32,7 +32,7 @@ async def create_script_project(
         raise HTTPException(status_code=500, detail="Failed to create script")
 
 
-@router.get("/")
+@router.get("")
 async def list_script_projects(
     auth: AuthDep,
     project_id: int = Query(...),
