@@ -319,7 +319,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         </div>
 
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-3">
           {isViewEnabled('resources') && (
             <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
           )}
@@ -374,7 +374,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       </div>
 
-      <nav className="flex-1 space-y-2">
+      <nav className="flex-1 space-y-3">
         {isViewEnabled('parser') && (
           <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
         )}
