@@ -135,7 +135,7 @@ export function ProjectNavSidebar({
   const metaText = `${fileCount} files`;
 
   return (
-    <div className="w-48 h-full flex flex-col border-r border-zinc-800/40 pt-14">
+    <div className="w-56 h-full flex flex-col border-r border-zinc-800/40 pt-16">
       {/* Header */}
       <div className="relative p-3" ref={dropdownRef}>
         <div className="flex items-center gap-2">
@@ -228,7 +228,7 @@ export function ProjectNavSidebar({
             <button
               key={section.key}
               onClick={() => onSectionChange(section.key)}
-              className={`flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md text-sm transition-colors duration-120 ${
+              className={`flex items-center gap-3 w-full px-3 py-2 rounded-md text-[13px] transition-colors duration-120 ${
                 isActive
                   ? 'text-zinc-100 bg-zinc-800/80'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'

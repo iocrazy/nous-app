@@ -199,7 +199,7 @@ export function ProjectsPage() {
           sectionCounts={sectionCounts}
         />
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden animate-in fade-in duration-300">
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="flex-1 overflow-y-auto px-6 pt-16 pb-6">
             {activeTab === 'files' && (
               <ProjectFilesView
                 project={selectedProject}
@@ -236,7 +236,7 @@ export function ProjectsPage() {
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
-        <div className="flex-1 min-w-0 px-6 py-4">
+        <div className="flex-1 min-w-0 px-6 pt-16 pb-6">
           <ProjectsListView
             projects={filteredProjects}
             onProjectSelect={handleProjectSelect}

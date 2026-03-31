@@ -175,7 +175,7 @@ export function CanvasEditorPage() {
           </ReactFlowProvider>
 
           {/* Floating panel toolbar — left side vertical */}
-          <div className="absolute top-14 left-3 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+          <div className="absolute top-20 left-4 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
             <FloatingIconButton
               icon={<ArrowLeft size={16} />}
               tooltip="Back to project"
