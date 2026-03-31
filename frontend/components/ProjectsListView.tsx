@@ -16,13 +16,14 @@ interface ProjectsListViewProps {
   onProjectSelect: (project: Project) => void;
   onCreateProject: () => void;
   onProjectsChange?: () => void;
+  title?: string;
 }
 
 type FilterTab = 'all' | 'internal' | 'external';
 type SortKey = 'updated_at' | 'created_at' | 'name';
 
 export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
-  projects, onProjectSelect, onCreateProject, onProjectsChange
+  projects, onProjectSelect, onCreateProject, onProjectsChange, title: externalTitle
 }) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterTab>('all');
@@ -139,7 +140,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-white">{t('mediatrack.projects', 'Projects')}</h1>
+        <h1 className="text-2xl font-bold text-white">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
