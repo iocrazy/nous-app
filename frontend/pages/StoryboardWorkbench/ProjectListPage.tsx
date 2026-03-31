@@ -85,6 +85,8 @@ export function ProjectListPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const sortRef = useRef<HTMLDivElement>(null);
 
   // ─── Load projects ─────────────────────────────────────────────────────────
@@ -141,17 +143,29 @@ export function ProjectListPage() {
     async (id: string) => {
       const project = projectList.find((p) => p.id === id);
       if (!project) return;
-      const newName = window.prompt('Rename project:', project.name);
-      if (!newName || newName.trim() === project.name) return;
+      // Use inline editing via renaming state
+      setRenamingId(id);
+      setRenameValue(project.name);
+    },
+    [projectList],
+  );
+
+  const submitRename = useCallback(
+    async () => {
+      if (!renamingId) return;
+      const trimmed = renameValue.trim();
+      const project = projectList.find((p) => p.id === renamingId);
+      setRenamingId(null);
+      if (!trimmed || trimmed === project?.name) return;
       try {
-        await updateProject(id, { name: newName.trim() });
+        await updateProject(renamingId, { name: trimmed });
         await loadProjects();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
       }
     },
-    [projectList, loadProjects],
+    [renamingId, renameValue, projectList, loadProjects],
   );
 
   const handleDuplicate = useCallback(
