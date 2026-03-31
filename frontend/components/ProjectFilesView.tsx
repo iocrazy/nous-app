@@ -304,11 +304,12 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           </div>
         </div>
 
-        {/* Toolbar */}
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-xs text-zinc-500">
-            {filteredAndSorted.length} {t('projects.toolbar.items', 'items')}
-          </span>
+        {/* Header + Toolbar */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-100">Files</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">{filteredAndSorted.length} {t('projects.toolbar.items', 'items')}</p>
+          </div>
           <div className="flex items-center gap-2">
             {/* Sort */}
             <select
