@@ -35,8 +35,8 @@ export interface ResourcesSidebarProps {
 // ─── Helper ────────────────────────────────────────────
 
 const sidebarItemClass = (active: boolean) =>
-  `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
-    active ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+  `w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
+    active ? 'bg-zinc-800/80 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
   }`;
 
 // ─── Component ─────────────────────────────────────────
@@ -129,7 +129,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         </button>
       )}
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-2 py-4 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
         <button
           onClick={() => navigate(resPath('/resources/shared'))}
