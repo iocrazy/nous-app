@@ -46,7 +46,7 @@ function FilterItem({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${style}`}
+      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] transition-colors ${style}`}
     >
       <Icon size={16} className="shrink-0" />
       <span className="flex-1 truncate text-left">{label}</span>
@@ -78,7 +78,7 @@ export function ProjectFilterSidebar({
   }
 
   return (
-    <div className="flex w-44 flex-col border-r border-zinc-800/40 pt-14">
+    <div className="flex w-52 flex-col border-r border-zinc-800/40 pt-16">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3">
         <span className="text-sm font-semibold text-zinc-200">Projects</span>
