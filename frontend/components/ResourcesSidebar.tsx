@@ -8,6 +8,8 @@ import {
   Zap,
   BookOpen,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Pencil,
   Loader2,
 } from 'lucide-react';
@@ -26,6 +28,8 @@ export interface ResourcesSidebarProps {
   onCreateLibrary: (name: string) => Promise<void>;
   onNewFolder: () => void;
   onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 // ─── Helper ────────────────────────────────────────────
@@ -46,6 +50,8 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
   onCreateLibrary,
   onNewFolder,
   onSmartFolderContextMenu,
+  collapsed = false,
+  onToggleCollapse,
 }) => {
   const { t } = useTranslation();
   const {
@@ -98,7 +104,30 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
   };
 
   return (
+    collapsed ? (
+      <div className="relative hidden md:block w-4 shrink-0">
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            title="Expand sidebar"
+          >
+            <ChevronRight size={12} />
+          </button>
+        )}
+      </div>
+    ) : (
     <div className="group relative hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col">
+      {/* Collapse toggle */}
+      {onToggleCollapse && (
+        <button
+          onClick={onToggleCollapse}
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+          title="Collapse sidebar"
+        >
+          <ChevronLeft size={12} />
+        </button>
+      )}
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
@@ -309,5 +338,6 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     </div>
+    )
   );
 };

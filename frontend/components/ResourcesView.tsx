@@ -1542,6 +1542,8 @@ const ResourcesViewInner: React.FC = () => {
 
   // ─── Shell props (sidebar + info panel) ─────────────
 
+  const [resSidebarCollapsed, setResSidebarCollapsed] = useState(false);
+
   const sidebarProps = useMemo(() => ({
     onSidebarDragOver: handleSidebarDragOver,
     onSidebarDrop: handleSidebarDrop,
@@ -1553,7 +1555,9 @@ const ResourcesViewInner: React.FC = () => {
     onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => {
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
     },
-  }), [handleSidebarDragOver, handleSidebarDrop, handleDeleteSmartFolder, handleCreateLibrary]);
+    collapsed: resSidebarCollapsed,
+    onToggleCollapse: () => setResSidebarCollapsed(v => !v),
+  }), [handleSidebarDragOver, handleSidebarDrop, handleDeleteSmartFolder, handleCreateLibrary, resSidebarCollapsed]);
 
   const infoPanelProps = useMemo(() => ({
     trashedFolderPreviews,
