@@ -150,7 +150,7 @@ export function CanvasEditorPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950">
+      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex items-center justify-center bg-zinc-950" style={{ height: '100vh' }}>
         <Loader2 size={24} className="animate-spin text-zinc-500" />
       </div>
     );
@@ -158,7 +158,7 @@ export function CanvasEditorPage() {
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-zinc-950">
+      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col items-center justify-center gap-4 bg-zinc-950" style={{ height: '100vh' }}>
         <p className="text-sm text-red-400">Failed to load project</p>
         <p className="text-xs text-zinc-500">{loadError}</p>
       </div>
