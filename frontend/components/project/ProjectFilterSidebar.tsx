@@ -69,7 +69,7 @@ export function ProjectFilterSidebar({
 }: ProjectFilterSidebarProps) {
   if (collapsed) {
     return (
-      <div className="flex w-10 flex-col items-center border-r border-zinc-800/80 bg-zinc-900 py-3">
+      <div className="flex w-10 flex-col items-center border-r border-zinc-800/40 py-3">
         <button onClick={onToggleCollapse} className={iconBtnClass} title="Expand sidebar">
           <PanelLeftOpen size={16} />
         </button>
@@ -78,7 +78,7 @@ export function ProjectFilterSidebar({
   }
 
   return (
-    <div className="flex w-44 flex-col border-r border-zinc-800/80 bg-zinc-900">
+    <div className="flex w-44 flex-col border-r border-zinc-800/40">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3">
         <span className="text-sm font-semibold text-zinc-200">Projects</span>

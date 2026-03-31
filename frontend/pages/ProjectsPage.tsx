@@ -125,12 +125,12 @@ export function ProjectsPage() {
 
   const filterTitle = useMemo(() => {
     switch (activeFilter) {
-      case 'starred': return '⭐ Starred Projects';
-      case 'recent': return '🕐 Recent Projects';
-      case 'active': return '⚡ Active Projects';
-      case 'archived': return '📦 Archived Projects';
+      case 'starred': return 'Starred Projects';
+      case 'recent': return 'Recent Projects';
+      case 'active': return 'Active Projects';
+      case 'archived': return 'Archived Projects';
       default:
-        if (folders.includes(activeFilter)) return `📁 ${activeFilter}`;
+        if (folders.includes(activeFilter)) return activeFilter;
         return t('projects.title', 'All Projects');
     }
   }, [activeFilter, folders, t]);

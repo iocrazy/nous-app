@@ -133,7 +133,7 @@ export function ProjectNavSidebar({
   const metaText = `${fileCount} files`;
 
   return (
-    <div className="w-48 h-full flex flex-col bg-zinc-900 border-r border-zinc-800">
+    <div className="w-48 h-full flex flex-col border-r border-zinc-800/40">
       {/* Header */}
       <div className="relative p-3" ref={dropdownRef}>
         <div className="flex items-center gap-2">
