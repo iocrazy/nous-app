@@ -110,7 +110,7 @@ export const router = createBrowserRouter([
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
-          { path: 'projects/:projectId/storyboard/:storyboardId', element: <SuspenseWrap><ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId/storyboard/:storyboardId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><StoryboardWorkbench /></ModuleGuard></SuspenseWrap> },
           { path: 'projects/:projectId/scripts/:scriptId', element: <SuspenseWrap><ScriptEditor /></SuspenseWrap> },
         ],
       },
