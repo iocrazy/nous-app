@@ -99,7 +99,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
   }
 
   return (
-    <aside className="w-52 border-r border-zinc-800 flex flex-col h-full bg-zinc-900/30 shrink-0">
+    <aside className="w-52 border-r border-zinc-800/80 flex flex-col h-full shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-800/50">
         <span className="flex items-center gap-2 text-sm font-medium text-zinc-200">
