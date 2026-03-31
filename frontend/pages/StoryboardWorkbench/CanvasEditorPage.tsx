@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChevronLeft, Loader2, Pencil } from 'lucide-react';
+import { ChevronLeft, Loader2, Pencil, Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
@@ -7,7 +7,14 @@ import { Canvas } from '../../features/storyboard/Canvas';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { fetchProject, updateProject } from '../../services/storyboardService';
+import { CharacterPanel } from '../../features/storyboard/ui/CharacterPanel';
+import ChatPanel from '../../features/storyboard/ui/ChatPanel';
+import { FrameTimeline } from '../../features/storyboard/ui/FrameTimeline';
+import { ScriptImportDialog } from '../../features/storyboard/ui/ScriptImportDialog';
+import { ExportDialog } from '../../features/storyboard/ui/ExportDialog';
 import type { CanvasNode, CanvasEdge } from '../../stores/canvasStore';
+
+type SidePanel = 'characters' | 'chat' | null;
 
 /**
  * Map backend node_type to frontend ReactFlow node type.
@@ -91,6 +98,16 @@ export function CanvasEditorPage() {
   const [nameInput, setNameInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Panel states
+  const [sidePanel, setSidePanel] = useState<SidePanel>(null);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [showScriptImport, setShowScriptImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+
+  const toggleSidePanel = useCallback((panel: SidePanel) => {
+    setSidePanel((prev) => (prev === panel ? null : panel));
+  }, []);
 
   // ─── Load project on mount ──────────────────────────────────────────────
 
@@ -232,14 +249,115 @@ export function CanvasEditorPage() {
             <Pencil size={12} className="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
           </button>
         )}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Toolbar buttons */}
+        <div className="flex items-center gap-1">
+          <ToolbarButton
+            icon={<FileText size={15} />}
+            label="Script"
+            onClick={() => setShowScriptImport(true)}
+          />
+          <ToolbarButton
+            icon={<Film size={15} />}
+            label="Timeline"
+            active={showTimeline}
+            onClick={() => setShowTimeline((v) => !v)}
+          />
+          <ToolbarButton
+            icon={<Users size={15} />}
+            label="Characters"
+            active={sidePanel === 'characters'}
+            onClick={() => toggleSidePanel('characters')}
+          />
+          <ToolbarButton
+            icon={<MessageCircle size={15} />}
+            label="Chat"
+            active={sidePanel === 'chat'}
+            onClick={() => toggleSidePanel('chat')}
+          />
+          <ToolbarButton
+            icon={<Download size={15} />}
+            label="Export"
+            onClick={() => setShowExport(true)}
+          />
+        </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 relative overflow-hidden min-h-0">
-        <ReactFlowProvider>
-          <Canvas />
-        </ReactFlowProvider>
+      {/* Main area: Canvas + optional side panel */}
+      <div className="flex-1 flex min-h-0">
+        {/* Canvas */}
+        <div className="flex-1 relative overflow-hidden min-h-0">
+          <ReactFlowProvider>
+            <Canvas />
+          </ReactFlowProvider>
+        </div>
+
+        {/* Right side panel */}
+        {sidePanel === 'characters' && projectId && (
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800 overflow-y-auto">
+            <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+          </div>
+        )}
+        {sidePanel === 'chat' && projectId && (
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800 overflow-y-auto">
+            <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+          </div>
+        )}
       </div>
+
+      {/* Bottom timeline */}
+      {showTimeline && (
+        <FrameTimeline onClose={() => setShowTimeline(false)} />
+      )}
+
+      {/* Dialogs */}
+      {projectId && (
+        <>
+          <ScriptImportDialog
+            projectId={projectId}
+            isOpen={showScriptImport}
+            onClose={() => setShowScriptImport(false)}
+          />
+          <ExportDialog
+            projectId={projectId}
+            isOpen={showExport}
+            onClose={() => setShowExport(false)}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+// ─── Toolbar button ──────────────────────────────────────────────────────────
+
+function ToolbarButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+        active
+          ? 'bg-indigo-600/20 text-indigo-400'
+          : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'
+      }`}
+    >
+      {icon}
+      <span className="hidden lg:inline">{label}</span>
+    </button>
   );
 }
