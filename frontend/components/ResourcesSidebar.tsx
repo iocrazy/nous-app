@@ -98,7 +98,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
   };
 
   return (
-    <div className="hidden md:flex md:static w-56 shrink-0 border-r border-zinc-800/80 flex-col">
+    <div className="group relative hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col">
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
