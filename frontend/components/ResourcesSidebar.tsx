@@ -117,7 +117,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className="group relative hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col">
+    <div className="group relative hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16">
       {/* Collapse toggle */}
       {onToggleCollapse && (
         <button
@@ -129,7 +129,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         </button>
       )}
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto px-2 py-4 space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-2 pt-4 pb-4 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
         <button
           onClick={() => navigate(resPath('/resources/shared'))}
