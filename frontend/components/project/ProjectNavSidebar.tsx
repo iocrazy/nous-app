@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ArrowLeft,
   FolderOpen,
   FileText,
@@ -28,6 +30,8 @@ interface ProjectNavSidebarProps {
   starredProjects: Project[];
   onProjectSwitch: (project: Project) => void;
   sectionCounts?: Record<string, number>;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 const AVATAR_COLORS = [
@@ -73,6 +77,8 @@ export function ProjectNavSidebar({
   starredProjects,
   onProjectSwitch,
   sectionCounts = {},
+  collapsed = false,
+  onToggleCollapse,
 }: ProjectNavSidebarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,8 +140,35 @@ export function ProjectNavSidebar({
   const fileCount = project.file_count ?? 0;
   const metaText = `${fileCount} files`;
 
+  if (collapsed) {
+    return (
+      <div className="relative w-4 flex-shrink-0">
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            title="Expand sidebar"
+          >
+            <ChevronRight size={12} />
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="w-52 h-full flex flex-col border-r border-zinc-800/40 pt-16">
+    <div className="group relative w-52 h-full flex flex-col border-r border-zinc-800/40 pt-16">
+      {/* Collapse toggle */}
+      {onToggleCollapse && (
+        <button
+          onClick={onToggleCollapse}
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+          title="Collapse sidebar"
+        >
+          <ChevronLeft size={12} />
+        </button>
+      )}
+
       {/* Header */}
       <div className="relative px-3 pt-4 pb-3" ref={dropdownRef}>
         <div className="flex items-center gap-2">
