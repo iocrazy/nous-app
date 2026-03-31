@@ -14,6 +14,8 @@ import {
   Star,
   Clock,
   LayoutGrid,
+  Calendar,
+  Tag,
 } from 'lucide-react';
 import { Project } from '../../types';
 
@@ -214,10 +216,10 @@ export function ProjectNavSidebar({
       </div>
 
       {/* Nav Menu */}
-      <nav className="flex-1 overflow-y-auto px-2 py-1">
+      <nav className="px-2 py-1">
         {NAV_SECTIONS.map(section => {
           if (section.key.startsWith('divider')) {
-            return <div key={section.key} className="my-1.5 mx-2 border-t border-zinc-800" />;
+            return <div key={section.key} className="my-1.5 mx-2 border-t border-zinc-800/50" />;
           }
           const Icon = section.icon!;
           const isActive = activeSection === section.key;
@@ -235,9 +237,7 @@ export function ProjectNavSidebar({
               <Icon size={16} className="shrink-0" />
               <span className="flex-1 text-left">{section.label}</span>
               {count != null && count > 0 && (
-                <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
-                  isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800 text-zinc-500'
-                }`}>
+                <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 font-medium">
                   {count}
                 </span>
               )}
@@ -245,6 +245,12 @@ export function ProjectNavSidebar({
           );
         })}
       </nav>
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Project Info */}
+      <ProjectInfoFooter project={project} />
     </div>
   );
 }
@@ -272,5 +278,38 @@ function DropdownItem({ project, onClick }: { project: Project; onClick: () => v
       <ProjectAvatar name={project.name} />
       <span className="truncate">{project.name}</span>
     </button>
+  );
+}
+
+function ProjectInfoFooter({ project }: { project: Project }) {
+  const created = new Date(project.created_at);
+  const month = created.toLocaleString('en', { month: 'short' });
+  const day = created.getDate();
+  const year = created.getFullYear();
+
+  return (
+    <div className="px-3 py-3 border-t border-zinc-800/40">
+      {project.description && (
+        <p className="text-[11px] text-zinc-500 mb-3 line-clamp-3 leading-relaxed">
+          {project.description}
+        </p>
+      )}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 text-[11px] text-zinc-600">
+          <Calendar size={12} className="shrink-0" />
+          <span>Created {month} {day}, {year}</span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-zinc-600">
+          <Tag size={12} className="shrink-0" />
+          <span>{project.project_type === 'external' ? 'External' : 'Internal'}</span>
+        </div>
+        {project.is_starred && (
+          <div className="flex items-center gap-2 text-[11px] text-yellow-600/60">
+            <Star size={12} className="shrink-0" />
+            <span>Starred</span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

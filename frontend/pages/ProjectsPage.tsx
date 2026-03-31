@@ -61,18 +61,23 @@ export function ProjectsPage() {
     });
   }, [setSearchParams]);
 
-  // Load projects
+  // Load projects + auto-select from URL
   useEffect(() => {
     const load = async () => {
       try {
         const data = await fetchProjects();
         setProjects(data);
+        // Auto-select project from URL param
+        if (projectId && !selectedProject) {
+          const match = data.find(p => String(p.id) === projectId);
+          if (match) setSelectedProject(match);
+        }
       } catch (err) {
         console.error('Failed to load projects:', err);
       }
     };
     load();
-  }, []);
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive filter counts and folders
   const starredProjects = useMemo(() => projects.filter(p => p.is_starred), [projects]);
