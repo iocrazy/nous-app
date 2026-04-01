@@ -872,7 +872,7 @@ export function Canvas() {
         snapToGrid={snapToGrid}
         snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]}
         proOptions={{ hideAttribution: true }}
-        className="!bg-[#0f0f11] [&_.react-flow__viewport]:transition-transform"
+        className="!bg-[#09090b] [&_.react-flow__viewport]:transition-transform"
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#3f3f46" />
         <MiniMap
