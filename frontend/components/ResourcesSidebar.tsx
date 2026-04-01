@@ -117,7 +117,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className="group relative hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16 overflow-visible">
+    <div className="hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16">
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pt-4 pb-4 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
@@ -334,15 +334,17 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
 
-      {/* Collapse toggle — right edge, hover to show */}
+      {/* Collapse toggle */}
       {onToggleCollapse && (
-        <button
-          onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 -right-4 z-50 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800 border border-zinc-700/50 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
-          title="Collapse sidebar"
-        >
-          <ChevronLeft size={12} />
-        </button>
+        <div className="flex justify-end px-2 py-2">
+          <button
+            onClick={onToggleCollapse}
+            className="w-6 h-6 flex items-center justify-center rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={14} />
+          </button>
+        </div>
       )}
     </div>
     )
