@@ -118,8 +118,12 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
       </div>
     ) : (
     <div className="group hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16" style={{ position: 'relative' }}>
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3">
+        <span className="text-sm font-semibold text-zinc-200">{t('sidebar.resources', 'Resources')}</span>
+      </div>
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto px-2 pt-4 pb-4 space-y-0.5">
+      <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
         <button
           onClick={() => navigate(resPath('/resources/shared'))}
