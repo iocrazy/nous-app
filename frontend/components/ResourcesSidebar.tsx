@@ -105,7 +105,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
   return (
     collapsed ? (
-      <div className="relative hidden md:block w-4 shrink-0 h-full">
+      <div className="relative hidden md:block w-4 shrink-0 h-full pt-16">
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
