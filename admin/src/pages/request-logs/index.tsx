@@ -997,7 +997,7 @@ export function RequestLogs() {
   return (
     <div>
       <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
-        Request Logs
+        Logs
       </Typography.Title>
       <Tabs defaultActiveTab="requests" type="card-gutter" lazyload destroyOnHide>
         <Tabs.TabPane key="requests" title="Request Logs">

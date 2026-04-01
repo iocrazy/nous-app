@@ -335,7 +335,9 @@ class DrissionPageParser(metaclass=SingletonMeta):
                 try:
                     response_count = 0
                     timeout_count = 0
-                    max_timeout_retries = 5  # 最多允许 5 次超时重试
+                    # Note/image-text pages need more time for aweme_id to appear
+                    is_note = "/note/" in redirected_url
+                    max_timeout_retries = 10 if is_note else 5
                     while True:
                         response_count += 1
 
