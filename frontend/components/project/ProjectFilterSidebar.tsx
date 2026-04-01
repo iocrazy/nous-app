@@ -72,7 +72,7 @@ export function ProjectFilterSidebar({
       <div className="relative w-4 flex-shrink-0">
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+          className="absolute top-1/3 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
           title="Expand sidebar"
         >
           <ChevronRight size={12} />
@@ -130,7 +130,7 @@ export function ProjectFilterSidebar({
       {/* Collapse toggle — right edge, mid-height */}
       <button
         onClick={onToggleCollapse}
-        className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+        className="absolute top-1/3 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
         title="Collapse sidebar"
       >
         <ChevronLeft size={12} />
