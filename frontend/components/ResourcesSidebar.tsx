@@ -105,7 +105,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
   return (
     collapsed ? (
-      <div className="relative hidden md:block w-4 shrink-0 h-full pt-16">
+      <div className="max-md:hidden w-4 shrink-0" style={{ position: 'relative', height: '100%' }}>
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
@@ -117,8 +117,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className="hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16">
-      <div className="group relative flex-1 flex flex-col">
+    <div className="group hidden md:flex md:static w-52 shrink-0 border-r border-zinc-800/40 flex-col pt-16" style={{ position: 'relative' }}>
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pt-4 pb-4 space-y-0.5">
         {/* ── Top section: Shared / Recycle Bin ── */}
@@ -345,7 +344,6 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           <ChevronLeft size={12} />
         </button>
       )}
-      </div>
     </div>
     )
   );
