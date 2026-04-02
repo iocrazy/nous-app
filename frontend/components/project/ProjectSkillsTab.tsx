@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Wand2, Plus, Archive } from 'lucide-react';
 import { Skill } from '../../types';
 import { fetchSkills, deleteSkill, invalidateSkillsCache } from '../../services/skillService';
-import { useToast } from '../../contexts/ToastContext';
+import { useToast } from '../Toast';
 
 const CATEGORY_TABS = ['all', 'script', 'storyboard', 'copywriting', 'general'] as const;
 

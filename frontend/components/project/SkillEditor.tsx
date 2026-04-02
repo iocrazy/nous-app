@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Save } from 'lucide-react';
 import MDEditor from '@uiw/react-md-editor';
 import { fetchSkillDetail, createSkill, updateSkill } from '../../services/skillService';
-import { useToast } from '../../contexts/ToastContext';
+import { useToast } from '../Toast';
 
 const CATEGORIES = ['script', 'storyboard', 'copywriting', 'general'];
 const ICONS = ['✨', '🎬', '🎞️', '✍️', '📱', '🔄', '📝', '🎯', '💡', '🎨'];
