@@ -88,23 +88,36 @@ export function ProjectStoryboardTab({ projectId }: Props) {
         </div>
       ) : (
         <div className="flex flex-wrap gap-5">
-          {items.map((sb) => (
-            <button
-              key={sb.id}
-              onClick={() => handleOpen(sb.id)}
-              className="w-[260px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
-                  <Layers size={18} className="text-indigo-400" />
+          {items.map((sb) => {
+            const modified = sb.updated_at ? new Date(sb.updated_at).toLocaleDateString() : '';
+            const created = sb.created_at ? new Date(sb.created_at).toLocaleDateString() : '';
+            return (
+              <button
+                key={sb.id}
+                onClick={() => handleOpen(sb.id)}
+                className="w-[280px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/15">
+                    <Layers size={18} className="text-indigo-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="truncate text-sm font-semibold text-zinc-100">{sb.name}</h4>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <h4 className="truncate text-sm font-semibold text-zinc-100">{sb.name}</h4>
-                  <p className="text-xs text-zinc-500 mt-1">{sb.frame_count ?? 0} frames</p>
+                <div className="mt-3">
+                  <span className="rounded-full border border-indigo-800/50 bg-indigo-900/30 px-2 py-0.5 text-[10px] text-indigo-400 font-medium">
+                    Storyboard
+                  </span>
+                  <span className="ml-2 text-[10px] text-zinc-600">{sb.frame_count ?? 0} frames</span>
                 </div>
-              </div>
-            </button>
-          ))}
+                <div className="mt-3 space-y-0.5 text-[11px] text-zinc-500">
+                  {modified && <div>Modified: {modified}</div>}
+                  {created && <div>Created: {created}</div>}
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 

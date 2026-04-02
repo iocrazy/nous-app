@@ -85,25 +85,38 @@ export function ProjectScriptsTab({ projectId }: Props) {
         </div>
       ) : (
         <div className="flex flex-wrap gap-5">
-          {items.map((script) => (
-            <button
-              key={script.id}
-              onClick={() => handleOpen(script.id)}
-              className="w-[260px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
-                  <ScrollText size={18} className="text-violet-400" />
+          {items.map((script) => {
+            const modified = script.updated_at ? new Date(script.updated_at).toLocaleDateString() : '';
+            const created = script.created_at ? new Date(script.created_at).toLocaleDateString() : '';
+            return (
+              <button
+                key={script.id}
+                onClick={() => handleOpen(script.id)}
+                className="w-[280px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/15">
+                    <ScrollText size={18} className="text-amber-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="truncate text-sm font-semibold text-zinc-100">{script.name}</h4>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <h4 className="truncate text-sm font-semibold text-zinc-100">{script.name}</h4>
-                  {script.display_code && (
-                    <p className="text-[11px] font-mono text-zinc-500 mt-1">{script.display_code}</p>
+                <div className="mt-3">
+                  <span className="rounded-full border border-amber-800/50 bg-amber-900/30 px-2 py-0.5 text-[10px] text-amber-400 font-medium">
+                    Script
+                  </span>
+                  {script.chapter_count != null && (
+                    <span className="ml-2 text-[10px] text-zinc-600">{script.chapter_count} chapters</span>
                   )}
                 </div>
-              </div>
-            </button>
-          ))}
+                <div className="mt-3 space-y-0.5 text-[11px] text-zinc-500">
+                  {modified && <div>Modified: {modified}</div>}
+                  {created && <div>Created: {created}</div>}
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
