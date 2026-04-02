@@ -48,7 +48,6 @@ const NAV_SECTIONS = [
   { key: 'output', label: 'Output', icon: Download, iconColor: '' },
   { key: 'tasks', label: 'Tasks', icon: KanbanSquare, iconColor: '' },
   { key: 'divider-1', label: '', icon: null, iconColor: '' },
-  { key: 'shares', label: 'Shares', icon: Share2, iconColor: '' },
   { key: 'trash', label: 'Trash', icon: Trash2, iconColor: '' },
   { key: 'divider-2', label: '', icon: null, iconColor: '' },
   { key: 'settings', label: 'Settings', icon: Settings, iconColor: '' },
