@@ -152,6 +152,8 @@ async def create_share(data: ShareCreate, auth: AuthDep):
             insert_data["expires_at"] = data.expires_at.isoformat()
         if data.max_views is not None:
             insert_data["max_views"] = data.max_views
+        if data.team_id:
+            insert_data["team_id"] = data.team_id
 
         result = await client.table("shares").insert(insert_data).execute()
 
@@ -182,13 +184,17 @@ async def list_shares(
         pattern="^(active|inactive|expired|cancelled)$",
         description="Filter by status",
     ),
+    team_id: Optional[str] = Query(
+        None,
+        description="Filter by team ID. 'personal' = team_id IS NULL.",
+    ),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
 ):
     """
     List shares created by the current user.
 
-    Supports filtering by share_type and status, with pagination.
+    Supports filtering by share_type, status, and team_id, with pagination.
 
     Authentication: Bearer Token or API Key
     """
@@ -201,6 +207,11 @@ async def list_shares(
             .eq("shared_by", auth.user_id)
             .order("created_at", desc=True)
         )
+
+        if team_id == "personal":
+            query = query.is_("team_id", "null")
+        elif team_id:
+            query = query.eq("team_id", team_id)
 
         if share_type:
             query = query.eq("share_type", share_type)

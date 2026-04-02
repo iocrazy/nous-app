@@ -62,6 +62,7 @@ export const fetchShares = async (params?: {
   project_file_id?: string;
   folder_id?: string;
   status?: string;
+  team_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<Share[]> => {
@@ -70,6 +71,7 @@ export const fetchShares = async (params?: {
   if (params?.project_file_id) searchParams.set('project_file_id', params.project_file_id);
   if (params?.folder_id) searchParams.set('folder_id', params.folder_id);
   if (params?.status) searchParams.set('status', params.status);
+  if (params?.team_id) searchParams.set('team_id', params.team_id);
   if (params?.limit != null) searchParams.set('limit', String(params.limit));
   if (params?.offset != null) searchParams.set('offset', String(params.offset));
 

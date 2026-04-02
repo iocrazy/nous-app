@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { fetchShares, cancelShare as cancelShareApi, deleteSharePermanent } from '../services/sharesService';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useTeamContext } from '../contexts/TeamContext';
 import { Share, ShareType, ShareStatus } from '../types';
 
 const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
@@ -45,6 +46,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export const SharedPage: React.FC = () => {
   const { t } = useTranslation();
+  const { selectedTeamId } = useTeamContext();
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ShareStatus | 'all'>('all');
@@ -54,15 +56,16 @@ export const SharedPage: React.FC = () => {
   const loadShares = useCallback(async () => {
     setLoading(true);
     try {
-      const params: { status?: string } = {};
+      const params: { status?: string; team_id?: string } = {};
       if (filter !== 'all') params.status = filter;
+      params.team_id = selectedTeamId || 'personal';
       const data = await fetchShares(params);
       setShares(data);
     } catch {
       /* ignore */
     }
     setLoading(false);
-  }, [filter]);
+  }, [filter, selectedTeamId]);
 
   useEffect(() => {
     loadShares();
