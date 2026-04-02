@@ -41,17 +41,17 @@ const AVATAR_COLORS = [
 ] as const;
 
 const NAV_SECTIONS = [
-  { key: 'files', label: 'Files', icon: FolderOpen },
-  { key: 'scripts', label: 'Scripts', icon: FileText },
-  { key: 'storyboard', label: 'Storyboard', icon: Clapperboard },
-  { key: 'skills', label: 'Skills', icon: Wand2 },
-  { key: 'output', label: 'Output', icon: Download },
-  { key: 'tasks', label: 'Tasks', icon: KanbanSquare },
-  { key: 'divider-1', label: '', icon: null },
-  { key: 'shares', label: 'Shares', icon: Share2 },
-  { key: 'trash', label: 'Trash', icon: Trash2 },
-  { key: 'divider-2', label: '', icon: null },
-  { key: 'settings', label: 'Settings', icon: Settings },
+  { key: 'files', label: 'Files', icon: FolderOpen, iconColor: '' },
+  { key: 'scripts', label: 'Scripts', icon: FileText, iconColor: '' },
+  { key: 'storyboard', label: 'Storyboard', icon: Clapperboard, iconColor: '' },
+  { key: 'skills', label: 'Skills', icon: Wand2, iconColor: 'text-violet-400' },
+  { key: 'output', label: 'Output', icon: Download, iconColor: '' },
+  { key: 'tasks', label: 'Tasks', icon: KanbanSquare, iconColor: '' },
+  { key: 'divider-1', label: '', icon: null, iconColor: '' },
+  { key: 'shares', label: 'Shares', icon: Share2, iconColor: '' },
+  { key: 'trash', label: 'Trash', icon: Trash2, iconColor: '' },
+  { key: 'divider-2', label: '', icon: null, iconColor: '' },
+  { key: 'settings', label: 'Settings', icon: Settings, iconColor: '' },
 ] as const;
 
 function getAvatarColor(name: string): string {
@@ -269,7 +269,7 @@ export function ProjectNavSidebar({
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
-              <Icon size={16} className="shrink-0" />
+              <Icon size={16} className={`shrink-0 ${!isActive && section.iconColor ? section.iconColor : ''}`} />
               <span className="flex-1 text-left">{section.label}</span>
               {count != null && count > 0 && (
                 <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 font-medium">
