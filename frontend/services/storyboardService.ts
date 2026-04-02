@@ -258,13 +258,14 @@ export async function splitScript(data: SplitScriptParams): Promise<{ task_id: s
 export async function chatWithAI(
   projectId: string,
   message: string,
-  frameId?: string
+  frameId?: string,
+  skillId?: string,
 ): Promise<{ response: string; actions: unknown[] }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/chat`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, frame_id: frameId }),
+    body: JSON.stringify({ message, frame_id: frameId, skill_id: skillId }),
   });
   return unwrapResponse<{ response: string; actions: unknown[] }>(res);
 }
