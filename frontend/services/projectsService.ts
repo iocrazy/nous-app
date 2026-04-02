@@ -2,11 +2,12 @@ import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileV
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
-export const fetchProjects = async (params?: { type?: string; starred?: boolean }): Promise<Project[]> => {
+export const fetchProjects = async (params?: { type?: string; starred?: boolean; teamId?: string }): Promise<Project[]> => {
   const apiUrl = getApiUrl();
   const searchParams = new URLSearchParams();
   if (params?.type) searchParams.set('project_type', params.type);
   if (params?.starred !== undefined) searchParams.set('starred', String(params.starred));
+  if (params?.teamId !== undefined) searchParams.set('team_id', params.teamId);
   const qs = searchParams.toString();
   const url = `${apiUrl}/api/v1/projects${qs ? '?' + qs : ''}`;
 

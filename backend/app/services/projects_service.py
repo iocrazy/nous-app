@@ -32,19 +32,22 @@ class ProjectsService:
     # Projects
     # ------------------------------------------------------------------ #
 
-    async def get_projects_with_counts(self, user_id: str) -> list:
+    async def get_projects_with_counts(
+        self, user_id: str, team_id: str | None = None
+    ) -> list:
         """
-        Get all projects for a user with file counts attached.
+        Get projects for a user with file counts attached.
 
         Args:
             user_id: UUID of the authenticated user.
+            team_id: If provided, filter by team. If None, return all.
 
         Returns:
             List of project dicts, each with a ``file_count`` key.
         """
         import asyncio
 
-        projects = await self.repo.get_user_projects(user_id)
+        projects = await self.repo.get_user_projects(user_id, team_id=team_id)
         if not projects:
             return []
 

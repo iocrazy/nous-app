@@ -69,7 +69,9 @@ export function ProjectsPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await fetchProjects();
+        const data = await fetchProjects({
+          teamId: selectedTeamId || 'personal',
+        });
         setProjects(data);
         // Auto-select project from URL param
         if (projectId && !selectedProject) {
@@ -81,7 +83,7 @@ export function ProjectsPage() {
       }
     };
     load();
-  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, selectedTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive filter counts and folders
   const starredProjects = useMemo(() => projects.filter(p => p.is_starred), [projects]);
