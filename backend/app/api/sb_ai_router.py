@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     project_id: str
     message: str = Field(..., min_length=1, max_length=4000)
     selected_frame_id: Optional[str] = None
+    skill_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +351,7 @@ async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
             project_id=body.project_id,
             message=body.message,
             selected_frame_id=body.selected_frame_id,
+            skill_id=body.skill_id,
         )
         return {"success": True, "data": result}
     except Exception as exc:

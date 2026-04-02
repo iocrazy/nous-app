@@ -615,6 +615,7 @@ class StoryboardAIService:
         project_id: str,
         message: str,
         selected_frame_id: Optional[str] = None,
+        skill_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handle a conversational message in the context of a storyboard project.
@@ -689,7 +690,34 @@ class StoryboardAIService:
 
         context_block = "\n\n".join(context_parts) if context_parts else "No additional context."
 
-        system_prompt = (
+        # Skill injection
+        skill_prefix = ""
+        if skill_id:
+            try:
+                from app.repositories.skill_repository import SkillRepository
+                skill_repo = SkillRepository()
+                skill = await skill_repo.get_by_id(skill_id)
+                if skill and skill.get("status") == "active":
+                    skill_prefix = (
+                        f"<skill>\n{skill['content_md']}\n</skill>\n\n"
+                    )
+                    if skill.get("output_format"):
+                        skill_prefix += (
+                            f"Output format:\n{skill['output_format']}\n\n"
+                        )
+                    logger.info(
+                        "chat: injected skill %s for project %s",
+                        skill_id, project_id,
+                    )
+                else:
+                    logger.warning(
+                        "chat: skill %s not found or archived, proceeding without",
+                        skill_id,
+                    )
+            except Exception as exc:
+                logger.warning("chat: skill lookup failed: %s", exc)
+
+        system_prompt = skill_prefix + (
             "You are a helpful storyboard assistant. "
             "You help filmmakers and animators develop their storyboard projects.\n\n"
             "When appropriate, you may suggest structured actions by including a "
