@@ -80,7 +80,39 @@
 - 画布视图 (square) — 默认，竖向流式画布
 - 缩放控制 — 减号 / 百分比显示 / 加号
 
-## 4. Node Types
+## 4. TipTap + ReactFlow Interaction Handling
+
+### 4.1 Focus & Event Management
+
+ReactFlow 拦截键盘事件（delete, backspace）会与 TipTap 编辑冲突。解决方案：
+- ChapterFlowNode 设置 `onKeyDown={e => e.stopPropagation()}` 阻止事件冒泡
+- ReactFlow `deleteKeyCode` 设为 `null`，禁用键盘删除节点
+- 节点删除改为右键菜单或 Delete 按钮
+- `Cmd+A` 在 TipTap 焦点内时全选文本，焦点外时全选节点
+
+### 4.2 Scroll & Drag Isolation
+
+- 鼠标在 TipTap 编辑区域内时，滚轮事件用于内容滚动（不缩放画布）
+- 鼠标在节点边框/标题栏区域时，允许拖拽节点（仅分支节点）
+- 主线章节禁用拖拽（`draggable={false}`）
+
+### 4.3 TipTap Instance Virtualization (性能关键)
+
+20 个章节 = 20 个 TipTap 实例会导致内存爆炸。必须虚拟化：
+- 仅当前编辑的章节（`selectedNodeId`）挂载完整 TipTap 编辑器
+- 其他章节渲染静态 HTML（`dangerouslySetInnerHTML` + TipTap 相同 CSS）
+- 点击其他章节时：销毁当前 TipTap → 当前章节降级为静态 HTML → 目标章节挂载 TipTap
+- 切换延迟 < 100ms（TipTap 初始化很快）
+
+### 4.4 dagre Layout Strategy
+
+- 仅在初始加载、章节增删时运行 dagre 布局
+- 编辑内容时不触发重排（节点高度自然撑开）
+- 初始间距 300px，吸收高度变化
+- 提供手动"重新排列"按钮
+- StoryRootNode 连接到第 1 章，章节之间用绿色连接点串联（不是根节点连所有章节）
+
+## 5. Node Types
 
 ### 4.1 ChapterFlowNode — 章节节点
 
@@ -181,11 +213,20 @@ HTML 输出：<p><strong>林然</strong>：（喘息）这是......什么地方�
 
 ### 5.3 Data Storage
 
-数据库双写：
-- `script_chapters.content` (TEXT) — 纯文本，用于全文搜索和 AI 处理
-- `script_chapters.content_json` (JSONB, 新增) — TipTap ProseMirror JSON 文档结构
+**`content_json` 为 source of truth**，`content` 为派生字段：
+- `script_chapters.content_json` (JSONB, 新增) — TipTap ProseMirror JSON 文档结构，**唯一写入源**
+- `script_chapters.content` (TEXT) — 纯文本，由后端从 content_json 自动派生（用于全文搜索和 AI 处理）
 
-AI 扩写返回 HTML 格式，前端解析为 TipTap JSON 存储。同时提取纯文本写入 content 字段。
+派生策略：前端只写 `content_json`，后端在 save/sync 时自动从 JSON 提取纯文本写入 `content`。避免双写不一致风险。
+
+AI 扩写返回 HTML 格式，前端解析为 TipTap JSON 后写入 `content_json`。
+
+### 5.4 Auto-Save Strategy
+
+- 编辑器内容变化后 debounce 500ms 自动保存到后端
+- 保存时只发送变化的章节（增量 sync）
+- 网络断开时本地暂存到 localStorage，恢复后自动同步
+- 保存状态指示：editing → saving... → saved
 
 ## 6. AI Features
 
@@ -220,6 +261,14 @@ AI prompt 指定输出 HTML 格式：
 - `<p>` 正文段落
 - `<strong>` 角色名
 - `<hr>` 场景分隔
+
+**AI 输出安全处理**：后端在接收 AI 输出后，用 bleach 做 HTML 白名单过滤（仅允许 h2, h3, p, strong, em, hr, br），过滤掉 script, iframe, style 等危险标签，再返回给前端。
+
+**AI 输出异常处理**：
+- LLM 返回空内容 → 提示"生成失败，请重试"，保留原内容不替换
+- LLM 返回非 HTML（纯文本） → 自动包裹 `<p>` 标签后注入
+- LLM 返回无效 JSON → 后端 try/catch + 返回 400 错误
+- AI 服务不可用 → 前端显示"AI 服务暂时不可用"，禁用 AI 按钮但允许手动编辑
 
 ### 6.3 Create Branches（创建分支）
 
@@ -271,16 +320,31 @@ POST /api/v1/scripts/import
 Content-Type: multipart/form-data
 
 Parameters:
-  - file: 上传文件 (.txt / .pdf / .docx)
+  - file: 上传文件 (.txt / .pdf / .docx, 最大 10MB)
   - script_id: 目标 Script 项目 ID
 
-Response:
+Response (异步，返回 task_id):
+  {
+    "task_id": "uuid",
+    "status": "pending"
+  }
+
+通过 unified_tasks 表轮询进度，完成后获取结果:
+GET /api/v1/scripts/import/{task_id}/result
   {
     "chapters": [
       { "title": "...", "summary": "...", "content": "...", "content_html": "..." }
     ]
   }
 ```
+
+注：导入涉及文件解析 + AI 分章，可能耗时较长，使用异步 task 模式（与 generate-outline 一致）。
+
+### 7.4 File Validation
+
+- 文件大小限制：10MB
+- MIME 类型校验：仅允许 text/plain, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document
+- 页数/字数限制：PDF 最大 200 页，总字数最大 50 万字
 
 ## 8. Export Script（剧本导出）
 
@@ -355,17 +419,16 @@ Response:
 ### 8.3 Backend API
 
 ```
-POST /api/v1/scripts/{script_id}/export
-Content-Type: application/json
+GET /api/v1/scripts/{script_id}/export?format=txt|docx|json|md&branch_id=<chapter_id>
 
-Body:
-  {
-    "format": "txt" | "docx" | "json" | "md",
-    "branch_id": null | "<chapter_id>"   // null = 完整故事
-  }
+Parameters (query string):
+  - format: "txt" | "docx" | "json" | "md" (required)
+  - branch_id: chapter_id (optional, null = 完整故事)
 
 Response: 文件下载 (Content-Disposition: attachment)
 ```
+
+注：使用 GET 而非 POST，因为导出是读操作，GET 支持浏览器直接下载链接。
 
 ## 9. Format Preset System（格式预设）
 
@@ -482,5 +545,34 @@ supabase/migrations/XXX_script_editor_v2.sql  # content_json + genre 字段
 
 ```
 python-docx    # Word 文件解析和生成
-PyPDF2         # PDF 文件解析
+pypdf          # PDF 文件解析（PyPDF2 已停止维护，改用 pypdf）
+bleach         # HTML 白名单过滤（AI 输出安全）
 ```
+
+## 14. Interaction States Matrix
+
+| 功能 | Loading | Empty | Error | Success | Partial |
+|------|---------|-------|-------|---------|---------|
+| AI 大纲生成 | Spinner + "正在生成大纲..." | N/A | "生成失败，请重试" + 重试按钮 | 大纲列表 + 确认按钮 | N/A（原子操作） |
+| AI 章节扩写 | Streaming 打字机效果 | N/A | "扩写失败" + 保留原内容 | 预览结果 + 确认替换 | 中断时显示已生成部分 |
+| AI 创建分支 | Spinner + "正在生成分支..." | N/A | "分支生成失败" | 分支节点出现在画布 | N/A |
+| 文件导入 | 进度条 + "正在解析文件..." | N/A | "文件格式不支持"/"文件过大" | 章节列表预览 + 确认导入 | 解析部分成功时显示已解析章节 |
+| 文件导出 | Spinner + "正在生成文件..." | N/A | "导出失败" | 浏览器自动下载 | N/A |
+| 画布加载 | 骨架屏（节点占位） | WelcomeScreen | "加载失败" + 重试 | 完整画布 | 部分章节加载失败时标记 |
+| 章节编辑 | N/A | "开始编写剧本内容..." placeholder | 保存失败 → Toast + 本地暂存 | "saved" 状态指示 | 自动保存中 → "saving..." |
+| 资产面板 | 骨架屏 | "暂无XX" + 添加按钮 | "加载失败" | 资产列表 | N/A |
+
+## 15. Review Findings (已整合)
+
+本 spec 经过三轮 review（CEO / Engineering / Design），以下发现已整合到各章节：
+
+- [x] content_json 定为 source of truth (Section 6.3)
+- [x] PyPDF2 → pypdf (Section 13)
+- [x] 导出 API 改 GET (Section 9.3)
+- [x] 导入 API 改异步 (Section 8.3)
+- [x] TipTap 实例虚拟化 (Section 4.3)
+- [x] AI 输出 HTML 白名单过滤 (Section 7.2)
+- [x] 自动保存策略 (Section 6.4)
+- [x] TipTap-ReactFlow 焦点/事件处理 (Section 4.1-4.2)
+- [x] 交互状态矩阵 (Section 14)
+- [x] 文件上传限制 (Section 8.4)
