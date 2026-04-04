@@ -118,17 +118,32 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
 
         svc = TranscodeService()
 
-        # Build progress callback if we have a unified task
+        # Build progress callback — Redis pub/sub for real-time, NOT Supabase
         on_progress = None
-        if unified_task_id:
+        if unified_task_id and user_id:
+            import json as _json
+            import time as _time
+            from app.core.redis import get_sync_redis
+
+            _redis = get_sync_redis()
+            _channel = f"task_progress:{user_id}"
+            _last_pct = [0]
+
             async def _report_progress(progress: int, subtitle: str = ""):
+                pct = min(max(int(progress), 0), 99)
+                # Publish to Redis for WebSocket delivery (every update)
                 try:
-                    from app.services.unified_task_manager import get_task_manager
-                    await get_task_manager().update_progress(
-                        unified_task_id, progress, subtitle=subtitle,
-                    )
+                    _redis.publish(_channel, _json.dumps({
+                        "unified_task_id": unified_task_id,
+                        "celery_task_id": task_id,
+                        "status": "transcoding",
+                        "percent": pct,
+                        "speed": "",
+                        "subtitle": subtitle,
+                    }))
                 except Exception:
                     pass
+                _last_pct[0] = pct
 
             on_progress = _report_progress
 
