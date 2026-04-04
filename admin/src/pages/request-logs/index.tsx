@@ -913,9 +913,6 @@ function ApplicationLogsTab() {
                             </Typography.Text>
                           </Space>
                         </td>
-                        <td>
-                          <Button type="text" size="mini" icon={<IconEye />} onClick={() => setDetailModal(log)} />
-                        </td>
                       </tr>
                     ))
                   )}
@@ -924,7 +921,6 @@ function ApplicationLogsTab() {
             </div>
           </div>
         </Card>
-        {detailModalElement}
       </>
     )
   }
