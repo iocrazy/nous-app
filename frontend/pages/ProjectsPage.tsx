@@ -38,7 +38,7 @@ export function ProjectsPage() {
   const { teamId, projectId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
-  const { selectedTeamId } = useTeamContext();
+  const { selectedTeamId, personalTeamId } = useTeamContext();
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -69,8 +69,9 @@ export function ProjectsPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
         const data = await fetchProjects({
-          teamId: selectedTeamId || 'personal',
+          teamId: isPersonal ? 'personal' : selectedTeamId,
         });
         setProjects(data);
         // Auto-select project from URL param
