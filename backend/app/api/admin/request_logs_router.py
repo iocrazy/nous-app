@@ -347,10 +347,22 @@ async def list_app_logs(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
 ):
-    """List application logs (loguru) with filtering and pagination."""
+    """List application logs (loguru) with filtering and pagination.
+
+    Excludes infrastructure noise (httpx, uvicorn.access, celery.beat)
+    by default to show only business logic logs.
+    """
     supabase = await get_async_supabase_admin()
 
+    # Noise modules to exclude from Application Logs view
+    NOISE_MODULES = ("httpx", "uvicorn.access", "uvicorn.error", "celery.beat")
+
     query = supabase.table("application_logs").select("*", count="exact")
+
+    # Exclude noise unless user explicitly filters by module
+    if not module:
+        for noise in NOISE_MODULES:
+            query = query.neq("module", noise)
 
     if level:
         query = query.eq("level", level.upper())

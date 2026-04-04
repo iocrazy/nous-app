@@ -82,7 +82,7 @@ admin_router.include_router(videos_router, prefix="/videos", tags=["Admin - Vide
 admin_router.include_router(audit_logs_router, prefix="/audit-logs", tags=["Admin - Audit Logs"])
 admin_router.include_router(stats_router, prefix="/stats", tags=["Admin - Stats"])
 admin_router.include_router(settings_router, prefix="/settings", tags=["Admin - Settings"])
-admin_router.include_router(request_logs_router, prefix="/request-logs", tags=["Admin - Request Logs"])
+admin_router.include_router(request_logs_router, prefix="/logs", tags=["Admin - Logs"])
 admin_router.include_router(monitoring_router, prefix="/monitoring", tags=["Admin - Monitoring"])
 admin_router.include_router(search_router, prefix="/search", tags=["Admin - Search"])
 admin_router.include_router(alert_rules_router, prefix="/alerts", tags=["Admin - Alerts"])
