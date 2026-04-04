@@ -657,18 +657,6 @@ function ApplicationLogsTab() {
       ),
     },
     {
-      key: 'module',
-      header: 'Location',
-      type: 'text',
-      filterable: true,
-      size: 200,
-      cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
-          {[row.module, row.function, row.line].filter(Boolean).join(':')}
-        </Typography.Text>
-      ),
-    },
-    {
       key: 'message',
       header: 'Message',
       type: 'text',
@@ -693,6 +681,18 @@ function ApplicationLogsTab() {
           </Space>
         )
       },
+    },
+    {
+      key: 'module',
+      header: 'Location',
+      type: 'text',
+      filterable: true,
+      size: 200,
+      cell: (row) => (
+        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+          {[row.module, row.function, row.line].filter(Boolean).join(':')}
+        </Typography.Text>
+      ),
     },
     {
       key: 'actions',
