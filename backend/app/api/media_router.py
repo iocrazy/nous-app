@@ -17,23 +17,23 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthDep, OptionalAuthDep
 from app.core.enums import DownloadStatus
 from app.repositories.tags_repository import TagsRepository
 from app.core.utils import Utils
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.repositories.media_repository import MediaRepository
-from app.services.douyin_analysis import DouyinAnalysis
-from app.services.douyin_parser import DouyinParser
-from app.services.lightweight_parser import LightweightParser
+from app.services.drissionpage_parser import DrissionPageParser
+from app.services.douyin_formatter import DouyinFormatter
+from app.services.ies_douyin_parser import IesDouyinParser
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
 from app.schemas.media import MediaTypeFetchRequest
 from app.services.media_service import MediaService
 from app.services.ytdlp_service import YtdlpService
 
-router = APIRouter(prefix="/videos")
+router = APIRouter(prefix="/media")
 
 # API group tags
 TAGS_FETCH = ["Video Fetch"]  # Fetch and parse videos
@@ -288,8 +288,7 @@ async def _dedup_and_dispatch(
                 task_id = "background"
 
     return {
-        "task_id": task_id,
-        "unified_task_id": unified_task_id,
+        "task_id": unified_task_id or task_id,
         "types_submitted": types_to_download,
         "types_skipped": types_skipped,
         "types_subscribed": types_subscribed,
@@ -499,13 +498,64 @@ async def fetch_media_by_type(
             if status_updates:
                 await resources_repo.update_download_status(resource_id, status_updates)
 
-        # 4) Detect platform: pass URL for yt-dlp platforms so Celery uses the right strategy
+        # 4) Detect platform: Douyin uses its own downloader, others use yt-dlp
         original_url = media.get("original_url")
         dispatch_url = None
+        platform = None
         if original_url:
-            _, handler_type = URLRouter.detect_platform(original_url)
-            if handler_type == "ytdlp":
-                dispatch_url = original_url
+            platform, _ = URLRouter.detect_platform(original_url)
+            if platform not in ("douyin", "tiktok"):
+                dispatch_url = original_url  # yt-dlp path
+            # Douyin/TikTok: dispatch_url=None → Celery uses Douyin downloader
+
+        # 4.5) Re-parse to get fresh URLs + updated stats (Douyin/TikTok only)
+        #       CDN URLs expire in hours; stale URLs cause download failures.
+        if platform in ("douyin", "tiktok"):
+            try:
+                aweme_detail = await IesDouyinParser._fetch_share_page(platform_id)
+                if aweme_detail:
+                    IesDouyinParser._process_video_urls(aweme_detail)
+                    new_parsed = await DouyinFormatter.parse_aweme_detail(
+                        aweme_detail=aweme_detail,
+                        valid_url=media.get("original_url", ""),
+                        download_video=True,
+                        download_music=True,
+                        download_cover=True,
+                    )
+                    if new_parsed:
+                        # Update URLs + stats in parsed_media
+                        update_fields = {}
+                        url_fields = [
+                            "video_download_urls",
+                            "image_download_urls",
+                            "music_play_urls",
+                            "cover_urls",
+                        ]
+                        for field in url_fields:
+                            if new_parsed.get(field):
+                                update_fields[field] = new_parsed[field]
+
+                        stat_fields = [
+                            "like_count",
+                            "comment_count",
+                            "share_count",
+                            "favorite_count",
+                        ]
+                        for field in stat_fields:
+                            if new_parsed.get(field) is not None:
+                                update_fields[field] = new_parsed[field]
+
+                        if update_fields:
+                            await repo.update(platform_id, update_fields)
+                            logger.info(
+                                f"[Refetch] Re-parsed {platform_id}: "
+                                f"updated {list(update_fields.keys())}"
+                            )
+            except Exception as e:
+                logger.warning(
+                    f"[Refetch] Re-parse failed for {platform_id}, "
+                    f"proceeding with existing URLs: {e}"
+                )
 
         # 5) Dedup + dispatch
         dispatch_result = await _dedup_and_dispatch(
@@ -534,7 +584,7 @@ async def fetch_media_by_type(
             "success": True,
             "message": "Fetch submitted",
             "platform_id": platform_id,
-            "download_task_id": dispatch_result["task_id"],
+            "task_id": dispatch_result.get("unified_task_id") or dispatch_result.get("task_id"),
             "types_submitted": dispatch_result["types_submitted"],
             "types_skipped": dispatch_result["types_skipped"],
             "types_subscribed": dispatch_result["types_subscribed"],
@@ -726,25 +776,25 @@ async def fetch_videos_batch(
             if user_parse_mode == "drissionpage":
                 # User selected DrissionPage, use browser parsing directly
                 try:
-                    aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                    aweme_detail = await DrissionPageParser.fetch_one_video(url)
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
             else:
                 # Default mode: try LightHTTP first, then fallback
                 try:
-                    aweme_detail = await LightweightParser.parse(url)
+                    aweme_detail = await IesDouyinParser.parse(url)
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Lightweight parsing failed: {e}")
 
                 # Fallback to browser automation
                 if not aweme_detail:
                     try:
-                        aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                        aweme_detail = await DrissionPageParser.fetch_one_video(url)
                     except Exception as e:
                         logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
 
             if aweme_detail:
-                parsed_data = await DouyinParser.parse_aweme_detail(
+                parsed_data = await DouyinFormatter.parse_aweme_detail(
                     aweme_detail=aweme_detail,
                     valid_url=url,
                     download_video=request.video_bool,
@@ -890,7 +940,7 @@ async def cleanup_stale_downloads(
         raise HTTPException(status_code=500, detail="Cleanup failed")
 
 
-@router.get("/videos", tags=TAGS_VIDEOS)
+@router.get("", tags=TAGS_VIDEOS)
 async def list_videos(
     auth: AuthDep,
     skip: int = Query(0, ge=0),
@@ -925,7 +975,7 @@ async def list_videos(
         raise HTTPException(status_code=500, detail="Failed to get video list")
 
 
-@router.get("/videos/{platform_id}", tags=TAGS_VIDEOS)
+@router.get("/{platform_id}", tags=TAGS_VIDEOS)
 async def get_video(platform_id: str, auth: AuthDep):
     """
     Get video details
@@ -939,6 +989,8 @@ async def get_video(platform_id: str, auth: AuthDep):
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
+        if not video:
+            video = await repo.get_by_id(platform_id)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -967,7 +1019,7 @@ async def get_video(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get video details")
 
 
-@router.delete("/videos/{platform_id}", tags=TAGS_VIDEOS)
+@router.delete("/{platform_id}", tags=TAGS_VIDEOS)
 async def delete_video(
     platform_id: str,
     background_tasks: BackgroundTasks,
@@ -989,8 +1041,10 @@ async def delete_video(
     try:
         repo = MediaRepository()
 
-        # Get video info for logging and file deletion
+        # Get video info — try platform_id first, then by id (Snowflake BIGINT)
         video = await repo.get_by_platform_id(platform_id)
+        if not video:
+            video = await repo.get_by_id(platform_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
 
@@ -1057,7 +1111,7 @@ async def delete_video(
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
 
-@router.post("/videos/search", tags=TAGS_VIDEOS)
+@router.post("/search", tags=TAGS_VIDEOS)
 async def search_videos(
     request: MediaSearchRequest,
     auth: AuthDep,
@@ -1220,7 +1274,6 @@ async def retry_download(
             media_type=int(media_type) if str(media_type).isdigit() else 0,
             video_title=video_title,
             download_video=request.video_bool,
-            download_music=False,
             download_cover=request.cover_bool,
             background_tasks=background_tasks,
         )
@@ -1239,7 +1292,7 @@ async def retry_download(
         return {
             "success": True,
             "message": "Download task resubmitted",
-            "task_id": download_task_id,
+            "task_id": dispatch_result.get("unified_task_id") if isinstance(dispatch_result, dict) else download_task_id,
         }
     except HTTPException:
         raise
@@ -1446,6 +1499,163 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
+# ===========================================================================
+# NEW: /api/v1/media/{media_id}/slides and /audio routes
+# Uses media_id (parsed_media Snowflake ID) — consistent with /media/{media_id}
+# ===========================================================================
+
+media_content_router = APIRouter(prefix="/media")
+
+TAGS_MEDIA_CONTENT = ["Media Content"]
+
+
+async def _get_media_download_path(media_id: str) -> tuple[dict, str]:
+    """Resolve media_id to download_path. Returns (media_record, download_path)."""
+    from app.db.supabase_client import get_async_supabase_admin
+    supabase = await get_async_supabase_admin()
+    res = await supabase.table("parsed_media").select("*").eq("id", media_id).maybe_single().execute()
+    if not res or not res.data:
+        raise HTTPException(status_code=404, detail="Media not found")
+    download_path = res.data.get("download_path")
+    if not download_path:
+        raise HTTPException(status_code=404, detail="Download path not found")
+    return res.data, download_path
+
+
+@media_content_router.get("/{media_id}/slides", tags=TAGS_MEDIA_CONTENT)
+async def list_slides(media_id: str, auth: AuthDep):
+    """
+    List slide files for a carousel/image-text media item.
+
+    - **media_id**: parsed_media Snowflake ID
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
+
+        # Check slides/ subfolder first (new format), fallback to root folder (old format)
+        slides_dir = Path(base_path) / download_path / "slides"
+        if not slides_dir.exists() or not slides_dir.is_dir():
+            slides_dir = Path(base_path) / download_path
+            if not slides_dir.exists() or not slides_dir.is_dir():
+                raise HTTPException(status_code=404, detail="Slides folder not found")
+
+        slides = []
+        for f in sorted(slides_dir.iterdir()):
+            if not f.is_file():
+                continue
+            suffix = f.suffix.lower()
+            if suffix in (".jpg", ".jpeg", ".png", ".webp"):
+                slide_type = "image"
+                mt = f"image/{suffix.lstrip('.')}"
+            elif suffix in (".mp4", ".mov", ".webm"):
+                slide_type = "video"
+                mt = f"video/{suffix.lstrip('.')}"
+            else:
+                continue
+            slides.append({
+                "name": f.name,
+                "type": slide_type,
+                "media_type": mt,
+                "url": f"/api/v1/media/{media_id}/slides/{f.name}",
+            })
+
+        return {"slides": slides, "count": len(slides)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list slides for media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list slides")
+
+
+@media_content_router.get("/{media_id}/slides/{filename}", tags=TAGS_MEDIA_CONTENT)
+async def serve_slide_file(media_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None):
+    """
+    Serve a single slide file.
+
+    - **media_id**: parsed_media Snowflake ID
+    - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
+
+    Authentication: Bearer Token, API Key, or ?token= query param
+    """
+    import mimetypes as _mt
+    from app.api.media_auth import validate_media_cookie
+
+    if not auth and token:
+        if not validate_media_cookie(token):
+            raise HTTPException(status_code=401, detail="Invalid token")
+    elif not auth:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    try:
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
+
+        file_path = Path(base_path) / download_path / "slides" / filename
+        if not file_path.exists():
+            file_path = Path(base_path) / download_path / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Slide file not found")
+
+        return FileResponse(
+            path=str(file_path),
+            media_type=_mt.guess_type(str(file_path))[0] or "application/octet-stream",
+            content_disposition_type="inline",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve slide {filename} for media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve slide file")
+
+
+@media_content_router.get("/{media_id}/audio", tags=TAGS_MEDIA_CONTENT)
+async def serve_audio_file(media_id: str, auth: OptionalAuthDep = None, token: str = None):
+    """
+    Serve standalone background audio for carousel content.
+
+    - **media_id**: parsed_media Snowflake ID
+
+    Authentication: Bearer Token, API Key, or ?token= query param
+    """
+    from app.api.media_auth import validate_media_cookie
+
+    if not auth and token:
+        if not validate_media_cookie(token):
+            raise HTTPException(status_code=401, detail="Invalid token")
+    elif not auth:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        media, download_path = await _get_media_download_path(media_id)
+        base_path = Utils.get_download_base_path()
+
+        audio_file = None
+        music_path = media.get("music_download_path")
+        if music_path:
+            candidate = Path(base_path) / music_path
+            if candidate.exists():
+                audio_file = candidate
+        if not audio_file:
+            candidate = Path(base_path) / download_path / "audio.mp3"
+            if candidate.exists():
+                audio_file = candidate
+        if not audio_file:
+            raise HTTPException(status_code=404, detail="Audio file not found")
+
+        return FileResponse(path=str(audio_file), media_type="audio/mpeg", content_disposition_type="inline")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve audio for media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve audio file")
+
+
 @router.get("/logs", tags=TAGS_LOGS)
 async def get_user_logs(
     auth: AuthDep,
@@ -1478,6 +1688,33 @@ async def get_user_logs(
     except Exception as e:
         logger.error(f"Failed to get user logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user logs")
+
+
+@router.get("/debug/raw-parse", tags=["Debug"])
+async def debug_raw_parse(
+    auth: AuthDep,
+    url: str = Query(..., description="Share URL to parse"),
+):
+    """
+    Debug endpoint: return raw aweme_detail JSON from IesDouyinParser.
+    No DB writes, no downloads — just raw parsed data.
+    """
+    aweme_detail = await IesDouyinParser.parse(url)
+    if not aweme_detail:
+        raise HTTPException(status_code=404, detail="IesDouyinParser returned None")
+
+    # Also run DouyinFormatter to show structured output
+    parsed = await DouyinFormatter.parse_aweme_detail(
+        aweme_detail=aweme_detail,
+        valid_url=url,
+        download_video=False,
+        download_music=False,
+    )
+
+    return {
+        "raw_aweme_detail": aweme_detail,
+        "parsed_data": parsed,
+    }
 
 
 async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]:
@@ -1513,7 +1750,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         # User selected DrissionPage — use browser parsing directly
         try:
             logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
-            aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+            aweme_detail = await DrissionPageParser.fetch_one_video(url)
             if aweme_detail:
                 parse_method = "browser_auto"
                 parse_method_name = "BrowserAuto"
@@ -1525,7 +1762,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         # Default (lighthttp): LightHTTP first, then DrissionPage fallback
         try:
             logger.info(f"[LightHTTP] Attempting parse: {url}")
-            aweme_detail = await LightweightParser.parse(url)
+            aweme_detail = await IesDouyinParser.parse(url)
             if aweme_detail:
                 parse_method = "light_http"
                 parse_method_name = "LightHTTP"
@@ -1540,7 +1777,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         if not aweme_detail:
             try:
                 logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
-                aweme_detail = await DouyinAnalysis.fetch_one_video(url)
+                aweme_detail = await DrissionPageParser.fetch_one_video(url)
                 if aweme_detail:
                     parse_method = "browser_auto"
                     parse_method_name = "BrowserAuto"
@@ -1555,7 +1792,7 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         )
 
     # Convert raw aweme_detail to our parsed_data format
-    parsed_data = await DouyinParser.parse_aweme_detail(
+    parsed_data = await DouyinFormatter.parse_aweme_detail(
         aweme_detail=aweme_detail,
         valid_url=url,
         download_video=True,
@@ -1566,6 +1803,22 @@ async def _douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str
         raise HTTPException(status_code=500, detail="Douyin video parsing failed")
 
     return parsed_data, parse_method, parse_method_name
+
+
+async def _mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -> None:
+    """Mark a user's platform cookie as invalid when yt-dlp encounters auth errors."""
+    auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+    if any(kw in error.lower() for kw in auth_keywords):
+        try:
+            from app.repositories.cookies_repository import CookiesRepository
+            repo = CookiesRepository()
+            await repo.mark_invalid(user_id, platform, error[:200])
+            logger.info(
+                f"[Cookie] Marked {platform} cookie as invalid for user {user_id}: "
+                f"{error[:80]}"
+            )
+        except Exception as e:
+            logger.warning(f"[Cookie] Failed to mark cookie invalid: {e}")
 
 
 async def _handle_ytdlp_fetch(
@@ -1588,6 +1841,21 @@ async def _handle_ytdlp_fetch(
     from app.tasks.parse_tasks import parse_media_task
 
     mgr = get_task_manager()
+
+    # Check cookie availability for platforms that benefit from cookies
+    has_cookie = False
+    if platform in ("douyin", "bilibili", "youtube"):
+        try:
+            has_cookie = await YtdlpService.user_has_cookie(auth.user_id, platform)
+            logger.info(
+                f"[Cookie] Platform={platform}, user={auth.user_id}, "
+                f"has_cookie={has_cookie}"
+            )
+        except Exception as e:
+            logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
+
+    # Douyin: use yt-dlp only when cookie is available, otherwise skip to LightHTTP → DrissionPage.
+    skip_ytdlp = platform == "douyin" and not has_cookie
 
     # Dedup check for parse (URL as dedup identifier)
     dedup_key = None
@@ -1615,7 +1883,7 @@ async def _handle_ytdlp_fetch(
         unified_task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="parse",
-            title=f"Parsing {url[:40]}...",
+            title=f"Parse {url[:50]}",
             subtitle="Initializing...",
             dedup_key=dedup_key,
         )
@@ -1632,6 +1900,7 @@ async def _handle_ytdlp_fetch(
         cover_bool=True,
         tags=tags,
         tag_ids=tag_ids,
+        skip_ytdlp=skip_ytdlp,
         _unified_task_id=unified_task_id,
         _dedup_key=dedup_key,
     )
@@ -1657,8 +1926,7 @@ async def _handle_ytdlp_fetch(
         "success": True,
         "async": True,
         "message": "Parse task submitted",
-        "parse_task_id": celery_task.id,
-        "unified_task_id": unified_task_id,
+        "task_id": unified_task_id,
     }
 
 

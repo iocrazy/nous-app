@@ -354,26 +354,31 @@ VALID_ENCODERS = {"auto", "libx264", "h264_nvenc", "h264_videotoolbox", "h264_qs
 VALID_PRESETS = {"ultrafast", "veryfast", "fast", "medium", "slow", "veryslow", "p1", "p2", "p3", "p4", "p5", "p6", "p7"}
 
 
+async def _load_transcode_settings_from_db() -> dict:
+    """Load transcode settings from system_settings table."""
+    supabase = await get_async_supabase_admin()
+    result = await (
+        supabase.table("system_settings")
+        .select("key, value")
+        .like("key", "transcode_%")
+        .execute()
+    )
+    db_map = {row["key"]: row["value"] for row in (result.data or [])}
+    return {
+        "transcode_enabled": db_map.get("transcode_enabled", settings.TRANSCODE_ENABLED),
+        "transcode_tiers": db_map.get("transcode_tiers", settings.TRANSCODE_TIERS),
+        "ffmpeg_encoder": db_map.get("transcode_encoder", settings.FFMPEG_ENCODER),
+        "ffmpeg_preset": db_map.get("transcode_preset", settings.FFMPEG_PRESET),
+        "transcode_parallel_tiers": db_map.get("transcode_parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS),
+        "transcode_min_size_mb": db_map.get("transcode_min_size_mb", settings.TRANSCODE_MIN_SIZE_MB),
+    }
+
+
 @router.get("/settings", response_model=AdminTranscodeSettingsResponse)
 async def get_transcode_settings(auth: AdminAuthDep):
-    """Get current HLS transcode settings."""
-    from app.api.frontend_config_router import load_config
-
-    config = load_config()
-    transcode = config.get("transcode", {})
-
-    return AdminTranscodeSettingsResponse(
-        transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
-        transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
-        ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
-        ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
-        transcode_parallel_tiers=transcode.get(
-            "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
-        ),
-        transcode_min_size_mb=transcode.get(
-            "min_size_mb", settings.TRANSCODE_MIN_SIZE_MB
-        ),
-    )
+    """Get current HLS transcode settings from database."""
+    vals = await _load_transcode_settings_from_db()
+    return AdminTranscodeSettingsResponse(**vals)
 
 
 @router.put("/settings", response_model=AdminTranscodeSettingsResponse)
@@ -382,8 +387,7 @@ async def update_transcode_settings(
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Update HLS transcode settings with validation and audit logging."""
-    from app.api.frontend_config_router import load_config, save_config
+    """Update HLS transcode settings in database with validation and audit logging."""
 
     # Validate tiers
     if body.transcode_tiers is not None:
@@ -421,47 +425,38 @@ async def update_transcode_settings(
             detail="min_size_mb must be >= 0 (0 means transcode all videos)",
         )
 
-    # Load, update, save config
-    config = load_config()
-    if "transcode" not in config:
-        config["transcode"] = {}
-
+    # Save to database
+    supabase = await get_async_supabase_admin()
     changes = {}
-    if body.transcode_enabled is not None:
-        config["transcode"]["enabled"] = body.transcode_enabled
-        settings.TRANSCODE_ENABLED = body.transcode_enabled
-        changes["enabled"] = body.transcode_enabled
+    field_to_db_key = {
+        "transcode_enabled": "transcode_enabled",
+        "transcode_tiers": "transcode_tiers",
+        "ffmpeg_encoder": "transcode_encoder",
+        "ffmpeg_preset": "transcode_preset",
+        "transcode_parallel_tiers": "transcode_parallel_tiers",
+        "transcode_min_size_mb": "transcode_min_size_mb",
+    }
 
-    if body.transcode_tiers is not None:
-        config["transcode"]["tiers"] = body.transcode_tiers
-        settings.TRANSCODE_TIERS = body.transcode_tiers
-        changes["tiers"] = body.transcode_tiers
-
-    if body.ffmpeg_encoder is not None:
-        config["transcode"]["encoder"] = body.ffmpeg_encoder
-        settings.FFMPEG_ENCODER = body.ffmpeg_encoder
-        changes["encoder"] = body.ffmpeg_encoder
-
-    if body.ffmpeg_preset is not None:
-        config["transcode"]["preset"] = body.ffmpeg_preset
-        settings.FFMPEG_PRESET = body.ffmpeg_preset
-        changes["preset"] = body.ffmpeg_preset
-
-    if body.transcode_parallel_tiers is not None:
-        config["transcode"]["parallel_tiers"] = body.transcode_parallel_tiers
-        settings.TRANSCODE_PARALLEL_TIERS = body.transcode_parallel_tiers
-        changes["parallel_tiers"] = body.transcode_parallel_tiers
-
-    if body.transcode_min_size_mb is not None:
-        config["transcode"]["min_size_mb"] = body.transcode_min_size_mb
-        settings.TRANSCODE_MIN_SIZE_MB = body.transcode_min_size_mb
-        changes["min_size_mb"] = body.transcode_min_size_mb
-
-    if not save_config(config):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save config",
-        )
+    for field, db_key in field_to_db_key.items():
+        value = getattr(body, field, None)
+        if value is not None:
+            await (
+                supabase.table("system_settings")
+                .upsert({"key": db_key, "value": value, "updated_by": auth.user_id})
+                .execute()
+            )
+            changes[field] = value
+            # Also update in-memory settings
+            settings_attr = {
+                "transcode_enabled": "TRANSCODE_ENABLED",
+                "transcode_tiers": "TRANSCODE_TIERS",
+                "ffmpeg_encoder": "FFMPEG_ENCODER",
+                "ffmpeg_preset": "FFMPEG_PRESET",
+                "transcode_parallel_tiers": "TRANSCODE_PARALLEL_TIERS",
+                "transcode_min_size_mb": "TRANSCODE_MIN_SIZE_MB",
+            }.get(field)
+            if settings_attr:
+                setattr(settings, settings_attr, value)
 
     # Audit log
     await create_audit_log(
@@ -475,16 +470,5 @@ async def update_transcode_settings(
 
     logger.info(f"[Admin] Transcode settings updated: {changes} by admin={auth.user_id}")
 
-    transcode = config.get("transcode", {})
-    return AdminTranscodeSettingsResponse(
-        transcode_enabled=transcode.get("enabled", settings.TRANSCODE_ENABLED),
-        transcode_tiers=transcode.get("tiers") or settings.TRANSCODE_TIERS,
-        ffmpeg_encoder=transcode.get("encoder") or settings.FFMPEG_ENCODER,
-        ffmpeg_preset=transcode.get("preset") or settings.FFMPEG_PRESET,
-        transcode_parallel_tiers=transcode.get(
-            "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
-        ),
-        transcode_min_size_mb=transcode.get(
-            "min_size_mb", settings.TRANSCODE_MIN_SIZE_MB
-        ),
-    )
+    vals = await _load_transcode_settings_from_db()
+    return AdminTranscodeSettingsResponse(**vals)

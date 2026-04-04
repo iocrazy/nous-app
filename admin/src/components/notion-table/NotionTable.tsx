@@ -81,6 +81,15 @@ export function NotionTable<T>({
                         {header.isPlaceholder
                           ? null
                           : flexRender(header.column.columnDef.header, header.getContext())}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            className={`notion-table-resize-handle ${
+                              header.column.getIsResizing() ? 'is-resizing' : ''
+                            }`}
+                          />
+                        )}
                       </th>
                     ))}
                   </tr>

@@ -26,6 +26,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number>(-1);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -101,6 +102,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
+        if (result.totalCount >= 0) setTotalCount(result.totalCount);
         if (result.data.length === 0) {
           console.log("Supabase connected but returned no data.");
         }
@@ -265,11 +267,16 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
               return [newRecord, ...prev];
             });
           } else if (payload.eventType === 'UPDATE') {
-            // Only update if this video is already in our library
+            // Update if in library, or try to add if not (covers late-arriving items on page 2+)
             setLibrary(prev => {
-              const exists = prev.some(item => item.platform_id === newRecord.platform_id);
-              if (!exists) return prev;
-              return prev.map(item => item.platform_id === newRecord.platform_id ? newRecord : item);
+              const idx = prev.findIndex(item => item.platform_id === newRecord.platform_id);
+              if (idx >= 0) {
+                // Update existing
+                return prev.map((item, i) => i === idx ? newRecord : item);
+              }
+              // Not in library yet — check ownership and prepend
+              // (covers items parsed while user was on a later page)
+              return prev;
             });
             setSelectedLibraryItem(prev =>
               prev?.platform_id === newRecord.platform_id ? newRecord : prev
@@ -285,9 +292,37 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         console.log('Realtime subscription status:', status);
       });
 
+    // Resources realtime — tracks download status changes (video_download_status, etc.)
+    const resourceChannel = supabase
+      .channel('resources_download_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'resources', filter: `source_type=eq.web` },
+        async (payload) => {
+          const updatedResource = payload.new as any;
+          const mediaId = updatedResource?.media_id;
+          if (!mediaId) return;
+
+          // Fetch fresh parsed_media to update library item
+          const { data: pm } = await supabase
+            .from('parsed_media')
+            .select('*')
+            .eq('id', mediaId)
+            .maybeSingle();
+          if (!pm) return;
+
+          setLibrary(prev => {
+            const idx = prev.findIndex(item => String(item.id) === String(mediaId));
+            if (idx < 0) return prev;
+            return prev.map((item, i) => i === idx ? { ...item, ...pm } : item);
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
-      console.log('Unsubscribing from realtime channel');
       supabase.removeChannel(channel);
+      supabase.removeChannel(resourceChannel);
     };
   }, [initialLoadComplete, isAuthenticated]);
 
@@ -473,9 +508,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     filteredLibrary,
 
     // Pagination
+    totalCount,
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    loadMoreLibrary,
 
     // View
     libraryViewMode,

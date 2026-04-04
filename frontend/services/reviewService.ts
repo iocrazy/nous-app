@@ -1,13 +1,5 @@
 import { getAuthHeaders } from './parserService';
-
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
+import { getApiUrl } from '../utils/apiConfig';
 
 // ─── Types ──────────────────────────────────────────────
 

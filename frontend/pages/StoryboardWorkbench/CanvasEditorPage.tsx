@@ -1,215 +1,281 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Pencil, Loader2 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import { useState, useCallback, useEffect } from 'react';
+import { Loader2, Users, MessageCircle, Film, FileText, Download, ArrowLeft } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ReactFlowProvider } from '@xyflow/react';
+import { Canvas } from '../../features/storyboard/Canvas';
+import { useCanvasStore } from '../../stores/canvasStore';
 import { useStoryboardStore } from '../../stores/storyboardStore';
-import { fetchProject, updateProject } from '../../services/storyboardService';
-import { useStoryboardPersist } from '../../hooks/storyboard/useStoryboardPersist';
-import { useStoryboardRealtime } from '../../hooks/storyboard/useStoryboardRealtime';
-import StoryboardCanvas from '../../components/storyboard/canvas/StoryboardCanvas';
-import ChatPanel from '../../components/storyboard/chat/ChatPanel';
-import FrameTimeline from '../../components/storyboard/timeline/FrameTimeline';
-import CharacterPanel from '../../components/storyboard/characters/CharacterPanel';
-import { StoryboardFrame } from '../../types';
+import { fetchProject } from '../../services/storyboardService';
+import { CharacterPanel } from '../../features/storyboard/ui/CharacterPanel';
+import ChatPanel from '../../features/storyboard/ui/ChatPanel';
+import { FrameTimeline } from '../../features/storyboard/ui/FrameTimeline';
+import { ScriptImportDialog } from '../../features/storyboard/ui/ScriptImportDialog';
+import { ExportDialog } from '../../features/storyboard/ui/ExportDialog';
+import type { CanvasNode, CanvasEdge } from '../../stores/canvasStore';
 
-// ─── Component ────────────────────────────────────────────────────────────────
+type SidePanel = 'characters' | 'chat' | null;
+
+/**
+ * Map backend node_type to frontend ReactFlow node type.
+ * Backend: upload, image, image_edit, storyboard_split, storyboard_gen, text_annotation, group, export
+ * Frontend: uploadNode, imageNode, exportImageNode, textAnnotationNode, groupNode, storyboardNode, storyboardGenNode
+ */
+const BACKEND_TO_FRONTEND_NODE_TYPE: Record<string, string> = {
+  upload: 'uploadNode',
+  image: 'imageNode',
+  image_edit: 'imageNode',
+  storyboard_split: 'storyboardNode',
+  storyboard_gen: 'storyboardGenNode',
+  text_annotation: 'textAnnotationNode',
+  group: 'groupNode',
+  export: 'exportImageNode',
+  image_to_video: 'exportImageNode',
+};
+
+function mapBackendNodesToCanvas(
+  backendNodes: Array<{
+    id: string;
+    node_type: string;
+    position_x: number;
+    position_y: number;
+    width?: number | null;
+    height?: number | null;
+    data_json?: Record<string, unknown>;
+    sort_order?: number;
+    locked?: boolean;
+  }>,
+): CanvasNode[] {
+  return backendNodes
+    .map((bn) => {
+      const frontendType = BACKEND_TO_FRONTEND_NODE_TYPE[bn.node_type];
+      if (!frontendType) {
+        console.warn(`[CanvasEditorPage] Unknown node type: ${bn.node_type}`);
+        return null;
+      }
+      return {
+        id: String(bn.id),
+        type: frontendType as CanvasNode['type'],
+        position: { x: bn.position_x, y: bn.position_y },
+        width: bn.width ?? undefined,
+        height: bn.height ?? undefined,
+        data: (bn.data_json ?? {}) as CanvasNode['data'],
+      };
+    })
+    .filter((n): n is NonNullable<typeof n> => n !== null) as CanvasNode[];
+}
+
+function mapBackendEdgesToCanvas(
+  backendEdges: Array<{
+    id: string;
+    source_node_id: string;
+    target_node_id: string;
+    source_handle?: string | null;
+    target_handle?: string | null;
+    edge_type?: string | null;
+  }>,
+): CanvasEdge[] {
+  return backendEdges.map((be) => ({
+    id: String(be.id),
+    source: String(be.source_node_id),
+    target: String(be.target_node_id),
+    sourceHandle: (be.source_handle === 'output' ? 'source' : be.source_handle) ?? 'source',
+    targetHandle: (be.target_handle === 'input' ? 'target' : be.target_handle) ?? 'target',
+    type: 'disconnectableEdge' as const,
+  }));
+}
 
 export function CanvasEditorPage() {
-  const { t } = useTranslation();
-  const {
-    currentProjectId,
-    setCurrentProject,
-    setNodes,
-    setEdges,
-    setCharacters,
-    nodes,
-  } = useStoryboardStore();
+  const navigate = useNavigate();
+  const { teamId, projectId: parentProjectId, storyboardId: projectId } = useParams<{ teamId?: string; projectId?: string; storyboardId?: string }>();
 
-  // ─── Panel visibility ──────────────────────────────────────────────────────
-  const [chatOpen, setChatOpen] = useState(true);
-  const [timelineOpen, setTimelineOpen] = useState(true);
-  const [characterPanelOpen, setCharacterPanelOpen] = useState(false);
+  const setCanvasData = useCanvasStore((state) => state.setCanvasData);
+  const setCurrentProject = useStoryboardStore((state) => state.setCurrentProject);
 
-  // ─── Project info ──────────────────────────────────────────────────────────
-  const [projectName, setProjectName] = useState('');
-  const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // ─── Frames derived from nodes ─────────────────────────────────────────────
-  const [frames, setFrames] = useState<StoryboardFrame[]>([]);
-  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+  // Panel states
+  const [sidePanel, setSidePanel] = useState<SidePanel>(null);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [showScriptImport, setShowScriptImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
-  // ─── Hooks ─────────────────────────────────────────────────────────────────
-  useStoryboardPersist();
-  useStoryboardRealtime();
+  const toggleSidePanel = useCallback((panel: SidePanel) => {
+    setSidePanel((prev) => (prev === panel ? null : panel));
+  }, []);
 
-  // ─── Load project data on mount ────────────────────────────────────────────
+  // ─── Load project on mount ──────────────────────────────────────────────
+
   useEffect(() => {
-    if (!currentProjectId) return;
+    if (!projectId) {
+      setLoading(false);
+      return;
+    }
 
+    setCurrentProject(projectId);
     let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+    void (async () => {
       try {
-        const data = await fetchProject(currentProjectId!);
+        const project = await fetchProject(projectId);
         if (cancelled) return;
-
-        setProjectName(data.name);
-        setNameInput(data.name);
-        setNodes(data.nodes);
-        setEdges(data.edges);
-        setCharacters(data.characters);
+        setCanvasData(
+          mapBackendNodesToCanvas(project.nodes),
+          mapBackendEdgesToCanvas(project.edges),
+        );
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
-        setError(message);
+        setLoadError(message);
+        console.error('[CanvasEditorPage] Failed to load project:', message);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
+    })();
 
-    load();
-    return () => { cancelled = true; };
-  }, [currentProjectId, setNodes, setEdges, setCharacters]);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, setCanvasData, setCurrentProject]);
 
-  // Derive frames from image-type nodes that have frame data
+  // ─── Clean up on unmount ────────────────────────────────────────────────
+
   useEffect(() => {
-    const derived: StoryboardFrame[] = nodes
-      .filter((n) => {
-        const data = n.data_json as Record<string, unknown> | undefined;
-        return data?.frame != null;
-      })
-      .map((n) => (n.data_json as Record<string, unknown>).frame as StoryboardFrame)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    setFrames(derived);
-  }, [nodes]);
-
-  // ─── Navigation ────────────────────────────────────────────────────────────
-  const handleBack = useCallback(() => {
-    setCurrentProject(null);
+    return () => {
+      setCurrentProject(null);
+    };
   }, [setCurrentProject]);
 
-  // ─── Project name editing ──────────────────────────────────────────────────
-  const handleNameSubmit = useCallback(async () => {
-    if (!currentProjectId || !nameInput.trim() || nameInput.trim() === projectName) {
-      setEditingName(false);
-      setNameInput(projectName);
-      return;
-    }
-    try {
-      await updateProject(currentProjectId, { name: nameInput.trim() });
-      setProjectName(nameInput.trim());
-    } catch {
-      setNameInput(projectName);
-    } finally {
-      setEditingName(false);
-    }
-  }, [currentProjectId, nameInput, projectName]);
-
-  const handleNameKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') handleNameSubmit();
-      if (e.key === 'Escape') {
-        setEditingName(false);
-        setNameInput(projectName);
-      }
-    },
-    [handleNameSubmit, projectName]
-  );
-
-  // ─── Timeline handlers ─────────────────────────────────────────────────────
-  const handleSelectFrame = useCallback((frameId: string) => {
-    setSelectedFrameId(frameId);
-  }, []);
-
-  const handleReorderFrames = useCallback((_reordered: StoryboardFrame[]) => {
-    // Frame reordering is persisted by useStoryboardPersist via syncCanvas
-    setFrames(_reordered);
-  }, []);
-
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-950">
-        <Loader2 size={32} className="animate-spin text-blue-500" />
+      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex items-center justify-center bg-zinc-950" style={{ height: '100vh' }}>
+        <Loader2 size={24} className="animate-spin text-zinc-500" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col items-center justify-center gap-4 bg-zinc-950" style={{ height: '100vh' }}>
+        <p className="text-sm text-red-400">Failed to load project</p>
+        <p className="text-xs text-zinc-500">{loadError}</p>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-800 flex-shrink-0 bg-gray-900">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-100 transition-colors"
-        >
-          <ChevronLeft size={16} />
-          <span className="hidden sm:inline">{t('storyboard.back', 'Back')}</span>
-        </button>
+    <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col bg-zinc-950 overflow-hidden" style={{ height: 'calc(100vh)' }}>
+      {/* Canvas fills everything */}
+      <div className="flex-1 flex min-h-0">
+        <div className="flex-1 relative overflow-hidden min-h-0">
+          <ReactFlowProvider>
+            <Canvas />
+          </ReactFlowProvider>
 
-        <div className="w-px h-4 bg-gray-700" />
-
-        {/* Editable project name */}
-        {editingName ? (
-          <input
-            type="text"
-            value={nameInput}
-            autoFocus
-            onChange={(e) => setNameInput(e.target.value)}
-            onBlur={handleNameSubmit}
-            onKeyDown={handleNameKeyDown}
-            className="px-2 py-0.5 bg-gray-800 border border-blue-500 rounded text-sm font-medium text-gray-100 focus:outline-none min-w-0 max-w-xs"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setEditingName(true); setNameInput(projectName); }}
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-200 hover:text-white transition-colors group"
-          >
-            <span className="truncate max-w-xs">{projectName}</span>
-            <Pencil size={12} className="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
-          </button>
-        )}
-
-        {/* Error indicator */}
-        {error && (
-          <span className="text-xs text-red-400 ml-2 truncate">{error}</span>
-        )}
-      </div>
-
-      {/* Main layout */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Character Panel (left slide-out) */}
-        <CharacterPanel
-          open={characterPanelOpen}
-          onClose={() => setCharacterPanelOpen(false)}
-        />
-
-        {/* Canvas (center) */}
-        <div className="flex-1 relative overflow-hidden">
-          <StoryboardCanvas />
+          {/* Floating panel toolbar — left side vertical */}
+          <div className="absolute top-20 left-4 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+            <FloatingIconButton
+              icon={<ArrowLeft size={16} />}
+              tooltip="Back to project"
+              onClick={() => navigate(teamId ? `/team/${teamId}/projects/${parentProjectId}?tab=storyboard` : '/projects')}
+            />
+            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
+            <FloatingIconButton
+              icon={<FileText size={16} />}
+              tooltip="Script Import"
+              onClick={() => setShowScriptImport(true)}
+            />
+            <FloatingIconButton
+              icon={<Users size={16} />}
+              tooltip="Characters"
+              active={sidePanel === 'characters'}
+              onClick={() => toggleSidePanel('characters')}
+            />
+            <FloatingIconButton
+              icon={<Film size={16} />}
+              tooltip="Timeline"
+              active={showTimeline}
+              onClick={() => setShowTimeline((v) => !v)}
+            />
+            <FloatingIconButton
+              icon={<MessageCircle size={16} />}
+              tooltip="Chat"
+              active={sidePanel === 'chat'}
+              onClick={() => toggleSidePanel('chat')}
+            />
+            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
+            <FloatingIconButton
+              icon={<Download size={16} />}
+              tooltip="Export"
+              onClick={() => setShowExport(true)}
+            />
+          </div>
         </div>
 
-        {/* Chat Panel (right, collapsible) */}
-        <ChatPanel
-          open={chatOpen}
-          onToggle={() => setChatOpen((v) => !v)}
-        />
+        {/* Right side panel */}
+        {sidePanel === 'characters' && projectId && (
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+            <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+          </div>
+        )}
+        {sidePanel === 'chat' && projectId && (
+          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+            <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+          </div>
+        )}
       </div>
 
-      {/* Frame Timeline (bottom, collapsible) */}
-      <FrameTimeline
-        frames={frames}
-        selectedFrameId={selectedFrameId}
-        onSelectFrame={handleSelectFrame}
-        onReorderFrames={handleReorderFrames}
-      />
+      {/* Bottom timeline */}
+      {showTimeline && (
+        <FrameTimeline onClose={() => setShowTimeline(false)} />
+      )}
+
+      {/* Dialogs */}
+      {projectId && (
+        <>
+          <ScriptImportDialog
+            projectId={projectId}
+            isOpen={showScriptImport}
+            onClose={() => setShowScriptImport(false)}
+          />
+          <ExportDialog
+            projectId={projectId}
+            isOpen={showExport}
+            onClose={() => setShowExport(false)}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+// ─── Floating icon button ────────────────────────────────────────────────────
+
+function FloatingIconButton({
+  icon,
+  tooltip,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  tooltip: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={tooltip}
+      className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+        active
+          ? 'bg-zinc-700 text-zinc-100'
+          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80'
+      }`}
+    >
+      {icon}
+    </button>
   );
 }

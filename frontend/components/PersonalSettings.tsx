@@ -99,100 +99,101 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
   };
 
   return (
-    <div className="space-y-8">
-      {/* Avatar */}
-      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
-        <div className="relative flex-shrink-0">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-2xl sm:text-3xl font-bold text-white">
-                {name.charAt(0).toUpperCase() || 'U'}
-              </span>
-            )}
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Profile Section */}
+      <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-6">
+        <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-5">Profile</h3>
+
+        {/* Avatar Row */}
+        <div className="flex items-center gap-5 mb-6">
+          <div className="relative flex-shrink-0">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden ring-2 ring-zinc-800">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-bold text-white">
+                  {name.charAt(0).toUpperCase() || 'U'}
+                </span>
+              )}
+            </div>
+            <button className="absolute -bottom-0.5 -right-0.5 p-1.5 bg-zinc-800 border border-zinc-700 rounded-full hover:bg-zinc-700 transition-colors">
+              <Camera size={12} className="text-zinc-300" />
+            </button>
           </div>
-          <button className="absolute bottom-0 right-0 p-2 bg-zinc-800 border border-zinc-700 rounded-full hover:bg-zinc-700 transition-colors">
-            <Camera size={14} className="text-zinc-300" />
-          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-zinc-400 mb-1.5">Avatar URL</p>
+            <input
+              type="text"
+              placeholder="Paste image URL..."
+              value={avatarUrl}
+              onChange={(e) => setAvatarUrl(e.target.value)}
+              className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+          </div>
         </div>
-        <div className="flex-1 space-y-1 text-center sm:text-left w-full">
-          <h3 className="text-sm font-medium text-zinc-400">Profile Photo</h3>
-          <p className="text-xs text-zinc-500">
-            Click the camera icon to upload a new photo
-          </p>
-          <input
-            type="text"
-            placeholder="Or paste image URL"
-            value={avatarUrl}
-            onChange={(e) => setAvatarUrl(e.target.value)}
-            className="mt-2 w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+
+        {/* Form Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div className="space-y-1.5">
+            <label className="text-sm text-zinc-400">Username</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm text-zinc-400">Email</label>
+            <input
+              type="email"
+              value={user.email}
+              disabled
+              className="w-full bg-zinc-950/30 border border-zinc-800/50 rounded-lg px-3 py-2.5 text-sm text-zinc-500 cursor-not-allowed"
+            />
+            <p className="text-xs text-zinc-600">Cannot be changed</p>
+          </div>
+        </div>
+
+        {/* Bio */}
+        <div className="space-y-1.5 mt-5">
+          <label className="text-sm text-zinc-400">Bio</label>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            rows={2}
+            placeholder="Tell us about yourself..."
+            className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors resize-none"
           />
         </div>
+
+        {/* Save */}
+        <div className="flex items-center gap-3 mt-5 pt-4 border-t border-zinc-800/50">
+          <button
+            onClick={handleSaveProfile}
+            disabled={isSaving}
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm rounded-lg font-medium transition-colors flex items-center gap-2"
+          >
+            {isSaving ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : saveSuccess ? (
+              <Check size={14} />
+            ) : null}
+            {saveSuccess ? 'Saved!' : 'Save Changes'}
+          </button>
+          {error && (
+            <span className="text-xs text-red-400 flex items-center gap-1">
+              <AlertCircle size={12} />
+              {error}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Username */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-zinc-400">Username</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
-        />
-      </div>
+      {/* Security Section */}
+      <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-6">
+        <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">Security</h3>
 
-      {/* Bio */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-zinc-400">Bio</label>
-        <textarea
-          value={bio}
-          onChange={(e) => setBio(e.target.value)}
-          rows={3}
-          placeholder="Tell us about yourself..."
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
-        />
-      </div>
-
-      {/* Email (readonly) */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-zinc-400">Email</label>
-        <input
-          type="email"
-          value={user.email}
-          disabled
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-500 cursor-not-allowed"
-        />
-        <p className="text-xs text-zinc-600">Email cannot be changed</p>
-      </div>
-
-      {/* Save Profile Button */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleSaveProfile}
-          disabled={isSaving}
-          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-        >
-          {isSaving ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : saveSuccess ? (
-            <Check size={16} />
-          ) : null}
-          {saveSuccess ? 'Saved!' : 'Save Changes'}
-        </button>
-        {error && (
-          <span className="text-sm text-red-400 flex items-center gap-1">
-            <AlertCircle size={14} />
-            {error}
-          </span>
-        )}
-      </div>
-
-      {/* Divider */}
-      <div className="border-t border-zinc-800 pt-8">
-        <h3 className="text-lg font-semibold text-white mb-4">Security</h3>
-
-        {/* Password Success Message */}
         {passwordSuccess && (
           <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-green-400 text-sm flex items-center gap-2">
             <Check size={14} />
@@ -200,48 +201,48 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
           </div>
         )}
 
-        {/* Change Password */}
         {!showPasswordForm ? (
           <button
             onClick={() => setShowPasswordForm(true)}
-            className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-200 rounded-lg font-medium transition-colors"
           >
             Change Password
           </button>
         ) : (
-          <div className="space-y-4 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-400">New Password</label>
-              <div className="relative">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-sm text-zinc-400">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg px-3 py-2.5 pr-10 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                  >
+                    {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm text-zinc-400">Confirm Password</label>
                 <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 pr-10 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500/50"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                >
-                  {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-400">Confirm Password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
             {passwordError && (
-              <p className="text-sm text-red-400 flex items-center gap-1">
-                <AlertCircle size={14} />
+              <p className="text-xs text-red-400 flex items-center gap-1">
+                <AlertCircle size={12} />
                 {passwordError}
               </p>
             )}
@@ -250,7 +251,7 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
               <button
                 onClick={handleChangePassword}
                 disabled={isChangingPassword}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm rounded-lg font-medium transition-colors flex items-center gap-2"
               >
                 {isChangingPassword && <Loader2 size={14} className="animate-spin" />}
                 Update Password
@@ -262,7 +263,7 @@ export const PersonalSettings: React.FC<PersonalSettingsProps> = ({
                   setNewPassword('');
                   setConfirmPassword('');
                 }}
-                className="px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-sm text-zinc-400 hover:text-white transition-colors"
               >
                 Cancel
               </button>

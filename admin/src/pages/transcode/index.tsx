@@ -40,13 +40,14 @@ const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 const KNOWN_PLATFORMS = ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter']
 
 function getCoverSrc(record: TranscodeVersionData): string | null {
+  if (record.cover_url) return record.cover_url
   if (record.cover_download_path) {
     const path = record.cover_download_path.startsWith('/')
       ? record.cover_download_path
       : `/${record.cover_download_path}`
     return `${API_URL}/media${path}`
   }
-  return record.cover_url || null
+  return null
 }
 
 function TranscodeStatusTag({ status }: { status: string | null }) {

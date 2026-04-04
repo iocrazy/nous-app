@@ -14,6 +14,7 @@
     "resources": "Resources",
     "projects": "Projects",
     "todolist": "Todolist",
+    "storyboard": "Storyboard",
     "management": "Management",
     "members": "Members",
     "billing": "Billing",
@@ -739,6 +740,7 @@
     "confirmCancel": "Cancel this share? Recipients will no longer be able to access it.",
     "status": {
       "active": "Active",
+      "inactive": "Inactive",
       "expired": "Expired",
       "cancelled": "Cancelled"
     },
@@ -1021,5 +1023,118 @@
       "wide": "Wide",
       "extremeWide": "Extreme Wide"
     }
+  },
+  "canvas": {
+    "addImage": "+ Add Image",
+    "generate": "Generate",
+    "generateAll": "Generate All",
+    "toolbar": {
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "fitView": "Fit View",
+      "lock": "Lock Canvas",
+      "unlock": "Unlock Canvas",
+      "snapGrid": "Snap to Grid",
+      "delete": "Clear Canvas"
+    }
+  },
+  "modelParams": {
+    "otherParams": "Parameters",
+    "provider": "Provider",
+    "model": "Model",
+    "quality": "Quality",
+    "aspectRatio": "Aspect Ratio",
+    "extraOptions": "Extra Options",
+    "enableWebSearch": "Web Search",
+    "goConfigure": "Configure",
+    "providerKeyRequiredTitle": "API Key Required",
+    "providerKeyRequiredDesc": "An API key for {{provider}} is required to use this model."
+  },
+  "node": {
+    "upload": {
+      "hint": "Click or drop image",
+      "uploadedAlt": "Uploaded image"
+    },
+    "imageEdit": {
+      "promptPlaceholder": "Describe the image you want to generate...",
+      "negativePrompt": "Negative prompt (optional)...",
+      "promptRequired": "Please enter a prompt"
+    },
+    "imageNode": {
+      "waitingResult": "Waiting for result...",
+      "waitingResultDelayed": "Waiting... ({{minutes}}min)",
+      "selectToEdit": "Select to edit",
+      "generationFailed": "Generation failed",
+      "resultAlt": "Result",
+      "generatedAlt": "Generated"
+    },
+    "storyboardGen": {
+      "rowsShort": "R",
+      "colsShort": "C",
+      "framePlaceholder": "Frame {{number}}"
+    },
+    "textAnnotation": {
+      "placeholder": "Type your notes here...",
+      "empty": "Empty note"
+    }
+  },
+  "nodeToolbar": {
+    "copy": "Copy",
+    "download": "Download",
+    "reupload": "Re-upload",
+    "ungroup": "Ungroup",
+    "copyText": "Copy Text",
+    "copyErrorReport": "Copy Error"
+  },
+  "tool": {
+    "crop": "Crop",
+    "annotate": "Annotate",
+    "split": "Split"
+  },
+  "viewer": {
+    "imageAlt": "Image",
+    "next": "Next",
+    "prev": "Previous",
+    "reset": "Reset"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete"
+  },
+  "skills": {
+    "title": "Skills",
+    "noSkills": "No Skills Yet",
+    "noSkillsDesc": "Create your first skill to standardize your AI outputs",
+    "newSkill": "New Skill",
+    "editSkill": "Edit Skill",
+    "backToSkills": "Back to Skills",
+    "save": "Save",
+    "cancel": "Cancel",
+    "name": "Name",
+    "description": "Description",
+    "category": "Category",
+    "icon": "Icon",
+    "content": "Content (Markdown)",
+    "outputFormat": "Output Format",
+    "scope": "Scope",
+    "scopeProject": "This Project Only",
+    "scopeGlobal": "Global (all projects)",
+    "visibility": "Visibility",
+    "public": "Public (visible to team)",
+    "archived": "Skill archived",
+    "created": "Skill created",
+    "updated": "Skill updated",
+    "unsavedChanges": "You have unsaved changes. Discard?",
+    "nameRequired": "Skill name is required",
+    "contentRequired": "Skill content is required",
+    "contentTooLong": "Content too long (max 10,000 chars)",
+    "projectSkills": "Project Skills",
+    "globalSkills": "Global Skills",
+    "systemPresets": "System Presets",
+    "selectSkill": "Select Skill",
+    "noSkill": "No Skill",
+    "using": "Using",
+    "searchSkills": "Search skills..."
   }
 }

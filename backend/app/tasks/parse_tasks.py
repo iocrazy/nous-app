@@ -35,15 +35,15 @@ def _fetch_and_parse(valid_url: str, video_bool: bool,
     Returns (aweme_detail, parsed_data) tuple.
     Raises RuntimeError if fetch or parse fails.
     """
-    from app.services.douyin_analysis import DouyinAnalysis
-    from app.services.douyin_parser import DouyinParser
+    from app.services.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_formatter import DouyinFormatter
 
-    aweme_detail = run_async(DouyinAnalysis.fetch_one_video(valid_url))
+    aweme_detail = run_async(DrissionPageParser.fetch_one_video(valid_url))
     if not aweme_detail:
         raise RuntimeError("Cannot fetch video info")
 
     parsed_data = run_async(
-        DouyinParser.parse_aweme_detail(
+        DouyinFormatter.parse_aweme_detail(
             aweme_detail=aweme_detail,
             valid_url=valid_url,
             download_video=video_bool,
@@ -324,69 +324,99 @@ def parse_batch_links_task(
 # ---------------------------------------------------------------------------
 
 
+def _get_douyin_method_flags() -> dict[str, bool]:
+    """Read Douyin parse method toggles from system_settings."""
+    flags = {"ytdlp": True, "lighthttp": True, "drissionpage": True}
+    try:
+        from app.db import get_async_supabase_admin
+        client = run_async(get_async_supabase_admin())
+        result = run_async(
+            client.table("system_settings")
+            .select("key, value")
+            .in_("key", [
+                "douyin_ytdlp_enabled",
+                "douyin_lighthttp_enabled",
+                "douyin_drissionpage_enabled",
+            ])
+            .execute()
+        )
+        for row in (result.data or []):
+            key_map = {
+                "douyin_ytdlp_enabled": "ytdlp",
+                "douyin_lighthttp_enabled": "lighthttp",
+                "douyin_drissionpage_enabled": "drissionpage",
+            }
+            short_key = key_map.get(row["key"])
+            if short_key:
+                flags[short_key] = row["value"] is True or row["value"] == "true"
+    except Exception as e:
+        logger.warning(f"[Douyin] Failed to read method flags, using defaults: {e}")
+    return flags
+
+
+def _try_lighthttp(url: str, user_id: str):
+    """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
+    from app.services.ies_douyin_parser import IesDouyinParser
+    from app.services.douyin_formatter import DouyinFormatter
+
+    try:
+        aweme_detail = run_async(IesDouyinParser.parse(url, user_id=user_id))
+        if aweme_detail:
+            parsed = run_async(DouyinFormatter.parse_aweme_detail(
+                aweme_detail=aweme_detail, valid_url=url,
+                download_video=True, download_music=False, download_cover=True,
+            ))
+            if parsed:
+                return parsed, "lightweight", "Lightweight"
+    except Exception as e:
+        logger.warning(f"[Douyin] LightHTTP failed: {e}")
+    return None
+
+
+def _try_drissionpage(url: str, user_id: str):
+    """Attempt DrissionPage parse. Returns (parsed, method, name) or None."""
+    from app.services.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_formatter import DouyinFormatter
+
+    try:
+        aweme_detail = run_async(DrissionPageParser.fetch_one_video(url, user_id=user_id))
+        if aweme_detail:
+            parsed = run_async(DouyinFormatter.parse_aweme_detail(
+                aweme_detail=aweme_detail, valid_url=url,
+                download_video=True, download_music=False, download_cover=True,
+            ))
+            if parsed:
+                return parsed, "drissionpage", "DrissionPage"
+    except Exception as e:
+        logger.warning(f"[Douyin] DrissionPage failed: {e}")
+    return None
+
+
 def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
-    """Sync Douyin fallback: LightHTTP → DrissionPage.
+    """Sync Douyin fallback: LightHTTP → DrissionPage (respects admin toggles).
 
     Returns (parsed_data, parse_method, parse_method_name).
-    Raises RuntimeError if all methods fail.
+    Raises RuntimeError if all enabled methods fail.
     """
-    from app.services.douyin_analysis import DouyinAnalysis
-    from app.services.douyin_parser import DouyinParser
-    from app.services.lightweight_parser import LightweightParser
-    from app.repositories.user_settings_repository import UserSettingsRepository
+    flags = _get_douyin_method_flags()
+    logger.info(f"[Douyin Fallback] Method flags: {flags}")
 
-    # Read user's parse mode setting
-    user_parse_mode = "lighthttp"
-    try:
-        settings_repo = UserSettingsRepository()
-        user_settings = run_async(settings_repo.get_by_user_id(user_id))
-        if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
-    except Exception as e:
-        logger.warning(f"[Douyin Fallback] Failed to read parse mode: {e}")
+    methods = []
+    if flags["lighthttp"]:
+        methods.append(("LightHTTP", _try_lighthttp))
+    if flags["drissionpage"]:
+        methods.append(("DrissionPage", _try_drissionpage))
 
-    aweme_detail = None
+    if not methods:
+        raise RuntimeError("All Douyin parse methods are disabled in admin settings")
 
-    if user_parse_mode == "drissionpage":
-        try:
-            aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "browser_auto", "BrowserAuto"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] DrissionPage failed: {e}")
-    else:
-        # LightHTTP first
-        try:
-            aweme_detail = run_async(LightweightParser.parse(url))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "light_http", "LightHTTP"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] LightHTTP failed: {e}")
+    for name, fn in methods:
+        logger.info(f"[Douyin Fallback] Trying {name}...")
+        result = fn(url, user_id)
+        if result:
+            return result
 
-        # DrissionPage fallback
-        try:
-            aweme_detail = run_async(DouyinAnalysis.fetch_one_video(url))
-            if aweme_detail:
-                parsed = run_async(DouyinParser.parse_aweme_detail(
-                    aweme_detail=aweme_detail, valid_url=url,
-                    download_video=True, download_music=False, download_cover=True,
-                ))
-                if parsed:
-                    return parsed, "browser_auto", "BrowserAuto"
-        except Exception as e:
-            logger.warning(f"[Douyin Fallback] DrissionPage failed: {e}")
-
-    raise RuntimeError("All Douyin parse methods failed")
+    raise RuntimeError("All enabled Douyin parse methods failed")
 
 
 def _dispatch_download_deduped(
@@ -447,7 +477,7 @@ def _dispatch_download_deduped(
         unified_task_id = run_async(mgr.create(
             user_id=user_id,
             task_type="download",
-            title=video_title[:50] or platform_id,
+            title=f"Download {video_title[:50] or platform_id}",
             subtitle=" + ".join(dl_parts),
             media_id=platform_id,
             resource_id=resource_id,
@@ -512,6 +542,7 @@ def parse_media_task(
     resource_id: str = None,
     tags: list = None,
     tag_ids: list = None,
+    skip_ytdlp: bool = False,
     _unified_task_id: str = None,
     _dedup_key: str = None,
 ):
@@ -550,26 +581,68 @@ def parse_media_task(
             except Exception:
                 pass
 
-        try:
-            ytdlp_info = run_async(YtdlpService.fetch_metadata(url))
+        # Check admin toggle for yt-dlp on Douyin
+        douyin_flags = _get_douyin_method_flags() if platform == "douyin" else {}
+        ytdlp_disabled_by_admin = platform == "douyin" and not douyin_flags.get("ytdlp", True)
+
+        if (skip_ytdlp or ytdlp_disabled_by_admin) and platform == "douyin":
+            # Douyin: skip yt-dlp (no cookie or admin disabled)
+            reason = "admin disabled" if ytdlp_disabled_by_admin else "no cookie"
+            logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin ({reason}): {url[:60]}")
+            fallback_used = True
+            dispatch_url = None
+            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
             if unified_task_id:
                 try:
                     run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
                 except Exception:
                     pass
-            parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
-        except Exception as e:
-            if platform != "douyin":
-                raise  # Non-Douyin: yt-dlp failure is fatal
-            # Douyin fallback
-            logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
-            fallback_used = True
-            dispatch_url = None
-            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
+        else:
+            try:
+                ytdlp_info = run_async(YtdlpService.fetch_metadata(url, user_id=user_id))
+                if unified_task_id:
+                    try:
+                        run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
+                    except Exception:
+                        pass
+                parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
+            except Exception as e:
+                # Invalidate cookie if yt-dlp failed due to auth error
+                # Skip for Douyin — yt-dlp cookie issues don't affect DrissionPage fallback
+                error_str = str(e)
+                if platform != "douyin":
+                    auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+                    if any(kw in error_str.lower() for kw in auth_keywords):
+                        try:
+                            from app.repositories.cookies_repository import CookiesRepository
+                            cookies_repo = CookiesRepository()
+                            run_async(cookies_repo.mark_invalid(user_id, platform, error_str[:200]))
+                            logger.info(
+                                f"[Cookie] Marked {platform} cookie invalid for user {user_id} "
+                                f"after yt-dlp auth failure"
+                            )
+                        except Exception as cookie_err:
+                            logger.warning(f"[Cookie] Failed to mark cookie invalid: {cookie_err}")
+
+                if platform != "douyin":
+                    raise  # Non-Douyin: yt-dlp failure is fatal
+                # Douyin fallback
+                logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
+                fallback_used = True
+                dispatch_url = None
+                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
+
+        _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "light_http": "LightHTTP", "drissionpage": "DrissionPage", "browser_auto": "DrissionPage"}
+        method_label = _METHOD_LABELS.get(parse_method, parse_method)
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 30, subtitle="Enriching data..."))
+                video_title = parsed_data.get("title") or parsed_data.get("description", "")[:50]
+                run_async(manager.update_progress(
+                    unified_task_id, 30,
+                    subtitle=f"via {method_label} · Enriching data...",
+                    title=f"Parse {video_title[:70]}" if video_title else None,
+                ))
             except Exception:
                 pass
 
@@ -587,7 +660,7 @@ def parse_media_task(
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 40, subtitle="Saving metadata..."))
+                run_async(manager.update_progress(unified_task_id, 40, subtitle=f"via {method_label} · Saving metadata..."))
             except Exception:
                 pass
 
@@ -641,7 +714,11 @@ def parse_media_task(
         # 6. Complete parse task
         if unified_task_id:
             try:
-                run_async(manager.complete(unified_task_id))
+                run_async(manager.complete(
+                    unified_task_id,
+                    subtitle=f"via {method_label}",
+                    metadata_patch={"parse_method": parse_method, "original_url": url},
+                ))
             except Exception:
                 pass
 
@@ -685,14 +762,24 @@ def parse_media_task(
         error_msg = str(e)[:300]
         logger.error(f"[Parse/Task] Failed: {url[:50]}..., error: {error_msg}")
 
+        if self.request.retries < self.max_retries:
+            # Will retry — update progress with error info but don't mark as terminal
+            if unified_task_id:
+                try:
+                    run_async(manager.update_progress(
+                        unified_task_id, None,
+                        subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries})...",
+                    ))
+                except Exception:
+                    pass
+            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+
+        # Final failure — no more retries
         if unified_task_id:
             try:
                 run_async(manager.fail(unified_task_id, error_msg))
             except Exception:
                 pass
-
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
 
         run_async(log_user_action(
             user_id=user_id, action="fetch",

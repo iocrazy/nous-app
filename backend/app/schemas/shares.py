@@ -33,6 +33,7 @@ class ShareCreate(BaseModel):
     expires_at: Optional[datetime] = Field(None, description="Expiration timestamp (UTC)")
     max_views: Optional[int] = Field(None, ge=1, description="Maximum number of views allowed")
     watermark: bool = Field(False, description="Whether to apply watermark on shared content")
+    team_id: Optional[str] = Field(None, description="Team ID for team-scoped shares")
 
 
 class ShareUpdate(BaseModel):

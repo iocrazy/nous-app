@@ -21,7 +21,7 @@ router = APIRouter(prefix="/teams", tags=["Teams"])
 
 
 @router.get("", response_model=TeamListResponse)
-async def list_teams(auth: AuthDep = None):
+async def list_teams(auth: AuthDep):
     """List all teams the current user is a member of."""
     repo = TeamRepository()
     teams = await repo.get_user_teams(auth.user_id)
@@ -43,7 +43,7 @@ async def list_teams(auth: AuthDep = None):
 
 
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
-async def create_team(team: TeamCreate, auth: AuthDep = None):
+async def create_team(team: TeamCreate, auth: AuthDep):
     """Create a new team."""
     repo = TeamRepository()
 
@@ -67,7 +67,7 @@ async def create_team(team: TeamCreate, auth: AuthDep = None):
 
 
 @router.get("/{team_id}", response_model=TeamResponse)
-async def get_team(team_id: str, auth: AuthDep = None):
+async def get_team(team_id: str, auth: AuthDep):
     """Get a specific team by ID."""
     repo = TeamRepository()
     team = await repo.get_team_by_id(team_id, auth.user_id)
@@ -89,7 +89,7 @@ async def get_team(team_id: str, auth: AuthDep = None):
 
 
 @router.put("/{team_id}", response_model=TeamResponse)
-async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep = None):
+async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
     """Update a team (owner only)."""
     repo = TeamRepository()
 
@@ -124,7 +124,7 @@ async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep = None):
 
 
 @router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_team(team_id: str, auth: AuthDep = None):
+async def delete_team(team_id: str, auth: AuthDep):
     """Delete a team (owner only)."""
     repo = TeamRepository()
     deleted = await repo.delete_team(team_id, auth.user_id)
@@ -137,7 +137,7 @@ async def delete_team(team_id: str, auth: AuthDep = None):
 
 
 @router.get("/{team_id}/members", response_model=TeamMemberListResponse)
-async def list_team_members(team_id: str, auth: AuthDep = None):
+async def list_team_members(team_id: str, auth: AuthDep):
     """List all members of a team."""
     repo = TeamRepository()
     members = await repo.get_team_members(team_id, auth.user_id)
@@ -169,7 +169,7 @@ async def update_member_role(
     team_id: str,
     user_id: str,
     update: TeamMemberUpdate,
-    auth: AuthDep = None
+    auth: AuthDep
 ):
     """Update a team member's role (owner/admin only)."""
     repo = TeamRepository()
@@ -209,7 +209,7 @@ async def update_member_role(
 
 
 @router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_member(team_id: str, user_id: str, auth: AuthDep = None):
+async def remove_member(team_id: str, user_id: str, auth: AuthDep):
     """Remove a member from team (owner/admin only, or self)."""
     repo = TeamRepository()
     removed = await repo.remove_member(team_id, user_id, auth.user_id)
@@ -222,7 +222,7 @@ async def remove_member(team_id: str, user_id: str, auth: AuthDep = None):
 
 
 @router.post("/join", response_model=TeamResponse)
-async def join_team(request: JoinTeamRequest, auth: AuthDep = None):
+async def join_team(request: JoinTeamRequest, auth: AuthDep):
     """Join a team using invite code."""
     repo = TeamRepository()
 

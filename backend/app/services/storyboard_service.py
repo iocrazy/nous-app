@@ -8,11 +8,14 @@ and character management. Delegates data access to the repository layer.
 """
 
 import asyncio
+import hashlib
 import os
-import logging
+from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
+from loguru import logger
 
 from app.repositories.storyboard_repository import (
     StoryboardProjectRepository,
@@ -24,8 +27,6 @@ from app.repositories.storyboard_repository import (
 )
 from app.schemas.storyboard import CanvasSyncRequest
 
-logger = logging.getLogger(__name__)
-
 # NAS directory sub-structure created for every new storyboard project
 _PROJECT_SUBDIRS = [
     "frames",
@@ -34,6 +35,7 @@ _PROJECT_SUBDIRS = [
     "videos",
     "exports",
     "temp",
+    "splits",
 ]
 
 
@@ -73,7 +75,7 @@ class StoryboardService:
         client = await get_async_supabase_admin()
         result = (
             await client.table("team_members")
-            .select("id")
+            .select("team_id")
             .eq("team_id", team_id)
             .eq("user_id", user_id)
             .limit(1)
@@ -95,6 +97,7 @@ class StoryboardService:
         user_id: str,
         name: str,
         description: Optional[str] = None,
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a storyboard project and provision its NAS directory tree.
@@ -104,6 +107,7 @@ class StoryboardService:
             user_id: UUID of the creating user.
             name: Human-readable project name.
             description: Optional project description.
+            project_id: Optional parent project ID.
 
         Returns:
             Created project row dict.
@@ -116,6 +120,8 @@ class StoryboardService:
             }
             if description is not None:
                 project_data["description"] = description
+            if project_id is not None:
+                project_data["project_id"] = project_id
 
             project = await self.project_repo.create(project_data)
             project_id = project.get("id", "")
@@ -141,7 +147,7 @@ class StoryboardService:
         """
         nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
         project_root = os.path.join(
-            nas_base, "teams", team_id, "storyboard", project_id
+            nas_base, "teams", str(team_id), "storyboard", str(project_id)
         )
         try:
             os.makedirs(project_root, exist_ok=True)
@@ -194,6 +200,7 @@ class StoryboardService:
         search: Optional[str] = None,
         sort_by: str = "updated_at",
         sort_order: str = "desc",
+        project_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Paginated list of active storyboard projects for a team.
@@ -207,6 +214,7 @@ class StoryboardService:
             search: Optional name substring filter.
             sort_by: Column to sort by.
             sort_order: 'asc' or 'desc'.
+            project_id: Optional parent project ID filter.
 
         Returns:
             Dict with keys: items, total, page, limit.
@@ -219,6 +227,7 @@ class StoryboardService:
                 search=search,
                 sort_by=sort_by,
                 sort_order=sort_order,
+                project_id=project_id,
             )
         except Exception as exc:
             logger.error(
@@ -512,3 +521,361 @@ class StoryboardService:
             parts.append(f"wearing {clothing}")
 
         return " ".join(parts)
+
+    # ------------------------------------------------------------------ #
+    # Image upload
+    # ------------------------------------------------------------------ #
+
+    async def upload_image(
+        self,
+        project_id: str,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+        node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Save an uploaded image to NAS with deduplication and preview generation.
+
+        Steps:
+          1. Compute SHA-256 hash of file bytes
+          2. Check storyboard_assets for existing hash (dedup)
+          3. If new: save original + generate 512px preview thumbnail
+          4. Insert asset record into storyboard_assets
+          5. Return asset metadata including URLs
+
+        Args:
+            project_id: UUID of the storyboard project.
+            file_bytes: Raw file content.
+            filename: Original filename (used to derive extension).
+            content_type: MIME type of the file.
+            node_id: Optional node ID (stored in metadata).
+
+        Returns:
+            Dict with image_url, preview_url, asset_id, width, height.
+        """
+        # 1. Compute hash
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        # 2. Dedup check
+        existing = await self.asset_repo.find_by_hash(project_id, file_hash)
+        if existing:
+            logger.info(
+                "Dedup hit for hash %s in project %s, returning existing asset %s",
+                file_hash[:12],
+                project_id,
+                existing["id"],
+            )
+            return self._build_upload_response(existing)
+
+        # 3. Resolve project to get team_id for path
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        team_id = str(project.get("team_id", "unknown"))
+        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+
+        # Derive extension from filename
+        ext = Path(filename).suffix.lower()
+        if not ext:
+            ext = _mime_to_ext(content_type)
+
+        # Build relative paths (stored in DB, relative to NAS_BASE_PATH)
+        rel_dir = f"teams/{team_id}/storyboard/{str(project_id)}/images"
+        rel_preview_dir = f"teams/{team_id}/storyboard/{str(project_id)}/previews"
+        rel_image_path = f"{rel_dir}/{file_hash}{ext}"
+        rel_preview_path = f"{rel_preview_dir}/{file_hash}.jpg"
+
+        abs_image_path = Path(nas_base) / rel_image_path
+        abs_preview_path = Path(nas_base) / rel_preview_path
+
+        # Create directories
+        abs_image_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_preview_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save original
+        abs_image_path.write_bytes(file_bytes)
+
+        # Get dimensions and generate preview
+        width, height = 0, 0
+        try:
+            from PIL import Image
+
+            img = Image.open(BytesIO(file_bytes))
+            width, height = img.size
+
+            # Generate preview thumbnail (max 512px on longest side)
+            img_rgb = img.convert("RGB")
+            scale = min(512 / max(width, 1), 512 / max(height, 1), 1.0)
+            if scale < 1.0:
+                new_w = max(1, int(width * scale))
+                new_h = max(1, int(height * scale))
+                img_rgb = img_rgb.resize((new_w, new_h), Image.LANCZOS)
+            img_rgb.save(str(abs_preview_path), format="JPEG", quality=85)
+        except Exception as exc:
+            logger.warning(
+                "Failed to process image / generate preview for %s: %s",
+                filename,
+                exc,
+            )
+            # Still proceed — preview just won't be available
+            rel_preview_path = ""
+
+        # 4. Insert asset record
+        metadata: Dict[str, Any] = {"original_filename": filename}
+        if node_id:
+            metadata["node_id"] = node_id
+
+        asset_data: Dict[str, Any] = {
+            "project_id": project_id,
+            "file_path": rel_image_path,
+            "file_hash": file_hash,
+            "file_size": len(file_bytes),
+            "mime_type": content_type,
+            "width": width,
+            "height": height,
+            "preview_path": rel_preview_path if rel_preview_path else None,
+            "metadata_json": metadata,
+            "source_type": "uploaded",
+        }
+
+        asset = await self.asset_repo.create(asset_data)
+        logger.info(
+            "Uploaded image asset %s for project %s (hash=%s, %dx%d)",
+            asset.get("id"),
+            project_id,
+            file_hash[:12],
+            width,
+            height,
+        )
+
+        return self._build_upload_response(asset)
+
+    def _build_upload_response(self, asset: Dict[str, Any]) -> Dict[str, Any]:
+        """Build the upload response dict from an asset record."""
+        asset_id = str(asset["id"])
+        return {
+            "asset_id": asset_id,
+            "image_url": f"/api/v1/storyboard/assets/{asset_id}/file",
+            "preview_url": (
+                f"/api/v1/storyboard/assets/{asset_id}/file?preview=true"
+                if asset.get("preview_path")
+                else f"/api/v1/storyboard/assets/{asset_id}/file"
+            ),
+            "width": asset.get("width", 0),
+            "height": asset.get("height", 0),
+            "file_hash": asset.get("file_hash", ""),
+        }
+
+    async def split_image_asset(
+        self,
+        project_id: str,
+        asset_id: str,
+        rows: int,
+        cols: int,
+        node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Split an uploaded image asset into a grid of frames.
+
+        For each cell in the grid:
+          1. Crop and save as a separate image + preview
+          2. Create a storyboard_asset record
+          3. Create a storyboard_frame record
+
+        Args:
+            project_id: UUID of the storyboard project.
+            asset_id: UUID of the source asset to split.
+            rows: Number of rows in the grid.
+            cols: Number of columns in the grid.
+            node_id: Optional UUID of the canvas node to attach frames to.
+
+        Returns:
+            Dict with keys: frames (list of frame records), source_asset_id,
+            rows, cols.
+        """
+        from app.services.storyboard_image_service import StoryboardImageService
+
+        # Validate grid dimensions
+        if rows < 1 or rows > 10:
+            raise HTTPException(status_code=422, detail="rows must be between 1 and 10")
+        if cols < 1 or cols > 10:
+            raise HTTPException(status_code=422, detail="cols must be between 1 and 10")
+
+        # 1. Get source asset
+        source_asset = await self.get_asset(asset_id)
+        if not source_asset:
+            raise HTTPException(status_code=404, detail="Source asset not found")
+
+        if str(source_asset.get("project_id")) != str(project_id):
+            raise HTTPException(status_code=403, detail="Asset does not belong to this project")
+
+        # 2. Resolve paths
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        team_id = str(project.get("team_id", "unknown"))
+        nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
+
+        source_file_path = Path(nas_base) / source_asset["file_path"]
+        if not source_file_path.exists():
+            raise HTTPException(status_code=404, detail="Source image file not found on disk")
+
+        # Compute a hash prefix for output filenames
+        source_hash = source_asset.get("file_hash", "unknown")[:12]
+
+        # Output directories (relative to NAS_BASE_PATH)
+        rel_split_dir = f"teams/{team_id}/storyboard/{project_id}/splits"
+        rel_preview_dir = f"teams/{team_id}/storyboard/{project_id}/previews"
+        abs_split_dir = Path(nas_base) / rel_split_dir
+        abs_preview_dir = Path(nas_base) / rel_preview_dir
+
+        # 3. Split the image
+        image_service = StoryboardImageService()
+        try:
+            cells = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: image_service.split_image_to_grid(
+                    image_path=str(source_file_path),
+                    rows=rows,
+                    cols=cols,
+                    output_dir=str(abs_split_dir),
+                    preview_dir=str(abs_preview_dir),
+                    file_prefix=source_hash,
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:
+            logger.error(
+                "split_image_asset: image processing failed for asset %s: %s",
+                asset_id, exc,
+            )
+            raise HTTPException(
+                status_code=500, detail=f"Image splitting failed: {exc}"
+            )
+
+        # 4. Create asset + frame records for each cell
+        created_frames: List[Dict[str, Any]] = []
+
+        for cell in cells:
+            # Compute relative paths (stored in DB)
+            cell_abs_path = Path(cell["file_path"])
+            cell_rel_path = str(cell_abs_path.relative_to(nas_base))
+            preview_abs_path = Path(cell["preview_path"])
+            preview_rel_path = str(preview_abs_path.relative_to(nas_base))
+
+            # Compute hash for the cell image
+            cell_hash = hashlib.sha256(cell_abs_path.read_bytes()).hexdigest()
+
+            # Create asset record
+            cell_asset_data: Dict[str, Any] = {
+                "project_id": project_id,
+                "file_path": cell_rel_path,
+                "file_hash": cell_hash,
+                "file_size": cell_abs_path.stat().st_size,
+                "mime_type": "image/png",
+                "width": cell["width"],
+                "height": cell["height"],
+                "preview_path": preview_rel_path,
+                "metadata_json": {
+                    "source_asset_id": asset_id,
+                    "split_row": cell["row"],
+                    "split_col": cell["col"],
+                    "grid_rows": rows,
+                    "grid_cols": cols,
+                },
+                "source_type": "split",
+            }
+            cell_asset = await self.asset_repo.create(cell_asset_data)
+            cell_asset_id = str(cell_asset.get("id", ""))
+
+            # Build image URLs
+            image_url = f"/api/v1/storyboard/assets/{cell_asset_id}/file"
+            preview_url = f"/api/v1/storyboard/assets/{cell_asset_id}/file?preview=true"
+
+            # Create frame record
+            frame_data: Dict[str, Any] = {
+                "project_id": project_id,
+                "frame_index": cell["index"],
+                "image_url": image_url,
+                "thumbnail_url": preview_url,
+                "sort_order": cell["index"],
+                "note": "",
+                "duration_seconds": 2.0,
+                "transition_type": "cut",
+            }
+            if node_id:
+                frame_data["node_id"] = node_id
+
+            frame = await self.frame_repo.create(frame_data)
+
+            created_frames.append(
+                {
+                    **frame,
+                    "asset_id": cell_asset_id,
+                    "image_url": image_url,
+                    "preview_url": preview_url,
+                    "width": cell["width"],
+                    "height": cell["height"],
+                    "row": cell["row"],
+                    "col": cell["col"],
+                }
+            )
+
+        logger.info(
+            "split_image_asset: created %d frames from asset %s in project %s (%dx%d grid)",
+            len(created_frames), asset_id, project_id, rows, cols,
+        )
+
+        return {
+            "frames": created_frames,
+            "source_asset_id": asset_id,
+            "rows": rows,
+            "cols": cols,
+        }
+
+    async def get_asset(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single asset by ID.
+
+        Args:
+            asset_id: Snowflake ID of the asset.
+
+        Returns:
+            Asset row dict, or None if not found.
+        """
+        try:
+            client = await self.asset_repo._get_client()
+            result = (
+                await client.table("storyboard_assets")
+                .select("*")
+                .eq("id", asset_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as exc:
+            logger.error("Failed to get asset %s: %s", asset_id, exc)
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+_MIME_EXT_MAP = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
+}
+
+
+def _mime_to_ext(mime_type: str) -> str:
+    """Convert a MIME type to a file extension, defaulting to .png."""
+    return _MIME_EXT_MAP.get(mime_type, ".png")

@@ -17,6 +17,7 @@ from .tasks_router import router as tasks_router
 from .table_preferences_router import router as table_preferences_router
 from .credits_router import router as credits_router
 from .tags_router import router as tags_router
+from .celery_router import router as celery_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -81,7 +82,7 @@ admin_router.include_router(videos_router, prefix="/videos", tags=["Admin - Vide
 admin_router.include_router(audit_logs_router, prefix="/audit-logs", tags=["Admin - Audit Logs"])
 admin_router.include_router(stats_router, prefix="/stats", tags=["Admin - Stats"])
 admin_router.include_router(settings_router, prefix="/settings", tags=["Admin - Settings"])
-admin_router.include_router(request_logs_router, prefix="/request-logs", tags=["Admin - Request Logs"])
+admin_router.include_router(request_logs_router, prefix="/logs", tags=["Admin - Logs"])
 admin_router.include_router(monitoring_router, prefix="/monitoring", tags=["Admin - Monitoring"])
 admin_router.include_router(search_router, prefix="/search", tags=["Admin - Search"])
 admin_router.include_router(alert_rules_router, prefix="/alerts", tags=["Admin - Alerts"])
@@ -90,3 +91,4 @@ admin_router.include_router(tasks_router, prefix="/tasks", tags=["Admin - Tasks"
 admin_router.include_router(table_preferences_router, prefix="/table-preferences", tags=["Admin - Table Preferences"])
 admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Credits"])
 admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
+admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])

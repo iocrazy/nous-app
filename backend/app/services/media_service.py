@@ -548,12 +548,20 @@ class MediaService:
                 except (ValueError, IndexError):
                     pass
 
+            # Determine mime_type from media_type
+            media_type = str(parsed_data.get("media_type") or "0")
+            if media_type in ("2", "68"):
+                mime_type = "image/jpeg"
+            else:
+                mime_type = "video/mp4"
+
             resource_data = {
                 "creator_id": user_id,
                 "media_id": media_id,
                 "source_type": "web",
                 "filename": parsed_data.get("title") or "Untitled",
-                "file_type": parsed_data.get("media_type") or "video",
+                "file_type": media_type,
+                "mime_type": mime_type,
                 "file_size_bytes": parsed_data.get("datasize_bytes"),
                 "duration_seconds": duration_seconds,
                 "resolution": parsed_data.get("resolution"),
@@ -565,4 +573,18 @@ class MediaService:
                 "image_download_status": image_status,
             }
             result = await resources_repo.create_resource(resource_data)
-            return result.get("id") if result else None
+            resource_id = result.get("id") if result else None
+
+            # Create resource_item for user's personal scope
+            if resource_id:
+                try:
+                    await resources_repo.create_resource_item({
+                        "resource_id": resource_id,
+                        "scope_type": "personal",
+                        "scope_id": user_id,
+                        "added_by": user_id,
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to create resource_item for resource {resource_id}: {e}")
+
+            return resource_id

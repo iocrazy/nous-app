@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   RefreshCw,
   LayoutGrid,
@@ -28,6 +29,7 @@ import {
   Music,
   Pencil,
   Link,
+  Search,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -38,6 +40,7 @@ import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
+import { ShareModal } from './ShareModal';
 import { getCoverUrl, getVideoUrl, formatResolution } from '../utils/awemeType';
 import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
 import { useToast } from './Toast';
@@ -47,6 +50,7 @@ import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { getSupabaseClient } from '../supabaseClient';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { EagleTagPicker } from './EagleTagPicker';
+import { useAuth } from '../contexts/AuthContext';
 
 // ─── AI Status Badge ──────────────────────────────────
 const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
@@ -85,6 +89,7 @@ export const DownloadsView: React.FC = () => {
   const navigate = useNavigate();
   const { selectedTeamId } = useTeamContext();
   const { addToast } = useToast();
+  const { mediaToken } = useAuth();
 
   // ─── Tag search map (media_id → space-joined tag names) ───
   const [tagSearchMap, setTagSearchMap] = useState<Record<string, string>>({});
@@ -94,9 +99,11 @@ export const DownloadsView: React.FC = () => {
     library,
     isLoadingLibrary,
     libraryError,
+    totalCount,
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    loadMoreLibrary,
     libraryViewMode,
     setLibraryViewMode,
     sharedVideoIds,
@@ -265,12 +272,17 @@ export const DownloadsView: React.FC = () => {
   const [renameTarget, setRenameTarget] = useState<Video | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [selectedVideoTags, setSelectedVideoTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
+  const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
+  const [shareTargetName, setShareTargetName] = useState<string>('');
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
 
   // ─── Navigation ────────────────────────────────────
   const handleNavigateToDetail = useCallback((item: Video) => {
-    if (!item.id) return;
+    const rid = (item as any).resource_id || item.id;
+    if (!rid) return;
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    navigate(`${teamPath}/player/${item.id}?from=downloads`);
+    navigate(`${teamPath}/resources/file/${rid}`);
   }, [selectedTeamId, navigate]);
 
   // ─── Toggle select (multi-select) ─────────────────
@@ -302,25 +314,44 @@ export const DownloadsView: React.FC = () => {
     setLastClickedId(platformId);
   }, [lastClickedId, filteredLibrary]);
 
-  // ─── Single click: select ─────────────────────────
+  // ─── Single click: select (delayed to avoid conflict with double-click) ───
+  const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleVideoClick = useCallback((item: Video, e?: React.MouseEvent) => {
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) {
       handleToggleSelect(item.platform_id, e);
       return;
     }
-    if (selectedVideo?.platform_id === item.platform_id) {
-      setSelectedVideo(null);
-      setSelectedIds(new Set());
-    } else {
-      setSelectedVideo(item);
-      setMultiSelectMode(false);
-      setSelectedIds(new Set([item.platform_id]));
-      setLastClickedId(item.platform_id);
+    // Mobile: single tap navigates to detail (no double-click on touch)
+    if (isMobileDevice) {
+      handleNavigateToDetail(item);
+      return;
     }
-  }, [selectedVideo, handleToggleSelect]);
+    // Delay single-click selection so double-click can cancel it,
+    // preventing sidebar open → grid reflow → wrong card on second click
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (selectedVideo?.platform_id === item.platform_id) {
+        setSelectedVideo(null);
+        setSelectedIds(new Set());
+      } else {
+        setSelectedVideo(item);
+        setMultiSelectMode(false);
+        setSelectedIds(new Set([item.platform_id]));
+        setLastClickedId(item.platform_id);
+      }
+    }, 250);
+  }, [selectedVideo, handleToggleSelect, isMobileDevice, handleNavigateToDetail]);
 
   // ─── Double click: navigate to detail ─────────────
   const handleVideoDoubleClick = useCallback((item: Video) => {
+    // Cancel pending single-click selection to prevent grid reflow
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
     handleNavigateToDetail(item);
   }, [handleNavigateToDetail]);
 
@@ -505,7 +536,13 @@ export const DownloadsView: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; video: Video } | null>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, video: Video) => {
-    setContextMenu({ x: e.clientX, y: e.clientY, video });
+    const menuHeight = 320; // approximate context menu height
+    const menuWidth = 180;
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+    const y = e.clientY + menuHeight > window.innerHeight
+      ? Math.max(8, e.clientY - menuHeight)
+      : e.clientY;
+    setContextMenu({ x, y, video });
   }, []);
 
   // Close context menu on click outside or Escape
@@ -522,7 +559,8 @@ export const DownloadsView: React.FC = () => {
     if (!contextMenu) return;
     const v = contextMenu.video;
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    window.open(`${teamPath}/player/${v.id}?from=downloads`, '_blank');
+    const rid = (v as any).resource_id || v.id;
+    window.open(`${teamPath}/resources/file/${rid}`, '_blank');
     setContextMenu(null);
   }, [contextMenu, selectedTeamId]);
 
@@ -545,7 +583,7 @@ export const DownloadsView: React.FC = () => {
       });
       if (ok) return;
     }
-    const videoUrl = getVideoUrl(v);
+    const videoUrl = getVideoUrl(v, mediaToken ?? undefined);
     if (videoUrl) {
       await downloadFile(videoUrl, `${baseName}.mp4`, callbacks);
     } else {
@@ -574,13 +612,16 @@ export const DownloadsView: React.FC = () => {
 
   const handleCtxShare = useCallback(() => {
     if (!contextMenu) return;
-    const url = contextMenu.video.original_url;
+    const video = contextMenu.video;
+    const rid = resourceIdMap[video.id];
     setContextMenu(null);
-    if (url) {
-      navigator.clipboard.writeText(url);
-      addToast('Link copied to clipboard', 'success');
+    if (rid) {
+      setShareTargetResourceId(rid);
+      setShareTargetName(video.title || video.description || 'Shared Media');
+    } else {
+      addToast('Cannot share: no resource linked', 'error');
     }
-  }, [contextMenu, addToast]);
+  }, [contextMenu, addToast, resourceIdMap]);
 
   const handleCtxRename = useCallback(() => {
     if (!contextMenu) return;
@@ -629,10 +670,10 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Render ────────────────────────────────────────
   return (
-    <div className="flex-1 min-w-0 flex flex-col h-full">
-      {/* Toolbar — matches ResourcesView style */}
+    <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? '' : 'md:h-full'}`}>
+      {/* Toolbar — matches ResourcesView style (hidden on mobile, search via overlay) */}
       <div
-        className="px-6 py-3 border-b border-zinc-800/80"
+        className="hidden md:block px-6 py-2 border-b border-zinc-800/80"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
@@ -640,7 +681,7 @@ export const DownloadsView: React.FC = () => {
             <span className="text-sm text-zinc-200 font-medium truncate">{t('resources.downloads')}</span>
             {!isLoadingLibrary && (
               <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                {filteredLibrary.length} {filteredLibrary.length === 1 ? 'item' : 'items'}
+                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
               </span>
             )}
           </div>
@@ -696,7 +737,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
-        className="flex-1 overflow-y-auto px-5 pt-4 pb-5"
+        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0 h-full min-h-0' : 'px-3 pt-3 pb-5'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
@@ -710,6 +751,25 @@ export const DownloadsView: React.FC = () => {
           }
         }}
       >
+        {/* Mobile header — hidden on feed view and desktop */}
+        <div className={`md:hidden flex items-center justify-between mb-3 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
+            {!isLoadingLibrary && (
+              <span className="text-[11px] text-zinc-600 tabular-nums">
+                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={loadLibraryData}
+            disabled={isLoadingLibrary}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
+          >
+            <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
             {libraryError}
@@ -731,7 +791,7 @@ export const DownloadsView: React.FC = () => {
           <>
             {/* Grid view */}
             {libraryViewMode === 'grid' && (
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, 200px)' }}>
+              <div className="grid grid-cols-2 gap-3 downloads-grid">
                 {filteredLibrary.map((item) => (
                   <CompactMediaCard
                     key={item.platform_id}
@@ -765,13 +825,18 @@ export const DownloadsView: React.FC = () => {
               <LibraryFeed data={filteredLibrary} />
             )}
 
-            {/* Load more sentinel */}
+            {/* Load more sentinel + tap fallback */}
             {!isSearchActive && libraryViewMode !== 'feed' && (
-              <div ref={loadMoreRef} className="w-full py-8 flex justify-center">
+              <div ref={loadMoreRef} className="w-full py-6 flex justify-center">
                 {isLoadingMore ? (
                   <Loader2 size={20} className="animate-spin text-zinc-500" />
                 ) : hasMoreData ? (
-                  <span className="text-zinc-600 text-xs">Scroll to load more</span>
+                  <button
+                    onClick={() => loadMoreLibrary()}
+                    className="px-6 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors"
+                  >
+                    Load More
+                  </button>
                 ) : library.length > 0 ? (
                   <span className="text-zinc-600 text-xs">All {library.length} items loaded</span>
                 ) : null}
@@ -781,10 +846,10 @@ export const DownloadsView: React.FC = () => {
         )}
       </div>
 
-      {/* ── Right Info Panel: Video details (Eagle style) ── */}
+      {/* ── Right Info Panel: Video details (Eagle style, desktop only) ── */}
       {selectedVideo && (
         <div
-          className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
+          className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
             showInfoPanel ? 'translate-x-0' : 'translate-x-full'
           }`}
           style={{ width: `${infoPanelWidth}px` }}
@@ -803,7 +868,7 @@ export const DownloadsView: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto">
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900">
+            <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b border-zinc-800/80 bg-zinc-900">
               <h3 className="text-sm font-semibold text-white truncate">{t('resources.details', 'Details')}</h3>
               <button
                 onClick={() => setSelectedVideo(null)}
@@ -815,9 +880,9 @@ export const DownloadsView: React.FC = () => {
 
             {/* Cover */}
             <div className="relative w-full aspect-video bg-black">
-              {getCoverUrl(selectedVideo) ? (
+              {getCoverUrl(selectedVideo, mediaToken ?? undefined) ? (
                 <img
-                  src={getCoverUrl(selectedVideo)!}
+                  src={getCoverUrl(selectedVideo, mediaToken ?? undefined)!}
                   alt={selectedVideo.title || ''}
                   className="w-full h-full object-contain"
                   referrerPolicy="no-referrer"
@@ -999,11 +1064,11 @@ export const DownloadsView: React.FC = () => {
         </div>
       )}
 
-      {/* Expand tab — visible when panel is closed */}
+      {/* Expand tab — visible when panel is closed (desktop only) */}
       {selectedVideo && !showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
-          className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
+          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
         >
           <ChevronLeft size={20} />
         </button>
@@ -1045,7 +1110,8 @@ export const DownloadsView: React.FC = () => {
               if (!contextMenu) return;
               const v = contextMenu.video;
               const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-              navigate(`${teamPath}/player/${v.id}?from=downloads`);
+              const rid = (v as any).resource_id || v.id;
+              navigate(`${teamPath}/resources/file/${rid}`);
               setContextMenu(null);
             }}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
@@ -1089,6 +1155,21 @@ export const DownloadsView: React.FC = () => {
             onClick={handleCtxShare}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
           >
+            <Share2 size={14} className="text-zinc-500" />
+            Share
+          </button>
+          <button
+            onClick={() => {
+              if (!contextMenu) return;
+              const url = contextMenu.video.original_url;
+              if (url) {
+                navigator.clipboard.writeText(url);
+                addToast('Link copied', 'success');
+              }
+              setContextMenu(null);
+            }}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          >
             <Link size={14} className="text-zinc-500" />
             Copy Link
           </button>
@@ -1102,6 +1183,55 @@ export const DownloadsView: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* ── Mobile Search Overlay (hidden in feed view) ── */}
+      {libraryViewMode !== 'feed' && createPortal(
+        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
+            {isMobileSearchOpen ? (
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                <input
+                  autoFocus
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                  placeholder="Search downloads..."
+                  value={mobileSearchQuery}
+                  onChange={(e) => {
+                    setMobileSearchQuery(e.target.value);
+                    handleSearchQueryChange(e.target.value);
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    setMobileSearchQuery('');
+                    handleSearchQueryChange('');
+                  }}
+                  className="ml-2 text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsMobileSearchOpen(true)}
+                className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+              >
+                <Search size={22} className="drop-shadow-md" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* ── Share Modal ── */}
+      <ShareModal
+        isOpen={!!shareTargetResourceId}
+        onClose={() => { setShareTargetResourceId(null); setShareTargetName(''); }}
+        resourceId={shareTargetResourceId || undefined}
+        defaultName={shareTargetName}
+      />
 
       {/* ── Rename Dialog ── */}
       {renameTarget && (

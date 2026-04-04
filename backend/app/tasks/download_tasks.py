@@ -360,15 +360,23 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         return media
 
     try:
-        from app.services.lightweight_parser import LightweightParser
-        from app.services.douyin_parser import DouyinParser
+        from app.services.ies_douyin_parser import IesDouyinParser
+        from app.services.douyin_formatter import DouyinFormatter
 
-        # --- Attempt 1: LightweightParser (fast HTTP, no browser) ---
-        aweme_detail = run_async(LightweightParser.parse(original_url))
+        # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
+        aweme_detail = run_async(IesDouyinParser.parse(original_url))
         parse_method = "LightHTTP"
 
+        # If short URL failed, try directly with platform_id (bypass URL redirect)
+        if not aweme_detail and platform_id:
+            logger.info(f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}")
+            aweme_detail = run_async(IesDouyinParser._fetch_share_page(platform_id))
+            if aweme_detail:
+                IesDouyinParser._process_video_urls(aweme_detail)
+                parse_method = "LightHTTP-directID"
+
         if aweme_detail:
-            new_parsed = run_async(DouyinParser.parse_aweme_detail(
+            new_parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail,
                 valid_url=original_url,
                 download_video=True,
@@ -388,19 +396,19 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
         else:
             still_missing = list(missing_types)
 
-        # --- Attempt 2: DouyinAnalysis browser fallback (if still missing) ---
+        # --- Attempt 2: DrissionPageParser browser fallback (if still missing) ---
         if still_missing:
             logger.info(
                 f"[Download/URL] LightHTTP still missing {still_missing}, "
                 f"falling back to BrowserAuto for {platform_id}"
             )
             try:
-                from app.services.douyin_analysis import DouyinAnalysis
+                from app.services.drissionpage_parser import DrissionPageParser
 
-                browser_detail = run_async(DouyinAnalysis.fetch_one_video(original_url))
+                browser_detail = run_async(DrissionPageParser.fetch_one_video(original_url))
                 if browser_detail:
                     parse_method = "BrowserAuto"
-                    browser_parsed = run_async(DouyinParser.parse_aweme_detail(
+                    browser_parsed = run_async(DouyinFormatter.parse_aweme_detail(
                         aweme_detail=browser_detail,
                         valid_url=original_url,
                         download_video=True,
@@ -440,6 +448,15 @@ def _ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]
                     f"[Download/URL] Refreshed {field} for {platform_id} "
                     f"({len(new_parsed[field])} URLs, via {parse_method})"
                 )
+
+        # Also update music_play_urls if re-parsed (carousel needs standalone music)
+        if new_parsed.get("music_play_urls"):
+            update_fields["music_play_urls"] = new_parsed["music_play_urls"]
+            media["music_play_urls"] = new_parsed["music_play_urls"]
+            logger.info(
+                f"[Download/URL] Refreshed music_play_urls for {platform_id} "
+                f"({len(new_parsed['music_play_urls'])} URLs, via {parse_method})"
+            )
 
         if update_fields:
             run_async(_MR().update(platform_id, update_fields))
@@ -493,9 +510,13 @@ def _validate_and_refresh_urls(
     if not urls:
         return media, False, "no URLs available"
 
-    # Test current URLs
+    # Test current URLs (handle nested lists: [[url1, url2], [url3, url4]])
     fail_reason = ""
-    for url in urls:
+    for item in urls:
+        # Nested list: item is [url1, url2, ...] — test first URL
+        url = item[0] if isinstance(item, list) and item else item
+        if not isinstance(url, str):
+            continue
         ok, reason = run_async(_check_url_accessible(url))
         if ok:
             return media, True, "ok"
@@ -515,7 +536,10 @@ def _validate_and_refresh_urls(
     if not fresh_urls:
         return media, False, "re-parse returned no URLs"
 
-    for url in fresh_urls:
+    for item in fresh_urls:
+        url = item[0] if isinstance(item, list) and item else item
+        if not isinstance(url, str):
+            continue
         ok, reason = run_async(_check_url_accessible(url))
         if ok:
             logger.info(f"[Download/Validate] Fresh {type_key} URLs accessible for {platform_id}")
@@ -756,18 +780,18 @@ def _do_douyin_download(
                         f"(DrissionPage) to get fresh URLs for {platform_id}"
                     )
                     try:
-                        from app.services.douyin_analysis import DouyinAnalysis
-                        from app.services.douyin_parser import DouyinParser
+                        from app.services.drissionpage_parser import DrissionPageParser
+                        from app.services.douyin_formatter import DouyinFormatter
                         from app.repositories.media_repository import (
                             MediaRepository as _MR_browser,
                         )
 
                         browser_detail = run_async(
-                            DouyinAnalysis.fetch_one_video(original_url)
+                            DrissionPageParser.fetch_one_video(original_url)
                         )
                         if browser_detail:
                             browser_parsed = run_async(
-                                DouyinParser.parse_aweme_detail(
+                                DouyinFormatter.parse_aweme_detail(
                                     aweme_detail=browser_detail,
                                     valid_url=original_url,
                                     download_video=True,
@@ -875,6 +899,63 @@ def _do_douyin_download(
             if results["video"] != "completed":
                 error_msg = getattr(video_result, "error", None) or "Image download failed"
                 logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
+
+                # Fallback: re-parse to get fresh image URLs and retry
+                try:
+                    from app.services.douyin_formatter import DouyinFormatter
+                    from app.services.ies_douyin_parser import IesDouyinParser
+
+                    logger.info(
+                        f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
+                    )
+                    aweme_detail = run_async(
+                        IesDouyinParser._fetch_share_page(platform_id)
+                    )
+                    if aweme_detail:
+                        IesDouyinParser._process_video_urls(aweme_detail)
+                        new_parsed = run_async(
+                            DouyinFormatter.parse_aweme_detail(
+                                aweme_detail=aweme_detail,
+                                valid_url=media.get("original_url", ""),
+                                download_video=True,
+                                download_music=False,
+                                download_cover=False,
+                            )
+                        )
+                        if new_parsed:
+                            # Update DB with fresh URLs
+                            update_fields = {}
+                            for field in ("image_download_urls", "video_download_urls"):
+                                if new_parsed.get(field):
+                                    update_fields[field] = new_parsed[field]
+                            if update_fields:
+                                repo = MediaRepository()
+                                run_async(repo.update(platform_id, update_fields))
+                                logger.info(
+                                    f"[Download/Exec] image: re-parsed {platform_id}, "
+                                    f"updated {list(update_fields.keys())}"
+                                )
+
+                            # Retry download with fresh URLs
+                            video_result = run_async(
+                                DownloaderService.download_images_by_platform_id(
+                                    platform_id, user_id=user_id
+                                )
+                            )
+                            results["video"] = (
+                                video_result.video_download_status.value
+                                if hasattr(video_result, "video_download_status")
+                                else "unknown"
+                            )
+                            logger.info(
+                                f"[Download/Exec] image retry: "
+                                f"{results['video']} for {platform_id}"
+                            )
+                except Exception as reparse_err:
+                    logger.warning(
+                        f"[Download/Exec] image: re-parse fallback failed "
+                        f"for {platform_id}: {reparse_err}"
+                    )
 
             # Mark image stage complete
             if 'video' in stages:
@@ -1081,7 +1162,7 @@ def download_unified_task(
             unified_task_id = run_async(manager.create(
                 user_id=user_id,
                 task_type="download",
-                title=video_title or platform_id,
+                title=f"Download {video_title or platform_id}",
                 subtitle=dl_subtitle,
                 media_id=platform_id,
                 celery_task_id=task_id,

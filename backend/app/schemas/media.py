@@ -66,6 +66,9 @@ class MediaBase(BaseModel):
 
     # Audio info
     music_name: Optional[str] = Field(None, description="Audio name")
+    music_play_urls: Optional[list] = Field(
+        None, description="Standalone music play URLs (carousel/image-text types)"
+    )
 
     # Cover info
     cover_urls: Optional[list] = Field(None, description="Cover URL list")

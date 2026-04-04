@@ -23,6 +23,7 @@ import { fetchResourceTags, addResourceTag, removeResourceTag } from '../service
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getSupabaseClient } from '../supabaseClient';
 import { EagleTagPicker } from './EagleTagPicker';
+import { useAuth } from '../contexts/AuthContext';
 
 interface MediaCardProps {
   data: Video;
@@ -111,6 +112,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   onNotesBlur,
   mobileActions,
 }) => {
+  const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
@@ -210,9 +212,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const isAlbum = !isVideo && images.length > 1;
 
   // 视频 URL: 优先使用 download_path
-  const videoUrl = getVideoUrl(data);
+  const videoUrl = getVideoUrl(data, mediaToken ?? undefined);
   // 封面 URL
-  const coverUrl = getCoverUrl(data);
+  const coverUrl = getCoverUrl(data, mediaToken ?? undefined);
 
   // 判断内容是否已可用（本地已下载 OR CDN URL 已存在 OR 本次已提交 Fetch）
   // 注意：skipped ≠ 已可用（skipped 表示当初跳过，用户可重新获取）
@@ -372,7 +374,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     doDownload(coverUrl, `${baseName}_cover.jpg`);
   };
 
-  // 重新获取：使用 per-type fetch endpoint (POST /api/v1/videos/{platform_id}/fetch)
+  // 重新获取：使用 per-type fetch endpoint (POST /api/v1/media/{platform_id}/fetch)
   // force=true 时跳过已下载检查，强制重新获取
   const onRefetch = async (options: { video?: boolean; cover?: boolean; force?: boolean }) => {
     if (!data.platform_id) {

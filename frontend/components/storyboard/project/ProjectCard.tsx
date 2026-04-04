@@ -1,134 +1,96 @@
-import React, { useState, useCallback } from 'react';
-import { MoreVertical, Pencil, Copy, Download, Trash2, Layers } from 'lucide-react';
-import { ProjectSummary } from '../../../types';
-
-// ─── Props ────────────────────────────────────────────────────────────────────
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { Layers, Pencil, Trash2 } from 'lucide-react';
+import type { ProjectSummary } from '../../../types';
 
 interface ProjectCardProps {
   project: ProjectSummary;
+  selectMode?: boolean;
   onClick: (id: string) => void;
-  onRename: (id: string) => void;
-  onDuplicate: (id: string) => void;
-  onExport: (id: string) => void;
-  onDelete: (id: string) => void;
+  onRename?: (id: string, name: string) => void;
+  onDelete?: (id: string) => void;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
-const GRADIENT_COLORS = [
-  'from-blue-900 to-indigo-900',
-  'from-purple-900 to-pink-900',
-  'from-teal-900 to-cyan-900',
-  'from-orange-900 to-red-900',
-];
-
-function coverGradient(id: string): string {
-  const idx = id.charCodeAt(0) % GRADIENT_COLORS.length;
-  return GRADIENT_COLORS[idx];
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-const ProjectCard = React.memo(function ProjectCard({
+function ProjectCard({
   project,
+  selectMode,
   onClick,
   onRename,
-  onDuplicate,
-  onExport,
   onDelete,
 }: ProjectCardProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const handleCardClick = useCallback(() => {
-    onClick(project.id);
-  }, [project.id, onClick]);
-
-  const stopProp = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
-
-  const menuItems = [
-    { label: 'Rename', icon: <Pencil size={13} />, action: () => onRename(project.id) },
-    { label: 'Duplicate', icon: <Copy size={13} />, action: () => onDuplicate(project.id) },
-    { label: 'Export', icon: <Download size={13} />, action: () => onExport(project.id) },
-    { label: 'Delete', icon: <Trash2 size={13} />, action: () => onDelete(project.id), danger: true },
-  ];
+  const [selected, setSelected] = useState(false);
 
   return (
     <div
-      onClick={handleCardClick}
-      className="group relative bg-gray-800 border border-gray-700 rounded-xl overflow-hidden cursor-pointer hover:border-gray-600 hover:shadow-xl transition-all"
+      className="group relative flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-600 cursor-pointer"
+      onClick={() => selectMode ? setSelected(v => !v) : onClick(project.id)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onClick(project.id);
+      }}
     >
-      {/* Cover image */}
-      <div className={`h-36 bg-gradient-to-br ${coverGradient(project.id)} relative`}>
-        {project.cover_image_url ? (
-          <img
-            src={project.cover_image_url}
-            alt={project.name}
-            className="w-full h-full object-cover"
-          />
+      {/* Top row: icon + title + actions */}
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600/20">
+          <Layers size={18} className="text-indigo-400" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-zinc-100">{project.name}</h3>
+        </div>
+        {/* Actions or checkbox */}
+        {selectMode ? (
+          <div
+            className={`flex h-5 w-5 items-center justify-center rounded border transition-colors ${
+              selected ? 'border-indigo-500 bg-indigo-600' : 'border-zinc-600 bg-zinc-800'
+            }`}
+          >
+            {selected && (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+          </div>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center opacity-20">
-            <Layers size={48} className="text-white" />
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRename?.(project.id, project.name); }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+              title="Rename"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete?.(project.id); }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-red-950/50 hover:text-red-400 transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         )}
       </div>
 
-      {/* Info */}
-      <div className="px-4 py-3">
-        <p className="text-sm font-semibold text-gray-100 truncate" title={project.name}>
-          {project.name}
-        </p>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {project.frame_count ?? 0} frames · {project.character_count ?? 0} characters
-        </p>
-        <p className="text-xs text-gray-600 mt-0.5">{relativeTime(project.updated_at)}</p>
+      {/* Tag badge */}
+      <div className="mt-2.5">
+        <span className="rounded-full border border-teal-800/50 bg-teal-900/40 px-2 py-0.5 text-[11px] text-teal-400">
+          Storyboard
+        </span>
       </div>
 
-      {/* Kebab menu */}
-      <div
-        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-        onClick={stopProp}
-      >
-        <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className="p-1.5 rounded-lg bg-black/50 hover:bg-black/70 text-white transition-colors"
-          title="More options"
-        >
-          <MoreVertical size={14} />
-        </button>
-
-        {menuOpen && (
-          <div className="absolute top-full right-0 mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-xl py-1 min-w-[140px] z-30">
-            {menuItems.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => { item.action(); setMenuOpen(false); }}
-                className={[
-                  'flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors',
-                  item.danger
-                    ? 'text-red-400 hover:bg-red-950/50'
-                    : 'text-gray-300 hover:bg-gray-800',
-                ].join(' ')}
-              >
-                {item.icon}
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
+      {/* Dates */}
+      <div className="mt-2 space-y-0.5 text-xs text-zinc-500">
+        <p>Modified: <span className="text-zinc-400">{formatDate(project.updated_at)}</span></p>
+        <p>Created: <span className="text-zinc-400">{formatDate(project.created_at)}</span></p>
       </div>
     </div>
   );
-});
+}
 
-export default ProjectCard;
+export default memo(ProjectCard);

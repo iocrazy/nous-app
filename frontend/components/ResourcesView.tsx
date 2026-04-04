@@ -1,67 +1,31 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import {
   AlertTriangle,
-  Clock,
   FolderOpen,
-  Loader2,
   Upload,
   Trash2,
-  LayoutGrid,
-  LayoutList,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Share2,
   Download,
-  Plus,
-  Zap,
   FolderPlus,
-  FolderSearch,
-  Search,
   Check,
   X,
-  UploadCloud,
-  BookOpen,
   ExternalLink,
   Pencil,
   Copy,
   Move,
   RefreshCw,
-  Filter,
-  FileText,
-  Table2,
-  Presentation,
-  Globe,
-  Sparkles,
   Eye,
-  Menu,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
-import { ToolbarSearch } from './ToolbarSearch';
 import { semanticSearch, hybridSearch } from '../services/searchService';
-import { usePermission } from '../hooks/usePermission';
-import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
+import { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import {
-  fetchFolders,
-  fetchChildFolders,
   fetchResources,
   createFolder,
   uploadResource,
-  trashResource,
-  restoreResource,
-  permanentDeleteResource,
-  permanentDeleteFolder,
-  fetchTrashedResources,
-  fetchDownloadedResources,
-  fetchResourceTags,
-  addResourceTag,
-  removeResourceTag,
-  fetchSmartFolders,
-  fetchSmartFolderResults,
   createSmartFolder,
   updateSmartFolder,
   deleteSmartFolder,
@@ -72,40 +36,34 @@ import {
   moveFolder,
   trashResources,
   renameResource,
-  getFolderPreview,
   uploadNewVersion,
   checkDuplicate,
   linkExistingResource,
-  updateResource,
   getFolderContentCount,
-  fetchTrashedFolders,
   restoreFolder,
-  fetchFolderContents,
+  restoreResource,
+  fetchSmartFolders,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
-import { fetchLibraries, createLibrary } from '../services/libraryService';
-import { fetchTags } from '../services/tagsService';
-import { createTag } from '../services/unifiedTagService';
-import { useTaskManager } from '../contexts/TaskManagerContext';
-import { ResourceCard } from './ResourceCard';
-import { FolderCard } from './FolderCard';
-import { ResourceInfoPanel } from './ResourceInfoPanel';
-import { FolderInfoPanel } from './FolderInfoPanel';
+import { createLibrary } from '../services/libraryService';
+// ResourceCard and FolderCard are now rendered by ResourceGrid
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
 import { SmartFolderEditor } from './SmartFolderEditor';
 import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
-import { useToast } from './Toast';
 import { useFileKeyboard } from '../hooks/useFileKeyboard';
 import { useTouchDragDrop } from '../hooks/useTouchDragDrop';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
 import { downloadWithAuth } from '../utils/download';
-import { getSupabaseClient } from '../supabaseClient';
 import { getResourceFileUrl } from '../services/resourceService';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import { Resource } from '../types';
+import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesContext';
+import type { SortBy } from '../contexts/ResourcesContext';
+import { ResourcesShell } from './ResourcesShell';
+import { ResourceGrid } from './ResourceGrid';
 
 // ─── Upload constants ────────────────────────────────────
 
@@ -134,70 +92,51 @@ interface ResourcesViewProps {
   scopeId: string;
 }
 
-type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
-type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
+// Skeletons moved to ResourceGrid.tsx
 
-// ─── Skeleton ─────────────────────────────────────────
+// ─── Main Component (wrapper with context provider) ───
 
-const SkeletonGrid: React.FC = () => (
-  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-    {Array.from({ length: 8 }).map((_, i) => (
-      <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
-        <div className="h-32 bg-zinc-800" />
-        <div className="p-3 space-y-2">
-          <div className="h-4 bg-zinc-700 rounded w-3/4" />
-          <div className="h-3 bg-zinc-700 rounded w-1/2" />
-        </div>
-      </div>
-    ))}
-  </div>
-);
+export const ResourcesView: React.FC<ResourcesViewProps> = ({ scopeType, scopeId }) => {
+  return (
+    <ResourcesProvider scopeType={scopeType} scopeId={scopeId}>
+      <ResourcesViewInner />
+    </ResourcesProvider>
+  );
+};
 
-const SkeletonList: React.FC = () => (
-  <div className="space-y-2">
-    {Array.from({ length: 6 }).map((_, i) => (
-      <div key={i} className="flex items-center gap-4 px-4 py-3 bg-zinc-800/60 border border-zinc-700/30 rounded-xl animate-pulse">
-        <div className="w-10 h-10 bg-zinc-700 rounded-lg" />
-        <div className="flex-1 h-4 bg-zinc-700 rounded w-1/3" />
-        <div className="w-16 h-3 bg-zinc-700 rounded" />
-        <div className="w-20 h-3 bg-zinc-700 rounded" />
-      </div>
-    ))}
-  </div>
-);
+// ─── Inner Component (consumes context) ───────────────
 
-// ─── Main Component ────────────────────────────────────
+const ResourcesViewInner: React.FC = () => {
+  const ctx = useResourcesContext();
+  const {
+    scopeType, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
+    resPath, navigate,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
+    resources, setResources, folders, childFolders, folderPreviews,
+    trashedResources, trashedFolders, downloadedResources,
+    libraries, setLibraries, smartFolders, setSmartFolders,
+    resourceTagNamesMap, loading, setLoading, folderChain,
+    recycleFolderId, setRecycleFolderId, recycleFolderItems,
+    pendingPermanentDelete, setPendingPermanentDelete,
+    pendingBatchPermanentDelete, setPendingBatchPermanentDelete,
+    pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders,
+    selectedResource, setSelectedResource, selectedFolder, setSelectedFolder,
+    selectedIds, setSelectedIds,
+    lastClickedId, setLastClickedId, multiSelectMode, setMultiSelectMode,
+    viewMode, setViewMode, sortBy, setSortBy,
+    searchQuery, setSearchQuery, debouncedSearch, setDebouncedSearch,
+    showInfoPanel, setShowInfoPanel, infoPanelWidth, setInfoPanelWidth,
+    loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
+    handleTrashResource: handleTrash, handleRestoreResource: handleRestore,
+    handlePermanentDelete, confirmPermanentDelete,
+    canDo, addToast, transcodingResourceIds,
+  } = ctx;
 
-export const ResourcesView: React.FC<ResourcesViewProps> = ({
-  scopeType,
-  scopeId,
-}) => {
   const { t } = useTranslation();
-  const { tasks: allUnifiedTasks } = useTaskManager();
-  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
-  const navigate = useNavigate();
   const location = useLocation();
-  const resPath = (path: string) => teamId ? `/team/${teamId}${path}` : path;
 
-  // Auto-close mobile sidebar on navigation
-  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
-
-  // URL-driven state
-  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
-    ? 'resources'
-    : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
-  const selectedFolderId = urlFolderId ?? null;
-  const selectedSmartFolderId = urlSmartFolderId ?? null;
-  const selectedLibraryId = urlLibraryId ?? null;
-
-  // Data
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [childFolders, setChildFolders] = useState<Folder[]>([]);
-  const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>>({});
-  const [resources, setResources] = useState<ResourceItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ─── UI-only state (stays in ResourcesView) ──────────
 
   // New folder inline input
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -211,75 +150,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
-  // Recycle bin
-  const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
-  const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
-  const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
-  const [recycleFolderItems, setRecycleFolderItems] = useState<ResourceItem[]>([]);
-  const [pendingPermanentDelete, setPendingPermanentDelete] = useState<string | null>(null);
-  const [pendingBatchPermanentDelete, setPendingBatchPermanentDelete] = useState<string[] | null>(null);
-  const [pendingBatchPermanentDeleteFolders, setPendingBatchPermanentDeleteFolders] = useState<string[] | null>(null);
 
-  // Downloads (parser-created resources)
-  const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
-
-  // Tags
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-  // Bulk tag names for search: resource_id → space-joined tag names
-  const [resourceTagNamesMap, setResourceTagNamesMap] = useState<Record<string, string>>({});
-
-  // Libraries (team mode)
-  const [libraries, setLibraries] = useState<Library[]>([]);
-  const [creatingLibrary, setCreatingLibrary] = useState(false);
-  const [newLibraryName, setNewLibraryName] = useState('');
-  const [savingLibrary, setSavingLibrary] = useState(false);
-  const newLibraryInputRef = useRef<HTMLInputElement>(null);
-
-  // Smart folders
-  const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState<SortBy>('newest');
-  const [showSortMenu, setShowSortMenu] = useState(false);
-
-  // Filter state
+  // Sort / filter UI
   type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
   const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AI search state
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
 
-  // Mobile detection (matches Tailwind md: breakpoint at 768px)
-  const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
-
   // Mobile-specific state
-  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
-
-  // Detail panel
-  const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
-  const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
-  const [selectedResourceTags, setSelectedResourceTags] = useState<Array<{ tag: Tag }>>([]);
-  const [showInfoPanel, setShowInfoPanel] = useState(true);
-  const [infoPanelWidth, setInfoPanelWidth] = useState(320);
-  const isResizingPanelRef = useRef(false);
-  const resizeStartRef = useRef({ x: 0, width: 0 });
-
-  // Multi-select mode (triggered by checkbox click)
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
-
-  // Upload dropdown
-  const [showUploadDropdown, setShowUploadDropdown] = useState(false);
-  const uploadDropdownRef = useRef<HTMLDivElement>(null);
-
-  // New dropdown
-  const [showNewDropdown, setShowNewDropdown] = useState(false);
-  const newDropdownRef = useRef<HTMLDivElement>(null);
 
   // Version upload via context menu
   const versionInputRef = useRef<HTMLInputElement>(null);
@@ -313,8 +195,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // Smart folder editor
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartCollection | null>(null);
-  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(true);
-  const [librariesExpanded, setLibrariesExpanded] = useState(true);
 
   // Share target (for ShareModal)
   const [shareTarget, setShareTarget] = useState<{
@@ -323,27 +203,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     libraryId?: string;
   } | null>(null);
 
-  // Batch selection
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
-
   // Copy/Move operations
   const [folderPickerMode, setFolderPickerMode] = useState<'copy' | 'move' | null>(null);
   const [operationTargetItems, setOperationTargetItems] = useState<ResourceItem[]>([]);
   const [operationTargetFolders, setOperationTargetFolders] = useState<Folder[]>([]);
-
-  // ─── Permission check ────────────────────────────────
-
-  const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
-  const permObjectId = selectedLibraryId ?? selectedFolderId ?? null;
-  const { canDo } = usePermission(
-    scopeType === 'team' ? permObjectType : null,
-    scopeType === 'team' ? permObjectId : null,
-    scopeType === 'team' ? (teamId ?? null) : null,
-  );
-
-  // ─── Toast ────────────────────────────────────────────
-  const { addToast } = useToast();
 
   // ─── Clipboard state for keyboard shortcuts ──────────
   const [clipboardItems, setClipboardItems] = useState<ResourceItem[]>([]);
@@ -352,286 +215,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   // ─── Folder upload ref ───────────────────────────────
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Folder breadcrumb chain (independent of full folders array) ──
-  const [folderChain, setFolderChain] = useState<Folder[]>([]);
-
-  // ─── Derived view flags ──────────────────────────────
-
-  const isResourcesView = sidebarView === 'resources';
-  const isRecycleView = sidebarView === 'recycle';
-  const isSharedView = sidebarView === 'shared';
-  const isDownloadsView = sidebarView === 'downloads';
-  const canUpload = isResourcesView && canDo('upload');
-
-  // ─── Load folders on scope change ────────────────────
-
-  const loadFolders = useCallback(async () => {
-    try {
-      const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
-      setFolders(allFolders);
-    } catch {
-      setFolders([]);
-    }
-  }, [scopeType, scopeId, selectedLibraryId]);
-
-  const loadChildFolders = useCallback(async () => {
-    if (!isResourcesView) {
-      setChildFolders([]);
-      return;
-    }
-    try {
-      const children = await fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-      setChildFolders(children);
-    } catch (err) {
-      console.error('[ResourcesView] loadChildFolders failed:', err);
-      setChildFolders([]);
-    }
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
-
-  useEffect(() => {
-    // State resets for folder/view/smart folder handled by URL navigation
-    setSelectedResource(null);
-    setSmartFolders([]);
-    loadFolders();
-    fetchTags().then(setAllTags).catch(() => {});
-    fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
-    // Load libraries in team mode
-    if (scopeType === 'team') {
-      fetchLibraries(scopeId).then((libs) => {
-        setLibraries(libs);
-        // Auto-redirect to first library if none selected (avoids empty state)
-        if (libs.length > 0 && !urlLibraryId && !section) {
-          navigate(resPath(`/resources/library/${libs[0].id}`), { replace: true });
-        }
-      }).catch(() => setLibraries([]));
-    } else {
-      setLibraries([]);
-    }
-  }, [loadFolders, scopeType, scopeId]);
-
-  // Load folder previews when child folders change
-  useEffect(() => {
-    if (childFolders.length === 0) {
-      setFolderPreviews({});
-      return;
-    }
-    const loadPreviews = async () => {
-      const previews: Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>> = {};
-      await Promise.all(
-        childFolders.map(async (f) => {
-          try {
-            previews[f.id] = await getFolderPreview(f.id);
-          } catch {
-            previews[f.id] = [];
-          }
-        })
-      );
-      setFolderPreviews(previews);
-    };
-    loadPreviews();
-  }, [childFolders]);
-
-  // ─── Build folder breadcrumb chain ────────────────────
-
-  useEffect(() => {
-    if (!selectedFolderId) {
-      setFolderChain([]);
-      return;
-    }
-
-    // Try to build chain from the already-loaded folders array
-    const buildChainFromFolders = (allFolders: Folder[]): Folder[] | null => {
-      const folder = allFolders.find((f) => f.id === selectedFolderId);
-      if (!folder) return null;
-      const chain: Folder[] = [];
-      let current: Folder | undefined = folder;
-      while (current) {
-        chain.unshift(current);
-        current = current.parent_id ? allFolders.find((f) => f.id === current!.parent_id) : undefined;
-      }
-      return chain;
-    };
-
-    const chain = buildChainFromFolders(folders);
-    if (chain && chain.length > 0) {
-      setFolderChain(chain);
-      return;
-    }
-
-    // Fallback: fetch folder chain directly from Supabase
-    let cancelled = false;
-    const fetchChain = async () => {
-      try {
-        const { supabase } = await import('../supabaseClient');
-        const result: Folder[] = [];
-        let currentId: string | null = selectedFolderId;
-        while (currentId) {
-          const { data, error } = await supabase
-            .from('folders')
-            .select('*')
-            .eq('id', currentId)
-            .single();
-          if (error || !data || cancelled) break;
-          result.unshift(data);
-          currentId = data.parent_id;
-        }
-        if (!cancelled) setFolderChain(result);
-      } catch {
-        // ignore
-      }
-    };
-    fetchChain();
-    return () => { cancelled = true; };
-  }, [selectedFolderId, folders]);
-
-  // ─── Load resources + child folders together ──────────
-  // Combined into a single effect so skeleton stays until BOTH complete.
-  // Prevents flash of files-without-folders when folders load slower.
-
-  useEffect(() => {
-    if (sidebarView !== 'resources') {
-      setChildFolders([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-
-    const loadAll = async () => {
-      try {
-        const [items, folders] = await Promise.all([
-          selectedSmartFolderId
-            ? fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId)
-            : fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId),
-          fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId),
-        ]);
-        if (!cancelled) {
-          setResources(items);
-          setChildFolders(folders);
-        }
-      } catch (err) {
-        console.error('[ResourcesView] Failed to load resources/folders:', err);
-        if (!cancelled) {
-          setResources([]);
-          setChildFolders([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    loadAll();
-    return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
-
-  // ─── Bulk load tag names for search ──────────────────
-  useEffect(() => {
-    const allItems = [...resources, ...downloadedResources];
-    const resourceIds = allItems
-      .map((item) => item.resource?.id)
-      .filter((id): id is string => !!id)
-      .map(String);
-    if (resourceIds.length === 0) {
-      setResourceTagNamesMap({});
-      return;
-    }
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    supabase
-      .from('resource_tags')
-      .select('resource_id, tag:tags(name)')
-      .in('resource_id', resourceIds)
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const map: Record<string, string> = {};
-        for (const row of data) {
-          const rid = String(row.resource_id);
-          const tag = row.tag as { name: string } | { name: string }[] | null;
-          const tagName = Array.isArray(tag) ? tag[0]?.name : tag?.name;
-          if (tagName) {
-            map[rid] = map[rid] ? `${map[rid]} ${tagName}` : tagName;
-          }
-        }
-        setResourceTagNamesMap(map);
-      });
-  }, [resources, downloadedResources]);
-
-  // ─── Load trashed resources ──────────────────────────
-
-  const loadTrashedResources = useCallback(async () => {
-    try {
-      const [items, folders] = await Promise.all([
-        fetchTrashedResources(scopeType, scopeId),
-        fetchTrashedFolders(scopeType, scopeId),
-      ]);
-      setTrashedResources(items);
-      setTrashedFolders(folders);
-    } catch {
-      setTrashedResources([]);
-      setTrashedFolders([]);
-    }
-  }, [scopeType, scopeId]);
-
-  useEffect(() => {
-    if (sidebarView !== 'recycle') return;
-    let cancelled = false;
-    setRecycleFolderId(null);
-    setLoading(true);
-    Promise.all([
-      fetchTrashedResources(scopeType, scopeId),
-      fetchTrashedFolders(scopeType, scopeId),
-    ])
-      .then(([items, folders]) => {
-        if (!cancelled) {
-          setTrashedResources(items);
-          setTrashedFolders(folders);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTrashedResources([]);
-          setTrashedFolders([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [sidebarView, scopeType, scopeId]);
-
-  // Load resource_items inside a trashed folder when navigating into it
-  useEffect(() => {
-    if (!recycleFolderId) {
-      setRecycleFolderItems([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    fetchFolderContents(recycleFolderId, true)
-      .then((items) => { if (!cancelled) setRecycleFolderItems(items); })
-      .catch((err) => { console.error('Failed to load trashed folder contents', err); if (!cancelled) setRecycleFolderItems([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [recycleFolderId]);
-
-  // ─── Load downloaded resources ─────────────────────
-
-  const loadDownloadedResources = useCallback(async () => {
-    try {
-      const items = await fetchDownloadedResources(scopeType, scopeId);
-      setDownloadedResources(items);
-    } catch {
-      setDownloadedResources([]);
-    }
-  }, [scopeType, scopeId]);
-
-  useEffect(() => {
-    if (sidebarView === 'downloads') {
-      setSelectedIds(new Set());
-      setLoading(true);
-      loadDownloadedResources().finally(() => setLoading(false));
-    }
-  }, [sidebarView, loadDownloadedResources]);
+  // Auto-close mobile sidebar on navigation
+  useEffect(() => { setMobileSidebarOpen(false); }, [location.pathname]);
 
   // ─── Focus new folder/library input ─────────────────
 
@@ -641,11 +226,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [creatingFolder]);
 
-  useEffect(() => {
-    if (creatingLibrary && newLibraryInputRef.current) {
-      newLibraryInputRef.current.focus();
-    }
-  }, [creatingLibrary]);
 
   // ─── Create folder handler ───────────────────────────
 
@@ -673,21 +253,10 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // ─── Create library handler ─────────────────────────
 
-  const handleCreateLibrary = async () => {
-    const trimmed = newLibraryName.trim();
-    if (!trimmed || savingLibrary) return;
-    setSavingLibrary(true);
-    try {
-      const lib = await createLibrary({ name: trimmed, scope_id: scopeId });
-      setNewLibraryName('');
-      setCreatingLibrary(false);
-      setLibraries((prev) => [...prev, lib]);
-      navigate(resPath(`/resources/library/${lib.id}`));
-    } catch {
-      // Keep input open on error
-    } finally {
-      setSavingLibrary(false);
-    }
+  const handleCreateLibrary = async (name: string) => {
+    const lib = await createLibrary({ name, scope_id: scopeId });
+    setLibraries((prev) => [...prev, lib]);
+    navigate(resPath(`/resources/library/${lib.id}`));
   };
 
   // ─── Upload handler ──────────────────────────────────
@@ -909,60 +478,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files);
   }, [handleUpload]);
 
-  // ─── Trash handlers ──────────────────────────────────
-
-  const handleTrash = useCallback(async (resourceId: string) => {
-    try {
-      const rid = String(resourceId);
-      const item = resources.find((r) => String(r.resource?.id) === rid);
-      await trashResource(rid, scopeType, scopeId, selectedFolderId);
-      // Optimistic removal
-      setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
-      if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
-      const filename = item?.resource?.filename || '';
-      addToast(t('resources.trashedNotification', { name: filename }), 'success');
-    } catch (err) { console.error('Failed to trash resource:', err); }
-  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t]);
-
-  const handleRestore = useCallback(async (resourceId: string) => {
-    try {
-      const rid = String(resourceId);
-      await restoreResource(rid);
-      setTrashedResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
-    } catch { /* ignore */ }
-  }, []);
-
-  const handlePermanentDelete = useCallback((resourceId: string) => {
-    setPendingPermanentDelete(resourceId);
-  }, []);
-
-  const confirmPermanentDelete = useCallback(async () => {
-    const ids = pendingBatchPermanentDelete || (pendingPermanentDelete ? [pendingPermanentDelete] : []);
-    const folderIds = pendingBatchPermanentDeleteFolders || [];
-    if (ids.length === 0 && folderIds.length === 0) return;
-    try {
-      for (const id of ids) {
-        await permanentDeleteResource(id);
-      }
-      for (const fid of folderIds) {
-        await permanentDeleteFolder(fid);
-      }
-      // Folder cascade deletes resources inside, so re-fetch trash to get accurate state
-      if (folderIds.length > 0) {
-        await loadTrashedResources();
-      } else {
-        setTrashedResources((prev) => prev.filter((r) => !ids.includes(String(r.resource?.id))));
-      }
-      setSelectedIds(new Set());
-      addToast(t('resources.permanentDeleteSuccess'), 'success');
-    } catch {
-      addToast(t('resources.permanentDeleteFailed'), 'error');
-    }
-    setPendingPermanentDelete(null);
-    setPendingBatchPermanentDelete(null);
-    setPendingBatchPermanentDeleteFolders(null);
-  }, [pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders, loadTrashedResources, addToast, t]);
-
   // ─── Resource selection & detail panel ───────────────
 
   const handleResourceClick = useCallback((item: ResourceItem) => {
@@ -974,7 +489,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       setSelectedResource(item);
       setSelectedFolder(null);
     }
-  }, [selectedResource]);
+  }, [selectedResource, setSelectedResource, setSelectedIds, setSelectedFolder]);
 
   // Double click: navigate to detail page
   const handleResourceDoubleClick = useCallback((item: ResourceItem) => {
@@ -983,105 +498,11 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     }
   }, [navigate, resPath]);
 
-  // Load tags when selected resource changes
-  useEffect(() => {
-    if (!selectedResource?.resource?.id) {
-      setSelectedResourceTags([]);
-      return;
-    }
-    setSelectedResourceTags([]);
-    fetchResourceTags(selectedResource.resource.id)
-      .then(setSelectedResourceTags)
-      .catch(() => setSelectedResourceTags([]));
-  }, [selectedResource?.resource?.id]);
-
-  // ESC to close panel / exit multi-select
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (multiSelectMode) {
-          setMultiSelectMode(false);
-          setSelectedIds(new Set());
-        }
-        setSelectedResource(null);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [multiSelectMode]);
-
-  // Auto-exit multi-select when no items selected
-  useEffect(() => {
-    if (multiSelectMode && selectedIds.size === 0) {
-      setMultiSelectMode(false);
-    }
-  }, [multiSelectMode, selectedIds.size]);
-
-  // Click outside to close upload dropdown
-  useEffect(() => {
-    if (!showUploadDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(e.target as Node)) {
-        setShowUploadDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showUploadDropdown]);
-
-  // Click outside to close new dropdown
-  useEffect(() => {
-    if (!showNewDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (newDropdownRef.current && !newDropdownRef.current.contains(e.target as Node)) {
-        setShowNewDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showNewDropdown]);
-
-  // Resize info panel handler
-  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingPanelRef.current = true;
-    resizeStartRef.current = { x: e.clientX, width: infoPanelWidth };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isResizingPanelRef.current) return;
-      const delta = resizeStartRef.current.x - ev.clientX;
-      const newWidth = Math.max(240, Math.min(600, resizeStartRef.current.width + delta));
-      setInfoPanelWidth(newWidth);
-    };
-
-    const onMouseUp = () => {
-      isResizingPanelRef.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [infoPanelWidth]);
-
-  // Debounce search
-  useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 300);
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery]);
-
   // ToolbarSearch callbacks for resources
   const handleResourceQueryChange = useCallback((q: string) => {
     setAiSearchMatchedMediaIds(null);
     setSearchQuery(q);
-  }, []);
+  }, [setSearchQuery]);
 
   const handleResourceAISearch = useCallback(async (q: string, mode: 'hybrid' | 'semantic') => {
     setIsAISearching(true);
@@ -1098,73 +519,18 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     } finally {
       setIsAISearching(false);
     }
-  }, []);
+  }, [setSearchQuery, setDebouncedSearch]);
 
   const handleResourceSearchClear = useCallback(() => {
     setSearchQuery('');
     setDebouncedSearch('');
     setAiSearchMatchedMediaIds(null);
-  }, []);
+  }, [setSearchQuery, setDebouncedSearch]);
 
-  // Clear search/filter on view/folder change
+  // Clear AI search filter on view/folder change
   useEffect(() => {
-    setSearchQuery('');
-    setDebouncedSearch('');
     setAiSearchMatchedMediaIds(null);
   }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
-
-  // Clear selection on view/folder/library change
-  useEffect(() => {
-    setSelectedResource(null);
-  }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
-
-  const handleAddTag = useCallback(async (tagId: string) => {
-    if (!selectedResource?.resource?.id) return;
-    try {
-      await addResourceTag(selectedResource.resource.id, tagId);
-      const updated = await fetchResourceTags(selectedResource.resource.id);
-      setSelectedResourceTags(updated);
-    } catch { /* ignore */ }
-  }, [selectedResource]);
-
-  const handleRemoveTag = useCallback(async (tagId: string) => {
-    if (!selectedResource?.resource?.id) return;
-    try {
-      await removeResourceTag(selectedResource.resource.id, tagId);
-      setSelectedResourceTags((prev) => prev.filter((t) => String(t.tag?.id) !== tagId));
-    } catch { /* ignore */ }
-  }, [selectedResource]);
-
-  const handleCreateTag = useCallback(async (name: string, color: string): Promise<Tag | null> => {
-    try {
-      const tag = await createTag({ name, color, type: 'user' });
-      setAllTags(prev => [...prev, tag]);
-      return tag;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
-    if (!selectedResource?.resource?.id) return;
-    const rid = String(selectedResource.resource.id);
-    try {
-      await updateResource(rid, data as Record<string, unknown>);
-      // Update selected resource panel
-      setSelectedResource(prev => prev ? {
-        ...prev,
-        resource: { ...prev.resource, ...data } as Resource,
-      } : null);
-      // Sync the main resources list so re-selecting shows fresh data
-      setResources(prev => prev.map(item =>
-        String(item.resource?.id) === rid
-          ? { ...item, resource: { ...item.resource!, ...data } as Resource }
-          : item
-      ));
-    } catch (err) {
-      console.error('Failed to update resource:', err);
-    }
-  }, [selectedResource]);
 
   // ─── Context menu handlers ─────────────────────────
 
@@ -1972,17 +1338,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
     return items;
   }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds, resourceTagNamesMap]);
 
-  // Set of resource IDs currently being transcoded (active transcode tasks)
-  const transcodingResourceIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const task of allUnifiedTasks) {
-      if (task.task_type === 'transcode' && (task.status === 'pending' || task.status === 'processing') && task.resource_id) {
-        ids.add(task.resource_id);
-      }
-    }
-    return ids;
-  }, [allUnifiedTasks]);
-
   const sortedItems = useMemo(() => {
     const items = [...filteredItems];
     switch (sortBy) {
@@ -2184,1080 +1539,152 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
   // ─── Render ──────────────────────────────────────────
 
-  const sidebarItemClass = (active: boolean) =>
-    `w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
-      active ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-    }`;
+
+  // ─── Shell props (sidebar + info panel) ─────────────
+
+  const [resSidebarCollapsed, setResSidebarCollapsed] = useState(false);
+
+  const sidebarProps = useMemo(() => ({
+    onSidebarDragOver: handleSidebarDragOver,
+    onSidebarDrop: handleSidebarDrop,
+    onCreateSmartFolder: () => setShowSmartFolderEditor(true),
+    onEditSmartFolder: (sf: SmartCollection) => setEditingSmartFolder(sf),
+    onDeleteSmartFolder: (id: string) => handleDeleteSmartFolder({ id } as any),
+    onCreateLibrary: handleCreateLibrary,
+    onNewFolder: () => setCreatingFolder(true),
+    onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => {
+      setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
+    },
+    collapsed: resSidebarCollapsed,
+    onToggleCollapse: () => setResSidebarCollapsed(v => !v),
+  }), [handleSidebarDragOver, handleSidebarDrop, handleDeleteSmartFolder, handleCreateLibrary, resSidebarCollapsed]);
+
+  const infoPanelProps = useMemo(() => ({
+    trashedFolderPreviews,
+    onRenameFolder: async (folderId: string | number, name: string) => {
+      try {
+        await renameFolder(folderId, name);
+        setSelectedFolder(prev => prev ? { ...prev, name } : null);
+        await Promise.all([loadFolders(), loadChildFolders()]);
+      } catch (err) {
+        console.error('Failed to rename folder:', err);
+      }
+    },
+  }), [trashedFolderPreviews, loadFolders, loadChildFolders]);
+
+  // ─── Render ──────────────────────────────────────────
 
   return (
-    <div className="flex h-full animate-in fade-in duration-300">
-      {/* ── Left panel: Desktop sidebar navigation (hidden on mobile — replaced by horizontal tabs) ── */}
-      <div className="hidden md:flex md:static w-56 shrink-0 border-r border-zinc-800/80 flex-col">
-        {/* Navigation */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {/* ── Top section: Shared / Recycle Bin ── */}
-          <button
-            onClick={() => navigate(resPath('/resources/shared'))}
-            className={sidebarItemClass(isSharedView)}
-          >
-            <Share2 size={15} className="shrink-0 opacity-70" />
-            <span>{t('resources.sharedManagement')}</span>
-          </button>
-
-          <button
-            onClick={() => navigate(resPath('/resources/recycle'))}
-            className={sidebarItemClass(isRecycleView)}
-          >
-            <Trash2 size={15} className="shrink-0 opacity-70" />
-            <span>{t('resources.recycleBin')}</span>
-          </button>
-
-          {/* ── Divider ── */}
-          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
-
-          {/* ── Main section: Team Libraries / Personal Resources ── */}
-          {scopeType === 'team' ? (
-            <>
-              {/* ── Library — collapsible parent item ── */}
-              <div className="flex items-center justify-between pr-1">
-                <button
-                  onClick={() => setLibrariesExpanded(!librariesExpanded)}
-                  className={sidebarItemClass(isResourcesView && !!selectedLibraryId && !librariesExpanded)}
-                >
-                  <BookOpen size={15} className="shrink-0 opacity-70" />
-                  <span className="flex-1 truncate">{t('resources.library')}</span>
-                  <ChevronDown
-                    size={12}
-                    className={`shrink-0 text-zinc-500 transition-transform duration-200 ${librariesExpanded ? '' : '-rotate-90'}`}
-                  />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setCreatingLibrary(true); setLibrariesExpanded(true); }}
-                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-                  title={t('resources.newLibrary')}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-
-              {/* Library children (indented with left border) */}
-              {librariesExpanded && (
-                <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
-                  {libraries.map((lib) => (
-                    <button
-                      key={lib.id}
-                      onClick={() => navigate(resPath(`/resources/library/${lib.id}`))}
-                      className={`group ${sidebarItemClass(isResourcesView && selectedLibraryId === String(lib.id))}`}
-                    >
-                      <BookOpen size={14} className="shrink-0 opacity-60" />
-                      <span className="truncate flex-1">{lib.name}</span>
-                    </button>
-                  ))}
-
-                  {/* Inline new library input */}
-                  {creatingLibrary && (
-                    <div className="flex items-center gap-1.5 px-2 py-1">
-                      <input
-                        ref={newLibraryInputRef}
-                        type="text"
-                        value={newLibraryName}
-                        onChange={(e) => setNewLibraryName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleCreateLibrary();
-                          if (e.key === 'Escape') {
-                            setCreatingLibrary(false);
-                            setNewLibraryName('');
-                          }
-                        }}
-                        onBlur={() => {
-                          if (!newLibraryName.trim()) {
-                            setCreatingLibrary(false);
-                            setNewLibraryName('');
-                          }
-                        }}
-                        placeholder={t('resources.libraryName')}
-                        disabled={savingLibrary}
-                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                      />
-                      {savingLibrary && (
-                        <Loader2 size={12} className="animate-spin text-zinc-400" />
-                      )}
-                    </div>
-                  )}
-
-                  {/* Create library button */}
-                  {!creatingLibrary && (
-                    <button
-                      onClick={() => setCreatingLibrary(true)}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
-                    >
-                      <Plus size={14} className="shrink-0 opacity-70" />
-                      <span>{t('resources.newLibrary')}</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              {/* Personal mode: My Downloads + My Resources */}
-              <button
-                onClick={() => navigate(resPath('/resources/downloads'))}
-                className={sidebarItemClass(isDownloadsView)}
-              >
-                <Download size={15} className="shrink-0 opacity-70" />
-                <span>{t('resources.downloads')}</span>
-              </button>
-
-              {/* My Resources with ➕ */}
-              <div className="flex items-center justify-between pr-1">
-                <button
-                  onClick={() => navigate(resPath('/resources'))}
-                  onDragOver={handleSidebarDragOver}
-                  onDrop={(e) => handleSidebarDrop(e, null)}
-                  className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
-                >
-                  <FolderOpen size={15} className="shrink-0 opacity-70" />
-                  <span>{t('resources.myResources')}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    navigate(resPath('/resources'));
-                    setCreatingFolder(true);
-                  }}
-                  className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-                  title={t('resources.newFolder')}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-
-
-            </>
-          )}
-
-          {/* ── Divider ── */}
-          <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
-
-          {/* ── Smart Folders — collapsible parent item ── */}
-          <div className="flex items-center justify-between pr-1">
-            <button
-              onClick={() => setSmartFoldersExpanded(!smartFoldersExpanded)}
-              className={sidebarItemClass(isResourcesView && !!selectedSmartFolderId && !smartFoldersExpanded)}
-            >
-              <Zap size={15} className="shrink-0 opacity-70" />
-              <span className="flex-1 truncate">{t('resources.smartFolders')}</span>
-              <ChevronDown
-                size={12}
-                className={`shrink-0 text-zinc-500 transition-transform duration-200 ${smartFoldersExpanded ? '' : '-rotate-90'}`}
-              />
-            </button>
-            <button
-              className="p-1 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors shrink-0"
-              title={t('smartFolder.createTitle')}
-              onClick={(e) => { e.stopPropagation(); setShowSmartFolderEditor(true); }}
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-
-          {/* Smart folder children (indented with left border) */}
-          {smartFoldersExpanded && (
-            <div className="ml-3 border-l border-zinc-700/40 pl-0.5">
-              {smartFolders.map((sf) => (
-                <button
-                  key={sf.id}
-                  onClick={() => navigate(resPath(`/resources/smart/${sf.id}`))}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setContextMenu({ x: e.clientX, y: e.clientY, type: 'smartFolder' as any, target: sf as any });
-                  }}
-                  className={`group ${sidebarItemClass(isResourcesView && selectedSmartFolderId === String(sf.id))}`}
-                >
-                  <Zap size={14} className="shrink-0 opacity-60" />
-                  <span className="truncate flex-1">{sf.name}</span>
-                  <span
-                    className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-600 hover:text-zinc-300 transition-all"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingSmartFolder(sf);
-                    }}
-                    title={t('smartFolder.editSmartFolder')}
-                  >
-                    <Pencil size={12} />
-                  </span>
-                </button>
-              ))}
-
-              {smartFolders.length === 0 && (
-                <button
-                  onClick={() => setShowSmartFolderEditor(true)}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-zinc-600 hover:text-zinc-400 rounded-lg transition-colors text-left"
-                >
-                  <Plus size={14} className="shrink-0 opacity-70" />
-                  <span>{t('smartFolder.createTitle')}</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Center panel: Main content ── */}
-      <div
-        className="flex-1 min-w-0 flex flex-col"
-      >
-        {/* Mobile breadcrumb navigation — replaces horizontal tabs */}
-        {!isDownloadsView && (
-          <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
-            {isMobileSearchOpen ? (
-              <div className="flex items-center w-full gap-2 animate-in slide-in-from-right-4 duration-200">
-                <Search size={16} className="text-zinc-400 shrink-0" />
-                <input
-                  ref={mobileSearchInputRef}
-                  autoFocus
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleResourceQueryChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && searchQuery.trim()) {
-                      handleResourceAISearch(searchQuery, 'hybrid');
-                    }
-                    if (e.key === 'Escape') {
-                      setIsMobileSearchOpen(false);
-                      handleResourceSearchClear();
-                    }
-                  }}
-                  placeholder={t('resources.searchFiles')}
-                  className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
-                />
-                <button
-                  onClick={() => {
-                    setIsMobileSearchOpen(false);
-                    handleResourceSearchClear();
-                  }}
-                  className="p-1 text-zinc-400 hover:text-zinc-200"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ) : (
-              <>
-                {(selectedFolderId || isRecycleView) && (
-                  <button
-                    onClick={() => {
-                      if (isRecycleView) {
-                        if (recycleFolderId) {
-                          setRecycleFolderId(null);
-                        } else {
-                          navigate(resPath('/resources'));
-                        }
-                      } else if (folderChain.length > 1) {
-                        const parentId = folderChain[folderChain.length - 2]?.id;
-                        navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
-                      } else {
-                        navigate(resPath('/resources'));
-                      }
-                    }}
-                    className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
-                  >
-                    <ChevronLeft size={22} />
-                  </button>
-                )}
-                <div className="flex-1 min-w-0">
-                  <Breadcrumb segments={breadcrumbSegments} />
-                </div>
-                {!isRecycleView && !isSharedView && (
-                  <button
-                    onClick={() => setIsMobileSearchOpen(true)}
-                    className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg transition-colors shrink-0"
-                  >
-                    <Search size={20} />
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
+    <>
+      <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
         {isDownloadsView ? (
           <DownloadsView />
         ) : (
-        <>
-        {/* Hidden file inputs — must be outside toolbar so they work on mobile too */}
-        {canUpload && (
           <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) {
-                  handleUpload(e.target.files);
-                  e.target.value = '';
-                }
-              }}
-            />
-            <input
-              ref={folderInputRef}
-              type="file"
-              // @ts-ignore - webkitdirectory is non-standard but widely supported
-              webkitdirectory=""
-              directory=""
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) {
-                  handleUpload(e.target.files);
-                  e.target.value = '';
-                }
-              }}
+            {/* Hidden file inputs — must be outside ResourceGrid so they persist */}
+            {canUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      handleUpload(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // @ts-ignore - webkitdirectory is non-standard but widely supported
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      handleUpload(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </>
+            )}
+            <ResourceGrid
+              breadcrumbSegments={breadcrumbSegments}
+              filteredFolders={filteredFolders}
+              sortedItems={sortedItems}
+              recycleSubFolders={recycleSubFolders}
+              trashedFolderPreviews={trashedFolderPreviews}
+              allSelectableIds={allSelectableIds}
+              filterOptions={filterOptions}
+              sortOptions={sortOptions}
+              activeFilters={activeFilters}
+              toggleFilter={toggleFilter}
+              clearFilters={() => setActiveFilters(new Set())}
+              currentSortLabel={currentSortLabel}
+              onQueryChange={handleResourceQueryChange}
+              onAISearch={handleResourceAISearch}
+              onSearchClear={handleResourceSearchClear}
+              isAISearching={isAISearching}
+              uploading={uploading}
+              overallProgress={upload.overallProgress}
+              fileInputRef={fileInputRef}
+              folderInputRef={folderInputRef}
+              canUploadDrop={canUpload}
+              dragOver={dragOver}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onResourceClick={handleResourceClick}
+              onResourceDoubleClick={handleResourceDoubleClick}
+              onFileContextMenu={handleFileContextMenu}
+              onFolderContextMenu={handleFolderContextMenu}
+              onEmptyAreaContextMenu={handleEmptyAreaContextMenu}
+              onCardClick={handleCardClick}
+              onToggleSelect={handleToggleSelect}
+              onDropOnFolder={handleDropOnFolder}
+              renamingResourceId={renamingResourceId}
+              renameValue={renameValue}
+              onRenameChange={setRenameValue}
+              onRenameResourceConfirm={handleRenameResourceConfirm}
+              onRenameResourceCancel={() => setRenamingResourceId(null)}
+              onStartRenameResource={(id, name) => { setRenamingResourceId(id); setRenameValue(name); }}
+              renamingFolderId={renamingFolderId}
+              renameFolderValue={renameFolderValue}
+              onRenameFolderChange={setRenameFolderValue}
+              onRenameFolderConfirm={handleRenameFolderConfirm}
+              onRenameFolderCancel={() => setRenamingFolderId(null)}
+              onStartRenameFolder={(id, name) => { setRenamingFolderId(id); setRenameFolderValue(name); }}
+              creatingFolder={creatingFolder}
+              newFolderName={newFolderName}
+              savingFolder={savingFolder}
+              newFolderInputRef={newFolderInputRef}
+              onNewFolderNameChange={setNewFolderName}
+              onCreateFolder={handleCreateFolder}
+              onCancelCreateFolder={() => { setCreatingFolder(false); setNewFolderName(''); }}
+              onStartCreateFolder={() => setCreatingFolder(true)}
+              onShowSmartFolderEditor={() => setShowSmartFolderEditor(true)}
+              getItemTouchHandlers={getItemTouchHandlers}
+              isTouchDropTarget={isTouchDropTarget}
+              touchDragState={touchDragState}
+              onEmptyAreaTouchStart={handleEmptyAreaTouchStart}
+              onEmptyAreaTouchMove={handleEmptyAreaTouchMove}
+              onEmptyAreaTouchEnd={handleEmptyAreaTouchEnd}
+              onTouchDragMove={handleTouchDragMove}
+              onTouchDragEnd={handleTouchDragEnd}
             />
           </>
         )}
-        {/* Toolbar — desktop only, mobile uses breadcrumb + floating search */}
-        <div
-          className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
-          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
-        >
-          {/* Single row: Breadcrumb + controls */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              {/* Mobile sidebar toggle — hidden, replaced by horizontal tabs */}
-              <Breadcrumb segments={breadcrumbSegments} />
-              {!loading && (
-                <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                  {filteredFolders.length + sortedItems.length} {t('resources.items')}
-                </span>
-              )}
-            </div>
+      </ResourcesShell>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Search box */}
-              <ToolbarSearch
-                onQueryChange={handleResourceQueryChange}
-                onAISearch={handleResourceAISearch}
-                onClear={handleResourceSearchClear}
-                isSearching={isAISearching}
-                placeholder={t('resources.searchFiles')}
-                className="w-48"
-              />
+      {/* ── Overlays (outside Shell — rendered as portals / fixed elements) ── */}
 
-              {/* Filter button */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowFilterPanel(!showFilterPanel)}
-                  className={`relative p-1.5 rounded-lg transition-colors ${
-                    activeFilters.size > 0
-                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                  }`}
-                  title={t('resources.filter')}
-                >
-                  <Filter size={14} />
-                  {activeFilters.size > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[9px] font-bold bg-indigo-500 text-white rounded-full px-0.5">
-                      {activeFilters.size}
-                    </span>
-                  )}
-                </button>
-                {showFilterPanel && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowFilterPanel(false)} />
-                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
-                      {filterOptions.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => toggleFilter(opt.value)}
-                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                            activeFilters.has(opt.value)
-                              ? 'bg-indigo-500/10 text-indigo-400'
-                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          {activeFilters.has(opt.value) && (
-                            <Check size={12} className="text-indigo-400" />
-                          )}
-                        </button>
-                      ))}
-                      {activeFilters.size > 0 && (
-                        <>
-                          <div className="mx-2.5 my-1.5 border-t border-zinc-700/60" />
-                          <button
-                            onClick={() => { setActiveFilters(new Set()); setShowFilterPanel(false); }}
-                            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                          >
-                            {t('resources.clearFilters')}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Sort dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSortMenu(!showSortMenu)}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    sortBy !== 'newest'
-                      ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                  }`}
-                  title={currentSortLabel}
-                >
-                  <ArrowUpDown size={14} />
-                </button>
-                {showSortMenu && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                    <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
-                      {sortOptions.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                            sortBy === opt.value
-                              ? 'bg-indigo-500/10 text-indigo-400'
-                              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          {sortBy === opt.value && (
-                            <Check size={12} className="text-indigo-400" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* View toggle */}
-              <button
-                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                title={viewMode === 'grid' ? t('resources.listView') : t('resources.gridView')}
-              >
-                {viewMode === 'grid' ? <LayoutList size={14} /> : <LayoutGrid size={14} />}
-              </button>
-
-              {/* Upload button (only on resources view) */}
-              {canUpload && (
-                <>
-                  {uploading ? (
-                    <button
-                      disabled
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
-                    >
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>{upload.overallProgress}%</span>
-                    </button>
-                  ) : (
-                    <div className="relative" ref={uploadDropdownRef}>
-                      <div className="flex">
-                        <button
-                          onClick={() => fileInputRef.current?.click()}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
-                        >
-                          <Upload size={14} />
-                          <span>{t('resources.upload')}</span>
-                        </button>
-                        <button
-                          onClick={() => setShowUploadDropdown(prev => !prev)}
-                          className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
-                        >
-                          <ChevronDown size={12} />
-                        </button>
-                      </div>
-                      {showUploadDropdown && (
-                        <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
-                          <button
-                            onClick={() => { fileInputRef.current?.click(); setShowUploadDropdown(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
-                          >
-                            <Upload size={12} />
-                            {t('resources.uploadFile')}
-                          </button>
-                          <button
-                            onClick={() => { folderInputRef.current?.click(); setShowUploadDropdown(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
-                          >
-                            <FolderOpen size={12} />
-                            {t('resources.uploadFolder')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* New dropdown button */}
-                  <div className="relative" ref={newDropdownRef}>
-                    <button
-                      onClick={() => setShowNewDropdown(prev => !prev)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
-                    >
-                      <Sparkles size={14} />
-                      <span>{t('resources.new')}</span>
-                      <ChevronDown size={12} />
-                    </button>
-                    {showNewDropdown && (
-                      <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
-                        {/* Group 1 — Containers */}
-                        <button
-                          onClick={() => { setCreatingFolder(true); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FolderPlus size={14} className="text-amber-400" />
-                          {t('resources.newFolder')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <LayoutGrid size={14} className="text-blue-400" />
-                          {t('resources.newProject')}
-                        </button>
-                        <button
-                          onClick={() => { setShowSmartFolderEditor(true); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FolderSearch size={14} className="text-purple-400" />
-                          {t('resources.newSmartFolder')}
-                        </button>
-                        {/* Divider */}
-                        <div className="border-t border-zinc-800 my-1" />
-                        {/* Group 2 — Documents */}
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <FileText size={14} className="text-emerald-400" />
-                          {t('resources.newDocument')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Table2 size={14} className="text-cyan-400" />
-                          {t('resources.newSpreadsheet')}
-                        </button>
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Presentation size={14} className="text-orange-400" />
-                          {t('resources.newPresentation')}
-                        </button>
-                        {/* Divider */}
-                        <div className="border-t border-zinc-800 my-1" />
-                        {/* Group 3 — Other */}
-                        <button
-                          onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
-                        >
-                          <Globe size={14} className="text-indigo-400" />
-                          {t('resources.newWebUrl')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Multi-select mode toolbar */}
-        {multiSelectMode && (
-          <div className="px-6 py-2 border-b border-zinc-800/80 bg-zinc-900/80 flex items-center gap-3">
-            <button
-              onClick={() => setSelectedIds(new Set(allSelectableIds))}
-              className="px-3 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-            >
-              {t('resources.selectAll')}
-            </button>
-            <button
-              onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); setSelectedResource(null); }}
-              className="px-3 py-1 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-            <span className="text-xs text-zinc-500">
-              {t('resources.multiSelectCount', {
-                total: filteredFolders.length + sortedItems.length,
-                selected: selectedIds.size,
-              })}
-            </span>
-          </div>
-        )}
-
-        {/* Content area */}
-        <div
-          className="flex-1 overflow-y-auto p-3 md:p-6 relative"
-          style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
-          onDragEnter={canUpload ? handleDragEnter : undefined}
-          onDragOver={canUpload ? handleDragOver : undefined}
-          onDragLeave={canUpload ? handleDragLeave : undefined}
-          onDrop={canUpload ? handleDrop : undefined}
-          onContextMenu={isResourcesView ? handleEmptyAreaContextMenu : undefined}
-          onTouchStart={handleEmptyAreaTouchStart}
-          onTouchMove={touchDragState.isDragging ? handleTouchDragMove : handleEmptyAreaTouchMove}
-          onTouchEnd={touchDragState.isDragging ? handleTouchDragEnd : handleEmptyAreaTouchEnd}
-          onClick={(e) => {
-            // Click on empty area → deselect all
-            const target = e.target as HTMLElement;
-            if (!target.closest('[data-context-item]')) {
-              if (selectedIds.size > 0 || multiSelectMode) {
-                setSelectedIds(new Set());
-                setMultiSelectMode(false);
-              }
-              setSelectedResource(null);
-              setSelectedFolder(null);
-            }
-          }}
-        >
-          {/* ── Drag-and-drop overlay ── */}
-          {dragOver && canUpload && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
-              <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
-              <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
-              <p className="text-sm text-zinc-400 mt-1">{t('resources.dropToUploadHint')}</p>
-            </div>
-          )}
-
-          {/* Recycle bin auto-cleanup notice */}
-          {isRecycleView && (
-            <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-zinc-800/50 border border-zinc-700/50 rounded-lg text-xs text-zinc-400">
-              <Clock size={14} className="shrink-0 text-zinc-500" />
-              <span>{t('resources.recycleBinAutoCleanup')}</span>
-            </div>
-          )}
-
-          {/* Shared view placeholder */}
-          {isSharedView && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-              <Share2 size={48} className="text-zinc-600 mb-4" />
-              <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
-            </div>
-          )}
-
-          {/* Recycle Bin — pinned at top of root on mobile */}
-          {!selectedFolderId && !selectedSmartFolderId && !selectedLibraryId && isResourcesView && !isRecycleView && (
-            <div className="md:hidden mb-3">
-              <button
-                onClick={() => navigate(resPath('/resources/recycle'))}
-                data-context-item
-                className="w-full flex items-center gap-3 px-4 py-3 bg-zinc-800/30 hover:bg-zinc-800/60 rounded-xl border border-zinc-700/30 transition-colors"
-              >
-                <div className="w-10 h-10 rounded-lg bg-zinc-700/40 flex items-center justify-center">
-                  <Trash2 size={18} className="text-zinc-400" />
-                </div>
-                <div className="flex-1 text-left">
-                  <span className="text-sm text-zinc-300 font-medium">Recycle Bin</span>
-                </div>
-                <ChevronRight size={16} className="text-zinc-600" />
-              </button>
-            </div>
-          )}
-
-          {/* Inline new folder input (content area) */}
-          {creatingFolder && !isSharedView && !isRecycleView && (
-            <div className="mb-4 flex items-center gap-2 max-w-sm">
-              <FolderPlus size={16} className="text-amber-400 shrink-0" />
-              <input
-                ref={newFolderInputRef}
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateFolder();
-                  if (e.key === 'Escape') {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                onBlur={() => {
-                  if (!newFolderName.trim()) {
-                    setCreatingFolder(false);
-                    setNewFolderName('');
-                  }
-                }}
-                placeholder={t('resources.folderName')}
-                disabled={savingFolder}
-                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-              />
-              {savingFolder && (
-                <Loader2 size={14} className="animate-spin text-zinc-400" />
-              )}
-            </div>
-          )}
-
-          {/* Resources / Recycle / Downloads content */}
-          {!isSharedView && (
-            loading ? (
-              viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-            ) : (filteredFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
-              <div className="space-y-5">
-                {/* Trashed folders in recycle bin */}
-                {isRecycleView && recycleSubFolders.length > 0 && (
-                  <div>
-                    {sortedItems.length > 0 && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
-                    )}
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                      {recycleSubFolders.map((folder) => (
-                        <FolderCard
-                          key={`trashed-folder-${folder.id}`}
-                          folder={folder}
-                          viewMode="grid"
-                          onClick={(e?: any) => {
-                            handleCardClick(`folder:${folder.id}`, e);
-                            if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                              setSelectedResource(null);
-                              if (selectedFolder?.id === folder.id) {
-                                setSelectedFolder(null);
-                              } else {
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
-                              }
-                            }
-                          }}
-                          onDoubleClick={() => setRecycleFolderId(String(folder.id))}
-                          previewItems={trashedFolderPreviews[String(folder.id)]}
-                          selectable
-                          isChecked={selectedIds.has(`folder:${folder.id}`)}
-                          onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                          forceShowCheckbox={multiSelectMode}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Folders section */}
-                {filteredFolders.length > 0 && (
-                  <div>
-                    {sortedItems.length > 0 && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
-                    )}
-                    {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                        {filteredFolders.map((folder) => {
-                          const folderNavigate = () => {
-                            if (selectedLibraryId) {
-                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                            } else {
-                              navigate(resPath(`/resources/folder/${folder.id}`));
-                            }
-                          };
-                          return (
-                          <div
-                            key={`folder-${folder.id}`}
-                            data-folder-id={String(folder.id)}
-                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
-                            {...getItemTouchHandlers('folder', folder)}
-                          >
-                          <FolderCard
-                            folder={folder}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                folderNavigate();
-                                return;
-                              }
-                              handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                                setSelectedResource(null);
-                                if (selectedFolder?.id === folder.id) {
-                                  setSelectedFolder(null);
-                                } else {
-                                  setSelectedFolder(folder);
-                                  setShowInfoPanel(true);
-                                }
-                              }
-                            }}
-                            onDoubleClick={folderNavigate}
-                            viewMode="grid"
-                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                            renaming={renamingFolderId === folder.id}
-                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                            onRenameChange={setRenameFolderValue}
-                            onRenameConfirm={handleRenameFolderConfirm}
-                            onRenameCancel={() => setRenamingFolderId(null)}
-                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
-                            selectable
-                            isChecked={selectedIds.has(`folder:${folder.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
-                            previewItems={folderPreviews[folder.id]}
-                          />
-                          </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {filteredFolders.map((folder) => {
-                          const folderNavigate = () => {
-                            if (selectedLibraryId) {
-                              navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
-                            } else {
-                              navigate(resPath(`/resources/folder/${folder.id}`));
-                            }
-                          };
-                          return (
-                          <div
-                            key={`folder-${folder.id}`}
-                            data-folder-id={String(folder.id)}
-                            className={isTouchDropTarget(String(folder.id)) ? 'ring-2 ring-indigo-500 rounded-xl transition-shadow' : ''}
-                            {...getItemTouchHandlers('folder', folder)}
-                          >
-                          <FolderCard
-                            folder={folder}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                folderNavigate();
-                                return;
-                              }
-                              handleCardClick(`folder:${folder.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                                setSelectedResource(null);
-                                if (selectedFolder?.id === folder.id) {
-                                  setSelectedFolder(null);
-                                } else {
-                                  setSelectedFolder(folder);
-                                  setShowInfoPanel(true);
-                                }
-                              }
-                            }}
-                            onDoubleClick={folderNavigate}
-                            viewMode="list"
-                            onContextMenu={(e) => handleFolderContextMenu(e, folder)}
-                            renaming={renamingFolderId === folder.id}
-                            renameValue={renamingFolderId === folder.id ? renameFolderValue : undefined}
-                            onRenameChange={setRenameFolderValue}
-                            onRenameConfirm={handleRenameFolderConfirm}
-                            onRenameCancel={() => setRenamingFolderId(null)}
-                            onStartRename={() => { setRenamingFolderId(folder.id); setRenameFolderValue(folder.name); }}
-                            selectable
-                            isChecked={selectedIds.has(`folder:${folder.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`folder:${folder.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            onDropItems={(ids) => handleDropOnFolder(folder.id, ids)}
-                            previewItems={folderPreviews[folder.id]}
-                          />
-                          </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Files section */}
-                {sortedItems.length > 0 && (
-                  <div>
-                    {(filteredFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
-                      <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
-                    )}
-                    {viewMode === 'list' && (
-                      <div className="flex items-center gap-4 px-4 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/60 mb-1">
-                        <div className="w-10" /> {/* thumbnail spacer */}
-                        <button onClick={() => setSortBy(sortBy === 'name-az' ? 'name-za' : 'name-az')} className="flex-1 text-left hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.listHeaderName')} {sortBy === 'name-az' ? '↑' : sortBy === 'name-za' ? '↓' : ''}
-                        </button>
-                        <span className="w-24 text-left">{t('resources.listHeaderType')}</span>
-                        <button onClick={() => setSortBy(sortBy === 'largest' ? 'smallest' : 'largest')} className="w-20 text-right hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.listHeaderSize')} {sortBy === 'largest' ? '↓' : sortBy === 'smallest' ? '↑' : ''}
-                        </button>
-                        <button onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')} className="w-28 text-right hover:text-zinc-300 transition-colors cursor-pointer">
-                          {t('resources.modifiedAt')} {sortBy === 'newest' ? '↓' : sortBy === 'oldest' ? '↑' : ''}
-                        </button>
-                      </div>
-                    )}
-                    {viewMode === 'grid' ? (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                        {sortedItems.map((item) => (
-                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
-                          <ResourceCard
-                            item={item}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                handleResourceDoubleClick(item);
-                                return;
-                              }
-                              handleCardClick(`item:${item.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                            }}
-                            onDoubleClick={() => handleResourceDoubleClick(item)}
-                            viewMode="grid"
-                            isSelected={selectedResource?.id === item.id}
-                            showRestoreAction={isRecycleView}
-                            onTrash={isRecycleView ? undefined : handleTrash}
-                            onRestore={isRecycleView ? handleRestore : undefined}
-                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                            renaming={renamingResourceId === item.id}
-                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                            onRenameChange={setRenameValue}
-                            onRenameConfirm={handleRenameResourceConfirm}
-                            onRenameCancel={() => setRenamingResourceId(null)}
-                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable
-                            isChecked={selectedIds.has(`item:${item.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            selectedIds={selectedIds}
-                            compositeId={`item:${item.id}`}
-                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
-                          />
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {sortedItems.map((item) => (
-                          <div key={item.id} {...getItemTouchHandlers('file', item)}>
-                          <ResourceCard
-                            item={item}
-                            onClick={(e?: any) => {
-                              if (isMobileDevice) {
-                                handleResourceDoubleClick(item);
-                                return;
-                              }
-                              handleCardClick(`item:${item.id}`, e);
-                              if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) handleResourceClick(item);
-                            }}
-                            onDoubleClick={() => handleResourceDoubleClick(item)}
-                            viewMode="list"
-                            isSelected={selectedResource?.id === item.id}
-                            showRestoreAction={isRecycleView}
-                            onTrash={isRecycleView ? undefined : handleTrash}
-                            onRestore={isRecycleView ? handleRestore : undefined}
-                            onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
-                            onContextMenu={!isRecycleView ? (e) => handleFileContextMenu(e, item) : undefined}
-                            renaming={renamingResourceId === item.id}
-                            renameValue={renamingResourceId === item.id ? renameValue : undefined}
-                            onRenameChange={setRenameValue}
-                            onRenameConfirm={handleRenameResourceConfirm}
-                            onRenameCancel={() => setRenamingResourceId(null)}
-                            onStartRename={() => { setRenamingResourceId(item.id); setRenameValue(item.resource?.filename ?? ""); }}
-                            selectable
-                            isChecked={selectedIds.has(`item:${item.id}`)}
-                            onToggleSelect={(e) => handleToggleSelect(`item:${item.id}`, e)}
-                            forceShowCheckbox={multiSelectMode}
-                            selectedIds={selectedIds}
-                            compositeId={`item:${item.id}`}
-                            isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
-                          />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* Empty states */
-              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                {isRecycleView ? (
-                  <>
-                    <Trash2 size={48} className="text-zinc-700 mb-4" />
-                    <p className="text-zinc-500 text-sm">{t('resources.recycleBinEmpty')}</p>
-                  </>
-                ) : (
-                  <>
-                    <FolderOpen size={48} className="text-zinc-700 mb-4" />
-                    <p className="text-zinc-500 text-sm">{t('resources.noResources')}</p>
-                    <p className="text-zinc-600 text-xs mt-1">{t('resources.noResourcesHint')}</p>
-                  </>
-                )}
-              </div>
-            )
-          )}
-        </div>
-        </>
-        )}
-      </div>
-
-      {/* ── Right panel: Fixed overlay, from TopBar bottom to viewport bottom ── */}
-      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && (
-        <div
-          className={`fixed top-14 bottom-0 right-0 z-40 flex bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
-            showInfoPanel ? 'translate-x-0' : 'translate-x-full'
-          }`}
-          style={{ width: `min(100vw, ${infoPanelWidth}px)` }}
-        >
-          {/* Collapse tab — attached to left edge of panel */}
-          <button
-            onClick={() => setShowInfoPanel(false)}
-            className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
-            title={t('resources.toggleInfoPanel')}
-          >
-            <ChevronRight size={20} />
-          </button>
-
-          {/* Resize handle — left edge blue line on hover */}
-          <div
-            onMouseDown={handlePanelResizeStart}
-            className="w-1 h-full cursor-col-resize shrink-0 hover:bg-blue-500 active:bg-blue-500 transition-colors"
-          />
-
-          {/* Panel content */}
-          {selectedFolder ? (
-            <FolderInfoPanel
-              folder={selectedFolder}
-              previewItems={
-                isRecycleView
-                  ? trashedFolderPreviews[String(selectedFolder.id)]
-                  : folderPreviews[selectedFolder.id]
-              }
-              readOnly={isRecycleView}
-              onClose={() => setSelectedFolder(null)}
-              onRename={async (name) => {
-                try {
-                  await renameFolder(selectedFolder.id, name);
-                  setSelectedFolder(prev => prev ? { ...prev, name } : null);
-                  await Promise.all([loadFolders(), loadChildFolders()]);
-                } catch (err) {
-                  console.error('Failed to rename folder:', err);
-                }
-              }}
-            />
-          ) : selectedResource?.resource ? (
-            <ResourceInfoPanel
-              resource={selectedResource.resource}
-              allTags={allTags}
-              assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
-              folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
-              readOnly={isRecycleView}
-              onClose={() => setSelectedResource(null)}
-              onAddTag={handleAddTag}
-              onRemoveTag={handleRemoveTag}
-              onCreate={handleCreateTag}
-              onUpdate={handleResourceUpdate}
-            />
-          ) : null}
-        </div>
-      )}
-
-      {/* Expand tab — fixed to viewport right edge, visible when panel is closed */}
-      {!isDownloadsView && (selectedResource?.resource || selectedFolder) && !showInfoPanel && (
-        <button
-          onClick={() => setShowInfoPanel(true)}
-          className="fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
-          title={t('resources.toggleInfoPanel')}
-        >
-          <ChevronLeft size={20} />
-        </button>
-      )}
-
-      {/* ── Batch Selection Toolbar ── */}
+      {/* Batch Selection Toolbar */}
       {selectedIds.size > 0 && !isDownloadsView && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
           <span className="text-sm text-zinc-300 font-medium">
@@ -3383,7 +1810,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         </div>
       )}
 
-      {/* ── Context Menu ── */}
+      {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
@@ -3401,7 +1828,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         onChange={handleVersionFileSelected}
       />
 
-      {/* ── Smart Folder Editor (Create) ── */}
+      {/* Smart Folder Editor (Create) */}
       {showSmartFolderEditor && (
         <SmartFolderEditor
           onSave={handleCreateSmartFolder}
@@ -3409,7 +1836,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         />
       )}
 
-      {/* ── Smart Folder Editor (Edit) ── */}
+      {/* Smart Folder Editor (Edit) */}
       {editingSmartFolder && (
         <SmartFolderEditor
           initialName={editingSmartFolder.name}
@@ -3419,7 +1846,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         />
       )}
 
-      {/* ── Share Modal ── */}
+      {/* Share Modal */}
       {shareTarget && (
         <ShareModal
           isOpen={true}
@@ -3429,7 +1856,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         />
       )}
 
-      {/* ── Folder Picker Modal (Copy/Move) ── */}
+      {/* Folder Picker Modal (Copy/Move) */}
       {folderPickerMode && (
         <FolderPickerModal
           isOpen={true}
@@ -3458,7 +1885,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         />
       )}
 
-      {/* ── Duplicate File Alert ── */}
+      {/* Duplicate File Alert */}
       {duplicateAlert && (
         <DuplicateFileAlert
           file={duplicateAlert.file}
@@ -3474,7 +1901,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         />
       )}
 
-      {/* ── Permanent Delete Confirmation Dialog ── */}
+      {/* Permanent Delete Confirmation Dialog */}
       {(pendingPermanentDelete || pendingBatchPermanentDelete || pendingBatchPermanentDeleteFolders) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -3511,9 +1938,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         </div>
       )}
 
-      {/* Mobile floating search removed — now integrated into breadcrumb bar */}
-
-      {/* ── Touch drag preview — portal to body ── */}
+      {/* Touch drag preview — portal to body */}
       {touchDragState.isDragging && touchDragState.dragPosition && createPortal(
         <div
           className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-zinc-800/90 backdrop-blur-sm border border-zinc-600 rounded-lg px-3 py-2 shadow-2xl"
@@ -3529,7 +1954,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
         </div>,
         document.body,
       )}
-
-    </div>
+    </>
   );
 };

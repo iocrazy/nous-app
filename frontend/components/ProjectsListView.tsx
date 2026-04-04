@@ -16,13 +16,14 @@ interface ProjectsListViewProps {
   onProjectSelect: (project: Project) => void;
   onCreateProject: () => void;
   onProjectsChange?: () => void;
+  title?: string;
 }
 
 type FilterTab = 'all' | 'internal' | 'external';
 type SortKey = 'updated_at' | 'created_at' | 'name';
 
 export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
-  projects, onProjectSelect, onCreateProject, onProjectsChange
+  projects, onProjectSelect, onCreateProject, onProjectsChange, title: externalTitle
 }) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterTab>('all');
@@ -139,7 +140,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-white">{t('mediatrack.projects', 'Projects')}</h1>
+        <h1 className="text-2xl font-bold text-white">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
@@ -249,15 +250,16 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
       {/* Grid view */}
       {filteredProjects.length > 0 && viewMode === 'grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="flex flex-wrap gap-4">
           {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onClick={() => onProjectSelect(project)}
-              onToggleStar={(e) => handleToggleStar(e, project)}
-              onContextMenu={(e) => handleContextMenu(e, project)}
-            />
+            <div key={project.id} className="w-[260px]">
+              <ProjectCard
+                project={project}
+                onClick={() => onProjectSelect(project)}
+                onToggleStar={(e) => handleToggleStar(e, project)}
+                onContextMenu={(e) => handleContextMenu(e, project)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -290,6 +292,9 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
                       <span className="text-sm text-white font-medium">{project.name}</span>
+                      {project.display_code && (
+                        <span className="text-[11px] font-mono text-zinc-500">{project.display_code}</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3">

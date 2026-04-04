@@ -24,6 +24,7 @@ class StoryboardProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     settings_json: Optional[Dict[str, Any]] = None
+    project_id: Optional[int] = None
 
 
 class StoryboardProjectUpdate(BaseModel):
@@ -44,6 +45,8 @@ class StoryboardProjectResponse(BaseModel):
     description: Optional[str] = None
     status: str
     settings_json: Optional[Dict[str, Any]] = None
+    project_id: Optional[int] = None
+    display_code: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -38,7 +38,7 @@ const MenuItemGroup = Menu.ItemGroup
 
 const allMenuKeys = [
   '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits',
-  '/monitoring', '/search', '/audit-logs', '/request-logs', '/alerts',
+  '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
   '/api-keys', '/settings', '/transcode-config',
 ]
 
@@ -109,7 +109,7 @@ export function AdminLayout() {
             <MenuItem key="/monitoring"><IconCompass />Monitoring</MenuItem>
             <MenuItem key="/search"><IconSearch />Search</MenuItem>
             <MenuItem key="/audit-logs"><IconFile />Audit Logs</MenuItem>
-            <MenuItem key="/request-logs"><IconCode />Request Logs</MenuItem>
+            <MenuItem key="/logs"><IconCode />Logs</MenuItem>
             <MenuItem key="/alerts"><IconNotification />Alerts</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="system" title="System">

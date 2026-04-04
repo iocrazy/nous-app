@@ -4,8 +4,8 @@
 业务逻辑层模块
 """
 
-from app.services.douyin_analysis import DouyinAnalysis
-from app.services.douyin_parser import DouyinParser
+from app.services.drissionpage_parser import DrissionPageParser
+from app.services.douyin_formatter import DouyinFormatter
 from app.services.downloader import DownloaderService
 from app.services.embedding_service import EmbeddingService
 from app.services.supabase_auth_service import (
@@ -19,8 +19,8 @@ from app.services.visual_analysis_service import (
 )
 
 __all__ = [
-    "DouyinAnalysis",
-    "DouyinParser",
+    "DrissionPageParser",
+    "DouyinFormatter",
     "DownloaderService",
     "MediaService",
     "SupabaseAuthService",

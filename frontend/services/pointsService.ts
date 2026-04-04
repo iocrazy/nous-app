@@ -8,9 +8,8 @@
  */
 
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 import { TeamQuota, PointTransaction, PointPricing, QuotaCheck } from '../types';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
 
 /**
  * Fetch the points balance and quota for a team.
@@ -20,7 +19,7 @@ export const fetchPointsBalance = async (teamId?: string): Promise<TeamQuota> =>
   if (teamId) params.set('team_id', teamId);
 
   const query = params.toString();
-  const url = `${API_BASE}/api/v1/points/balance${query ? `?${query}` : ''}`;
+  const url = `${getApiUrl()}/api/v1/points/balance${query ? `?${query}` : ''}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -54,7 +53,7 @@ export const fetchPointsTransactions = async (
   params.set('offset', String(offset));
   if (type) params.set('type', type);
 
-  const url = `${API_BASE}/api/v1/points/transactions?${params.toString()}`;
+  const url = `${getApiUrl()}/api/v1/points/transactions?${params.toString()}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -77,7 +76,7 @@ export const fetchPointsTransactions = async (
  * Fetch the pricing table for all action types.
  */
 export const fetchPointsPricing = async (): Promise<PointPricing[]> => {
-  const url = `${API_BASE}/api/v1/points/pricing`;
+  const url = `${getApiUrl()}/api/v1/points/pricing`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -104,7 +103,7 @@ export const fetchUsageStats = async (teamId?: string): Promise<any> => {
   if (teamId) params.set('team_id', teamId);
 
   const query = params.toString();
-  const url = `${API_BASE}/api/v1/points/usage-stats${query ? `?${query}` : ''}`;
+  const url = `${getApiUrl()}/api/v1/points/usage-stats${query ? `?${query}` : ''}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -136,7 +135,7 @@ export const checkQuota = async (
   params.set('count', String(count));
   if (teamId) params.set('team_id', teamId);
 
-  const url = `${API_BASE}/api/v1/points/check?${params.toString()}`;
+  const url = `${getApiUrl()}/api/v1/points/check?${params.toString()}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -163,7 +162,7 @@ export const adjustPoints = async (
   amount: number,
   description: string
 ): Promise<{ new_balance: number }> => {
-  const url = `${API_BASE}/api/v1/points/admin/adjust`;
+  const url = `${getApiUrl()}/api/v1/points/admin/adjust`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {

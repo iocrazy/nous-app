@@ -249,6 +249,8 @@ export function useNotionTable<T>(config: UseNotionTableConfig<T>) {
     manualSorting: true,
     manualFiltering: true,
     pageCount: Math.ceil(total / pageSize),
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
   })
 
   // --- Toolbar props ---

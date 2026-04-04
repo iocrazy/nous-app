@@ -102,7 +102,7 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 unified_task_id = run_async(tracker.create(
                     user_id=user_id,
                     task_type="transcode",
-                    title=resource_title,
+                    title=f"Transcode {resource_title}",
                     subtitle="Preparing...",
                     resource_id=resource_id,
                     celery_task_id=task_id,
@@ -118,17 +118,32 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
 
         svc = TranscodeService()
 
-        # Build progress callback if we have a unified task
+        # Build progress callback — Redis pub/sub for real-time, NOT Supabase
         on_progress = None
-        if unified_task_id:
+        if unified_task_id and user_id:
+            import json as _json
+            import time as _time
+            from app.core.redis import get_sync_redis
+
+            _redis = get_sync_redis()
+            _channel = f"task_progress:{user_id}"
+            _last_pct = [0]
+
             async def _report_progress(progress: int, subtitle: str = ""):
+                pct = min(max(int(progress), 0), 99)
+                # Publish to Redis for WebSocket delivery (every update)
                 try:
-                    from app.services.unified_task_manager import get_task_manager
-                    await get_task_manager().update_progress(
-                        unified_task_id, progress, subtitle=subtitle,
-                    )
+                    _redis.publish(_channel, _json.dumps({
+                        "unified_task_id": unified_task_id,
+                        "celery_task_id": task_id,
+                        "status": "transcoding",
+                        "percent": pct,
+                        "speed": "",
+                        "subtitle": subtitle,
+                    }))
                 except Exception:
                     pass
+                _last_pct[0] = pct
 
             on_progress = _report_progress
 
@@ -267,25 +282,26 @@ def maybe_trigger_transcode(
 
             file_size_mb = file_path.stat().st_size / (1024 * 1024)
 
-            # H.264 fast path: copy-only segmentation has no CPU cost, bypass gating
+            # Check minimum file size (applies to ALL codecs, including H.264)
             video_codec = _probe_codec_sync(str(file_path))
             is_h264 = video_codec in ("h264",)
+            min_size = settings.TRANSCODE_MIN_SIZE_MB
 
-            if is_h264:
-                logger.info(
-                    f"[Transcode] H.264 detected — fast segment mode, "
-                    f"bypass gating ({file_size_mb:.0f}MB) for version {version_id}"
-                )
-            else:
+            if file_size_mb < min_size:
                 duration_sec = _probe_duration_sync(str(file_path))
-                min_size = settings.TRANSCODE_MIN_SIZE_MB
-                if file_size_mb < min_size and (duration_sec or 0) < MIN_DURATION_SEC:
+                if (duration_sec or 0) < MIN_DURATION_SEC:
                     logger.info(
-                        f"[Transcode] Skip: non-H.264 ({video_codec}) too small "
-                        f"({file_size_mb:.0f}MB, {duration_sec or '?'}s) "
+                        f"[Transcode] Skip: {video_codec} too small "
+                        f"({file_size_mb:.0f}MB < {min_size}MB, {duration_sec or '?'}s) "
                         f"for version {version_id}"
                     )
                     return
+
+            if is_h264:
+                logger.info(
+                    f"[Transcode] H.264 detected — fast segment mode "
+                    f"({file_size_mb:.0f}MB) for version {version_id}"
+                )
 
                 logger.info(
                     f"[Transcode] Gating passed: {file_size_mb:.0f}MB, "

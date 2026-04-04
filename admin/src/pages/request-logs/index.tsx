@@ -253,7 +253,7 @@ function RequestLogsTab() {
       const statusFilter = filters.find((f) => f.field === 'status_code')
       const dateParams = buildDateParams(filters, 'timestamp')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs', {
+      const { data } = await apiClient.get('/api/v1/admin/logs', {
         params: {
           page,
           pageSize,
@@ -498,7 +498,7 @@ function FrontendErrorsTab() {
       const errorTypeFilter = filters.find((f) => f.field === 'error_type')
       const dateParams = buildDateParams(filters, 'created_at')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs/frontend-errors', {
+      const { data } = await apiClient.get('/api/v1/admin/logs/frontend-errors', {
         params: {
           page,
           pageSize,
@@ -614,8 +614,6 @@ function FrontendErrorsTab() {
 // ============================================
 
 function ApplicationLogsTab() {
-  const [detailModal, setDetailModal] = useState<AppLog | null>(null)
-
   // Live Tail state
   const [liveTail, setLiveTail] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -657,35 +655,25 @@ function ApplicationLogsTab() {
       ),
     },
     {
-      key: 'module',
-      header: 'Location',
-      type: 'text',
-      filterable: true,
-      size: 280,
-      cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
-          {[row.module, row.function, row.line].filter(Boolean).join(':')}
-        </Typography.Text>
-      ),
-    },
-    {
       key: 'message',
       header: 'Message',
       type: 'text',
       filterable: true,
       required: true,
+      size: 600,
+      minSize: 300,
       cell: (row) => {
         const shortModule = row.module
           ? row.module.split('.').pop() || row.module
           : ''
         return (
-          <Space size={4}>
+          <Space size={4} style={{ flexWrap: 'nowrap', maxWidth: '100%' }}>
             {shortModule && (
               <Tag size="small" color="arcoblue" style={{ fontSize: 11, flexShrink: 0 }}>
                 {shortModule}
               </Tag>
             )}
-            <Typography.Text style={{ fontSize: 13 }} ellipsis>
+            <Typography.Text style={{ fontSize: 13, wordBreak: 'break-all' }} ellipsis={{ rows: 2 }}>
               {row.message}
             </Typography.Text>
           </Space>
@@ -693,21 +681,52 @@ function ApplicationLogsTab() {
       },
     },
     {
-      key: 'actions',
-      header: '',
+      key: 'module',
+      header: 'Location',
       type: 'text',
-      required: true,
-      size: 48,
+      filterable: true,
+      size: 200,
       cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
+        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+          {[row.module, row.function, row.line].filter(Boolean).join(':')}
+        </Typography.Text>
       ),
     },
   ], [])
+
+  const expandedRowRender = useCallback((row: AppLog) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Level', value: <Tag color={getLogLevelColor(row.level)} size="small">{row.level}</Tag> },
+          { label: 'Module', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.module || '-'}</span> },
+          { label: 'Function', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.function || '-'}</span> },
+          { label: 'Line', value: row.line ?? '-' },
+          { label: 'File', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.file_path || '-'}</span> },
+          { label: 'Time', value: formatDateTime(row.logged_at) },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>Message</Typography.Text>
+        <pre style={preStyle}>{row.message}</pre>
+      </div>
+      {row.exception && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block', color: 'var(--color-danger-6)' }}>Exception</Typography.Text>
+          <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>{row.exception}</pre>
+        </div>
+      )}
+      {row.extra && Object.keys(row.extra).length > 0 && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>Extra</Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.extra, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  ), [])
 
   const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<AppLog>({
     tableKey: 'app-logs',
@@ -719,7 +738,7 @@ function ApplicationLogsTab() {
       const moduleFilter = filters.find((f) => f.field === 'module')
       const dateParams = buildDateParams(filters, 'logged_at')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs/app-logs', {
+      const { data } = await apiClient.get('/api/v1/admin/logs/app-logs', {
         params: {
           page,
           pageSize,
@@ -829,69 +848,6 @@ function ApplicationLogsTab() {
     </Space>
   )
 
-  // Detail modal (shared between both modes)
-  const detailModalElement = (
-    <Modal
-      title="Application Log Details"
-      visible={!!detailModal}
-      onCancel={() => setDetailModal(null)}
-      footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-      style={{ width: 720 }}
-    >
-      {detailModal && (
-        <>
-          <Descriptions
-            column={2}
-            data={[
-              { label: 'Time', value: formatDateTime(detailModal.logged_at) },
-              {
-                label: 'Level',
-                value: (
-                  <Tag color={getLogLevelColor(detailModal.level)}>
-                    {detailModal.level}
-                  </Tag>
-                ),
-              },
-              { label: 'Module', value: detailModal.module || '-' },
-              { label: 'Function', value: detailModal.function || '-' },
-              { label: 'Line', value: detailModal.line ?? '-' },
-              { label: 'File', value: detailModal.file_path || '-' },
-            ]}
-            style={{ marginBottom: 16 }}
-          />
-
-          <div style={{ marginBottom: 12 }}>
-            <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-              Message
-            </Typography.Text>
-            <pre style={preStyle}>{detailModal.message}</pre>
-          </div>
-
-          {detailModal.exception && (
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
-                Exception
-              </Typography.Text>
-              <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>
-                {detailModal.exception}
-              </pre>
-            </div>
-          )}
-
-          {detailModal.extra && Object.keys(detailModal.extra).length > 0 && (
-            <div>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                Extra
-              </Typography.Text>
-              <pre style={preStyle}>
-                {JSON.stringify(detailModal.extra, null, 2)}
-              </pre>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  )
 
   // When liveTail is on, render a simple live tail view instead of NotionTable
   if (liveTail) {
@@ -957,9 +913,6 @@ function ApplicationLogsTab() {
                             </Typography.Text>
                           </Space>
                         </td>
-                        <td>
-                          <Button type="text" size="mini" icon={<IconEye />} onClick={() => setDetailModal(log)} />
-                        </td>
                       </tr>
                     ))
                   )}
@@ -968,24 +921,21 @@ function ApplicationLogsTab() {
             </div>
           </div>
         </Card>
-        {detailModalElement}
       </>
     )
   }
 
   return (
-    <>
-      <NotionTable<AppLog>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={liveTailControls}
-        emptyText="No application logs found"
-      />
-      {detailModalElement}
-    </>
+    <NotionTable<AppLog>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={liveTailControls}
+      emptyText="No application logs found"
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 
@@ -997,7 +947,7 @@ export function RequestLogs() {
   return (
     <div>
       <Typography.Title heading={4} style={{ marginTop: 0, marginBottom: 16 }}>
-        Request Logs
+        Logs
       </Typography.Title>
       <Tabs defaultActiveTab="requests" type="card-gutter" lazyload destroyOnHide>
         <Tabs.TabPane key="requests" title="Request Logs">

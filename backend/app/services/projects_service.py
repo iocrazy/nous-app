@@ -32,20 +32,32 @@ class ProjectsService:
     # Projects
     # ------------------------------------------------------------------ #
 
-    async def get_projects_with_counts(self, user_id: str) -> list:
+    async def get_projects_with_counts(
+        self, user_id: str, team_id: str | None = None
+    ) -> list:
         """
-        Get all projects for a user with file counts attached.
+        Get projects for a user with file counts attached.
 
         Args:
             user_id: UUID of the authenticated user.
+            team_id: If provided, filter by team. If None, return all.
 
         Returns:
             List of project dicts, each with a ``file_count`` key.
         """
-        projects = await self.repo.get_user_projects(user_id)
-        for p in projects:
-            p["file_count"] = await self.repo.get_project_file_count(p["id"])
-        return projects
+        import asyncio
+
+        projects = await self.repo.get_user_projects(user_id, team_id=team_id)
+        if not projects:
+            return []
+
+        counts = await asyncio.gather(
+            *(self.repo.get_project_file_count(p["id"]) for p in projects)
+        )
+        return [
+            {**p, "file_count": count}
+            for p, count in zip(projects, counts)
+        ]
 
     async def create_project(self, user_id: str, data: dict) -> dict:
         """
@@ -59,7 +71,22 @@ class ProjectsService:
             Created project dict.
         """
         data["owner_id"] = user_id
-        return await self.repo.create_project(data)
+        project = await self.repo.create_project(data)
+
+        # Generate display code if project belongs to a team
+        team_id = project.get("team_id")
+        if team_id:
+            try:
+                from app.services.display_code_service import generate_display_code
+
+                display_code = await generate_display_code(int(team_id), "P")
+                project = await self.repo.update_project(
+                    project["id"], {"display_code": display_code}
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to generate display_code: {exc}")
+
+        return project
 
     async def update_project(self, project_id: str, user_id: str, data: dict) -> dict:
         """

@@ -254,32 +254,12 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       {/* Main content */}
       <div className="flex-1 min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onBack}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <h1 className="text-2xl font-bold text-white">{project.name}</h1>
-            {project.announcement && (
-              <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded-lg max-w-[200px] truncate">
-                {project.announcement}
-              </span>
-            )}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-100">Files</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">{filteredAndSorted.length} {t('projects.toolbar.items', 'items')}</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Member avatars placeholder */}
-            <div className="flex items-center -space-x-2">
-              <div className="w-7 h-7 rounded-full bg-indigo-500/30 flex items-center justify-center text-[10px] text-indigo-300 border-2 border-zinc-900">
-                <Users size={12} />
-              </div>
-              <button className="w-7 h-7 rounded-full bg-zinc-800 border-2 border-zinc-900 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors">
-                <Plus size={12} />
-              </button>
-            </div>
-
             {/* Search */}
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -313,9 +293,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-4">
-          <span className="text-xs text-zinc-500">
-            {filteredAndSorted.length} {t('projects.toolbar.items', 'items')}
-          </span>
+          <div></div>
           <div className="flex items-center gap-2">
             {/* Sort */}
             <select

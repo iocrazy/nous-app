@@ -42,7 +42,7 @@ export default function App() {
               <Route path="/monitoring" element={<MonitoringDashboard />} />
               <Route path="/search" element={<GlobalSearch />} />
               <Route path="/audit-logs" element={<AuditLogList />} />
-              <Route path="/request-logs" element={<RequestLogs />} />
+              <Route path="/logs" element={<RequestLogs />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
               <Route path="/settings" element={<Settings />} />

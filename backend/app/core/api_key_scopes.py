@@ -57,46 +57,46 @@ LEGACY_SCOPE_MAP = {
 # Format: (method, path_pattern): [allowed_scopes]
 # Request only needs to match one scope for access
 ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
-    # Video fetch
-    ("POST", "/videos/fetch"): [
+    # Media fetch
+    ("POST", "/media/fetch"): [
         ApiKeyScope.VIDEOS_FETCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    ("POST", "/videos/fetch/batch"): [
+    ("POST", "/media/fetch/batch"): [
         ApiKeyScope.VIDEOS_FETCH_BATCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    # Video read
-    ("GET", "/videos/videos"): [
+    # Media read
+    ("GET", "/media"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    ("GET", "/videos/videos/{platform_id}"): [
+    ("GET", "/media/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
-    # Video write
-    ("DELETE", "/videos/videos/{platform_id}"): [
+    # Media write
+    ("DELETE", "/media/{platform_id}"): [
         ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Search
-    ("POST", "/videos/videos/search"): [
+    ("POST", "/media/search"): [
         ApiKeyScope.VIDEOS_SEARCH.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Statistics
-    ("GET", "/videos/statistics"): [
+    ("GET", "/media/statistics"): [
         ApiKeyScope.VIDEOS_STATISTICS.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Pending downloads list
-    ("GET", "/videos/pending"): [
+    ("GET", "/media/pending"): [
         ApiKeyScope.VIDEOS_VIDEOS_READ.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
     # Retry download
-    ("POST", "/videos/retry/{platform_id}"): [
+    ("POST", "/media/retry/{platform_id}"): [
         ApiKeyScope.VIDEOS_RETRY.value,
         ApiKeyScope.VIDEOS_ALL.value,
     ],
@@ -195,51 +195,51 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
 AVAILABLE_SCOPES = [
     {
         "scope": ApiKeyScope.VIDEOS_FETCH.value,
-        "name": "Fetch Video",
-        "description": "Fetch single video info via URL",
-        "category": "Video",
+        "name": "Fetch Media",
+        "description": "Fetch single media info via URL",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_FETCH_BATCH.value,
         "name": "Batch Fetch",
-        "description": "Fetch multiple videos info in batch",
-        "category": "Video",
+        "description": "Fetch multiple media info in batch",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_VIDEOS_READ.value,
-        "name": "Read Videos",
-        "description": "View video list and details",
-        "category": "Video",
+        "name": "Read Media",
+        "description": "View media list and details",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_VIDEOS_WRITE.value,
-        "name": "Manage Videos",
-        "description": "Delete video records",
-        "category": "Video",
+        "name": "Manage Media",
+        "description": "Delete media records",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_SEARCH.value,
-        "name": "Search Videos",
-        "description": "Search videos",
-        "category": "Video",
+        "name": "Search Media",
+        "description": "Search media",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_STATISTICS.value,
         "name": "View Statistics",
         "description": "View statistics data",
-        "category": "Video",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_RETRY.value,
         "name": "Retry Download",
-        "description": "Retry failed video downloads",
-        "category": "Video",
+        "description": "Retry failed media downloads",
+        "category": "Media",
     },
     {
         "scope": ApiKeyScope.VIDEOS_ALL.value,
         "name": "Full Access",
-        "description": "All video-related permissions",
-        "category": "Video",
+        "description": "All media-related permissions",
+        "category": "Media",
     },
     # Tags
     {

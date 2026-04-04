@@ -16,13 +16,13 @@ configured via environment variables (LLM_API_URL, LLM_API_KEY).
 
 import asyncio
 import json
-import logging
-import os
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 import httpx
+from loguru import logger
 
+from app.core.config import settings
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
 from app.services.storyboard_service import StoryboardService
 from app.services.video_providers import (
@@ -30,17 +30,6 @@ from app.services.video_providers import (
     VideoGenResult,
     provider_registry,
 )
-
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# LLM config constants
-# ---------------------------------------------------------------------------
-
-_LLM_API_URL = os.environ.get("LLM_API_URL", "http://localhost:8000/v1")
-_LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-_LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
-_LLM_TIMEOUT_SECONDS = 120.0
 
 # ---------------------------------------------------------------------------
 # Scene schema description (used in LLM prompts)
@@ -97,20 +86,20 @@ class StoryboardAIService:
             RuntimeError: If the HTTP request fails or returns an error status.
         """
         headers = {"Content-Type": "application/json"}
-        if _LLM_API_KEY:
-            headers["Authorization"] = f"Bearer {_LLM_API_KEY}"
+        if settings.LLM_API_KEY:
+            headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
 
         payload = {
-            "model": _LLM_MODEL,
+            "model": settings.LLM_MODEL,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
 
         try:
-            async with httpx.AsyncClient(timeout=_LLM_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
                 response = await client.post(
-                    f"{_LLM_API_URL}/chat/completions",
+                    f"{settings.LLM_API_URL}/chat/completions",
                     json=payload,
                     headers=headers,
                 )
@@ -626,6 +615,7 @@ class StoryboardAIService:
         project_id: str,
         message: str,
         selected_frame_id: Optional[str] = None,
+        skill_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handle a conversational message in the context of a storyboard project.
@@ -700,7 +690,34 @@ class StoryboardAIService:
 
         context_block = "\n\n".join(context_parts) if context_parts else "No additional context."
 
-        system_prompt = (
+        # Skill injection
+        skill_prefix = ""
+        if skill_id:
+            try:
+                from app.repositories.skill_repository import SkillRepository
+                skill_repo = SkillRepository()
+                skill = await skill_repo.get_by_id(skill_id)
+                if skill and skill.get("status") == "active":
+                    skill_prefix = (
+                        f"<skill>\n{skill['content_md']}\n</skill>\n\n"
+                    )
+                    if skill.get("output_format"):
+                        skill_prefix += (
+                            f"Output format:\n{skill['output_format']}\n\n"
+                        )
+                    logger.info(
+                        "chat: injected skill %s for project %s",
+                        skill_id, project_id,
+                    )
+                else:
+                    logger.warning(
+                        "chat: skill %s not found or archived, proceeding without",
+                        skill_id,
+                    )
+            except Exception as exc:
+                logger.warning("chat: skill lookup failed: %s", exc)
+
+        system_prompt = skill_prefix + (
             "You are a helpful storyboard assistant. "
             "You help filmmakers and animators develop their storyboard projects.\n\n"
             "When appropriate, you may suggest structured actions by including a "

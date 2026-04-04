@@ -1,26 +1,43 @@
-import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import { AppLayout } from './components/AppLayout';
 import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
+
+// Eagerly loaded (needed immediately)
 import { LoginPage } from './pages/LoginPage';
-import { ParserPage } from './pages/ParserPage';
-import { LibraryPage } from './pages/LibraryPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { CleanupPage } from './pages/CleanupPage';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { PointsPage } from './pages/PointsPage';
-import { BillingPage } from './pages/BillingPage';
-import { MembersPage } from './pages/MembersPage';
-import { ResourcesPage } from './pages/ResourcesPage';
-import { TodolistPage } from './pages/TodolistPage';
-import { PlayerPage } from './pages/PlayerPage';
-import { ResourceDetailPage } from './pages/ResourceDetailPage';
-import { SharePage } from './pages/SharePage';
-import { SharedPage } from './pages/SharedPage';
-import { ShortcutsTagsPage } from './pages/ShortcutsTagsPage';
-import { StoryboardWorkbench } from './pages/StoryboardWorkbench';
+
+// Lazy-loaded pages (code-split per route)
+const ParserPage = lazy(() => import('./pages/ParserPage').then(m => ({ default: m.ParserPage })));
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const CleanupPage = lazy(() => import('./pages/CleanupPage').then(m => ({ default: m.CleanupPage })));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const PointsPage = lazy(() => import('./pages/PointsPage').then(m => ({ default: m.PointsPage })));
+const BillingPage = lazy(() => import('./pages/BillingPage').then(m => ({ default: m.BillingPage })));
+const MembersPage = lazy(() => import('./pages/MembersPage').then(m => ({ default: m.MembersPage })));
+const ResourcesPage = lazy(() => import('./pages/ResourcesPage').then(m => ({ default: m.ResourcesPage })));
+const TodolistPage = lazy(() => import('./pages/TodolistPage').then(m => ({ default: m.TodolistPage })));
+const FileDetailDispatcher = lazy(() => import('./pages/FileDetailDispatcher').then(m => ({ default: m.FileDetailDispatcher })));
+const SharePage = lazy(() => import('./pages/SharePage').then(m => ({ default: m.SharePage })));
+const SharedPage = lazy(() => import('./pages/SharedPage').then(m => ({ default: m.SharedPage })));
+const ShortcutsTagsPage = lazy(() => import('./pages/ShortcutsTagsPage').then(m => ({ default: m.ShortcutsTagsPage })));
+const StoryboardWorkbench = lazy(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
+const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
+const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+function SuspenseWrap({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+}
 
 export const router = createBrowserRouter([
   // Public routes (no auth required)
@@ -30,11 +47,11 @@ export const router = createBrowserRouter([
   },
   {
     path: '/share/:shareCode',
-    element: <SharePage />,
+    element: <SuspenseWrap><SharePage /></SuspenseWrap>,
   },
   {
     path: '/shortcuts/tags',
-    element: <ShortcutsTagsPage />,
+    element: <SuspenseWrap><ShortcutsTagsPage /></SuspenseWrap>,
   },
 
   // Authenticated routes
@@ -46,8 +63,6 @@ export const router = createBrowserRouter([
 
       // Legacy flat URLs → redirect to /team/:teamId/:view
       { path: 'parser', element: <RedirectToTeam view="parser" /> },
-      { path: 'library', element: <RedirectToTeam view="library" /> },
-      { path: 'library/:itemId', element: <RedirectToTeam view="library" /> },
       { path: 'dashboard', element: <RedirectToTeam view="dashboard" /> },
       { path: 'dashboard/:subview', element: <RedirectToTeam view="dashboard" /> },
       { path: 'resources', element: <RedirectToTeam view="resources" /> },
@@ -61,12 +76,11 @@ export const router = createBrowserRouter([
       { path: 'billing', element: <RedirectToTeam view="billing" /> },
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
-      { path: 'player/:displayId', element: <RedirectToTeam view="player" /> },
       { path: 'shared', element: <RedirectToTeam view="shared" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
-        { index: true, element: <SettingsPage /> },
+        { index: true, element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
       ]},
 
       // Team-scoped routes
@@ -75,30 +89,29 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
-          { path: 'parser', element: <ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard> },
-          { path: 'library', element: <ModuleGuard moduleKey="library"><LibraryPage /></ModuleGuard> },
-          { path: 'library/:itemId', element: <ModuleGuard moduleKey="library"><LibraryPage /></ModuleGuard> },
-          { path: 'dashboard', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
-          { path: 'dashboard/:subview', element: <ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard> },
-          { path: 'resources', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/file/:resourceId', element: <ModuleGuard moduleKey="resources"><ResourceDetailPage /></ModuleGuard> },
-          { path: 'resources/:section', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/folder/:folderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/smart/:smartFolderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/library/:libraryId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'resources/library/:libraryId/folder/:folderId', element: <ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard> },
-          { path: 'projects', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
-          { path: 'projects/:projectId', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
-          { path: 'projects/:projectId/review/:fileId', element: <ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard> },
-          { path: 'settings', element: <SettingsPage /> },
-          { path: 'cleanup', element: <ModuleGuard moduleKey="cleanup"><CleanupPage /></ModuleGuard> },
-          { path: 'points', element: <PointsPage /> },
-          { path: 'members', element: <MembersPage /> },
-          { path: 'billing', element: <BillingPage /> },
-          { path: 'todolist', element: <TodolistPage /> },
-          { path: 'shared', element: <SharedPage /> },
-          { path: 'player/:displayId', element: <PlayerPage /> },
-          { path: 'storyboard', element: <ModuleGuard moduleKey="storyboard"><StoryboardWorkbench /></ModuleGuard> },
+          { path: 'parser', element: <SuspenseWrap><ModuleGuard moduleKey="parser"><ParserPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'dashboard', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'dashboard/:subview', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/file/:resourceId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><FileDetailDispatcher /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/:section', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/smart/:smartFolderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/library/:libraryId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/library/:libraryId/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId/review/:fileId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'settings', element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
+          { path: 'cleanup', element: <SuspenseWrap><ModuleGuard moduleKey="cleanup"><CleanupPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'points', element: <SuspenseWrap><PointsPage /></SuspenseWrap> },
+          { path: 'members', element: <SuspenseWrap><MembersPage /></SuspenseWrap> },
+          { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
+          { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
+          { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
+          { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
+          { path: 'projects/:projectId/storyboard/:storyboardId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><StoryboardWorkbench /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId/scripts/:scriptId', element: <SuspenseWrap><ScriptEditor /></SuspenseWrap> },
         ],
       },
 

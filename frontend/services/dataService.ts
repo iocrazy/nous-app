@@ -8,14 +8,7 @@ const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
 // on self-hosted PostgREST. The payload difference is negligible for 20 rows.
 const RESOURCE_LIST_SELECT = 'id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)';
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
+import { getApiUrl } from '../utils/apiConfig';
 
 /**
  * Frontend config interface (for Supabase URL and Anon Key)
@@ -87,21 +80,21 @@ export const saveFrontendConfig = async (config: {
  * Get video download URL via backend API
  */
 export const getDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}`;
 };
 
 /**
  * Get cover download URL
  */
 export const getCoverDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}/cover`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}/cover`;
 };
 
 /**
  * Get music/audio download URL
  */
 export const getMusicDownloadUrl = (platformId: string): string => {
-  return `${getApiUrl()}/api/v1/videos/download/${platformId}/music`;
+  return `${getApiUrl()}/api/v1/media/download/${platformId}/music`;
 };
 
 /**
@@ -116,7 +109,7 @@ export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promis
     if (!session?.access_token) return 0;
 
     const response = await fetch(
-      `${getApiUrl()}/api/v1/videos/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
+      `${getApiUrl()}/api/v1/media/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
       {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${session.access_token}` },
@@ -267,9 +260,21 @@ export const fetchLibraryPaginated = async (
     const hasMore = rows.length > pageSize;
     const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
+    // Fast total count (only on first page to avoid repeated queries)
+    let totalCount = -1;
+    if (page === 0) {
+      const { count } = await supabase
+        .from('resources')
+        .select('id', { count: 'exact', head: true })
+        .eq('creator_id', userId)
+        .eq('source_type', 'web')
+        .eq('is_trashed', false);
+      totalCount = count ?? -1;
+    }
+
     return {
       data: pageData.map(flattenResourceMedia) as ParsedMedia[],
-      totalCount: -1,  // no longer computed
+      totalCount,
       hasMore,
       page,
     };
@@ -406,7 +411,7 @@ export const deleteItem = async (id: string, deleteFiles: boolean = false): Prom
   }
 
   const response = await fetch(
-    `${getApiUrl()}/api/v1/videos/${id}?delete_files=${deleteFiles}`,
+    `${getApiUrl()}/api/v1/media/${id}?delete_files=${deleteFiles}`,
     {
       method: 'DELETE',
       headers: {
@@ -452,7 +457,7 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
       return [];
     }
 
-    const response = await fetch(`${getApiUrl()}/api/v1/videos/logs?limit=${limit}`, {
+    const response = await fetch(`${getApiUrl()}/api/v1/media/logs?limit=${limit}`, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`
       }

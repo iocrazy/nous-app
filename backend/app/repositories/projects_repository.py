@@ -39,25 +39,36 @@ class ProjectsRepository:
     # Projects CRUD
     # ------------------------------------------------------------------ #
 
-    async def get_user_projects(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_user_projects(
+        self, user_id: str, team_id: str | None = None
+    ) -> List[Dict[str, Any]]:
         """
-        Get all projects accessible to a user, ordered by updated_at desc.
+        Get projects accessible to a user, ordered by updated_at desc.
 
         Args:
             user_id: UUID of the authenticated user.
+            team_id: If provided, filter by team_id. If ``"personal"``,
+                     return only projects where team_id IS NULL.
+                     If None, return all user projects (no team filter).
 
         Returns:
             List of project row dicts.
         """
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_PROJECTS)
+            query = (
+                client.table(self.TABLE_PROJECTS)
                 .select("*")
                 .or_(f"owner_id.eq.{user_id}")
                 .order("updated_at", desc=True)
-                .execute()
             )
+
+            if team_id == "personal":
+                query = query.is_("team_id", "null")
+            elif team_id:
+                query = query.eq("team_id", team_id)
+
+            result = await query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Failed to get projects for user {user_id}: {e}")

@@ -152,6 +152,8 @@ async def create_share(data: ShareCreate, auth: AuthDep):
             insert_data["expires_at"] = data.expires_at.isoformat()
         if data.max_views is not None:
             insert_data["max_views"] = data.max_views
+        if data.team_id:
+            insert_data["team_id"] = data.team_id
 
         result = await client.table("shares").insert(insert_data).execute()
 
@@ -179,8 +181,12 @@ async def list_shares(
     ),
     status: Optional[str] = Query(
         None,
-        pattern="^(active|expired|cancelled)$",
+        pattern="^(active|inactive|expired|cancelled)$",
         description="Filter by status",
+    ),
+    team_id: Optional[str] = Query(
+        None,
+        description="Filter by team ID. 'personal' = team_id IS NULL.",
     ),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
@@ -188,7 +194,7 @@ async def list_shares(
     """
     List shares created by the current user.
 
-    Supports filtering by share_type and status, with pagination.
+    Supports filtering by share_type, status, and team_id, with pagination.
 
     Authentication: Bearer Token or API Key
     """
@@ -201,6 +207,11 @@ async def list_shares(
             .eq("shared_by", auth.user_id)
             .order("created_at", desc=True)
         )
+
+        if team_id == "personal":
+            query = query.is_("team_id", "null")
+        elif team_id:
+            query = query.eq("team_id", team_id)
 
         if share_type:
             query = query.eq("share_type", share_type)
@@ -344,16 +355,15 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
 
 
 @router.delete("/{share_id}")
-async def cancel_share(share_id: str, auth: AuthDep):
+async def toggle_share_status(share_id: str, auth: AuthDep):
     """
-    Cancel a share (soft-delete by setting status to 'cancelled').
+    Toggle share status: active → inactive, inactive → active.
 
     Authentication: Bearer Token or API Key
     """
     try:
         client = await get_async_supabase_admin()
 
-        # Verify ownership
         existing = (
             await client.table("shares")
             .select("id, shared_by, status")
@@ -367,29 +377,66 @@ async def cancel_share(share_id: str, auth: AuthDep):
         share = existing.data[0]
 
         if share["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to cancel this share")
+            raise HTTPException(status_code=403, detail="Not authorized")
 
-        if share["status"] == "cancelled":
-            raise HTTPException(status_code=400, detail="Share is already cancelled")
+        # Toggle: active → inactive, inactive/cancelled → active
+        new_status = "inactive" if share["status"] == "active" else "active"
 
         result = (
             await client.table("shares")
-            .update({"status": "cancelled"})
+            .update({"status": new_status})
             .eq("id", share_id)
             .execute()
         )
 
         if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to cancel share")
+            raise HTTPException(status_code=500, detail="Failed to update share status")
 
-        logger.info(f"Share {share_id} cancelled by user {auth.user_id}")
-        return {"success": True, "message": "Share cancelled"}
+        logger.info(f"Share {share_id} toggled to {new_status} by user {auth.user_id}")
+        return {"success": True, "message": f"Share {new_status}", "status": new_status}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to cancel share {share_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cancel share")
+        logger.error(f"Failed to toggle share {share_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update share")
+
+
+@router.delete("/{share_id}/permanent")
+async def delete_share_permanent(share_id: str, auth: AuthDep):
+    """
+    Permanently delete a share record (hard delete).
+
+    Authentication: Bearer Token or API Key
+    """
+    try:
+        client = await get_async_supabase_admin()
+
+        existing = (
+            await client.table("shares")
+            .select("id, shared_by")
+            .eq("id", share_id)
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Share not found")
+
+        share = existing.data[0]
+
+        if share["shared_by"] != auth.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        await client.table("shares").delete().eq("id", share_id).execute()
+
+        logger.info(f"Share {share_id} permanently deleted by user {auth.user_id}")
+        return {"success": True, "message": "Share deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete share {share_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete share")
 
 
 # ============================================
@@ -428,8 +475,8 @@ async def access_share_by_code(
         share = result.data[0]
 
         # Check status
-        if share["status"] == "cancelled":
-            raise HTTPException(status_code=410, detail="This share has been cancelled")
+        if share["status"] in ("cancelled", "inactive"):
+            raise HTTPException(status_code=410, detail="This share is no longer available")
 
         # Check expiration
         if _is_expired(share):
@@ -510,6 +557,29 @@ async def access_share_by_code(
                 .execute()
             )
 
+        # Fetch resource metadata for preview (mime_type, filename, cover)
+        resource_meta = {}
+        if share.get("resource_id"):
+            try:
+                res_data = (
+                    await client.table("resources")
+                    .select("mime_type, file_type, filename, cover_image_path, thumbnail_path, media_id")
+                    .eq("id", share["resource_id"])
+                    .maybe_single()
+                    .execute()
+                )
+                if res_data.data:
+                    resource_meta = {
+                        "mime_type": res_data.data.get("mime_type"),
+                        "file_type": res_data.data.get("file_type"),
+                        "filename": res_data.data.get("filename"),
+                        "cover_image_path": res_data.data.get("cover_image_path"),
+                        "thumbnail_path": res_data.data.get("thumbnail_path"),
+                        "media_id": str(res_data.data["media_id"]) if res_data.data.get("media_id") else None,
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to fetch resource metadata for share: {e}")
+
         # Build the response (strip sensitive fields)
         share["view_count"] = new_view_count
         response_data = {
@@ -525,6 +595,7 @@ async def access_share_by_code(
             "folder_id": share.get("folder_id"),
             "version_id": share.get("version_id"),
             "created_at": share["created_at"],
+            **resource_meta,
         }
 
         logger.info(

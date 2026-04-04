@@ -1,20 +1,13 @@
 import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileVersion, ReviewComment, ReviewStatus } from '../types';
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
-
-export const fetchProjects = async (params?: { type?: string; starred?: boolean }): Promise<Project[]> => {
+export const fetchProjects = async (params?: { type?: string; starred?: boolean; teamId?: string }): Promise<Project[]> => {
   const apiUrl = getApiUrl();
   const searchParams = new URLSearchParams();
   if (params?.type) searchParams.set('project_type', params.type);
   if (params?.starred !== undefined) searchParams.set('starred', String(params.starred));
+  if (params?.teamId !== undefined) searchParams.set('team_id', params.teamId);
   const qs = searchParams.toString();
   const url = `${apiUrl}/api/v1/projects${qs ? '?' + qs : ''}`;
 

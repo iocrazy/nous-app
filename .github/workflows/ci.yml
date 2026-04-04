@@ -64,6 +64,9 @@ jobs:
       - name: Lint (flake8)
         run: uv run flake8 app/
 
+      - name: Run tests (pytest)
+        run: uv run pytest tests/ -v --tb=short
+
   rust:
     name: Rust Check
     runs-on: ubuntu-latest

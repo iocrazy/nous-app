@@ -7,13 +7,14 @@
 需要认证才能访问。
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
+from app.repositories.cookies_repository import CookiesRepository
 from app.repositories.user_settings_repository import UserSettingsRepository
 
 router = APIRouter(prefix="/settings", tags=["用户设置"])
@@ -256,3 +257,196 @@ async def set_parse_mode(request: ParseModeRequest, auth: AuthDep):
     except Exception as e:
         logger.error(f"设置解析模式失败: {e}")
         raise HTTPException(status_code=500, detail="设置解析模式失败")
+
+
+# ============================================
+# Cookie Management
+# ============================================
+
+SUPPORTED_PLATFORMS = ["douyin", "bilibili", "youtube"]
+
+
+class CookieStatusItem(BaseModel):
+    """Single platform cookie status (no cookie content for security)"""
+
+    platform: str
+    has_cookie: bool
+    is_valid: bool
+    error_message: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class CookieListResponse(BaseModel):
+    """Response for GET /settings/cookies"""
+
+    cookies: List[CookieStatusItem]
+
+
+class CookieUpsertRequest(BaseModel):
+    """Request body for PUT /settings/cookies/{platform}"""
+
+    cookie_text: Optional[str] = None
+    cookie_file: Optional[str] = None
+
+
+@router.get("/cookies", response_model=CookieListResponse)
+async def list_cookies(auth: AuthDep):
+    """
+    List cookie status for all supported platforms
+
+    Returns the presence and validity of cookies per platform.
+    Cookie content is never returned for security reasons.
+
+    Requires authentication: Bearer Token or API Key
+    """
+    try:
+        repo = CookiesRepository()
+        rows = await repo.get_all_by_user(auth.user_id)
+
+        # Index existing rows by platform for quick lookup
+        row_by_platform: Dict[str, Dict] = {r["platform"]: r for r in rows}
+
+        items: List[CookieStatusItem] = []
+        for platform in SUPPORTED_PLATFORMS:
+            row = row_by_platform.get(platform)
+            if row:
+                items.append(
+                    CookieStatusItem(
+                        platform=platform,
+                        has_cookie=True,
+                        is_valid=row.get("is_valid", True),
+                        error_message=row.get("error_message"),
+                        updated_at=row.get("updated_at"),
+                    )
+                )
+            else:
+                items.append(
+                    CookieStatusItem(
+                        platform=platform,
+                        has_cookie=False,
+                        is_valid=False,
+                        error_message=None,
+                        updated_at=None,
+                    )
+                )
+
+        return CookieListResponse(cookies=items)
+
+    except Exception as e:
+        logger.error(f"获取 Cookie 列表失败: {e}")
+        raise HTTPException(status_code=500, detail="获取 Cookie 列表失败")
+
+
+@router.put("/cookies/{platform}")
+async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep):
+    """
+    Set or update cookie for a platform
+
+    One of cookie_text or cookie_file must be provided.
+    Saving resets is_valid to true automatically.
+
+    Requires authentication: Bearer Token or API Key
+    """
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported platform. Valid options: {', '.join(SUPPORTED_PLATFORMS)}",
+        )
+
+    if not request.cookie_text and not request.cookie_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Either cookie_text or cookie_file must be provided",
+        )
+
+    try:
+        repo = CookiesRepository()
+
+        data: Dict[str, Any] = {}
+        if request.cookie_text is not None:
+            data["cookie_text"] = request.cookie_text
+        if request.cookie_file is not None:
+            data["cookie_file"] = request.cookie_file
+
+        result = await repo.upsert(auth.user_id, platform, data)
+
+        if result is None:
+            raise HTTPException(status_code=500, detail="保存 Cookie 失败")
+
+        logger.info(f"用户 {auth.user_id} 保存 {platform} Cookie 成功")
+        return {"success": True, "platform": platform}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"保存 Cookie 失败: platform={platform}, error={e}")
+        raise HTTPException(status_code=500, detail="保存 Cookie 失败")
+
+
+@router.delete("/cookies/{platform}")
+async def delete_cookie(platform: str, auth: AuthDep):
+    """
+    Delete cookie for a platform
+
+    Requires authentication: Bearer Token or API Key
+    """
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported platform. Valid options: {', '.join(SUPPORTED_PLATFORMS)}",
+        )
+
+    try:
+        repo = CookiesRepository()
+        success = await repo.delete(auth.user_id, platform)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="删除 Cookie 失败")
+
+        logger.info(f"用户 {auth.user_id} 删除 {platform} Cookie 成功")
+        return {"success": True, "platform": platform}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除 Cookie 失败: platform={platform}, error={e}")
+        raise HTTPException(status_code=500, detail="删除 Cookie 失败")
+
+
+# ─── Custom Headers ───────────────────────────────────────
+
+
+class HeadersUpsertRequest(BaseModel):
+    """Request body for PUT /settings/headers/{platform}"""
+    headers_text: str
+
+
+@router.get("/headers/{platform}")
+async def get_headers(platform: str, auth: AuthDep):
+    """Get custom headers for a platform."""
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+    try:
+        repo = CookiesRepository()
+        row = await repo.get_by_user_and_platform(auth.user_id, platform)
+        return {
+            "platform": platform,
+            "headers_text": row.get("custom_headers", "") if row else "",
+        }
+    except Exception as e:
+        logger.error(f"获取 Headers 失败: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get headers")
+
+
+@router.put("/headers/{platform}")
+async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDep):
+    """Set custom headers for a platform (stored alongside cookies)."""
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+    try:
+        repo = CookiesRepository()
+        await repo.upsert(auth.user_id, platform, {"custom_headers": request.headers_text})
+        return {"success": True, "platform": platform}
+    except Exception as e:
+        logger.error(f"保存 Headers 失败: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save headers")

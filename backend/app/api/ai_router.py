@@ -14,8 +14,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from app.core.deps import AuthDep
-from app.db.supabase_client import get_async_supabase_admin
+from app.core.deps import AuthDep, get_team_id_for_user
 from app.repositories.ai_repository import AIRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -52,19 +51,6 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
     return resource, media["platform_id"]
 
 
-async def _get_team_id_for_user(user_id: str) -> str | None:
-    """Look up the first team_id for a user."""
-    _admin = await get_async_supabase_admin()
-    _tm = (
-        await _admin.table("team_members")
-        .select("team_id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    return _tm.data[0]["team_id"] if _tm.data else None
-
-
 # ------------------------------------------------------------------
 # Manual triggers (resource_id-based)
 # ------------------------------------------------------------------
@@ -77,7 +63,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
 
     # === Points check ===
     points_service = PointsService()
-    _team_id = await _get_team_id_for_user(auth.user_id)
+    _team_id = await get_team_id_for_user(auth.user_id)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -135,7 +121,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 
     # === Points check ===
     points_service = PointsService()
-    _team_id = await _get_team_id_for_user(auth.user_id)
+    _team_id = await get_team_id_for_user(auth.user_id)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -218,7 +204,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
 
     # === Points check ===
     points_service = PointsService()
-    _team_id = await _get_team_id_for_user(auth.user_id)
+    _team_id = await get_team_id_for_user(auth.user_id)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -274,7 +260,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     """
     # === Points check ===
     points_service = PointsService()
-    _team_id = await _get_team_id_for_user(auth.user_id)
+    _team_id = await get_team_id_for_user(auth.user_id)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -348,7 +334,7 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
     # === Points check ===
     points_service = PointsService()
-    _team_id = await _get_team_id_for_user(auth.user_id)
+    _team_id = await get_team_id_for_user(auth.user_id)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)

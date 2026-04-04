@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Search, Library, User, FolderOpen, Download, Check,
-  LayoutList, LayoutGrid, Smartphone,
+  Search, Library as LibraryIcon, User, FolderOpen, Download, Check,
+  LayoutList, LayoutGrid, Smartphone, Trash2, Share2, Zap, BookOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ViewState, PointPackage } from '../types';
+import { ViewState, PointPackage, Library, SmartCollection } from '../types';
+import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
+import { fetchLibraries } from '../services/libraryService';
+import { fetchSmartFolders } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useNavigation } from '../hooks/useNavigation';
@@ -13,43 +16,16 @@ import { LibraryProvider, useLibraryContext } from '../contexts/LibraryContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ToastProvider } from './Toast';
+import { ConfirmProvider } from './ConfirmDialog';
 import { UploadProvider } from '../contexts/UploadContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
+import { MobileProfilePage } from './MobileProfilePage';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
-
-// ---------------------------------------------------------------------------
-// Map URL pathname → ViewState
-// Supports both /team/:teamId/:view and legacy /:view patterns
-// ---------------------------------------------------------------------------
-
-export function pathnameToView(pathname: string, search?: string): ViewState {
-  // Strip /team/:teamId/ prefix if present
-  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
-  // PlayerPage: derive view from ?from= query param
-  if (stripped.startsWith('/player/')) {
-    const params = new URLSearchParams(search || '');
-    const from = params.get('from');
-    if (from === 'downloads') return 'library';
-    if (from === 'resources') return 'resources';
-    return 'library';
-  }
-  if (stripped.startsWith('/library')) return 'library';
-  if (stripped.startsWith('/dashboard')) return 'dashboard';
-  if (stripped.startsWith('/settings')) return 'settings';
-  if (stripped.startsWith('/cleanup')) return 'cleanup';
-  if (stripped.startsWith('/projects')) return 'mediatrack';
-  if (stripped.startsWith('/points')) return 'points';
-  if (stripped.startsWith('/billing')) return 'billing';
-  if (stripped.startsWith('/members')) return 'members';
-  if (stripped.startsWith('/resources')) return 'resources';
-  if (stripped.startsWith('/todolist')) return 'todolist';
-  return 'parser';
-}
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -91,7 +67,11 @@ function AppLayoutInner() {
     }
   }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
 
-  const view = pathnameToView(location.pathname, location.search);
+  const view = pathnameToView(location.pathname);
+  const isDownloadsRoute = location.pathname.includes('/resources/downloads');
+  const isDetailPage = location.pathname.includes('/resources/file/') || location.pathname.includes('/player/');
+
+  const isPersonalWorkspace = !selectedTeamId || selectedTeamId === personalTeamId;
 
   const {
     settingsTab, setSettingsTab,
@@ -120,6 +100,31 @@ function AppLayoutInner() {
 
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
+  const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
+  const [isDownloadsMenuOpen, setIsDownloadsMenuOpen] = useState(false);
+  const [mobileLibraries, setMobileLibraries] = useState<Library[]>([]);
+  const [mobileSmartFolders, setMobileSmartFolders] = useState<SmartCollection[]>([]);
+
+  // Mobile workspace switch — navigates to new team, respecting current view
+  const handleWorkspaceSwitch = (newTeamId: string) => {
+    // Eagerly update team context so data loads immediately
+    setSelectedTeamId(newTeamId);
+    if (view === 'resources' && location.pathname.includes('/downloads')) {
+      navigate(`/team/${newTeamId}/resources`);
+    } else {
+      navigate(`/team/${newTeamId}/${VIEW_PATH_MAP[view].slice(1)}`);
+    }
+    setIsMobileProfileOpen(false);
+  };
+
+  // Load libraries + smart folders for mobile Resources popup
+  useEffect(() => {
+    if (!isResourcesMenuOpen || !selectedTeamId) return;
+    const scopeId = selectedTeamId === personalTeamId ? (currentUserId || '') : selectedTeamId;
+    const scopeType = selectedTeamId === personalTeamId ? 'personal' : 'team';
+    fetchLibraries(scopeId).then(setMobileLibraries).catch(() => setMobileLibraries([]));
+    fetchSmartFolders(scopeType, scopeId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
+  }, [isResourcesMenuOpen, selectedTeamId, personalTeamId, currentUserId]);
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -139,12 +144,12 @@ function AppLayoutInner() {
   };
 
   // Main content padding — mobile: clear TopBar (pt-14) + Tab Bar (pb-20)
+  // Resources view: desktop uses h-screen + overflow-hidden for Shell layout;
+  // mobile uses natural scroll (no h-screen) so infinite scroll works
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
-    view === 'library'
-      ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-      : view === 'resources'
-        ? 'pt-14 pb-20 sm:p-8 sm:pt-20 sm:pb-8'
-        : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
+    view === 'resources'
+      ? 'pt-14 pb-20 sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden'
+      : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
@@ -155,32 +160,16 @@ function AppLayoutInner() {
 
   // Mobile nav handlers
   const handleMobileNavClick = (targetView: ViewState) => {
-    const viewToPath: Record<string, string> = {
-      parser: '/parser',
-      library: '/library',
-      dashboard: '/dashboard',
-      resources: '/resources',
-      mediatrack: '/projects',
-      settings: '/settings',
-      cleanup: '/cleanup',
-      points: '/points',
-      billing: '/billing',
-      members: '/members',
-      todolist: '/todolist',
-    };
-    navigate(teamPath(viewToPath[targetView] || '/parser'));
+    navigate(teamPath(VIEW_PATH_MAP[targetView]));
     setIsMobileMenuOpen(false);
     setIsDashboardMenuOpen(false);
   };
 
   const handleMobileLibraryClick = () => {
     setIsDashboardMenuOpen(false);
-    if (view === 'library') {
-      setIsMobileMenuOpen(!isMobileMenuOpen);
-    } else {
-      navigate(teamPath('/library'));
-      setIsMobileMenuOpen(false);
-    }
+    const pid = personalTeamId || selectedTeamId;
+    navigate(`/team/${pid}/resources/downloads`);
+    setIsMobileMenuOpen(false);
   };
 
   const handleMobileDashboardClick = () => {
@@ -195,6 +184,7 @@ function AppLayoutInner() {
 
   return (
     <ToastProvider>
+    <ConfirmProvider>
     <TaskManagerProvider>
     <UploadProvider>
     <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
@@ -205,6 +195,23 @@ function AppLayoutInner() {
         onClose={() => setIsProfileModalOpen(false)}
         user={userProfile}
         onSave={(updated) => setUserProfile(updated)}
+        onLogout={handleAuthLogout}
+      />
+
+      {/* Mobile Profile Page — full-screen overlay, Me tab */}
+      <MobileProfilePage
+        isOpen={isMobileProfileOpen}
+        onClose={() => setIsMobileProfileOpen(false)}
+        userProfile={userProfile}
+        teams={teams}
+        personalTeamId={personalTeamId}
+        selectedTeamId={selectedTeamId}
+        currentView={view}
+        onSwitchTeam={handleWorkspaceSwitch}
+        onSettings={() => {
+          setSettingsModalInitialTab('personal');
+          setIsSettingsModalOpen(true);
+        }}
         onLogout={handleAuthLogout}
       />
 
@@ -248,138 +255,164 @@ function AppLayoutInner() {
         defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
       />
 
-      {/* Mobile Tab Bar — 4 tabs: Parser, Downloads, Resources, Me */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40">
+      {/* Mobile Tab Bar — hidden on detail pages for immersive experience */}
+      <div className={`sm:hidden fixed bottom-0 left-0 right-0 z-40 ${isDetailPage ? 'hidden' : ''}`}>
         {/* Backdrop to dismiss popups */}
-        {(isMobileMenuOpen || isResourcesMenuOpen) && (
+        {(isMobileMenuOpen || isResourcesMenuOpen || isDownloadsMenuOpen) && (
           <div
             className="fixed inset-0 z-30"
-            onClick={() => { setIsMobileMenuOpen(false); setIsResourcesMenuOpen(false); }}
+            onClick={() => { setIsMobileMenuOpen(false); setIsResourcesMenuOpen(false); setIsDownloadsMenuOpen(false); }}
           />
         )}
 
-        {/* Tab buttons */}
-        <div className="bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/60 flex justify-around px-2 pt-2 pb-[calc(env(safe-area-inset-bottom,8px)+4px)] relative z-40">
-          {/* Parser */}
-          <button
-            onClick={() => handleMobileNavClick('parser')}
-            className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'parser' ? 'text-indigo-400' : 'text-zinc-500'}`}
-          >
-            <Search size={22} />
-            <span className="text-[10px] leading-tight">Parser</span>
-          </button>
+        {/* Figma-style floating pill tab bar */}
+        <div className="flex justify-center pb-[calc(env(safe-area-inset-bottom,6px)+6px)] relative z-40">
+          <div className="bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/60 rounded-full flex items-center px-2 py-1.5 gap-0.5 shadow-2xl">
+            {/* Parser */}
+            <button
+              onClick={() => handleMobileNavClick('parser')}
+              className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                view === 'parser' ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+              }`}
+            >
+              <Search size={20} />
+              <span className="text-[9px] leading-tight font-medium">Parser</span>
+            </button>
 
-          {/* Downloads (formerly Library) — with view mode popup */}
-          <div className="relative">
-            {isMobileMenuOpen && view === 'library' && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-800/95 backdrop-blur-md border border-zinc-700 p-1.5 rounded-xl shadow-2xl flex gap-1 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+            {/* Downloads — personal workspace only */}
+            {isPersonalWorkspace && (
+              <div className="relative">
+                {isDownloadsMenuOpen && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+                    <div className="flex p-1.5 gap-1">
+                      <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutGrid size={18} /></button>
+                      <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutList size={18} /></button>
+                      <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><Smartphone size={18} /></button>
+                    </div>
+                  </div>
+                )}
                 <button
-                  onClick={() => { setLibraryViewMode('list'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'list' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
+                  onClick={() => {
+                    if (isDownloadsRoute) {
+                      setIsDownloadsMenuOpen(!isDownloadsMenuOpen);
+                    } else {
+                      handleMobileLibraryClick();
+                      setIsDownloadsMenuOpen(false);
+                    }
+                  }}
+                  className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                    isDownloadsRoute ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+                  }`}
                 >
-                  <LayoutList size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('grid'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'grid' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-                <button
-                  onClick={() => { setLibraryViewMode('feed'); setIsMobileMenuOpen(false); }}
-                  className={`p-2.5 rounded-lg transition-all ${libraryViewMode === 'feed' ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'}`}
-                >
-                  <Smartphone size={20} />
+                  <Download size={20} />
+                  <span className="text-[9px] leading-tight font-medium">Downloads</span>
                 </button>
               </div>
             )}
-            <button
-              onClick={handleMobileLibraryClick}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'library' ? 'text-indigo-400' : 'text-zinc-500'}`}
-            >
-              <Download size={22} />
-              <span className="text-[10px] leading-tight">Downloads</span>
-            </button>
-          </div>
 
-          {/* Resources — with team picker popup */}
-          <div className="relative">
-            {isResourcesMenuOpen && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-52 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
-                <div className="px-4 pt-3 pb-2 border-b border-zinc-800/60">
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Workspace</span>
-                </div>
-                <div className="py-1 max-h-60 overflow-y-auto">
-                  {personalTeamId && (
+            {/* Resources — full sidebar navigation (replaces desktop sidebar on mobile) */}
+            <div className="relative">
+              {isResourcesMenuOpen && (
+                <div className="absolute bottom-full right-0 mb-3 w-56 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden max-h-[60vh] overflow-y-auto">
+                  {/* Main views */}
+                  <div className="py-1.5">
                     <button
-                      onClick={() => { navigate(`/team/${personalTeamId}/resources`); setIsResourcesMenuOpen(false); }}
-                      className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
-                        selectedTeamId === personalTeamId ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
                       }`}
                     >
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                        selectedTeamId === personalTeamId ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
-                      }`}>
-                        {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
-                      </div>
-                      <span className={`text-sm flex-1 ${selectedTeamId === personalTeamId ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>Personal</span>
-                      {selectedTeamId === personalTeamId && <Check size={14} className="text-indigo-400" />}
+                      <FolderOpen size={16} className="shrink-0" />
+                      <span className="text-sm">My Resources</span>
                     </button>
-                  )}
-                  {teams.filter(t => String(t.id) !== personalTeamId).map(team => {
-                    const isActive = selectedTeamId === String(team.id);
-                    return (
-                      <button
-                        key={team.id}
-                        onClick={() => { navigate(`/team/${team.id}/resources`); setIsResourcesMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-2.5 ${
-                          isActive ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/60'
-                        }`}
-                      >
-                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                          isActive ? 'bg-indigo-500/30 text-indigo-300' : 'bg-zinc-700 text-zinc-400'
-                        }`}>
-                          {team.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className={`text-sm flex-1 ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-300'}`}>{team.name}</span>
-                        {isActive && <Check size={14} className="text-indigo-400" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                if (view === 'resources') {
-                  setIsResourcesMenuOpen(!isResourcesMenuOpen);
-                } else {
-                  navigate(teamPath('/resources'));
-                  setIsResourcesMenuOpen(false);
-                }
-              }}
-              className={`flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors ${view === 'resources' ? 'text-indigo-400' : 'text-zinc-500'}`}
-            >
-              <FolderOpen size={22} />
-              <span className="text-[10px] leading-tight">Resources</span>
-            </button>
-          </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <Share2 size={16} className="shrink-0" />
+                      <span className="text-sm">Shared</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
+                      className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                        location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <Trash2 size={16} className="shrink-0" />
+                      <span className="text-sm">Recycle Bin</span>
+                    </button>
+                  </div>
 
-          {/* Profile */}
-          <button
-            onClick={() => setIsProfileModalOpen(true)}
-            className="flex flex-col items-center gap-0.5 min-w-0 px-3 py-1 transition-colors text-zinc-500"
-          >
-            {userProfile.avatarUrl ? (
-               <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-600">
-                  <img src={userProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
-               </div>
-            ) : (
-               <User size={22} />
-            )}
-            <span className="text-[10px] leading-tight">Me</span>
-          </button>
+                  {/* Libraries (team workspace) */}
+                  {mobileLibraries.length > 0 && (
+                    <>
+                      <div className="h-px bg-zinc-800/60 mx-3" />
+                      <div className="py-1.5">
+                        <div className="px-3.5 py-1.5">
+                          <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Libraries</span>
+                        </div>
+                        {mobileLibraries.map(lib => (
+                          <button
+                            key={lib.id}
+                            onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/library/${lib.id}`)); setIsResourcesMenuOpen(false); }}
+                            className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                              location.pathname.includes(`/library/${lib.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                            }`}
+                          >
+                            <BookOpen size={16} className="shrink-0" />
+                            <span className="text-sm truncate">{lib.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Smart Folders */}
+                  {mobileSmartFolders.length > 0 && (
+                    <>
+                      <div className="h-px bg-zinc-800/60 mx-3" />
+                      <div className="py-1.5">
+                        <div className="px-3.5 py-1.5">
+                          <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Smart Folders</span>
+                        </div>
+                        {mobileSmartFolders.map(sf => (
+                          <button
+                            key={sf.id}
+                            onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/smart/${sf.id}`)); setIsResourcesMenuOpen(false); }}
+                            className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
+                              location.pathname.includes(`/smart/${sf.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                            }`}
+                          >
+                            <Zap size={16} className="shrink-0" />
+                            <span className="text-sm truncate">{sf.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  if (view === 'resources' && !isDownloadsRoute) {
+                    setIsResourcesMenuOpen(!isResourcesMenuOpen);
+                  } else {
+                    navigate(teamPath('/resources'));
+                    setIsResourcesMenuOpen(false);
+                  }
+                }}
+                className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
+                  view === 'resources' && !isDownloadsRoute ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
+                }`}
+              >
+                <FolderOpen size={20} />
+                <span className="text-[9px] leading-tight font-medium">Resources</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -421,7 +454,7 @@ function AppLayoutInner() {
           setSearchResults([]);
           setSearchQueryText('');
           setActiveSmartCollectionId(collection?.id || null);
-          navigate(teamPath('/library'));
+          navigate(teamPath('/resources/downloads'));
           setActiveCollectionId(null);
           setActiveLibraryTab('my-library');
         }}
@@ -439,6 +472,22 @@ function AppLayoutInner() {
         }}
         sidebarCollapsed={sidebarCollapsed}
       />
+
+      {/* Mobile workspace avatar — hidden on detail pages */}
+      <button
+        className={`sm:hidden fixed top-2.5 right-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
+        onClick={() => setIsMobileProfileOpen(true)}
+      >
+        <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-zinc-950 ${
+          selectedTeamId === personalTeamId
+            ? 'bg-indigo-600 text-white ring-indigo-500/50'
+            : 'bg-emerald-600 text-white ring-emerald-500/50'
+        }`}>
+          {selectedTeamId === personalTeamId
+            ? (userProfile?.name?.charAt(0)?.toUpperCase() || 'P')
+            : (currentTeam?.name?.charAt(0)?.toUpperCase() || 'T')}
+        </div>
+      </button>
 
       {/* Main Content */}
       <main className={mainContentClass}>
@@ -471,6 +520,7 @@ function AppLayoutInner() {
     </div>
     </UploadProvider>
     </TaskManagerProvider>
+    </ConfirmProvider>
     </ToastProvider>
   );
 }

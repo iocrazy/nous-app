@@ -33,6 +33,7 @@ from app.api.task_router import router as task_router
 from app.api.user_settings_router import router as settings_router
 from app.api.media_router import legacy_router as legacy_douyin_router
 from app.api.media_router import router as media_router
+from app.api.media_router import media_content_router
 from app.api.teams_router import router as teams_router
 from app.api.invites_router import router as invites_router
 from app.api.video_collections_router import router as video_collections_router
@@ -40,19 +41,30 @@ from app.api.notifications_router import router as notifications_router
 from app.api.realtime_router import router as realtime_router
 from app.api.error_report_router import router as error_report_router
 from app.api.admin import admin_router
+from app.api.media_auth import router as media_auth_router
 from app.api.sb_projects_router import router as sb_projects_router
 from app.api.sb_canvas_router import router as sb_canvas_router
 from app.api.sb_characters_router import router as sb_characters_router
 from app.api.sb_ai_router import router as sb_ai_router
 from app.api.sb_export_router import router as sb_export_router
+from app.api.style_templates_router import router as style_templates_router
+from app.api.skills_router import router as skills_router
+from app.api.script_projects_router import router as script_projects_router
+from app.api.script_canvas_router import router as script_canvas_router
+from app.api.script_assets_router import router as script_assets_router
+from app.api.script_ai_router import router as script_ai_router
 
 api_router = APIRouter()
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
 
+api_router.include_router(router=media_auth_router, tags=["Media Auth"])
+
 api_router.include_router(router=temp_token_router, tags=["Temp Token"])
 
 api_router.include_router(router=media_router, tags=["Media"])
+
+api_router.include_router(router=media_content_router, tags=["Media Content"])
 
 api_router.include_router(router=legacy_douyin_router, tags=["Legacy"])
 
@@ -118,3 +130,12 @@ api_router.include_router(router=sb_canvas_router, tags=["Storyboard Canvas"])
 api_router.include_router(router=sb_characters_router, tags=["Storyboard Characters"])
 api_router.include_router(router=sb_ai_router, tags=["Storyboard AI"])
 api_router.include_router(router=sb_export_router, tags=["Storyboard Export"])
+
+api_router.include_router(router=style_templates_router, tags=["Style Templates"])
+
+api_router.include_router(router=skills_router, tags=["Skills"])
+
+api_router.include_router(router=script_projects_router, tags=["Scripts"])
+api_router.include_router(router=script_canvas_router, tags=["Scripts"])
+api_router.include_router(router=script_assets_router, tags=["Script Assets"])
+api_router.include_router(router=script_ai_router, tags=["Script AI"])

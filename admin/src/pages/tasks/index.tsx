@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Tag,
@@ -12,6 +12,7 @@ import {
   Space,
   Message,
   Modal,
+  Descriptions,
 } from '@arco-design/web-react'
 import {
   IconCheckCircle,
@@ -80,6 +81,18 @@ function formatSpeed(speed: number | null): string {
   return `${(speed / 1024 / 1024).toFixed(1)} MB/s`
 }
 
+function formatRuntime(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt) return '-'
+  const end = completedAt ? new Date(completedAt) : new Date()
+  const diffMs = end.getTime() - new Date(startedAt).getTime()
+  if (diffMs < 0) return '-'
+  const totalSec = diffMs / 1000
+  if (totalSec < 60) return `${totalSec.toFixed(1)}s`
+  const min = Math.floor(totalSec / 60)
+  const sec = Math.round(totalSec % 60)
+  return `${min}m ${sec}s`
+}
+
 // --- Sub-components ---
 
 function StatsCards() {
@@ -142,29 +155,31 @@ function StatsCards() {
   )
 }
 
+const ellipsisStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap' as const,
+}
+
 function TitleCell({ record }: { record: AdminTaskData }) {
   return (
-    <div>
-      <Typography.Text ellipsis style={{ maxWidth: 260 }}>
-        {record.title || 'Untitled'}
-      </Typography.Text>
-      {record.subtitle && (
-        <>
-          <br />
-          <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+    <div style={{ lineHeight: 1.4 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ ...ellipsisStyle, maxWidth: 220, flexShrink: 0 }}>
+          {record.title || 'Untitled'}
+        </span>
+        {record.subtitle && (
+          <span style={{ ...ellipsisStyle, fontSize: 11, color: 'var(--color-text-3)', minWidth: 0 }}>
             {record.subtitle}
-          </Typography.Text>
-        </>
-      )}
+          </span>
+        )}
+      </div>
       {record.error_msg && (
-        <>
-          <br />
-          <Tooltip content={record.error_msg}>
-            <Typography.Text type="error" style={{ fontSize: 12 }} ellipsis={{ rows: 1 }}>
-              {record.error_msg}
-            </Typography.Text>
-          </Tooltip>
-        </>
+        <Tooltip content={record.error_msg}>
+          <div style={{ ...ellipsisStyle, fontSize: 11, color: 'rgb(var(--red-6))', marginTop: 1 }}>
+            {record.error_msg}
+          </div>
+        </Tooltip>
       )}
     </div>
   )
@@ -236,22 +251,29 @@ export function TaskCenter() {
   const cancelTask = useCancelTask()
   const retryTask = useRetryTask()
 
-  // Supabase Realtime: auto-refresh on unified_tasks changes
+  // Supabase Realtime: auto-refresh on unified_tasks changes (debounced)
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedInvalidate = useCallback(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    debounceTimer.current = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    }, 1000)
+  }, [queryClient])
+
   useEffect(() => {
     const channel = supabase
       .channel('admin-tasks')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'unified_tasks' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['tasks'] })
-        },
+        debouncedInvalidate,
       )
       .subscribe()
     return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current)
       supabase.removeChannel(channel)
     }
-  }, [queryClient])
+  }, [debouncedInvalidate])
 
   const handleCancel = (record: AdminTaskData) => {
     Modal.confirm({
@@ -332,6 +354,20 @@ export function TaskCenter() {
         },
       },
       {
+        key: 'runtime',
+        header: 'Runtime',
+        type: 'text',
+        size: 90,
+        cell: (row) => {
+          const isRunning = row.status === 'processing'
+          return (
+            <Typography.Text type={isRunning ? undefined : 'secondary'} style={{ fontSize: 12 }}>
+              {formatRuntime(row.started_at, row.completed_at)}
+            </Typography.Text>
+          )
+        },
+      },
+      {
         key: 'progress',
         header: 'Progress',
         type: 'number',
@@ -398,6 +434,60 @@ export function TaskCenter() {
     },
   })
 
+  const expandedRowRender = (row: AdminTaskData) => {
+    const statusConfig = STATUS_TAG_CONFIG[row.status] || { color: 'gray', icon: null }
+    const meta = row.metadata || {}
+    const descData = [
+      { label: 'Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.id}</span> },
+      { label: 'Type', value: (
+        <Tag size="small" color={TYPE_TAG_COLORS[row.task_type] || 'gray'}>{row.task_type}</Tag>
+      )},
+      { label: 'Status', value: (
+        <Tag icon={statusConfig.icon} color={statusConfig.color}>{row.status}</Tag>
+      )},
+      { label: 'User', value: row.user_email || '-' },
+      { label: 'Phase', value: row.phase || '-' },
+      { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
+      { label: 'Created', value: formatDateTime(row.created_at) },
+      { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
+      { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
+      { label: 'Celery Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.celery_task_id || '-'}</span> },
+      { label: 'Resource ID', value: row.resource_id || '-' },
+      { label: 'Media ID', value: row.media_id || '-' },
+    ]
+    // Add metadata fields for parse tasks
+    if (meta.original_url) {
+      descData.push({ label: 'Original URL', value: <span style={{ fontSize: 12, wordBreak: 'break-all' }}>{meta.original_url as string}</span> })
+    }
+    if (meta.parse_method) {
+      const methodLabels: Record<string, string> = { ytdlp: 'yt-dlp', lightweight: 'Lightweight', drissionpage: 'DrissionPage' }
+      descData.push({ label: 'Parse Method', value: (
+        <Tag size="small" color="cyan">{methodLabels[meta.parse_method as string] || (meta.parse_method as string)}</Tag>
+      )})
+    }
+
+    return (
+      <div style={{ padding: '12px 16px' }}>
+        <Descriptions column={3} size="small" data={descData} />
+        {row.subtitle && (
+          <div style={{ marginTop: 8 }}>
+            <Typography.Text bold style={{ fontSize: 12 }}>Subtitle: </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{row.subtitle}</Typography.Text>
+          </div>
+        )}
+        {row.error_msg && (
+          <div style={{ marginTop: 8 }}>
+            <Typography.Text bold style={{ fontSize: 12 }}>Error: </Typography.Text>
+            <Typography.Text type="error" style={{ fontSize: 12 }}>{row.error_msg}</Typography.Text>
+            {row.error_code && (
+              <Tag size="small" color="red" style={{ marginLeft: 8 }}>{row.error_code}</Tag>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <NotionTable<AdminTaskData>
       table={table}
@@ -409,6 +499,7 @@ export function TaskCenter() {
       headerContent={<StatsCards />}
       emptyText="No tasks found"
       scrollX={1100}
+      expandedRowRender={expandedRowRender}
     />
   )
 }

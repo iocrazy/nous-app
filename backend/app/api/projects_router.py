@@ -48,16 +48,21 @@ async def list_projects(
     auth: AuthDep,
     project_type: Optional[str] = Query(None, description="Filter by project type"),
     starred: Optional[bool] = Query(None, description="Filter starred projects only"),
+    team_id: Optional[str] = Query(None, description="Filter by team ID (null = personal)"),
 ):
     """
     List all projects accessible to the current user.
 
     - **project_type**: Optional filter (internal, external, personal).
     - **starred**: Optional filter for starred projects.
+    - **team_id**: Optional team filter. If provided, returns team projects.
+      If omitted, returns all user projects (backward-compatible).
     """
     try:
         svc = ProjectsService()
-        projects = await svc.get_projects_with_counts(auth.user_id)
+        projects = await svc.get_projects_with_counts(
+            auth.user_id, team_id=team_id
+        )
 
         if project_type:
             projects = [p for p in projects if p.get("project_type") == project_type]

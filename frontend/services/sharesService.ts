@@ -8,9 +8,8 @@
  */
 
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
 import { Share } from '../types';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
 
 /**
  * Create a new share.
@@ -28,7 +27,7 @@ export const createShare = async (data: {
   max_views?: number;
   watermark?: boolean;
 }): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares`;
+  const url = `${getApiUrl()}/api/v1/shares`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -63,6 +62,7 @@ export const fetchShares = async (params?: {
   project_file_id?: string;
   folder_id?: string;
   status?: string;
+  team_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<Share[]> => {
@@ -71,11 +71,12 @@ export const fetchShares = async (params?: {
   if (params?.project_file_id) searchParams.set('project_file_id', params.project_file_id);
   if (params?.folder_id) searchParams.set('folder_id', params.folder_id);
   if (params?.status) searchParams.set('status', params.status);
+  if (params?.team_id) searchParams.set('team_id', params.team_id);
   if (params?.limit != null) searchParams.set('limit', String(params.limit));
   if (params?.offset != null) searchParams.set('offset', String(params.offset));
 
   const query = searchParams.toString();
-  const url = `${API_BASE}/api/v1/shares${query ? `?${query}` : ''}`;
+  const url = `${getApiUrl()}/api/v1/shares${query ? `?${query}` : ''}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -98,7 +99,7 @@ export const fetchShares = async (params?: {
  * Get a single share by ID.
  */
 export const getShare = async (shareId: string): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -131,7 +132,7 @@ export const updateShare = async (
     watermark?: boolean;
   }
 ): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'PUT',
@@ -158,7 +159,7 @@ export const updateShare = async (
  * Cancel (soft-delete) a share.
  */
 export const cancelShare = async (shareId: string): Promise<void> => {
-  const url = `${API_BASE}/api/v1/shares/${shareId}`;
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}`;
 
   const response = await fetch(url, {
     method: 'DELETE',
@@ -177,6 +178,23 @@ export const cancelShare = async (shareId: string): Promise<void> => {
 };
 
 /**
+ * Permanently delete a share (hard delete, only for expired/cancelled).
+ */
+export const deleteSharePermanent = async (shareId: string): Promise<void> => {
+  const url = `${getApiUrl()}/api/v1/shares/${shareId}/permanent`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete share' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+};
+
+/**
  * Access a share by its public share code (no auth required for public access).
  * Backend uses POST with JSON body for password verification.
  */
@@ -184,7 +202,7 @@ export const accessShare = async (
   shareCode: string,
   password?: string
 ): Promise<Share> => {
-  const url = `${API_BASE}/api/v1/shares/code/${shareCode}`;
+  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}`;
 
   const response = await fetch(url, {
     method: 'POST',

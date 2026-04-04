@@ -8,8 +8,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-
-const API_BASE = 'VITE_API_URL' in import.meta.env ? (import.meta.env.VITE_API_URL || '') : 'http://localhost:8080';
+import { getApiUrl } from '../utils/apiConfig';
 
 export interface EffectivePermission {
   role: string;
@@ -31,7 +30,7 @@ export const fetchEffectiveRole = async (
     object_id: objectId,
     team_id: teamId,
   });
-  const res = await fetch(`${API_BASE}/api/v1/resources/permissions?${params}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/resources/permissions?${params}`, {
     headers,
   });
   if (!res.ok) {

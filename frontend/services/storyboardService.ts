@@ -1,4 +1,6 @@
 import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
+import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
 import {
   StoryboardProject,
   StoryboardNode,
@@ -8,39 +10,22 @@ import {
   ProjectSummary,
 } from '../types';
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
-
-// ─── Response helpers ─────────────────────────────────────────────────────────
-
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API error ${res.status}: ${text}`);
-  }
-  if (res.status === 204) {
-    return undefined as unknown as T;
-  }
-  return res.json() as Promise<T>;
-}
-
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 export async function fetchProjects(
   teamId: string,
   page = 1,
-  limit = 20
+  limit = 20,
+  projectId?: string
 ): Promise<{ data: ProjectSummary[]; total: number }> {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ team_id: teamId, page: String(page), limit: String(limit) });
+  if (projectId) {
+    params.set('project_id', projectId);
+  }
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects?${params}`, { headers });
-  return handleResponse<{ data: ProjectSummary[]; total: number }>(res);
+  const result = await unwrapResponse<{ items: ProjectSummary[]; total: number }>(res);
+  return { data: result?.items ?? [], total: result?.total ?? 0 };
 }
 
 export interface ProjectFull extends StoryboardProject {
@@ -52,13 +37,20 @@ export interface ProjectFull extends StoryboardProject {
 export async function fetchProject(projectId: string): Promise<ProjectFull> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}`, { headers });
-  return handleResponse<ProjectFull>(res);
+  const raw = await unwrapResponse<{ project: StoryboardProject; nodes: StoryboardNode[]; edges: StoryboardEdge[]; characters: StoryboardCharacter[] }>(res);
+  return {
+    ...raw.project,
+    nodes: raw.nodes ?? [],
+    edges: raw.edges ?? [],
+    characters: raw.characters ?? [],
+  };
 }
 
 export async function createProject(data: {
   team_id: string;
   name: string;
   description?: string;
+  project_id?: string;
 }): Promise<StoryboardProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects`, {
@@ -66,7 +58,7 @@ export async function createProject(data: {
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardProject>(res);
+  return unwrapResponse<StoryboardProject>(res);
 }
 
 export async function updateProject(
@@ -79,7 +71,7 @@ export async function updateProject(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardProject>(res);
+  return unwrapResponse<StoryboardProject>(res);
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
@@ -88,7 +80,7 @@ export async function deleteProject(projectId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 export async function updateViewport(
@@ -101,7 +93,7 @@ export async function updateViewport(
     headers,
     body: JSON.stringify({ viewport_json: viewport }),
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── Canvas Sync ──────────────────────────────────────────────────────────────
@@ -130,7 +122,7 @@ export async function syncCanvas(
     headers,
     body: JSON.stringify(syncData),
   });
-  return handleResponse<SyncResult>(res);
+  return unwrapResponse<SyncResult>(res);
 }
 
 // ─── Characters ───────────────────────────────────────────────────────────────
@@ -138,7 +130,7 @@ export async function syncCanvas(
 export async function fetchCharacters(projectId: string): Promise<StoryboardCharacter[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/characters`, { headers });
-  return handleResponse<StoryboardCharacter[]>(res);
+  return unwrapResponse<StoryboardCharacter[]>(res);
 }
 
 export async function createCharacter(
@@ -151,7 +143,7 @@ export async function createCharacter(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardCharacter>(res);
+  return unwrapResponse<StoryboardCharacter>(res);
 }
 
 export async function updateCharacter(
@@ -164,7 +156,7 @@ export async function updateCharacter(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardCharacter>(res);
+  return unwrapResponse<StoryboardCharacter>(res);
 }
 
 export async function deleteCharacter(characterId: string): Promise<void> {
@@ -173,7 +165,7 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── Frames ───────────────────────────────────────────────────────────────────
@@ -188,7 +180,7 @@ export async function updateFrame(
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<StoryboardFrame>(res);
+  return unwrapResponse<StoryboardFrame>(res);
 }
 
 export async function reorderFrames(frameIds: string[]): Promise<void> {
@@ -198,7 +190,7 @@ export async function reorderFrames(frameIds: string[]): Promise<void> {
     headers,
     body: JSON.stringify({ frame_ids: frameIds }),
   });
-  return handleResponse<void>(res);
+  return unwrapResponse<void>(res);
 }
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
@@ -215,12 +207,14 @@ export interface GenerateImageParams {
 
 export async function generateImage(data: GenerateImageParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-image`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/generate/image`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  // Backend returns { success, task_id } directly (not wrapped in data)
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export interface GenerateVideoParams {
@@ -234,12 +228,13 @@ export interface GenerateVideoParams {
 
 export async function generateVideo(data: GenerateVideoParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/generate-video`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/generate/video`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export interface SplitScriptParams {
@@ -251,36 +246,135 @@ export interface SplitScriptParams {
 
 export async function splitScript(data: SplitScriptParams): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/ai/split-script`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/storyboard/split-script`, {
     method: 'POST',
     headers,
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  const body = await handleResponse<{ success: boolean; task_id: string }>(res);
+  return { task_id: body.task_id };
 }
 
 export async function chatWithAI(
   projectId: string,
   message: string,
-  frameId?: string
+  frameId?: string,
+  skillId?: string,
 ): Promise<{ response: string; actions: unknown[] }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/chat`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, frame_id: frameId }),
+    body: JSON.stringify({ message, frame_id: frameId, skill_id: skillId }),
   });
-  return handleResponse<{ response: string; actions: unknown[] }>(res);
+  return unwrapResponse<{ response: string; actions: unknown[] }>(res);
+}
+
+// ─── Image Upload ─────────────────────────────────────────────────────────────
+
+export interface UploadImageResult {
+  asset_id: string;
+  image_url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+  file_hash: string;
+}
+
+export async function uploadImage(
+  projectId: string,
+  file: File,
+  nodeId?: string,
+): Promise<UploadImageResult> {
+  const headers = await getAuthHeaders();
+  // Remove Content-Type — let the browser set multipart boundary automatically
+  delete (headers as Record<string, string>)['Content-Type'];
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (nodeId) {
+    formData.append('node_id', nodeId);
+  }
+
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/storyboard/projects/${projectId}/upload`,
+    {
+      method: 'POST',
+      headers,
+      body: formData,
+    },
+  );
+  return unwrapResponse<UploadImageResult>(res);
+}
+
+// ─── Image Split ──────────────────────────────────────────────────────────────
+
+export interface SplitImageFrame {
+  id: string;
+  asset_id: string;
+  frame_index: number;
+  image_url: string;
+  preview_url: string;
+  width: number;
+  height: number;
+  row: number;
+  col: number;
+  node_id?: string;
+  sort_order: number;
+}
+
+export interface SplitImageResult {
+  frames: SplitImageFrame[];
+  source_asset_id: string;
+  rows: number;
+  cols: number;
+}
+
+export async function splitImage(
+  projectId: string,
+  assetId: string,
+  rows: number,
+  cols: number,
+  nodeId?: string,
+): Promise<SplitImageResult> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/storyboard/projects/${projectId}/split-image`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        asset_id: assetId,
+        rows,
+        cols,
+        node_id: nodeId,
+      }),
+    },
+  );
+  return unwrapResponse<SplitImageResult>(res);
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export type ExportFormat = 'png' | 'pdf' | 'zip';
 
+export interface ExportProjectOptions {
+  includeFrameNumbers?: boolean;
+  includeAnnotations?: boolean;
+  includeCameraOverlays?: boolean;
+  includeNotes?: boolean;
+  includeMetadata?: boolean;
+  columns?: number;
+  paperSize?: 'a4' | 'letter' | 'custom';
+  includeCharacterPage?: boolean;
+  quality?: 'low' | 'medium' | 'high';
+  includeAllAssets?: boolean;
+}
+
 export async function exportProject(
   projectId: string,
   format: ExportFormat,
-  options?: Record<string, unknown>
+  options?: ExportProjectOptions
 ): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/storyboard/projects/${projectId}/export`, {
@@ -288,5 +382,5 @@ export async function exportProject(
     headers,
     body: JSON.stringify({ format, options: options ?? {} }),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }

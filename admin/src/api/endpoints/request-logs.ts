@@ -101,7 +101,7 @@ export function useRequestLogs(params: RequestLogsParams) {
       if (params.end_date) query.end_date = params.end_date
 
       const { data } = await apiClient.get<RequestLogListResponse>(
-        '/api/v1/admin/request-logs',
+        '/api/v1/admin/logs',
         { params: query },
       )
       return data
@@ -132,7 +132,7 @@ export function useFrontendErrors(params: FrontendErrorsParams) {
       if (params.end_date) query.end_date = params.end_date
 
       const { data } = await apiClient.get<FrontendErrorListResponse>(
-        '/api/v1/admin/request-logs/frontend-errors',
+        '/api/v1/admin/logs/frontend-errors',
         { params: query },
       )
       return data
@@ -169,7 +169,7 @@ export function useAppLogs(params: AppLogsParams) {
       if (params.end_date) query.end_date = params.end_date
 
       const { data } = await apiClient.get<AppLogListResponse>(
-        '/api/v1/admin/request-logs/app-logs',
+        '/api/v1/admin/logs/app-logs',
         { params: query },
       )
       return data

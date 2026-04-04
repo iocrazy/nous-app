@@ -358,6 +358,7 @@ class AdminTaskResponse(BaseModel):
     resource_id: Optional[str] = None
     media_id: Optional[str] = None
     celery_task_id: Optional[str] = None
+    metadata: Optional[dict] = None
     created_at: str
     started_at: Optional[str] = None
     completed_at: Optional[str] = None

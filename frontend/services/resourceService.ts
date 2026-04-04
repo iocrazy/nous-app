@@ -1,15 +1,8 @@
 import { supabase } from '../supabaseClient';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import { getAuthHeaders } from './parserService';
-
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
+import { getApiUrl } from '../utils/apiConfig';
+import { buildMediaUrl } from '../utils/mediaUrl';
 
 // ─── Folders ────────────────────────────────────────────
 
@@ -543,12 +536,11 @@ export async function deleteVersion(
 // ─── File URL ───────────────────────────────────────────
 
 /**
- * Build a direct /media/ URL for a resource's file_path.
- * This bypasses auth (same as Downloads) and supports Range requests reliably.
+ * Build a /media/{id} URL for a resource.
+ * Backend resolves the file path from DB — the URL never exposes filenames.
  */
-export function getResourceMediaUrl(filePath: string): string {
-  const apiUrl = getApiUrl();
-  return `${apiUrl}/media/${filePath}`;
+export function getResourceMediaUrl(resourceId: string, token?: string): string {
+  return buildMediaUrl(resourceId, token);
 }
 
 export function getResourceFileUrl(resourceId: string, token?: string): string {

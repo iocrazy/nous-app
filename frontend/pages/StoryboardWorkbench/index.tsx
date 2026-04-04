@@ -1,14 +1,8 @@
-import React from 'react';
-import { useStoryboardStore } from '../../stores/storyboardStore';
-import { ProjectListPage } from './ProjectListPage';
+import { useParams } from 'react-router-dom';
 import { CanvasEditorPage } from './CanvasEditorPage';
 
 export function StoryboardWorkbench() {
-  const currentProjectId = useStoryboardStore((s) => s.currentProjectId);
-
-  if (currentProjectId === null) {
-    return <ProjectListPage />;
-  }
-
+  const { storyboardId } = useParams<{ storyboardId: string }>();
+  // storyboardId is always present when this route is matched
   return <CanvasEditorPage />;
 }

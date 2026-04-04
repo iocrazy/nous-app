@@ -103,7 +103,7 @@ interface EndpointDef {
 const endpoints: EndpointDef[] = [
   {
     method: 'POST',
-    path: '/api/v1/videos/fetch',
+    path: '/api/v1/media/fetch',
     description: 'Parse and fetch a single video by share link. Returns parsed metadata and starts downloading media files.',
     params: [
       { name: 'url', type: 'string', required: true, description: 'Share link or video URL' },
@@ -113,7 +113,7 @@ const endpoints: EndpointDef[] = [
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach' },
       { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
     ],
-    curl: `curl -X POST "${BASE_URL}/api/v1/videos/fetch" \\
+    curl: `curl -X POST "${BASE_URL}/api/v1/media/fetch" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: your_api_key_here" \\
   -d '{
@@ -135,7 +135,7 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'POST',
-    path: '/api/v1/videos/fetch/batch',
+    path: '/api/v1/media/fetch/batch',
     description: 'Parse and fetch multiple videos at once. Returns results for each URL.',
     params: [
       { name: 'urls', type: 'string[]', required: true, description: 'Array of share links' },
@@ -145,7 +145,7 @@ const endpoints: EndpointDef[] = [
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach to all videos' },
       { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
     ],
-    curl: `curl -X POST "${BASE_URL}/api/v1/videos/fetch/batch" \\
+    curl: `curl -X POST "${BASE_URL}/api/v1/media/fetch/batch" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: your_api_key_here" \\
   -d '{
@@ -165,7 +165,7 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'GET',
-    path: '/api/v1/videos/videos',
+    path: '/api/v1/media',
     description: 'List all videos in your library with pagination support.',
     queryParams: [
       { name: 'skip', type: 'integer', required: false, default: '0', description: 'Number of records to skip' },
@@ -173,7 +173,7 @@ const endpoints: EndpointDef[] = [
       { name: 'order_by', type: 'string', required: false, default: 'created_at', description: 'Field to sort by' },
       { name: 'ascending', type: 'boolean', required: false, default: 'false', description: 'Sort ascending' },
     ],
-    curl: `curl "${BASE_URL}/api/v1/videos/videos?limit=10&skip=0" \\
+    curl: `curl "${BASE_URL}/api/v1/media?limit=10&skip=0" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
@@ -191,9 +191,9 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'GET',
-    path: '/api/v1/videos/videos/{platform_id}',
+    path: '/api/v1/media/{platform_id}',
     description: 'Get full details for a specific video by its platform ID.',
-    curl: `curl "${BASE_URL}/api/v1/videos/videos/7312345678901234567" \\
+    curl: `curl "${BASE_URL}/api/v1/media/7312345678901234567" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
@@ -212,9 +212,9 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'DELETE',
-    path: '/api/v1/videos/videos/{platform_id}',
+    path: '/api/v1/media/{platform_id}',
     description: 'Delete a video record and its associated media files.',
-    curl: `curl -X DELETE "${BASE_URL}/api/v1/videos/videos/7312345678901234567" \\
+    curl: `curl -X DELETE "${BASE_URL}/api/v1/media/7312345678901234567" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
@@ -223,9 +223,9 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'POST',
-    path: '/api/v1/videos/retry/{platform_id}',
+    path: '/api/v1/media/retry/{platform_id}',
     description: 'Retry downloading media for a video that previously failed.',
-    curl: `curl -X POST "${BASE_URL}/api/v1/videos/retry/7312345678901234567" \\
+    curl: `curl -X POST "${BASE_URL}/api/v1/media/retry/7312345678901234567" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
@@ -234,9 +234,9 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'GET',
-    path: '/api/v1/videos/statistics',
+    path: '/api/v1/media/statistics',
     description: 'Get aggregate statistics for your video library.',
-    curl: `curl "${BASE_URL}/api/v1/videos/statistics" \\
+    curl: `curl "${BASE_URL}/api/v1/media/statistics" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
@@ -249,7 +249,7 @@ const endpoints: EndpointDef[] = [
   },
   {
     method: 'POST',
-    path: '/api/v1/videos/videos/search',
+    path: '/api/v1/media/search',
     description: 'Search videos by keyword, author, status, date range, and more.',
     params: [
       { name: 'keyword', type: 'string', required: false, description: 'Search in title and description' },
@@ -264,7 +264,7 @@ const endpoints: EndpointDef[] = [
       { name: 'skip', type: 'integer', required: false, default: '0', description: 'Records to skip' },
       { name: 'limit', type: 'integer', required: false, default: '20', description: 'Max records (1–100)' },
     ],
-    curl: `curl -X POST "${BASE_URL}/api/v1/videos/videos/search?limit=10" \\
+    curl: `curl -X POST "${BASE_URL}/api/v1/media/search?limit=10" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: your_api_key_here" \\
   -d '{
@@ -332,11 +332,11 @@ const EndpointSection: React.FC<{ ep: EndpointDef }> = ({ ep }) => {
 // --- Scopes Table ---
 
 const scopesData = [
-  { scope: 'videos:fetch', description: 'Parse single video link' },
+  { scope: 'videos:fetch', description: 'Parse single media link' },
   { scope: 'videos:fetch:batch', description: 'Batch parse multiple links' },
-  { scope: 'videos:videos:read', description: 'List and get video details' },
-  { scope: 'videos:videos:write', description: 'Create and update videos' },
-  { scope: 'videos:search', description: 'Search videos' },
+  { scope: 'videos:videos:read', description: 'List and get media details' },
+  { scope: 'videos:videos:write', description: 'Create and update media' },
+  { scope: 'videos:search', description: 'Search media' },
   { scope: 'videos:statistics', description: 'View statistics' },
   { scope: 'videos:retry', description: 'Retry failed downloads' },
   { scope: 'tags:read', description: 'List tags' },
@@ -403,7 +403,7 @@ export const ApiDocsPanel: React.FC = () => {
 
           <div>
             <h3 className="text-sm font-medium text-zinc-300 mb-2">Try it now</h3>
-            <CodeBlock code={`curl -X POST "${BASE_URL}/api/v1/videos/fetch" \\
+            <CodeBlock code={`curl -X POST "${BASE_URL}/api/v1/media/fetch" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: your_api_key_here" \\
   -d '{"url": "https://v.douyin.com/xxxxxx/", "video_bool": true}'`} />

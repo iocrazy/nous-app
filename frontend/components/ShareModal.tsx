@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { DateTimePicker } from './DateTimePicker';
 import { createShare } from '../services/sharesService';
 import { Share, ShareType } from '../types';
 
@@ -129,12 +130,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={handleClose}
       />
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-800">
           <div className="flex items-center gap-3">
@@ -294,11 +295,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   </button>
                 </div>
                 {expirationEnabled && (
-                  <input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={expirationDate}
-                    onChange={(e) => setExpirationDate(e.target.value)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 transition-colors [color-scheme:dark]"
+                    onChange={setExpirationDate}
                   />
                 )}
 

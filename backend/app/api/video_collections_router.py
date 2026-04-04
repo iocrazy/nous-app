@@ -21,7 +21,7 @@ router = APIRouter(prefix="/video-collections", tags=["Video Collections"])
 
 
 @router.get("", response_model=VideoCollectionListResponse)
-async def list_collections(auth: AuthDep = None):
+async def list_collections(auth: AuthDep):
     """List all video collections the user has access to."""
     repo = VideoCollectionRepository()
     collections = await repo.get_user_collections(auth.user_id)
@@ -45,7 +45,7 @@ async def list_collections(auth: AuthDep = None):
 
 
 @router.post("", response_model=VideoCollectionResponse, status_code=status.HTTP_201_CREATED)
-async def create_collection(collection: VideoCollectionCreate, auth: AuthDep = None):
+async def create_collection(collection: VideoCollectionCreate, auth: AuthDep):
     """Create a new video collection."""
     repo = VideoCollectionRepository()
 
@@ -75,7 +75,7 @@ async def create_collection(collection: VideoCollectionCreate, auth: AuthDep = N
 
 
 @router.get("/{collection_id}", response_model=VideoCollectionResponse)
-async def get_collection(collection_id: str, auth: AuthDep = None):
+async def get_collection(collection_id: str, auth: AuthDep):
     """Get a specific collection by ID."""
     repo = VideoCollectionRepository()
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
@@ -102,7 +102,7 @@ async def get_collection(collection_id: str, auth: AuthDep = None):
 async def update_collection(
     collection_id: str,
     update: VideoCollectionUpdate,
-    auth: AuthDep = None
+    auth: AuthDep
 ):
     """Update a collection."""
     repo = VideoCollectionRepository()
@@ -138,7 +138,7 @@ async def update_collection(
 
 
 @router.delete("/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_collection(collection_id: str, auth: AuthDep = None):
+async def delete_collection(collection_id: str, auth: AuthDep):
     """Delete a collection."""
     repo = VideoCollectionRepository()
     deleted = await repo.delete_collection(collection_id, auth.user_id)
@@ -154,7 +154,7 @@ async def delete_collection(collection_id: str, auth: AuthDep = None):
 async def add_video(
     collection_id: str,
     request: AddVideoRequest,
-    auth: AuthDep = None
+    auth: AuthDep
 ):
     """Add a video to a collection."""
     repo = VideoCollectionRepository()
@@ -189,7 +189,7 @@ async def add_video(
 async def remove_video(
     collection_id: str,
     video_aweme_id: str,
-    auth: AuthDep = None
+    auth: AuthDep
 ):
     """Remove a video from a collection."""
     repo = VideoCollectionRepository()
@@ -216,7 +216,7 @@ async def remove_video(
 
 
 @router.get("/video/{video_aweme_id}", response_model=VideoCollectionVideosResponse)
-async def get_video_collections(video_aweme_id: str, auth: AuthDep = None):
+async def get_video_collections(video_aweme_id: str, auth: AuthDep):
     """Get all collection IDs a video belongs to."""
     repo = VideoCollectionRepository()
     collection_ids = await repo.get_video_collections(video_aweme_id, auth.user_id)
@@ -225,7 +225,7 @@ async def get_video_collections(video_aweme_id: str, auth: AuthDep = None):
 
 
 @router.get("/{collection_id}/videos", response_model=CollectionVideosAwemeIdsResponse)
-async def get_collection_videos(collection_id: str, auth: AuthDep = None):
+async def get_collection_videos(collection_id: str, auth: AuthDep):
     """Get all video aweme_ids in a collection."""
     repo = VideoCollectionRepository()
     aweme_ids = await repo.get_collection_video_aweme_ids(collection_id, auth.user_id)
@@ -236,7 +236,7 @@ async def get_collection_videos(collection_id: str, auth: AuthDep = None):
 @router.post("/batch-videos", response_model=CollectionVideosAwemeIdsResponse)
 async def get_batch_collection_videos(
     request: CollectionVideosAwemeIdsRequest,
-    auth: AuthDep = None
+    auth: AuthDep
 ):
     """Get all unique video aweme_ids from multiple collections."""
     repo = VideoCollectionRepository()

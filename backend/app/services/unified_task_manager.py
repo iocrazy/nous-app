@@ -106,6 +106,7 @@ class UnifiedTaskManager:
 
     def __init__(self) -> None:
         self._last_progress: Dict[str, float] = {}   # task_id -> last_write_time
+        self._last_progress_value: Dict[str, int] = {}  # task_id -> last_progress_percent
         self._last_renewal: Dict[str, float] = {}     # dedup_key -> last renewal epoch
 
     # ── Internal helpers ──────────────────────────────────────────────
@@ -241,18 +242,24 @@ class UnifiedTaskManager:
         *,
         speed: Optional[int] = None,
         subtitle: Optional[str] = None,
+        title: Optional[str] = None,
         metadata_patch: Optional[dict] = None,
     ) -> None:
         """Update progress (0-100). Throttled to 1 write/sec per task.
 
-        Does not change phase — only updates progress/speed/subtitle.
+        Does not change phase — only updates progress/speed/subtitle/title.
         """
         now = time.time()
         last = self._last_progress.get(task_id, 0)
-        if now - last < self.THROTTLE_INTERVAL:
+        # Skip throttle when title is being updated (important state change)
+        if title is None and now - last < self.THROTTLE_INTERVAL:
             return
         self._last_progress[task_id] = now
-        logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%, speed={speed}")
+        # Only log at INFO for significant changes (every 10%), DEBUG for the rest
+        prev_progress = self._last_progress_value.get(task_id, 0)
+        if progress // 10 > prev_progress // 10 or progress >= 100:
+            logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%")
+        self._last_progress_value[task_id] = progress
 
         client = await self._get_client()
         updates: Dict[str, Any] = {
@@ -263,6 +270,8 @@ class UnifiedTaskManager:
             updates["speed"] = speed
         if subtitle is not None:
             updates["subtitle"] = subtitle
+        if title is not None:
+            updates["title"] = title
         if metadata_patch:
             existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
@@ -272,7 +281,13 @@ class UnifiedTaskManager:
 
     # ── Lifecycle: complete ───────────────────────────────────────────
 
-    async def complete(self, task_id: str, *, metadata_patch: Optional[dict] = None) -> None:
+    async def complete(
+        self,
+        task_id: str,
+        *,
+        subtitle: Optional[str] = None,
+        metadata_patch: Optional[dict] = None,
+    ) -> None:
         """Transition to COMPLETED phase.
 
         Idempotent: already-terminal tasks log a debug message and return.
@@ -288,6 +303,7 @@ class UnifiedTaskManager:
             "status": _PHASE_TO_STATUS[TaskPhase.COMPLETED],
             "progress": 100,
             "completed_at": now_iso,
+            "subtitle": subtitle or "",
         }
         if metadata_patch:
             client = await self._get_client()
@@ -297,6 +313,7 @@ class UnifiedTaskManager:
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
         logger.debug(f"[TaskManager] Completed {task_id}")
 
     # ── Lifecycle: fail ───────────────────────────────────────────────
@@ -324,6 +341,7 @@ class UnifiedTaskManager:
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
         logger.debug(f"[TaskManager] Failed {task_id}: {error_msg[:80]}")
 
     # ── Lifecycle: cancel ─────────────────────────────────────────────
@@ -369,6 +387,7 @@ class UnifiedTaskManager:
             .execute()
         )
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
 
         if celery_id:
             try:

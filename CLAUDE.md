@@ -205,7 +205,7 @@ supabase db push
 **服务层分工**：
 | 前端服务 | 后端路由 | 用途 |
 |----------|----------|------|
-| `parserService.ts` | `/api/v1/videos/*` | 视频解析/下载 |
+| `parserService.ts` | `/api/v1/media/*` | 媒体解析/下载 |
 | `resourceService.ts` | `/api/v1/resources/*` | 资源库 CRUD |
 | `unifiedTagService.ts` | `/api/v1/tags/*` + `/api/v1/resources/*/tags` | 标签管理 |
 | `teamService.ts` | `/api/v1/teams/*` | 团队管理 |
@@ -280,16 +280,19 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 | `/auth/me` | GET | 获取当前用户 |
 | `/auth/refresh` | POST | 刷新令牌 |
 
-### 媒体解析/下载 (`/videos`)
+### 媒体解析/下载 (`/media`)
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/videos/fetch` | POST | 解析并下载视频 |
-| `/videos/fetch/batch` | POST | 批量解析 |
-| `/videos` | GET | 获取 parsed_media 列表 |
-| `/videos/{id}` | GET | 获取 parsed_media 详情 |
-| `/videos/{id}` | DELETE | 删除 |
-| `/videos/search` | POST | 搜索 |
+| `/media/fetch` | POST | 解析并下载媒体 |
+| `/media/fetch/batch` | POST | 批量解析 |
+| `/media` | GET | 获取 parsed_media 列表 |
+| `/media/{id}` | GET | 获取 parsed_media 详情 |
+| `/media/{id}` | DELETE | 删除 |
+| `/media/search` | POST | 搜索 |
+| `/media/{id}/slides` | GET | 获取图集 slides 列表 |
+| `/media/{id}/slides/{filename}` | GET | 获取单张 slide 文件 |
+| `/media/{id}/audio` | GET | 获取背景音频 |
 
 ### 资源库 (`/resources`)
 

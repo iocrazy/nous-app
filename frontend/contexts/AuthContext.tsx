@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, getSupabaseCredentials } from '../supabaseClient';
 import { UserProfile, UserSettings, AISettings as AISettingsType } from '../types';
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
+import { createMediaSession, deleteMediaSession, fetchMediaToken } from '../services/mediaAuthService';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -13,6 +14,7 @@ interface AuthState {
   userSettings: UserSettings;
   aiSettings: AISettingsType;
   isProfileModalOpen: boolean;
+  mediaToken: string | null;
 }
 
 interface AuthActions {
@@ -71,6 +73,7 @@ export function AuthProvider({
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [aiSettings, setAISettings] = useState<AISettingsType>(DEFAULT_AI_SETTINGS);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [mediaToken, setMediaToken] = useState<string | null>(null);
 
   // Load frontend config from backend YAML on mount.
   // If Supabase is already configured via env vars, mark config as loaded
@@ -137,7 +140,7 @@ export function AuthProvider({
       supabaseAnonKey: credentials.anonKey || prev.supabaseAnonKey,
     }));
 
-    const handleSession = async (session: { user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
+    const handleSession = async (session: { access_token?: string; user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } } | null) => {
       if (session?.user) {
         const displayName =
           (session.user.user_metadata?.display_name as string) ||
@@ -151,7 +154,25 @@ export function AuthProvider({
           email: session.user.email || '',
         }));
         setCurrentUserId(session.user.id);
+
+        // Set media session cookie BEFORE enabling auth state,
+        // so video/image loads already have the cookie when components render
+        if (session.access_token) {
+          try {
+            await createMediaSession(session.access_token);
+          } catch (err) {
+            console.error('Failed to create media session:', err);
+          }
+        }
+
         setIsAuthenticated(true);
+
+        // Fetch signed media token for URL-based auth (non-blocking)
+        if (session.access_token) {
+          fetchMediaToken(session.access_token).then(tok => {
+            if (tok) setMediaToken(tok);
+          });
+        }
 
         // Load profile and settings in background — don't block data loading
         supabase
@@ -182,8 +203,8 @@ export function AuthProvider({
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      handleSession(session);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      await handleSession(session);
       setIsAuthLoading(false);
     });
 
@@ -195,7 +216,7 @@ export function AuthProvider({
           setCurrentUserId(null);
           onLogout?.();
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          handleSession(session);
+          await handleSession(session);
         }
       }
     );
@@ -217,6 +238,9 @@ export function AuthProvider({
   };
 
   const handleLogout = async () => {
+    // Clear media session cookie before signing out
+    await deleteMediaSession();
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       await supabase.auth.signOut();
@@ -225,6 +249,7 @@ export function AuthProvider({
     setIsProfileModalOpen(false);
     setUserProfile(DEFAULT_PROFILE);
     setCurrentUserId(null);
+    setMediaToken(null);
     setShowAuthModal(false);
     onLogout?.();
   };
@@ -281,6 +306,7 @@ export function AuthProvider({
     userSettings,
     aiSettings,
     isProfileModalOpen,
+    mediaToken,
     setShowAuthModal,
     setIsProfileModalOpen,
     setUserProfile,

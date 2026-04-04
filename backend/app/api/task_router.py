@@ -150,7 +150,7 @@ async def cancel_task(task_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
 
 
-@router.get("/", tags=TAGS)
+@router.get("", tags=TAGS)
 async def list_active_tasks(
     auth: AuthDep,
     queue: Optional[str] = Query(None, description="按队列筛选"),

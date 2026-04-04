@@ -8,6 +8,10 @@
       "destination": "https://mediahubserver.heygo.cn:88/api/:path*"
     },
     {
+      "source": "/media/:path*",
+      "destination": "https://mediahubserver.heygo.cn:88/media/:path*"
+    },
+    {
       "source": "/auth/v1/:path*",
       "destination": "https://sb-mediahub.heygo.cn:88/auth/v1/:path*"
     },

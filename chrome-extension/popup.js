@@ -186,7 +186,7 @@ pushBtn.addEventListener('click', async () => {
 
   try {
     // 1. Push URL
-    const res = await fetch(`${config.apiUrl}/api/v1/videos/fetch`, {
+    const res = await fetch(`${config.apiUrl}/api/v1/media/fetch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

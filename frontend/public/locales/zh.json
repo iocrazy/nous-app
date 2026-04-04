@@ -14,6 +14,7 @@
     "resources": "资源库",
     "projects": "项目",
     "todolist": "待办事项",
+    "storyboard": "分镜工作台",
     "management": "管理",
     "members": "成员",
     "billing": "账单",
@@ -739,6 +740,7 @@
     "confirmCancel": "确定取消此分享？接收者将无法再访问。",
     "status": {
       "active": "活跃",
+      "inactive": "未激活",
       "expired": "已过期",
       "cancelled": "已取消"
     },
@@ -1021,5 +1023,118 @@
       "wide": "远景",
       "extremeWide": "极远景"
     }
+  },
+  "canvas": {
+    "addImage": "+ 添加图片",
+    "generate": "生成",
+    "generateAll": "全部生成",
+    "toolbar": {
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "fitView": "适配视图",
+      "lock": "锁定画布",
+      "unlock": "解锁画布",
+      "snapGrid": "对齐网格",
+      "delete": "清空画布"
+    }
+  },
+  "modelParams": {
+    "otherParams": "参数设置",
+    "provider": "服务商",
+    "model": "模型",
+    "quality": "质量",
+    "aspectRatio": "宽高比",
+    "extraOptions": "高级选项",
+    "enableWebSearch": "网络搜索",
+    "goConfigure": "去配置",
+    "providerKeyRequiredTitle": "需要 API 密钥",
+    "providerKeyRequiredDesc": "使用此模型需要 {{provider}} 的 API 密钥。"
+  },
+  "node": {
+    "upload": {
+      "hint": "点击或拖放图片",
+      "uploadedAlt": "已上传图片"
+    },
+    "imageEdit": {
+      "promptPlaceholder": "描述你想要生成的图片...",
+      "negativePrompt": "反向提示词（可选）...",
+      "promptRequired": "请输入提示词"
+    },
+    "imageNode": {
+      "waitingResult": "等待结果...",
+      "waitingResultDelayed": "等待中... ({{minutes}}分钟)",
+      "selectToEdit": "选中以编辑",
+      "generationFailed": "生成失败",
+      "resultAlt": "结果",
+      "generatedAlt": "生成图片"
+    },
+    "storyboardGen": {
+      "rowsShort": "行",
+      "colsShort": "列",
+      "framePlaceholder": "帧 {{number}}"
+    },
+    "textAnnotation": {
+      "placeholder": "在此输入笔记...",
+      "empty": "空白笔记"
+    }
+  },
+  "nodeToolbar": {
+    "copy": "复制",
+    "download": "下载",
+    "reupload": "重新上传",
+    "ungroup": "取消分组",
+    "copyText": "复制文本",
+    "copyErrorReport": "复制错误"
+  },
+  "tool": {
+    "crop": "裁剪",
+    "annotate": "标注",
+    "split": "分割"
+  },
+  "viewer": {
+    "imageAlt": "图片",
+    "next": "下一张",
+    "prev": "上一张",
+    "reset": "重置"
+  },
+  "common": {
+    "cancel": "取消",
+    "close": "关闭",
+    "delete": "删除"
+  },
+  "skills": {
+    "title": "技能",
+    "noSkills": "暂无技能",
+    "noSkillsDesc": "创建你的第一个技能来规范 AI 输出",
+    "newSkill": "新建技能",
+    "editSkill": "编辑技能",
+    "backToSkills": "返回技能列表",
+    "save": "保存",
+    "cancel": "取消",
+    "name": "名称",
+    "description": "描述",
+    "category": "分类",
+    "icon": "图标",
+    "content": "内容 (Markdown)",
+    "outputFormat": "输出格式",
+    "scope": "作用范围",
+    "scopeProject": "仅限本项目",
+    "scopeGlobal": "全局（所有项目）",
+    "visibility": "可见性",
+    "public": "公开（团队可见）",
+    "archived": "技能已归档",
+    "created": "技能已创建",
+    "updated": "技能已更新",
+    "unsavedChanges": "有未保存的修改，确认丢弃？",
+    "nameRequired": "技能名称不能为空",
+    "contentRequired": "技能内容不能为空",
+    "contentTooLong": "内容过长（最多 10,000 字符）",
+    "projectSkills": "项目技能",
+    "globalSkills": "全局技能",
+    "systemPresets": "系统预设",
+    "selectSkill": "选择技能",
+    "noSkill": "不使用技能",
+    "using": "使用中",
+    "searchSkills": "搜索技能..."
   }
 }

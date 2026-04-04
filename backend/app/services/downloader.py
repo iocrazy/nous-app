@@ -585,9 +585,181 @@ class DownloaderService:
             return result
 
     @staticmethod
+    async def download_slide_item(
+        index: int, url_list: list, slides_dir: str, is_video: bool, headers: dict
+    ) -> dict:
+        """Download a single slide item (image or video clip) to the slides/ subfolder.
+
+        Files are named sequentially: 001.jpg, 002.mp4, etc.
+
+        Args:
+            index: Zero-based index for sequential numbering
+            url_list: List of fallback URLs for this item
+            slides_dir: Full path to the slides/ directory
+            is_video: True for video clips (.mp4), False for images (.jpg)
+            headers: HTTP request headers
+
+        Returns:
+            dict with 'success', 'path', and optionally 'already_exists' or 'message'
+        """
+        extension = ".mp4" if is_video else ".jpg"
+        filename = f"{index + 1:03d}{extension}"
+        file_path = os.path.join(slides_dir, filename)
+
+        os.makedirs(slides_dir, exist_ok=True)
+
+        if os.path.exists(file_path):
+            logger.info(f"Slide already exists, skipping: {filename}")
+            return {"success": True, "path": file_path, "already_exists": True}
+
+        for j, url in enumerate(url_list):
+            try:
+                if await DownloaderService.download_file(url, file_path, headers):
+                    return {"success": True, "path": file_path}
+            except Exception as e:
+                logger.warning(f"Slide {filename} URL {j} failed: {e}")
+                continue
+
+        return {
+            "success": False,
+            "path": None,
+            "message": f"All {len(url_list)} URLs failed for slide {filename}",
+        }
+
+    @staticmethod
+    async def _download_standalone_music(
+        platform_id: str,
+        music_play_urls: list,
+        resource_dir_full: str,
+        resource_dir_relative: str,
+        headers: dict,
+        repo: "MediaRepository",
+    ) -> bool:
+        """Download standalone background music for carousel/image-text content.
+
+        Args:
+            platform_id: Media platform ID
+            music_play_urls: List of fallback music URLs
+            resource_dir_full: Full path to the resource directory
+            resource_dir_relative: Relative path prefix
+            headers: HTTP request headers
+            repo: MediaRepository instance for DB updates
+
+        Returns:
+            True if music was downloaded successfully, False otherwise
+        """
+        if not music_play_urls:
+            logger.info(f"[Music/Standalone] No music_play_urls for {platform_id}")
+            return False
+
+        music_full_path = os.path.join(resource_dir_full, "audio.mp3")
+        music_relative_path = f"{resource_dir_relative}/audio.mp3"
+
+        for idx, url in enumerate(music_play_urls):
+            logger.info(
+                f"[Music/Standalone] {platform_id}: trying URL[{idx}] → {url[:80]}..."
+            )
+            if await DownloaderService.download_file(url, music_full_path, headers):
+                try:
+                    await repo.update(
+                        platform_id,
+                        {
+                            "music_download_status": DownloadStatus.COMPLETED.value,
+                            "music_download_path": music_relative_path,
+                        },
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[Music/Standalone] DB update failed for {platform_id}: {e}"
+                    )
+                logger.success(
+                    f"[Music/Standalone] Downloaded music for {platform_id}"
+                )
+                return True
+
+        logger.warning(
+            f"[Music/Standalone] All {len(music_play_urls)} URLs failed for {platform_id}"
+        )
+        await repo.update(
+            platform_id,
+            {"music_download_status": DownloadStatus.FAILED.value},
+        )
+        return False
+
+    @staticmethod
+    async def _ensure_carousel_resource(
+        media_id: str,
+        user_id: str,
+        platform_id: str,
+        resource_dir_relative: str,
+        video_data: dict,
+    ) -> None:
+        """Create a resource record for carousel content if one doesn't exist.
+
+        Args:
+            media_id: parsed_media ID (Snowflake BIGINT as string)
+            user_id: Creator user ID
+            platform_id: Platform content ID
+            resource_dir_relative: Relative path to resource folder
+            video_data: parsed_media record dict
+        """
+        from app.repositories.resources_repository import ResourcesRepository
+
+        resources_repo = ResourcesRepository()
+
+        existing = await resources_repo.get_resource_by_media_id_and_creator(
+            media_id, user_id
+        )
+        if existing:
+            logger.info(
+                f"[Carousel/Resource] Resource already exists for media {media_id} "
+                f"(user {user_id})"
+            )
+            return
+
+        resource_data = {
+            "creator_id": user_id,
+            "media_id": media_id,
+            "source_type": "web",
+            "file_path": resource_dir_relative,
+            "mime_type": "image/jpeg",
+            "filename": f"{platform_id}_slides",
+            "file_type": video_data.get("media_type", "2"),
+            "cover_image_path": video_data.get("cover_download_path"),
+            "video_download_status": "completed",
+            "image_download_status": "completed",
+        }
+        try:
+            resource = await resources_repo.create_resource(resource_data)
+            resource_id = resource.get("id") if resource else None
+            logger.info(
+                f"[Carousel/Resource] Created resource {resource_id} for media {media_id}"
+            )
+
+            # Create resource_item for user's personal scope
+            if resource_id and user_id:
+                await resources_repo.create_resource_item(
+                    {
+                        "resource_id": resource_id,
+                        "scope_type": "personal",
+                        "scope_id": user_id,
+                        "added_by": user_id,
+                    }
+                )
+        except Exception as e:
+            logger.error(
+                f"[Carousel/Resource] Failed to create resource for media {media_id}: {e}"
+            )
+
+    @staticmethod
     async def download_images_by_platform_id(platform_id, user_id: str = None):
         """
-        Download image files only
+        Download carousel images/videos to slides/ subfolder, standalone music,
+        and create resource record.
+
+        Saves files as:
+          {media_id}/slides/001.jpg, 002.mp4, ...  (sequential numbering)
+          {media_id}/audio.mp3                       (standalone background music)
 
         Args:
             platform_id: Video platform ID
@@ -596,16 +768,13 @@ class DownloaderService:
         Returns:
             DownloadImagesResult: Download result info
         """
-        # todo: get and accumulate error_message
-
         result = DownloadImagesResult.model_construct()
         headers = Utils.get_headers()
 
         try:
-            # Establish database connection
             repo = MediaRepository()
 
-            # Get video data
+            # Get media data from DB
             try:
                 video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
@@ -619,129 +788,119 @@ class DownloaderService:
                 result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
 
-            logger.info(f"准备下载 {platform_id} 的图片集")
+            logger.info(f"准备下载 {platform_id} 的图片集 (slides/ subfolder)")
 
             # Create structured path: global/resources/web/{platform}/{media_id}/
             source_platform = video_data.get("source_platform", "douyin")
             media_id = str(video_data["id"])
-            sub_download_full_path, sub_download_relative_path = (
+            resource_dir_full, resource_dir_relative = (
                 Utils.create_web_resource_path(source_platform, media_id)
             )
+            slides_dir = os.path.join(str(resource_dir_full), "slides")
+            os.makedirs(slides_dir, exist_ok=True)
             video_title = video_data.get("title", "undefined")
-            file_name = platform_id  # Use platform_id as base name for image files
-            logger.debug(f"图片下载路径: {sub_download_full_path}")
+            logger.debug(f"Slides download path: {slides_dir}")
 
             video_urls = video_data.get("video_download_urls")
             image_urls = video_data.get("image_download_urls")
 
-            video_downloaded_count = 0
-            image_downloaded_count = 0
-
-            # Download videos
-
+            # Build a unified ordered list of slide items:
+            # Each item is (url_list, is_video)
+            # We need to reconstruct the original order from images data.
+            # For type 68 (image-text), images and videos are interleaved.
+            # The parser extracts them separately, so we merge back in order.
+            # Since we don't have original ordering info, we download videos first,
+            # then images — each group keeps its own order.
+            slide_items = []
             if Utils.is_nested_list(video_urls):
-                logger.info(f"准备下载  {len(video_urls)} 个视频")
-                video_tasks = []
+                for url_list in video_urls:
+                    slide_items.append((url_list, True))
+            if Utils.is_nested_list(image_urls):
+                for url_list in image_urls:
+                    slide_items.append((url_list, False))
+
+            total_expected = len(slide_items)
+            downloaded_count = 0
+
+            if slide_items:
+                logger.info(f"Downloading {total_expected} slides for {platform_id}")
+                download_tasks = []
                 async with asyncio.TaskGroup() as tg:
-                    for i, url_list in enumerate(video_urls):
+                    for i, (url_list, is_video) in enumerate(slide_items):
                         task = tg.create_task(
-                            DownloaderService.download_single_list_item(
-                                i, url_list, sub_download_full_path, file_name, headers
+                            DownloaderService.download_slide_item(
+                                i, url_list, slides_dir, is_video, headers
                             )
                         )
-                        logger.debug(f"添加视频第{i+1}下载任务: {task}")
-                        video_tasks.append(task)
+                        download_tasks.append(task)
 
-                for task in video_tasks:
+                for task in download_tasks:
                     try:
-                        result_data = task.result()
-                        if result_data and result_data.get("success", False):
-                            video_downloaded_count += 1
+                        task_result = task.result()
+                        if task_result and task_result.get("success", False):
+                            downloaded_count += 1
                     except Exception as e:
-                        logger.error(f"获取视频下载任务结果失败: {e}")
+                        logger.error(f"Slide download task result error: {e}")
 
                 logger.info(
-                    f"{file_name} 视频下载完成，共下载了 {video_downloaded_count}/{len(video_urls)} 个视频文件。"
-                )
-            else:
-                logger.info("No videos require downloading.")
-
-            # todo check errors
-            if Utils.is_nested_list(image_urls):
-                logger.debug(f"准备下载 {len(image_urls)} 张图片")
-                image_tasks = []
-                async with asyncio.TaskGroup() as tg:
-                    for i, url_list in enumerate(image_urls):
-                        task = tg.create_task(
-                            DownloaderService.download_single_list_item(
-                                i, url_list, sub_download_full_path, file_name, headers
-                            )
-                        )
-                        logger.debug(f"添加图片第{i+1}下载任务: {task}")
-                        image_tasks.append(task)
-
-                # Process image download results
-                for task in image_tasks:
-                    try:
-                        result_data = task.result()
-                        if result_data and result_data.get("success", False):
-                            image_downloaded_count += 1
-                            logger.debug(
-                                f"成功下载图片，当前计数: {image_downloaded_count}"
-                            )
-
-                    except Exception as e:
-                        logger.error(f"获取图片下载任务结果失败: {e}")
-
-                logger.info(
-                    f"{file_name} 图片下载完成，共下载了 {image_downloaded_count}/{len(image_urls)} 个图片文件。"
+                    f"{platform_id} slides download: {downloaded_count}/{total_expected}"
                 )
 
-            # Calculate total download count
-            total_expected = 0
-            if Utils.is_nested_list(video_urls):
-                total_expected += len(video_urls)
-            if Utils.is_nested_list(image_urls):
-                total_expected += len(image_urls)
-
-            total_downloaded = video_downloaded_count + image_downloaded_count
-
-            if total_downloaded == total_expected and total_expected > 0:
+            if downloaded_count == total_expected and total_expected > 0:
                 logger.success(
-                    f"{file_name} 下载完成，共下载了 {video_downloaded_count}个视频文件和 {image_downloaded_count}个图片文件。"
+                    f"{platform_id} slides download complete: {downloaded_count} files"
                 )
                 await repo.update(
                     platform_id,
                     {
                         "video_download_status": DownloadStatus.COMPLETED,
-                        "download_path": sub_download_relative_path,  # Use relative path
+                        "download_path": resource_dir_relative,
                     },
                 )
                 result.video_download_status = DownloadStatus.COMPLETED
+
+                # Download standalone music (non-blocking for overall result)
+                music_play_urls = video_data.get("music_play_urls") or []
+                if music_play_urls:
+                    await DownloaderService._download_standalone_music(
+                        platform_id=platform_id,
+                        music_play_urls=music_play_urls,
+                        resource_dir_full=str(resource_dir_full),
+                        resource_dir_relative=resource_dir_relative,
+                        headers=headers,
+                        repo=repo,
+                    )
+
+                # Create resource record (backfill)
+                if user_id:
+                    await DownloaderService._ensure_carousel_resource(
+                        media_id=media_id,
+                        user_id=user_id,
+                        platform_id=platform_id,
+                        resource_dir_relative=resource_dir_relative,
+                        video_data=video_data,
+                    )
 
                 # Log success
                 if user_id:
                     await log_user_action(
                         user_id=user_id,
                         action="download",
-                        message=f"Image set downloaded: {video_title[:30]}... ({total_downloaded} files)",
+                        message=f"Image set downloaded: {video_title[:30]}... ({downloaded_count} files)",
                         status="success",
                         aweme_id=platform_id,
                         details={
                             "media_type": "images",
-                            "file_count": total_downloaded,
-                            "platform": video_data.get("source_platform", "douyin"),
+                            "file_count": downloaded_count,
+                            "platform": source_platform,
                         },
                     )
 
             else:
-                video_total = len(video_urls) if Utils.is_nested_list(video_urls) else 0
-                image_total = len(image_urls) if Utils.is_nested_list(image_urls) else 0
                 error_msg = (
-                    f"{file_name} 下载失败，共下载了 "
-                    f"{video_downloaded_count}/{video_total} 个视频文件和 "
-                    f"{image_downloaded_count}/{image_total} 个图片文件。"
-                    f"Download Path: {sub_download_full_path}"
+                    f"{platform_id} slides download failed: "
+                    f"{downloaded_count}/{total_expected} files. "
+                    f"Path: {slides_dir}"
                 )
                 logger.error(error_msg)
                 await repo.update(
@@ -754,7 +913,6 @@ class DownloaderService:
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = error_msg
 
-                # Log failure
                 if user_id:
                     await log_user_action(
                         user_id=user_id,
@@ -764,7 +922,7 @@ class DownloaderService:
                         aweme_id=platform_id,
                         details={
                             "error": error_msg[:200],
-                            "platform": video_data.get("source_platform", "douyin"),
+                            "platform": source_platform,
                         },
                     )
 

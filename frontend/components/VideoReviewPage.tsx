@@ -19,18 +19,11 @@ interface VideoReviewPageProps {
   currentUserId: string;
 }
 
-const getApiUrl = (): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
-    // @ts-ignore
-    return import.meta.env.VITE_API_URL || '';
-  }
-  return 'http://localhost:8080';
-};
+import { buildMediaUrl } from '../utils/mediaUrl';
 
 const getVersionVideoSrc = (version: FileVersion): string => {
-  if (!version.file_path) return '';
-  return `${getApiUrl()}/media/${version.file_path}`;
+  if (!version.resource_id) return '';
+  return buildMediaUrl(String(version.resource_id));
 };
 
 export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
@@ -202,11 +195,11 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
     setViewingDrawingData(null);
   }, []);
 
-  // Determine video source URL
-  const videoSrc = selectedVersion?.file_path
-    ? `${getApiUrl()}/media/${selectedVersion.file_path}`
-    : file.file_path
-      ? `${getApiUrl()}/media/${file.file_path}`
+  // Determine video source URL — use ID-based /media/{id} route
+  const videoSrc = selectedVersion?.resource_id
+    ? buildMediaUrl(String(selectedVersion.resource_id))
+    : file.resource_id
+      ? buildMediaUrl(String(file.resource_id))
       : '';
 
   const videoMime = selectedVersion?.mime_type || file.mime_type || undefined;

@@ -488,8 +488,8 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         </IconButton>
       </div>
 
-      {/* Task Center */}
-      <div ref={taskCenterRef} className="relative">
+      {/* Task Center — hidden on mobile (accessible via MobileProfilePage) */}
+      <div ref={taskCenterRef} className="relative hidden sm:block">
         <IconButton
           title={t('topbar.taskCenter')}
           onClick={() => togglePanel('taskCenter')}
@@ -501,8 +501,8 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         {openPanel === 'taskCenter' && <TaskCenterPanel />}
       </div>
 
-      {/* Notifications */}
-      <div ref={notificationsRef} className="relative">
+      {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}
+      <div ref={notificationsRef} className="relative hidden sm:block">
         <IconButton
           title={t('topbar.notifications')}
           onClick={() => togglePanel('notifications')}

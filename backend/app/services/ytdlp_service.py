@@ -8,8 +8,10 @@ Supports YouTube, Bilibili, Twitter/X, TikTok, Instagram, Xiaohongshu, and more.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import os
+import tempfile
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -20,16 +22,80 @@ from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
 
+# ---------------------------------------------------------------------------
+# Cookie format helpers
+# ---------------------------------------------------------------------------
+
+# Platform → default cookie domain mapping
+_PLATFORM_COOKIE_DOMAINS: dict[str, str] = {
+    "douyin": ".douyin.com",
+    "bilibili": ".bilibili.com",
+    "youtube": ".youtube.com",
+    "tiktok": ".tiktok.com",
+    "twitter": ".twitter.com",
+    "x": ".x.com",
+    "instagram": ".instagram.com",
+    "xiaohongshu": ".xiaohongshu.com",
+    "weibo": ".weibo.com",
+}
+
+_NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n# This file was auto-converted from browser cookie string\n\n"
+
+
+def _is_netscape_format(text: str) -> bool:
+    """Return True if *text* already looks like a Netscape cookie file."""
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # A valid Netscape line has 7 tab-separated fields
+        if len(line.split("\t")) == 7:
+            return True
+        return False
+    return False
+
+
+def _browser_cookie_to_netscape(cookie_str: str, platform: str) -> str:
+    """Convert a browser-style cookie string to Netscape format.
+
+    Browser cookie strings look like: ``key1=value1; key2=value2; ...``
+    Netscape format is one tab-separated line per cookie:
+        domain  include_subdomains  path  secure  expiry  name  value
+
+    If the input is already in Netscape format it is returned as-is.
+    """
+    if _is_netscape_format(cookie_str):
+        return cookie_str
+
+    domain = _PLATFORM_COOKIE_DOMAINS.get(platform, f".{platform}.com")
+    lines = [_NETSCAPE_HEADER]
+
+    for pair in cookie_str.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        name, _, value = pair.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        # domain  flag  path  secure  expiry  name  value
+        lines.append(f"{domain}\tTRUE\t/\tFALSE\t0\t{name}\t{value}")
+
+    return "\n".join(lines) + "\n"
+
+
 class YtdlpService:
     """Universal video download via yt-dlp"""
 
     @staticmethod
-    async def fetch_metadata(url: str) -> dict:
+    async def fetch_metadata(url: str, user_id: Optional[str] = None) -> dict:
         """
         Fetch video metadata using yt-dlp --dump-json.
 
         Args:
             url: Video URL
+            user_id: Optional user ID for per-user cookie lookup
 
         Returns:
             dict: yt-dlp info_dict with video metadata
@@ -45,7 +111,7 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
-            *YtdlpService._get_cookie_args(url),
+            *YtdlpService._get_cookie_args(url, user_id=user_id),
             url,
         ]
 
@@ -81,6 +147,7 @@ class YtdlpService:
         output_dir: str,
         platform_id: str,
         progress_callback: Optional[Callable] = None,
+        user_id: Optional[str] = None,
     ) -> dict:
         """
         Download video file via yt-dlp with real-time progress tracking.
@@ -90,6 +157,7 @@ class YtdlpService:
             output_dir: Directory to save the file
             platform_id: Used for filename
             progress_callback: Optional callback(downloaded, total, speed) for progress updates
+            user_id: Optional user ID for per-user cookie lookup
 
         Returns:
             dict: {file_path, file_size}
@@ -109,7 +177,7 @@ class YtdlpService:
             "--newline",
             "--progress-template",
             "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
-            *YtdlpService._get_cookie_args(url),
+            *YtdlpService._get_cookie_args(url, user_id=user_id),
             "-o",
             output_template,
             url,
@@ -192,7 +260,12 @@ class YtdlpService:
         }
 
     @staticmethod
-    async def download_audio(url: str, output_dir: str, platform_id: str) -> dict:
+    async def download_audio(
+        url: str,
+        output_dir: str,
+        platform_id: str,
+        user_id: Optional[str] = None,
+    ) -> dict:
         """
         Extract audio only via yt-dlp.
 
@@ -200,6 +273,7 @@ class YtdlpService:
             url: Video URL
             output_dir: Directory to save the file
             platform_id: Used for filename
+            user_id: Optional user ID for per-user cookie lookup
 
         Returns:
             dict: {file_path, file_size}
@@ -217,7 +291,7 @@ class YtdlpService:
             "0",  # Best quality
             "--no-playlist",
             "--no-warnings",
-            *YtdlpService._get_cookie_args(url),
+            *YtdlpService._get_cookie_args(url, user_id=user_id),
             "-o",
             output_template,
             url,
@@ -383,24 +457,95 @@ class YtdlpService:
         return None
 
     @staticmethod
-    def _get_cookie_args(url: str) -> list[str]:
-        """Return ['--cookies', '/path/to/platform.txt'] if a cookie file exists for this URL's platform."""
+    def _get_cookie_args(url: str, user_id: Optional[str] = None) -> list[str]:
+        """Return ['--cookies', '/path/to/cookies.txt'] for the URL's platform.
+
+        Priority 1: Per-user cookie from DB (if user_id provided).
+        Priority 2: Filesystem cookie from COOKIES_DIR.
+        """
+        platform, _ = URLRouter.detect_platform(url)
+        if not platform or platform == "unknown":
+            return []
+
+        # Priority 1: Per-user DB cookie
+        if user_id:
+            try:
+                from app.repositories.cookies_repository import CookiesRepository
+
+                repo = CookiesRepository()
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                if loop and loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        record = pool.submit(
+                            asyncio.run,
+                            repo.get_by_user_and_platform(user_id, platform),
+                        ).result()
+                else:
+                    record = asyncio.run(
+                        repo.get_by_user_and_platform(user_id, platform)
+                    )
+
+                if record:
+                    cookie_content = record.get("cookie_file") or record.get(
+                        "cookie_text"
+                    )
+                    if cookie_content:
+                        # Convert browser cookie string to Netscape format
+                        # so yt-dlp can parse it correctly.
+                        cookie_content = _browser_cookie_to_netscape(
+                            cookie_content, platform
+                        )
+                        tmp = tempfile.NamedTemporaryFile(
+                            mode="w",
+                            suffix=f"_{platform}.txt",
+                            delete=False,
+                        )
+                        tmp.write(cookie_content)
+                        tmp.flush()
+                        tmp.close()
+                        logger.info(
+                            f"[yt-dlp] Using DB cookie for user={user_id} platform={platform}: {tmp.name}"
+                        )
+                        return ["--cookies", tmp.name]
+            except Exception as e:
+                logger.warning(
+                    f"[yt-dlp] Failed to load DB cookie for user={user_id} platform={platform}: {e}"
+                )
+
+        # Priority 2: Filesystem cookie fallback
         from app.core.config import settings
 
         cookies_dir = settings.COOKIES_DIR
         if not cookies_dir:
             return []
 
-        platform, _ = URLRouter.detect_platform(url)
-        if not platform or platform == "unknown":
-            return []
-
         cookie_file = os.path.join(cookies_dir, f"{platform}.txt")
         if os.path.isfile(cookie_file):
-            logger.info(f"[yt-dlp] Using cookies for {platform}: {cookie_file}")
+            logger.info(f"[yt-dlp] Using filesystem cookie for {platform}: {cookie_file}")
             return ["--cookies", cookie_file]
 
         return []
+
+    @staticmethod
+    async def user_has_cookie(user_id: str, platform: str) -> bool:
+        """Check whether a user has a stored cookie for the given platform.
+
+        Args:
+            user_id: User ID to look up.
+            platform: Platform identifier (e.g. 'douyin', 'bilibili').
+
+        Returns:
+            True if a cookie record exists, False otherwise.
+        """
+        from app.repositories.cookies_repository import CookiesRepository
+
+        repo = CookiesRepository()
+        record = await repo.get_by_user_and_platform(user_id, platform)
+        return record is not None
 
     @staticmethod
     def _find_downloaded_file(directory: str, prefix: str) -> Optional[str]:
