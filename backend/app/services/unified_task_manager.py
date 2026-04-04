@@ -106,6 +106,7 @@ class UnifiedTaskManager:
 
     def __init__(self) -> None:
         self._last_progress: Dict[str, float] = {}   # task_id -> last_write_time
+        self._last_progress_value: Dict[str, int] = {}  # task_id -> last_progress_percent
         self._last_renewal: Dict[str, float] = {}     # dedup_key -> last renewal epoch
 
     # ── Internal helpers ──────────────────────────────────────────────
@@ -254,7 +255,11 @@ class UnifiedTaskManager:
         if title is None and now - last < self.THROTTLE_INTERVAL:
             return
         self._last_progress[task_id] = now
-        logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%, speed={speed}")
+        # Only log at INFO for significant changes (every 10%), DEBUG for the rest
+        prev_progress = self._last_progress_value.get(task_id, 0)
+        if progress // 10 > prev_progress // 10 or progress >= 100:
+            logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%")
+        self._last_progress_value[task_id] = progress
 
         client = await self._get_client()
         updates: Dict[str, Any] = {
@@ -308,6 +313,7 @@ class UnifiedTaskManager:
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
         logger.debug(f"[TaskManager] Completed {task_id}")
 
     # ── Lifecycle: fail ───────────────────────────────────────────────
@@ -335,6 +341,7 @@ class UnifiedTaskManager:
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
         logger.debug(f"[TaskManager] Failed {task_id}: {error_msg[:80]}")
 
     # ── Lifecycle: cancel ─────────────────────────────────────────────
@@ -380,6 +387,7 @@ class UnifiedTaskManager:
             .execute()
         )
         self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
 
         if celery_id:
             try:
