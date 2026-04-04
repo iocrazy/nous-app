@@ -18,6 +18,7 @@ export interface ChapterNodeData {
   branchLabel?: string;
   branchType?: 'condition' | 'choice';
   isExpanded?: boolean;
+  contentJson: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 
@@ -52,6 +53,11 @@ interface ScriptCanvasState {
 
   setViewportState: (viewport: { x: number; y: number; zoom: number }) => void;
 
+  viewMode: 'canvas' | 'grid' | 'list';
+  editingNodeId: string | null;
+  setViewMode: (mode: 'canvas' | 'grid' | 'list') => void;
+  setEditingNodeId: (nodeId: string | null) => void;
+
   // AI dialog state
   expandDialog: { isOpen: boolean; chapterId: string; title: string; summary: string } | null;
   branchDialog: { isOpen: boolean; chapterId: string; title: string; summary: string } | null;
@@ -79,6 +85,8 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
   selectedNodeId: null,
   history: { past: [], future: [] },
   currentViewport: { x: 0, y: 0, zoom: 1 },
+  viewMode: 'canvas',
+  editingNodeId: null,
   expandDialog: null,
   branchDialog: null,
 
@@ -128,6 +136,7 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
         chapterNumber: data?.chapterNumber ?? chapterCount + 1,
         branchLabel: data?.branchLabel,
         branchType: data?.branchType,
+        contentJson: data?.contentJson ?? null,
         ...data,
       },
     };
@@ -159,6 +168,9 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
   setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
 
   setViewportState: (viewport) => set({ currentViewport: viewport }),
+
+  setViewMode: (mode) => set({ viewMode: mode }),
+  setEditingNodeId: (nodeId) => set({ editingNodeId: nodeId }),
 
   openExpandDialog: (chapterId, title, summary) =>
     set({ expandDialog: { isOpen: true, chapterId, title, summary } }),
