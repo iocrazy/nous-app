@@ -614,8 +614,6 @@ function FrontendErrorsTab() {
 // ============================================
 
 function ApplicationLogsTab() {
-  const [detailModal, setDetailModal] = useState<AppLog | null>(null)
-
   // Live Tail state
   const [liveTail, setLiveTail] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -694,22 +692,41 @@ function ApplicationLogsTab() {
         </Typography.Text>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      type: 'text',
-      required: true,
-      size: 48,
-      cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
-      ),
-    },
   ], [])
+
+  const expandedRowRender = useCallback((row: AppLog) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Level', value: <Tag color={getLogLevelColor(row.level)} size="small">{row.level}</Tag> },
+          { label: 'Module', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.module || '-'}</span> },
+          { label: 'Function', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.function || '-'}</span> },
+          { label: 'Line', value: row.line ?? '-' },
+          { label: 'File', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.file_path || '-'}</span> },
+          { label: 'Time', value: formatDateTime(row.logged_at) },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>Message</Typography.Text>
+        <pre style={preStyle}>{row.message}</pre>
+      </div>
+      {row.exception && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block', color: 'var(--color-danger-6)' }}>Exception</Typography.Text>
+          <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>{row.exception}</pre>
+        </div>
+      )}
+      {row.extra && Object.keys(row.extra).length > 0 && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>Extra</Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.extra, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  ), [])
 
   const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<AppLog>({
     tableKey: 'app-logs',
@@ -831,69 +848,6 @@ function ApplicationLogsTab() {
     </Space>
   )
 
-  // Detail modal (shared between both modes)
-  const detailModalElement = (
-    <Modal
-      title="Application Log Details"
-      visible={!!detailModal}
-      onCancel={() => setDetailModal(null)}
-      footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-      style={{ width: 720 }}
-    >
-      {detailModal && (
-        <>
-          <Descriptions
-            column={2}
-            data={[
-              { label: 'Time', value: formatDateTime(detailModal.logged_at) },
-              {
-                label: 'Level',
-                value: (
-                  <Tag color={getLogLevelColor(detailModal.level)}>
-                    {detailModal.level}
-                  </Tag>
-                ),
-              },
-              { label: 'Module', value: detailModal.module || '-' },
-              { label: 'Function', value: detailModal.function || '-' },
-              { label: 'Line', value: detailModal.line ?? '-' },
-              { label: 'File', value: detailModal.file_path || '-' },
-            ]}
-            style={{ marginBottom: 16 }}
-          />
-
-          <div style={{ marginBottom: 12 }}>
-            <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-              Message
-            </Typography.Text>
-            <pre style={preStyle}>{detailModal.message}</pre>
-          </div>
-
-          {detailModal.exception && (
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
-                Exception
-              </Typography.Text>
-              <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)', maxHeight: 300, overflow: 'auto' }}>
-                {detailModal.exception}
-              </pre>
-            </div>
-          )}
-
-          {detailModal.extra && Object.keys(detailModal.extra).length > 0 && (
-            <div>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                Extra
-              </Typography.Text>
-              <pre style={preStyle}>
-                {JSON.stringify(detailModal.extra, null, 2)}
-              </pre>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  )
 
   // When liveTail is on, render a simple live tail view instead of NotionTable
   if (liveTail) {
@@ -976,18 +930,16 @@ function ApplicationLogsTab() {
   }
 
   return (
-    <>
-      <NotionTable<AppLog>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={liveTailControls}
-        emptyText="No application logs found"
-      />
-      {detailModalElement}
-    </>
+    <NotionTable<AppLog>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={liveTailControls}
+      emptyText="No application logs found"
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 
