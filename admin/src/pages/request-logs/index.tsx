@@ -661,7 +661,7 @@ function ApplicationLogsTab() {
       header: 'Location',
       type: 'text',
       filterable: true,
-      size: 280,
+      size: 200,
       cell: (row) => (
         <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
           {[row.module, row.function, row.line].filter(Boolean).join(':')}
@@ -674,18 +674,20 @@ function ApplicationLogsTab() {
       type: 'text',
       filterable: true,
       required: true,
+      size: 600,
+      minSize: 300,
       cell: (row) => {
         const shortModule = row.module
           ? row.module.split('.').pop() || row.module
           : ''
         return (
-          <Space size={4}>
+          <Space size={4} style={{ flexWrap: 'nowrap', maxWidth: '100%' }}>
             {shortModule && (
               <Tag size="small" color="arcoblue" style={{ fontSize: 11, flexShrink: 0 }}>
                 {shortModule}
               </Tag>
             )}
-            <Typography.Text style={{ fontSize: 13 }} ellipsis>
+            <Typography.Text style={{ fontSize: 13, wordBreak: 'break-all' }} ellipsis={{ rows: 2 }}>
               {row.message}
             </Typography.Text>
           </Space>
