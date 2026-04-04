@@ -26,20 +26,32 @@
 /* Column resize handle */
 .notion-table-resize-handle {
   position: absolute;
-  right: 0;
+  right: -2px;
   top: 0;
   height: 100%;
-  width: 4px;
+  width: 8px;
   cursor: col-resize;
   user-select: none;
   touch-action: none;
   background: transparent;
+  z-index: 1;
+}
+
+.notion-table-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 25%;
+  height: 50%;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
   transition: background-color 0.15s;
 }
 
-.notion-table-resize-handle:hover,
-.notion-table-resize-handle.is-resizing {
-  background: var(--color-primary-light-2);
+.notion-table-resize-handle:hover::after,
+.notion-table-resize-handle.is-resizing::after {
+  background: rgb(var(--primary-6));
 }
 
 .notion-table tbody tr {
@@ -57,7 +69,7 @@
   overflow: hidden;
 }
 
-/* Allow table layout to respect column sizes */
+/* Fixed layout respects explicit column widths from colgroup; table width is set dynamically via JS */
 .notion-table {
   table-layout: fixed;
 }

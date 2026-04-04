@@ -36,6 +36,13 @@ class DatabaseLogSink:
     # Loguru sink entry point (called synchronously from any thread)
     # ------------------------------------------------------------------
 
+    # Modules whose logs are pure noise and should not be persisted to DB
+    _NOISE_MODULES = frozenset({
+        "celery.app.trace",
+        "celery.beat",
+        "celery.worker.strategy",
+    })
+
     def __call__(self, message: Any) -> None:
         # Skip logs generated during flush to prevent recursion
         # (e.g. Supabase client init logs from _insert_entries)
@@ -43,6 +50,11 @@ class DatabaseLogSink:
             return
 
         record = message.record
+
+        # Filter out noisy infrastructure modules (e.g. Celery task trace)
+        module = record.get("name", "")
+        if module in self._NOISE_MODULES:
+            return
         entry = self._serialize(record)
         try:
             self._queue.put_nowait(entry)
