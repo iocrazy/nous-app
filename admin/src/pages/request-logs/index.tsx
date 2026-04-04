@@ -253,7 +253,7 @@ function RequestLogsTab() {
       const statusFilter = filters.find((f) => f.field === 'status_code')
       const dateParams = buildDateParams(filters, 'timestamp')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs', {
+      const { data } = await apiClient.get('/api/v1/admin/logs', {
         params: {
           page,
           pageSize,
@@ -498,7 +498,7 @@ function FrontendErrorsTab() {
       const errorTypeFilter = filters.find((f) => f.field === 'error_type')
       const dateParams = buildDateParams(filters, 'created_at')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs/frontend-errors', {
+      const { data } = await apiClient.get('/api/v1/admin/logs/frontend-errors', {
         params: {
           page,
           pageSize,
@@ -719,7 +719,7 @@ function ApplicationLogsTab() {
       const moduleFilter = filters.find((f) => f.field === 'module')
       const dateParams = buildDateParams(filters, 'logged_at')
 
-      const { data } = await apiClient.get('/api/v1/admin/request-logs/app-logs', {
+      const { data } = await apiClient.get('/api/v1/admin/logs/app-logs', {
         params: {
           page,
           pageSize,

@@ -278,7 +278,7 @@ export function MonitoringDashboard() {
                 style: { cursor: 'pointer' },
                 onClick: () =>
                   navigate(
-                    `/request-logs?path=${encodeURIComponent(record.path)}`,
+                    `/logs?path=${encodeURIComponent(record.path)}`,
                   ),
               })}
             />
@@ -298,7 +298,7 @@ export function MonitoringDashboard() {
                 style: { cursor: 'pointer' },
                 onClick: () =>
                   navigate(
-                    `/request-logs?path=${encodeURIComponent(record.path)}`,
+                    `/logs?path=${encodeURIComponent(record.path)}`,
                   ),
               })}
             />
@@ -351,7 +351,7 @@ export function MonitoringDashboard() {
               noDataElement={<EmptyState description="No recent errors" />}
               onRow={() => ({
                 style: { cursor: 'pointer' },
-                onClick: () => navigate('/request-logs?tab=app-logs'),
+                onClick: () => navigate('/logs?tab=app-logs'),
               })}
             />
           </Card>

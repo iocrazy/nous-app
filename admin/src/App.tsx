@@ -13,7 +13,7 @@ import { PlaceholderPage } from './pages/placeholder'
 import { TagsPage } from './pages/tags'
 import { CreditsPage } from './pages/credits'
 import { Settings } from './pages/settings'
-import { RequestLogs } from './pages/request-logs'
+import { RequestLogs } from './pages/logs'
 import { MonitoringDashboard } from './pages/monitoring'
 import { GlobalSearch } from './pages/search'
 import { Alerts } from './pages/alerts'
@@ -42,7 +42,7 @@ export default function App() {
               <Route path="/monitoring" element={<MonitoringDashboard />} />
               <Route path="/search" element={<GlobalSearch />} />
               <Route path="/audit-logs" element={<AuditLogList />} />
-              <Route path="/request-logs" element={<RequestLogs />} />
+              <Route path="/logs" element={<RequestLogs />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
               <Route path="/settings" element={<Settings />} />
