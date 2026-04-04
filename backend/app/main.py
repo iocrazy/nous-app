@@ -191,7 +191,7 @@ app.openapi = custom_openapi
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=r"^http://localhost:\d+$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):\d+$",
     allow_credentials=settings.CORS_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],

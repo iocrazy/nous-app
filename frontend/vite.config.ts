@@ -11,18 +11,18 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: ['mediahubserver.heygo.cn', 'mediahubapi.heygo.cn'],
+      allowedHosts: ['mediahubserver.heygo.cn', 'mediahubapi.heygo.cn', 'test.heygo.cn', '10.0.0.3'],
       proxy: {
         '/api': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
         '/media': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
         '/stream': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
       },

@@ -8,6 +8,7 @@ import {
   Layers,
   Users,
   Sparkles,
+  Clapperboard,
   ChevronDown,
   FolderOpen,
   ListTodo,
@@ -26,7 +27,6 @@ import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { hasPermission } from '../utils/permissions';
-import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 
 declare const __APP_VERSION__: string;
 
@@ -179,6 +179,45 @@ const VersionFooter: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => vo
 const Divider: React.FC = () => <div className="my-3 border-t border-zinc-800" />;
 
 // ---------------------------------------------------------------------------
+// URL ↔ ViewState mapping (local to avoid circular dep with AppLayout)
+// ---------------------------------------------------------------------------
+
+const VIEW_PATH_MAP: Record<string, string> = {
+  parser: '/parser',
+  library: '/library',
+  dashboard: '/dashboard',
+  settings: '/settings',
+  cleanup: '/cleanup',
+  mediatrack: '/projects',
+  points: '/points',
+  billing: '/billing',
+  members: '/members',
+  resources: '/resources',
+  todolist: '/todolist',
+  shared: '/shared',
+  storyboard: '/storyboard',
+};
+
+function viewFromPathname(pathname: string): ViewState {
+  // Strip /team/:teamId/ prefix if present
+  const stripped = pathname.replace(/^\/team\/[^/]+/, '');
+  if (stripped.startsWith('/library')) return 'library';
+  if (stripped.startsWith('/dashboard')) return 'dashboard';
+  if (stripped.startsWith('/settings')) return 'settings';
+  if (stripped.startsWith('/cleanup')) return 'cleanup';
+  if (stripped.startsWith('/projects')) return 'mediatrack';
+  if (stripped.startsWith('/points')) return 'points';
+  if (stripped.startsWith('/billing')) return 'billing';
+  if (stripped.startsWith('/members')) return 'members';
+  if (stripped.startsWith('/resources')) return 'resources';
+  if (stripped.startsWith('/todolist')) return 'todolist';
+  if (stripped.startsWith('/shared')) return 'shared';
+  if (stripped.startsWith('/storyboard')) return 'storyboard';
+  if (stripped.startsWith('/player')) return 'resources';
+  return 'parser';
+}
+
+// ---------------------------------------------------------------------------
 // Main Sidebar export
 // ---------------------------------------------------------------------------
 
@@ -213,7 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const currentView = pathnameToView(location.pathname);
+  const currentView = viewFromPathname(location.pathname);
 
   // Navigate via URL and notify parent for side effects
   const handleNav = (viewKey: string) => {
@@ -319,7 +358,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         </div>
 
-        <nav className="flex-1 space-y-3">
+        <nav className="flex-1 space-y-2">
           {isViewEnabled('resources') && (
             <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
           )}
@@ -374,7 +413,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       </div>
 
-      <nav className="flex-1 space-y-3">
+      <nav className="flex-1 space-y-2">
         {isViewEnabled('parser') && (
           <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
         )}
@@ -384,6 +423,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {isViewEnabled('mediatrack') && (
           <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
         )}
+        <SidebarItem icon={Clapperboard} label={t('sidebar.storyboard')} active={currentView === 'storyboard'} onClick={() => handleNav('storyboard')} collapsed={collapsed} />
         <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
         <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
 
