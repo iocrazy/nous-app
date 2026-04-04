@@ -765,6 +765,9 @@ function ApplicationLogsTab() {
         { event: 'INSERT', schema: 'public', table: 'application_logs' },
         (payload) => {
           const row = payload.new as AppLog
+          // Filter out infrastructure noise in Live Tail
+          const NOISE_MODULES = ['httpx', 'uvicorn.access', 'uvicorn.error', 'celery.beat', 'celery.app.trace']
+          if (NOISE_MODULES.includes(row.module || '')) return
           setRealtimeLogs((prev) => [row, ...prev].slice(0, LIVE_TAIL_MAX))
           setNewIds((prev) => {
             const next = new Set(prev)
