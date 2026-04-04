@@ -118,10 +118,14 @@ class DouyinFormatter:
         aweme_type = aweme_detail.get("aweme_type")
         aweme_id = aweme_detail.get("aweme_id")
 
+        # Detect image-text by data structure first (Douyin may return aweme_type=0
+        # for image-text posts, so we check for images field before type branching)
+        has_images = bool(aweme_detail.get("images"))
+
         # Handle different media types
-        if aweme_type == 68:  # Image-text type
+        if aweme_type == 68 or (has_images and aweme_type in (0, 2)):  # Image-text type
             logger.info(
-                f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}"
+                f"解析图文类型数据:aweme_id={aweme_id}, media_type={aweme_type}, has_images={has_images}"
             )
             return await DouyinFormatter._parse_image_text(
                 aweme_detail,
