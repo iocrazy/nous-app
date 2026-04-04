@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import {
   Tag,
-  Modal,
   Descriptions,
   Typography,
   Button,
@@ -11,7 +10,6 @@ import {
   Switch,
 } from '@arco-design/web-react'
 import {
-  IconEye,
   IconCopy,
   IconExport,
   IconPause,
@@ -118,8 +116,6 @@ function buildDateParams(
 // ============================================
 
 function RequestLogsTab() {
-  const [detailModal, setDetailModal] = useState<RequestLog | null>(null)
-
   const columns = useMemo<NotionColumnDef<RequestLog>[]>(() => [
     {
       key: 'timestamp',
@@ -226,22 +222,82 @@ function RequestLogsTab() {
         </Typography.Text>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      type: 'text',
-      required: true,
-      size: 48,
-      cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
-      ),
-    },
   ], [])
+
+  const expandedRowRender = useCallback((row: RequestLog) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Time', value: formatDateTime(row.timestamp) },
+          {
+            label: 'Request ID',
+            value: (
+              <Space size={4}>
+                <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  {row.request_id}
+                </Typography.Text>
+                <Button
+                  type="text"
+                  size="mini"
+                  icon={<IconCopy />}
+                  onClick={(e) => { e.stopPropagation(); copyToClipboard(row.request_id) }}
+                />
+              </Space>
+            ),
+          },
+          {
+            label: 'Method & Path',
+            value: (
+              <Space size={4}>
+                <Tag color={getMethodColor(row.method)} size="small">{row.method}</Tag>
+                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.path}</span>
+              </Space>
+            ),
+          },
+          {
+            label: 'Status',
+            value: <Tag color={getStatusColor(row.status_code)}>{row.status_code ?? '-'}</Tag>,
+          },
+          { label: 'Response Time', value: formatResponseTime(row.response_time_ms) },
+          { label: 'User', value: row.user_email || '-' },
+          { label: 'Auth Type', value: row.auth_type },
+          { label: 'IP Address', value: row.ip_address || '-' },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+
+      {row.query_params && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Query Parameters
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.query_params, null, 2)}</pre>
+        </div>
+      )}
+
+      {row.request_body && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Request Body
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.request_body, null, 2)}</pre>
+        </div>
+      )}
+
+      {row.error_detail && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block', color: 'var(--color-danger-6)' }}>
+            Error Detail
+          </Typography.Text>
+          <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)' }}>
+            {row.error_detail}
+          </pre>
+        </div>
+      )}
+    </div>
+  ), [])
 
   const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<RequestLog>({
     tableKey: 'request-logs',
@@ -291,110 +347,17 @@ function RequestLogsTab() {
   )
 
   return (
-    <>
-      <NotionTable<RequestLog>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={exportButton}
-        emptyText="No request logs found"
-        scrollX={1100}
-      />
-
-      <Modal
-        title="Request Log Details"
-        visible={!!detailModal}
-        onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-        style={{ width: 720 }}
-      >
-        {detailModal && (
-          <>
-            <Descriptions
-              column={2}
-              data={[
-                { label: 'Time', value: formatDateTime(detailModal.timestamp) },
-                {
-                  label: 'Request ID',
-                  value: (
-                    <Space size={4}>
-                      <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {detailModal.request_id}
-                      </Typography.Text>
-                      <Button
-                        type="text"
-                        size="mini"
-                        icon={<IconCopy />}
-                        onClick={() => copyToClipboard(detailModal.request_id)}
-                      />
-                    </Space>
-                  ),
-                },
-                {
-                  label: 'Method & Path',
-                  value: (
-                    <Space size={4}>
-                      <Tag color={getMethodColor(detailModal.method)} size="small">
-                        {detailModal.method}
-                      </Tag>
-                      <span style={{ fontFamily: 'monospace' }}>{detailModal.path}</span>
-                    </Space>
-                  ),
-                },
-                {
-                  label: 'Status',
-                  value: (
-                    <Tag color={getStatusColor(detailModal.status_code)}>
-                      {detailModal.status_code ?? '-'}
-                    </Tag>
-                  ),
-                },
-                { label: 'Response Time', value: formatResponseTime(detailModal.response_time_ms) },
-                { label: 'User', value: detailModal.user_email || '-' },
-                { label: 'Auth Type', value: detailModal.auth_type },
-                { label: 'IP Address', value: detailModal.ip_address || '-' },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
-
-            {detailModal.query_params && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Query Parameters
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.query_params, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.request_body && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Request Body
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.request_body, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.error_detail && (
-              <div>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
-                  Error Detail
-                </Typography.Text>
-                <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)' }}>
-                  {detailModal.error_detail}
-                </pre>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
-    </>
+    <NotionTable<RequestLog>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={exportButton}
+      emptyText="No request logs found"
+      scrollX={1100}
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 
@@ -403,8 +366,6 @@ function RequestLogsTab() {
 // ============================================
 
 function FrontendErrorsTab() {
-  const [detailModal, setDetailModal] = useState<FrontendError | null>(null)
-
   const columns = useMemo<NotionColumnDef<FrontendError>[]>(() => [
     {
       key: 'created_at',
@@ -472,22 +433,61 @@ function FrontendErrorsTab() {
       size: 160,
       cell: (row) => row.user_email || '-',
     },
-    {
-      key: 'actions',
-      header: '',
-      type: 'text',
-      required: true,
-      size: 48,
-      cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
-      ),
-    },
   ], [])
+
+  const expandedRowRender = useCallback((row: FrontendError) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Time', value: formatDateTime(row.created_at) },
+          {
+            label: 'Type',
+            value: (
+              <Tag
+                color={row.error_type === 'runtime' ? 'red' : row.error_type === 'network' ? 'orange' : 'purple'}
+              >
+                {row.error_type}
+              </Tag>
+            ),
+          },
+          { label: 'User', value: row.user_email || '-' },
+          { label: 'Session', value: row.session_id || '-' },
+          { label: 'Page URL', value: row.url || '-' },
+          { label: 'Component', value: row.component || '-' },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+          Message
+        </Typography.Text>
+        <pre style={preStyle}>{row.message || 'No message'}</pre>
+      </div>
+
+      {row.stack && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Stack Trace
+          </Typography.Text>
+          <pre style={{ ...preStyle, maxHeight: 300, overflow: 'auto' }}>
+            {row.stack}
+          </pre>
+        </div>
+      )}
+
+      {row.metadata && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Metadata
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.metadata, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  ), [])
 
   const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<FrontendError>({
     tableKey: 'frontend-errors',
@@ -532,80 +532,16 @@ function FrontendErrorsTab() {
   )
 
   return (
-    <>
-      <NotionTable<FrontendError>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={exportButton}
-        emptyText="No frontend errors found"
-      />
-
-      <Modal
-        title="Frontend Error Details"
-        visible={!!detailModal}
-        onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-        style={{ width: 720 }}
-      >
-        {detailModal && (
-          <>
-            <Descriptions
-              column={2}
-              data={[
-                { label: 'Time', value: formatDateTime(detailModal.created_at) },
-                {
-                  label: 'Type',
-                  value: (
-                    <Tag
-                      color={detailModal.error_type === 'runtime' ? 'red' : detailModal.error_type === 'network' ? 'orange' : 'purple'}
-                    >
-                      {detailModal.error_type}
-                    </Tag>
-                  ),
-                },
-                { label: 'User', value: detailModal.user_email || '-' },
-                { label: 'Session', value: detailModal.session_id || '-' },
-                { label: 'Page URL', value: detailModal.url || '-' },
-                { label: 'Component', value: detailModal.component || '-' },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
-
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                Message
-              </Typography.Text>
-              <pre style={preStyle}>{detailModal.message || 'No message'}</pre>
-            </div>
-
-            {detailModal.stack && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Stack Trace
-                </Typography.Text>
-                <pre style={{ ...preStyle, maxHeight: 300, overflow: 'auto' }}>
-                  {detailModal.stack}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.metadata && (
-              <div>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Metadata
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.metadata, null, 2)}
-                </pre>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
-    </>
+    <NotionTable<FrontendError>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={exportButton}
+      emptyText="No frontend errors found"
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 

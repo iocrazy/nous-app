@@ -777,7 +777,10 @@ def parse_media_task(
         # Final failure — no more retries
         if unified_task_id:
             try:
-                run_async(manager.fail(unified_task_id, error_msg))
+                run_async(manager.fail(
+                    unified_task_id, error_msg,
+                    metadata_patch={"original_url": url},
+                ))
             except Exception:
                 pass
 

@@ -64,7 +64,7 @@ export function NotionTable<T>({
         <Spin loading={isLoading} style={{ display: 'block' }}>
           <div
             className="notion-table-wrapper"
-            style={{ overflowX: scrollX ? 'auto' : undefined }}
+            style={{ overflowX: 'auto' }}
           >
             <table className="notion-table" style={{ minWidth: scrollX }}>
               <thead>
