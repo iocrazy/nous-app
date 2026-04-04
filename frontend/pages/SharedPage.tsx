@@ -46,19 +46,21 @@ const STATUS_COLORS: Record<string, string> = {
 
 export const SharedPage: React.FC = () => {
   const { t } = useTranslation();
-  const { selectedTeamId } = useTeamContext();
+  const { selectedTeamId, personalTeamId } = useTeamContext();
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ShareStatus | 'all'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const confirm = useConfirm();
 
+  const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
+
   const loadShares = useCallback(async () => {
     setLoading(true);
     try {
       const params: { status?: string; team_id?: string } = {};
       if (filter !== 'all') params.status = filter;
-      params.team_id = selectedTeamId || 'personal';
+      params.team_id = isPersonal ? 'personal' : selectedTeamId!;
       const data = await fetchShares(params);
       setShares(data);
     } catch {
