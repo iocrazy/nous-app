@@ -10,6 +10,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@supabase/supabase-js": "^2.49.0",
     "@tiptap/extension-placeholder": "^3.22.2",
     "@tiptap/react": "^3.22.2",
