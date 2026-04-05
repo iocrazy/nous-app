@@ -85,3 +85,18 @@
 .notion-table-expanded-row:hover {
   background: var(--color-fill-1) !important;
 }
+
+/* CSS-based ellipsis (avoids Arco Typography.Text ellipsis DOM manipulation that causes React removeChild crashes) */
+.cell-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
