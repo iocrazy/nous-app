@@ -106,15 +106,16 @@ export async function generateOutline(data: {
   script_id: string;
   premise: string;
   chapter_count: number;
+  genre?: string;
   style_guide?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/generate-outline`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }>(res);
 }
 
 export async function expandChapter(data: {
@@ -122,6 +123,7 @@ export async function expandChapter(data: {
   chapter_id: string;
   title: string;
   summary: string;
+  expansion_request?: string;
   context?: string;
 }): Promise<{ content: string; chapter: Record<string, unknown> }> {
   const headers = await getAuthHeaders();
