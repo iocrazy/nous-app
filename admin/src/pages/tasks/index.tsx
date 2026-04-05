@@ -304,9 +304,9 @@ export function TaskCenter() {
         filterable: true,
         size: 160,
         cell: (row) => (
-          <Typography.Text ellipsis style={{ maxWidth: 140 }}>
+          <span className="cell-ellipsis" style={{ maxWidth: 140, display: 'block' }}>
             {row.user_email || '-'}
-          </Typography.Text>
+          </span>
         ),
       },
       {

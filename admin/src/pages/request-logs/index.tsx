@@ -156,9 +156,9 @@ function RequestLogsTab() {
       required: true,
       minSize: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 13, display: 'block' }}>
           {row.path}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -408,9 +408,9 @@ function FrontendErrorsTab() {
       filterable: true,
       required: true,
       cell: (row) => (
-        <Typography.Text style={{ fontSize: 13 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontSize: 13, display: 'block' }}>
           {row.message || '-'}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -419,11 +419,11 @@ function FrontendErrorsTab() {
       type: 'text',
       size: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {row.url
             ? (() => { try { return new URL(row.url).pathname } catch { return row.url } })()
             : '-'}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -609,9 +609,9 @@ function ApplicationLogsTab() {
                 {shortModule}
               </Tag>
             )}
-            <Typography.Text style={{ fontSize: 13, wordBreak: 'break-all' }} ellipsis={{ rows: 2 }}>
+            <span className="cell-ellipsis-2" style={{ fontSize: 13 }}>
               {row.message}
-            </Typography.Text>
+            </span>
           </Space>
         )
       },
@@ -623,9 +623,9 @@ function ApplicationLogsTab() {
       filterable: true,
       size: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {[row.module, row.function, row.line].filter(Boolean).join(':')}
-        </Typography.Text>
+        </span>
       ),
     },
   ], [])
@@ -836,9 +836,9 @@ function ApplicationLogsTab() {
                           <Tag color={getLogLevelColor(log.level)} size="small">{log.level}</Tag>
                         </td>
                         <td>
-                          <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+                          <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
                             {[log.module, log.function, log.line].filter(Boolean).join(':')}
-                          </Typography.Text>
+                          </span>
                         </td>
                         <td>
                           <Space size={4}>
@@ -847,9 +847,9 @@ function ApplicationLogsTab() {
                                 {log.module.split('.').pop()}
                               </Tag>
                             )}
-                            <Typography.Text style={{ fontSize: 13 }} ellipsis>
+                            <span className="cell-ellipsis" style={{ fontSize: 13, display: 'block' }}>
                               {log.message}
-                            </Typography.Text>
+                            </span>
                           </Space>
                         </td>
                       </tr>
