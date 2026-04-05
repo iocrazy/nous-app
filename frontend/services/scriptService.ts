@@ -224,3 +224,37 @@ export async function deleteScriptAsset(assetId: string): Promise<void> {
     headers,
   });
 }
+
+// ─── Import / Export ─────────────────────────────────────────────────────────
+
+export interface ImportedChapter {
+  title: string;
+  summary: string;
+  content: string;
+  content_html: string;
+}
+
+export async function importScript(
+  scriptId: string,
+  file: File,
+): Promise<{ chapters: ImportedChapter[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('script_id', scriptId);
+  const headers = await getAuthHeaders();
+  // Remove Content-Type — FormData sets it automatically with the multipart boundary
+  delete (headers as Record<string, string>)['Content-Type'];
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/import`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Import failed: ${res.status}`);
+  return res.json();
+}
+
+export function getExportUrl(scriptId: string, format: string, branchId?: string): string {
+  const params = new URLSearchParams({ format });
+  if (branchId) params.set('branch_id', branchId);
+  return `${getApiUrl()}/api/v1/scripts/${scriptId}/export?${params}`;
+}
