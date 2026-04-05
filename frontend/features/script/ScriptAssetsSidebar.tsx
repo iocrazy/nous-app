@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Globe, User, MapPin, Package, Milestone,
   Plus, Trash2, ChevronDown, ChevronRight, Edit2, Check, X,
+  Sparkles, Download, Copy, PanelLeftClose,
 } from 'lucide-react';
 import {
   fetchScriptAssets,
@@ -10,6 +11,7 @@ import {
   updateScriptAsset,
   deleteScriptAsset,
 } from '../../services/scriptService';
+import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
 import type { ScriptAsset, ScriptAssetType } from '../../types';
 
 const ASSET_CATEGORIES: { type: ScriptAssetType; label: string; icon: typeof Globe }[] = [
@@ -23,11 +25,16 @@ const ASSET_CATEGORIES: { type: ScriptAssetType; label: string; icon: typeof Glo
 interface Props {
   collapsed?: boolean;
   onToggle?: () => void;
+  onExport?: () => void;
+  onNavigateToChapter?: (nodeId: string) => void;
 }
 
-export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
+export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateToChapter }: Props) {
   const { scriptId } = useParams<{ scriptId: string }>();
   const [assets, setAssets] = useState<ScriptAsset[]>([]);
+  const nodes = useScriptCanvasStore((s) => s.nodes);
+  const chapterNodes = nodes.filter((n) => n.type === 'chapterNode');
+  const [chaptersExpanded, setChaptersExpanded] = useState(true);
   const [expandedTypes, setExpandedTypes] = useState<Set<ScriptAssetType>>(new Set(['character']));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -102,6 +109,13 @@ export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
   if (collapsed) {
     return (
       <div className="w-10 border-r border-zinc-800 bg-zinc-900 flex flex-col items-center py-3 gap-2">
+        <button
+          onClick={onToggle}
+          className="p-1.5 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+          title="Expand sidebar"
+        >
+          <PanelLeftClose size={14} />
+        </button>
         {ASSET_CATEGORIES.map(({ type, icon: Icon }) => (
           <button
             key={type}
@@ -120,14 +134,100 @@ export function ScriptAssetsSidebar({ collapsed, onToggle }: Props) {
     <div className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
         <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Assets</h3>
-        {onToggle && (
-          <button onClick={onToggle} className="text-zinc-500 hover:text-zinc-300 p-0.5">
-            <ChevronRight size={14} />
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => {
+              try {
+                navigator.clipboard.writeText(
+                  chapterNodes.map((n) => `${n.data.chapterNumber}. ${n.data.title}\n${n.data.summary}`).join('\n\n'),
+                );
+              } catch (err) {
+                console.error('Copy failed:', err);
+              }
+            }}
+            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+            title="Copy outline"
+          >
+            <Copy size={13} />
           </button>
-        )}
+          <button
+            onClick={onExport}
+            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+            title="Export script"
+          >
+            <Download size={13} />
+          </button>
+          <button
+            className="p-1 text-zinc-500 hover:text-indigo-400 rounded hover:bg-zinc-800"
+            title="AI suggestions"
+          >
+            <Sparkles size={13} />
+          </button>
+          {onToggle && (
+            <button
+              onClick={onToggle}
+              className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
+        {/* Chapters / Story Outline group */}
+        <div className="mb-0.5">
+          <button
+            onClick={() => setChaptersExpanded((v) => !v)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+          >
+            {chaptersExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <Sparkles size={12} className="text-indigo-400" />
+            <span className="flex-1 text-left">Story Outline</span>
+            <span className="text-[10px] text-zinc-600">{chapterNodes.length}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); }}
+              className="p-0.5 text-zinc-600 hover:text-indigo-400 rounded"
+              title="Add chapter"
+            >
+              <Plus size={11} />
+            </button>
+          </button>
+
+          {chaptersExpanded && chapterNodes.length > 0 && (
+            <div className="ml-4 border-l border-zinc-800">
+              {chapterNodes.map((node) => {
+                const { title, chapterNumber, branchLabel } = node.data;
+                const isBranch = Boolean(branchLabel);
+
+                return (
+                  <div key={node.id} className={isBranch ? 'ml-3' : ''}>
+                    <button
+                      onClick={() => onNavigateToChapter?.(node.id)}
+                      className="w-full flex items-center gap-1.5 px-3 py-1.5 group hover:bg-zinc-800/50"
+                    >
+                      {isBranch && (
+                        <Sparkles size={10} className="text-amber-400 shrink-0" />
+                      )}
+                      <span className="text-[10px] text-zinc-600 shrink-0 w-4 text-right">
+                        {chapterNumber}.
+                      </span>
+                      <span className={`text-xs flex-1 truncate text-left group-hover:text-zinc-200 transition-colors ${isBranch ? 'text-amber-400/80' : 'text-zinc-300'}`}>
+                        {title || `Chapter ${chapterNumber}`}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {chaptersExpanded && chapterNodes.length === 0 && (
+            <p className="ml-4 px-3 py-1 text-[10px] text-zinc-600 italic">No chapters yet</p>
+          )}
+        </div>
+
         {ASSET_CATEGORIES.map(({ type, label, icon: Icon }) => {
           const items = assets.filter((a) => a.asset_type === type);
           const isExpanded = expandedTypes.has(type);

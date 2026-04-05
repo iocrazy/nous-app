@@ -1,0 +1,39 @@
+/* TipTap editor styles for script formatting */
+
+.script-tiptap-editor .scene-heading {
+  color: #f59e0b;
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.script-tiptap-editor .dialogue-line {
+  color: #f59e0b;
+  margin: 0.25rem 0;
+}
+
+.script-tiptap-editor .dialogue-line strong {
+  font-weight: 600;
+}
+
+.script-tiptap-editor .tiptap p.is-editor-empty:first-child::before {
+  color: #52525b;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Chapter connector dot */
+.chapter-connector {
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  margin: 0 auto;
+}
+
+/* Export dialog format items hover */
+.export-format-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
