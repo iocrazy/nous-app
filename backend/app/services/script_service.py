@@ -2,6 +2,16 @@
 
 from typing import Any, Dict, List, Optional
 
+DEFAULT_FORMAT_PRESET: Dict[str, Any] = {
+    "format_preset": {
+        "scene_heading": "场景N：场景名 – 时间 – 内/外景",
+        "dialogue": "角色名：（动作描述）台词内容",
+        "scene_separator": "hr",
+        "action": "paragraph",
+        "voiceover": "italic",
+    }
+}
+
 from loguru import logger
 
 from app.repositories.script_repository import (
@@ -52,6 +62,7 @@ class ScriptService:
             "created_by": user_id,
             "project_id": project_id,
             "name": name,
+            "settings_json": DEFAULT_FORMAT_PRESET,
         }
         if description is not None:
             data["description"] = description

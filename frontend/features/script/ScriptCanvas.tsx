@@ -14,6 +14,7 @@ import { LayoutGrid } from 'lucide-react';
 import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
 import { scriptNodeTypes } from './nodes';
 import { applyDagreLayout } from './layout/dagreLayout';
+import { ViewControls } from './components/ViewControls';
 
 function ScriptCanvasInner() {
   const nodes = useScriptCanvasStore((s) => s.nodes);
@@ -62,7 +63,7 @@ function ScriptCanvasInner() {
   }, [setSelectedNode]);
 
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -95,6 +96,7 @@ function ScriptCanvasInner() {
           </button>
         </Panel>
       </ReactFlow>
+      <ViewControls showZoom />
     </div>
   );
 }

@@ -44,8 +44,8 @@ function ZoomButton({ onClick, title, children }: ZoomButtonProps) {
   );
 }
 
-export function ViewControls() {
-  const { viewMode, setViewMode } = useScriptCanvasStore();
+/** Zoom controls — must be rendered inside a ReactFlowProvider. */
+function CanvasZoomControls() {
   const { zoomIn, zoomOut, getViewport } = useReactFlow();
   const [zoom, setZoom] = useState(() => Math.round(getViewport().zoom * 100));
 
@@ -55,12 +55,41 @@ export function ViewControls() {
     },
   });
 
+  return (
+    <>
+      <div className="w-px h-4 bg-zinc-600 mx-1" />
+      <ZoomButton onClick={() => zoomOut()} title="Zoom out">
+        <Minus className="w-4 h-4" />
+      </ZoomButton>
+      <span className="text-xs text-zinc-400 min-w-[36px] text-center select-none">
+        {zoom}%
+      </span>
+      <ZoomButton onClick={() => zoomIn()} title="Zoom in">
+        <Plus className="w-4 h-4" />
+      </ZoomButton>
+    </>
+  );
+}
+
+/** View-mode switcher + optional zoom controls.
+ *
+ * When `showZoom` is true the component must be rendered inside a ReactFlowProvider
+ * (i.e. inside ScriptCanvas). When false (grid/list views) it renders without any
+ * ReactFlow dependency. */
+interface ViewControlsProps {
+  /** Whether to render zoom controls (requires ReactFlow context). Default false. */
+  showZoom?: boolean;
+}
+
+export function ViewControls({ showZoom = false }: ViewControlsProps) {
+  const { viewMode, setViewMode } = useScriptCanvasStore();
+
   const handleSetViewMode = (mode: ViewMode) => {
     setViewMode(mode);
   };
 
   return (
-    <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-zinc-800/90 backdrop-blur-sm rounded-lg p-1 border border-zinc-700">
+    <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-zinc-800/90 backdrop-blur-sm rounded-lg p-1 border border-zinc-700 z-10">
       {/* View mode buttons */}
       <ViewButton
         onClick={() => handleSetViewMode('grid')}
@@ -86,21 +115,8 @@ export function ViewControls() {
         <Square className="w-4 h-4" />
       </ViewButton>
 
-      {/* Divider */}
-      <div className="w-px h-4 bg-zinc-600 mx-1" />
-
-      {/* Zoom controls */}
-      <ZoomButton onClick={() => zoomOut()} title="Zoom out">
-        <Minus className="w-4 h-4" />
-      </ZoomButton>
-
-      <span className="text-xs text-zinc-400 min-w-[36px] text-center select-none">
-        {zoom}%
-      </span>
-
-      <ZoomButton onClick={() => zoomIn()} title="Zoom in">
-        <Plus className="w-4 h-4" />
-      </ZoomButton>
+      {/* Zoom controls — only rendered inside ReactFlow context */}
+      {showZoom && <CanvasZoomControls />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { useScriptCanvasStore, type ScriptNode } from '../../stores/scriptCanvasStore';
@@ -8,11 +8,18 @@ import { CreateStoryDialog } from '../../features/script/CreateStoryDialog';
 import { ExpandChapterDialog } from '../../features/script/ExpandChapterDialog';
 import { CreateBranchDialog } from '../../features/script/CreateBranchDialog';
 import { ScriptAssetsSidebar } from '../../features/script/ScriptAssetsSidebar';
+import WelcomeScreen from '../../features/script/components/WelcomeScreen';
+import { ImportScriptDialog } from '../../features/script/components/ImportScriptDialog';
+import { ExportDialog } from '../../features/script/components/ExportDialog';
+import { ViewControls } from '../../features/script/components/ViewControls';
+import { GridView } from '../../features/script/views/GridView';
+import { ListView } from '../../features/script/views/ListView';
 import {
   fetchScriptProject,
   updateScriptProject,
   syncScriptCanvas,
   updateScriptViewport,
+  type ImportedChapter,
 } from '../../services/scriptService';
 import type { ScriptChapter } from '../../types';
 
@@ -34,7 +41,9 @@ function mapChaptersToNodes(chapters: ScriptChapter[]): ScriptNode[] {
   }));
 }
 
-function mapChaptersToEdges(chapters: ScriptChapter[]): { id: string; source: string; target: string }[] {
+function mapChaptersToEdges(
+  chapters: ScriptChapter[]
+): { id: string; source: string; target: string }[] {
   return chapters
     .filter((ch) => ch.parent_chapter_id)
     .map((ch) => ({
@@ -59,6 +68,7 @@ export function ScriptEditorPage() {
   const closeExpandDialog = useScriptCanvasStore((s) => s.closeExpandDialog);
   const branchDialog = useScriptCanvasStore((s) => s.branchDialog);
   const closeBranchDialog = useScriptCanvasStore((s) => s.closeBranchDialog);
+  const viewMode = useScriptCanvasStore((s) => s.viewMode);
 
   const [scriptName, setScriptName] = useState('Untitled Script');
   const [editingName, setEditingName] = useState(false);
@@ -66,7 +76,16 @@ export function ScriptEditorPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateStory, setShowCreateStory] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Derived: has branch nodes
+  const hasBranches = nodes.some((n) => n.data.branchType != null);
+
+  // Auto-save timer ref
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load script on mount
   useEffect(() => {
@@ -94,7 +113,9 @@ export function ScriptEditorPage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [scriptId, setCanvasData]);
 
   // Save handler
@@ -129,6 +150,27 @@ export function ScriptEditorPage() {
     }
   }, [scriptId, nodes, viewport, saving]);
 
+  // Debounced auto-save (500ms after node changes settle)
+  useEffect(() => {
+    if (nodes.length === 0 || loading) return;
+
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+    }
+
+    autoSaveTimer.current = setTimeout(() => {
+      void handleSave();
+    }, 500);
+
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    };
+    // handleSave is intentionally excluded to avoid re-triggering on its own change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, loading]);
+
   // Name editing
   const handleNameBlur = useCallback(async () => {
     setEditingName(false);
@@ -138,6 +180,30 @@ export function ScriptEditorPage() {
       await updateScriptProject(scriptId, { name: trimmed }).catch(console.error);
     }
   }, [nameInput, scriptName, scriptId]);
+
+  // Called after successful import — reload data
+  const handleImportComplete = useCallback(
+    (_chapters: ImportedChapter[]) => {
+      if (!scriptId) return;
+      void (async () => {
+        try {
+          const project = await fetchScriptProject(scriptId);
+          const chapterNodes = mapChaptersToNodes(project.chapters);
+          const chapterEdges = mapChaptersToEdges(project.chapters);
+          setCanvasData(chapterNodes, chapterEdges);
+        } catch (err) {
+          console.error('[ScriptEditorPage] Reload after import failed:', err);
+        }
+      })();
+    },
+    [scriptId, setCanvasData]
+  );
+
+  // Navigate to a chapter node in canvas view
+  const handleNavigateToChapter = useCallback((_nodeId: string) => {
+    useScriptCanvasStore.getState().setViewMode('canvas');
+    // ReactFlow fitView to node is handled by ScriptCanvas when viewMode changes
+  }, []);
 
   const handleBack = () => {
     navigate(`/team/${teamId}/projects/${projectId}?tab=scripts`);
@@ -161,6 +227,8 @@ export function ScriptEditorPage() {
       </div>
     );
   }
+
+  const hasChapters = nodes.length > 0;
 
   return (
     <div className="flex flex-col h-screen bg-zinc-950">
@@ -203,11 +271,35 @@ export function ScriptEditorPage() {
       {/* Toolbar */}
       <ScriptToolbar onCreateStory={() => setShowCreateStory(true)} />
 
-      {/* Sidebar + Canvas */}
+      {/* Three-column layout: Sidebar + Main content */}
       <div className="flex-1 flex overflow-hidden">
-        <ScriptAssetsSidebar />
-        <div className="flex-1 relative">
-          <ScriptCanvas />
+        <ScriptAssetsSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((c) => !c)}
+        />
+
+        {/* Main content area */}
+        <div className="flex-1 relative overflow-hidden">
+          {!hasChapters ? (
+            <WelcomeScreen
+              onImport={() => setShowImport(true)}
+              onCreateStory={() => setShowCreateStory(true)}
+              onBack={handleBack}
+            />
+          ) : viewMode === 'grid' ? (
+            <>
+              <GridView onNavigateToChapter={handleNavigateToChapter} />
+              <ViewControls />
+            </>
+          ) : viewMode === 'list' ? (
+            <>
+              <ListView onNavigateToChapter={handleNavigateToChapter} />
+              <ViewControls />
+            </>
+          ) : (
+            /* Canvas mode: ScriptCanvas renders ViewControls internally (with zoom) */
+            <ScriptCanvas />
+          )}
         </div>
       </div>
 
@@ -216,6 +308,26 @@ export function ScriptEditorPage() {
         isOpen={showCreateStory}
         onClose={() => setShowCreateStory(false)}
       />
+
+      {/* Import Dialog */}
+      {scriptId && (
+        <ImportScriptDialog
+          open={showImport}
+          onClose={() => setShowImport(false)}
+          scriptId={scriptId}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+
+      {/* Export Dialog */}
+      {scriptId && (
+        <ExportDialog
+          open={showExport}
+          onClose={() => setShowExport(false)}
+          scriptId={scriptId}
+          hasBranches={hasBranches}
+        />
+      )}
 
       {/* AI Expand Dialog */}
       {expandDialog && (
