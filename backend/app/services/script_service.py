@@ -13,6 +13,23 @@ from app.repositories.script_repository import (
 from app.services.display_code_service import generate_display_code
 
 
+def _extract_text_from_content_json(content_json: dict) -> str:
+    """Extract plain text from TipTap ProseMirror JSON document."""
+    if not content_json or "content" not in content_json:
+        return ""
+    texts: List[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "text":
+                texts.append(node.get("text", ""))
+            for child in node.get("content", []):
+                _walk(child)
+
+    _walk(content_json)
+    return "\n".join(texts)
+
+
 class ScriptService:
     """Orchestrates script project, chapter, asset, and link operations."""
 
@@ -96,7 +113,12 @@ class ScriptService:
     async def update_chapter(
         self, chapter_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        return await self.chapter_repo.update(chapter_id, data)
+        update_data = {**data}
+        if update_data.get("content_json"):
+            update_data["content"] = _extract_text_from_content_json(
+                update_data["content_json"]
+            )
+        return await self.chapter_repo.update(chapter_id, update_data)
 
     async def delete_chapter(self, chapter_id: str) -> None:
         await self.chapter_repo.delete(chapter_id)
@@ -120,6 +142,10 @@ class ScriptService:
                 ch_copy = {**ch}
                 ch_id = ch_copy.pop("id", None)
                 if ch_id:
+                    if ch_copy.get("content_json"):
+                        ch_copy["content"] = _extract_text_from_content_json(
+                            ch_copy["content_json"]
+                        )
                     await self.chapter_repo.update(ch_id, ch_copy)
 
         chapters = await self.chapter_repo.get_by_script(script_id)
