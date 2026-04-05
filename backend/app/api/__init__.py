@@ -53,6 +53,8 @@ from app.api.script_projects_router import router as script_projects_router
 from app.api.script_canvas_router import router as script_canvas_router
 from app.api.script_assets_router import router as script_assets_router
 from app.api.script_ai_router import router as script_ai_router
+from app.api.script_import_router import router as script_import_router
+from app.api.script_export_router import router as script_export_router
 
 api_router = APIRouter()
 
@@ -139,3 +141,5 @@ api_router.include_router(router=script_projects_router, tags=["Scripts"])
 api_router.include_router(router=script_canvas_router, tags=["Scripts"])
 api_router.include_router(router=script_assets_router, tags=["Script Assets"])
 api_router.include_router(router=script_ai_router, tags=["Script AI"])
+api_router.include_router(router=script_import_router, tags=["Script Import"])
+api_router.include_router(router=script_export_router, tags=["Script Export"])
