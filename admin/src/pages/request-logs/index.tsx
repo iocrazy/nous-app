@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react'
 import {
   Tag,
   Descriptions,
@@ -15,7 +15,13 @@ import {
   IconPause,
   IconPlayArrow,
 } from '@arco-design/web-react/icon'
-import { NotionTable } from '../../components/notion-table'
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  type ColumnDef,
+} from '@tanstack/react-table'
+import { NotionTable, NotionTableToolbar } from '../../components/notion-table'
 import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
@@ -742,7 +748,7 @@ function ApplicationLogsTab() {
     }
   }, [])
 
-  // Build toolbar extra: Live tail toggle + export button (when not in live tail)
+  // Build toolbar extra: Live tail toggle + export button
   const liveTailControls = (
     <Space size={8}>
       <Switch
@@ -764,13 +770,14 @@ function ApplicationLogsTab() {
           </Button>
         </>
       )}
-      {!liveTail && (
-        <Button
-          icon={<IconExport />}
-          size="small"
-          onClick={() => exportToCsv(
+      <Button
+        icon={<IconExport />}
+        size="small"
+        onClick={() => {
+          const data = liveTail ? realtimeLogs : table.getRowModel().rows.map((r) => r.original)
+          exportToCsv(
             `app-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-            table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+            data as unknown as Record<string, unknown>[],
             [
               { key: 'logged_at', label: 'Time' },
               { key: 'level', label: 'Level' },
@@ -779,88 +786,137 @@ function ApplicationLogsTab() {
               { key: 'message', label: 'Message' },
               { key: 'exception', label: 'Exception' },
             ],
-          )}
-        >
-          Export
-        </Button>
-      )}
+          )
+        }}
+      >
+        Export
+      </Button>
     </Space>
   )
 
+  // Live tail table: reuse same columns + expandedRowRender
+  const liveColumns = useMemo<ColumnDef<AppLog, unknown>[]>(
+    () =>
+      columns.map((col) => ({
+        id: col.key,
+        header: col.header,
+        size: col.size,
+        minSize: col.minSize,
+        accessorFn: (row: AppLog) => (row as unknown as Record<string, unknown>)[col.key],
+        cell: col.cell
+          ? ({ row }: { row: { original: AppLog } }) => col.cell!(row.original)
+          : ({ getValue }: { getValue: () => unknown }) => {
+              const val = getValue()
+              return val == null ? '-' : String(val)
+            },
+      })),
+    [columns],
+  )
 
-  // When liveTail is on, render a simple live tail view instead of NotionTable
+  const liveTable = useReactTable({
+    data: realtimeLogs,
+    columns: liveColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id,
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+  })
+
+  const [liveExpandedIds, setLiveExpandedIds] = useState<Set<string>>(new Set())
+  const toggleLiveExpand = useCallback((id: string) => {
+    setLiveExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  // Unified layout: toolbar always visible, live tail replaces only the table body
   if (liveTail) {
+    const liveRows = liveTable.getRowModel().rows
     return (
-      <>
-        <Card>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
-            {liveTailControls}
-          </div>
-          <div ref={scrollRef}>
-            <style>{`
-              @keyframes liveTailHighlight {
-                from { background-color: var(--color-primary-1); }
-                to { background-color: transparent; }
-              }
-              .live-tail-new-row td {
-                animation: liveTailHighlight 2s ease-out;
-              }
-            `}</style>
-            <div className="notion-table-wrapper">
-              <table className="notion-table" style={{ width: '100%' }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 180 }}>Time</th>
-                    <th style={{ width: 100 }}>Level</th>
-                    <th style={{ width: 280 }}>Location</th>
-                    <th>Message</th>
-                    <th style={{ width: 48 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {realtimeLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-3)' }}>
-                        Waiting for new logs...
-                      </td>
+      <Card>
+        <NotionTableToolbar {...toolbarProps} extra={liveTailControls} />
+        <style>{`
+          @keyframes liveTailHighlight {
+            from { background-color: var(--color-primary-1); }
+            to { background-color: transparent; }
+          }
+          .live-tail-new-row td {
+            animation: liveTailHighlight 2s ease-out;
+          }
+        `}</style>
+        <div className="notion-table-wrapper" ref={scrollRef} style={{ overflowX: 'auto' }}>
+          <table className="notion-table">
+            <thead>
+              {liveTable.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th
+                      key={header.id}
+                      style={{
+                        width: header.getSize(),
+                        minWidth: header.column.columnDef.minSize,
+                      }}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                      {header.column.getCanResize() && (
+                        <div
+                          onMouseDown={header.getResizeHandler()}
+                          onTouchStart={header.getResizeHandler()}
+                          className={`notion-table-resize-handle ${
+                            header.column.getIsResizing() ? 'is-resizing' : ''
+                          }`}
+                        />
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {liveRows.length === 0 ? (
+                <tr>
+                  <td colSpan={liveTable.getVisibleFlatColumns().length} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-3)' }}>
+                    Waiting for new logs...
+                  </td>
+                </tr>
+              ) : (
+                liveRows.map((row) => (
+                  <Fragment key={row.id}>
+                    <tr
+                      className={newIds.has(row.id) ? 'live-tail-new-row' : ''}
+                      onClick={() => toggleLiveExpand(row.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
                     </tr>
-                  ) : (
-                    realtimeLogs.map((log) => (
-                      <tr key={log.id} className={newIds.has(log.id) ? 'live-tail-new-row' : ''}>
-                        <td>
-                          <Typography.Text style={{ fontSize: 13 }}>
-                            {formatDateTime(log.logged_at)}
-                          </Typography.Text>
-                        </td>
-                        <td>
-                          <Tag color={getLogLevelColor(log.level)} size="small">{log.level}</Tag>
-                        </td>
-                        <td>
-                          <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
-                            {[log.module, log.function, log.line].filter(Boolean).join(':')}
-                          </span>
-                        </td>
-                        <td>
-                          <Space size={4}>
-                            {log.module && (
-                              <Tag size="small" color="arcoblue" style={{ fontSize: 11 }}>
-                                {log.module.split('.').pop()}
-                              </Tag>
-                            )}
-                            <span className="cell-ellipsis" style={{ fontSize: 13, display: 'block' }}>
-                              {log.message}
-                            </span>
-                          </Space>
+                    {liveExpandedIds.has(row.id) && (
+                      <tr className="notion-table-expanded-row">
+                        <td colSpan={row.getVisibleCells().length} style={{ padding: 0 }}>
+                          {expandedRowRender(row.original)}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Card>
-      </>
+                    )}
+                  </Fragment>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            Live: {realtimeLogs.length} entries (max {LIVE_TAIL_MAX})
+          </Typography.Text>
+        </div>
+      </Card>
     )
   }
 
