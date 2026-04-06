@@ -178,9 +178,12 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
       <div className="flex-1 overflow-y-auto py-1">
         {/* Chapters / Story Outline group */}
         <div className="mb-0.5">
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setChaptersExpanded((v) => !v)}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setChaptersExpanded((v) => !v); }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
           >
             {chaptersExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <Sparkles size={12} className="text-indigo-400" />
@@ -193,7 +196,7 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
             >
               <Plus size={11} />
             </button>
-          </button>
+          </div>
 
           {chaptersExpanded && chapterNodes.length > 0 && (
             <div className="ml-4 border-l border-zinc-800">
@@ -234,9 +237,12 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
 
           return (
             <div key={type} className="mb-0.5">
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => toggleType(type)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleType(type); }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
               >
                 {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 <Icon size={12} />
@@ -249,7 +255,7 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
                 >
                   <Plus size={11} />
                 </button>
-              </button>
+              </div>
 
               {isExpanded && creatingType === type && (
                 <div className="ml-4 px-3 py-1.5 flex items-center gap-1">
