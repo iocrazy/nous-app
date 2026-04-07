@@ -24,9 +24,10 @@ interface ToolbarButtonProps {
   onClick: () => void;
   title: string;
   children: React.ReactNode;
+  activeClassName?: string;
 }
 
-function ToolbarButton({ active, onClick, title, children }: ToolbarButtonProps) {
+function ToolbarButton({ active, onClick, title, children, activeClassName = 'bg-indigo-600 text-white' }: ToolbarButtonProps) {
   return (
     <button
       type="button"
@@ -38,8 +39,8 @@ function ToolbarButton({ active, onClick, title, children }: ToolbarButtonProps)
       className={[
         'px-2 py-1 rounded text-sm font-medium transition-colors',
         active
-          ? 'bg-indigo-600 text-white'
-          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+          ? activeClassName
+          : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300',
       ].join(' ')}
     >
       {children}
@@ -163,6 +164,7 @@ export function ScriptTipTapEditor({
             active={isParagraph}
             onClick={setParagraph}
             title="Body text"
+            activeClassName="bg-amber-600 text-white"
           >
             Body
           </ToolbarButton>
@@ -183,7 +185,7 @@ export function ScriptTipTapEditor({
       <EditorContent
         editor={editor}
         className={[
-          'px-4 py-3 min-h-[120px] text-zinc-100 text-sm leading-relaxed',
+          'px-5 py-4 min-h-[160px] text-zinc-100 text-sm leading-relaxed',
           'focus-within:outline-none',
           // Custom node styles via TailwindCSS arbitrary selectors
           '[&_.scene-heading]:text-amber-500 [&_.scene-heading]:font-semibold [&_.scene-heading]:text-base',

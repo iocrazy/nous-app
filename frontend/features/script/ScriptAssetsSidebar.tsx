@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Globe, User, MapPin, Package, Milestone,
   Plus, Trash2, ChevronDown, ChevronRight, Edit2, Check, X,
-  Sparkles, Download, Copy, PanelLeftClose,
+  Sparkles, Download, Copy, PanelLeftClose, FileText,
 } from 'lucide-react';
 import {
   fetchScriptAssets,
@@ -132,9 +132,25 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
 
   return (
     <div className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col overflow-hidden">
-      <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Assets</h3>
-        <div className="flex items-center gap-0.5">
+      <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FileText size={14} className="text-zinc-400" />
+          <h3 className="text-sm font-medium text-zinc-300">Script Assets</h3>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className="text-zinc-500 hover:text-amber-400 transition-colors"
+            title="AI suggestions"
+          >
+            <Sparkles size={16} />
+          </button>
+          <button
+            onClick={onExport}
+            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            title="Export script"
+          >
+            <Download size={16} />
+          </button>
           <button
             onClick={() => {
               try {
@@ -145,31 +161,18 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
                 console.error('Copy failed:', err);
               }
             }}
-            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+            className="text-zinc-500 hover:text-zinc-300 transition-colors"
             title="Copy outline"
           >
-            <Copy size={13} />
-          </button>
-          <button
-            onClick={onExport}
-            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
-            title="Export script"
-          >
-            <Download size={13} />
-          </button>
-          <button
-            className="p-1 text-zinc-500 hover:text-indigo-400 rounded hover:bg-zinc-800"
-            title="AI suggestions"
-          >
-            <Sparkles size={13} />
+            <Copy size={16} />
           </button>
           {onToggle && (
             <button
               onClick={onToggle}
-              className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800"
+              className="text-zinc-500 hover:text-zinc-300 transition-colors"
               title="Collapse sidebar"
             >
-              <PanelLeftClose size={13} />
+              <PanelLeftClose size={16} />
             </button>
           )}
         </div>
@@ -183,12 +186,12 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
             tabIndex={0}
             onClick={() => setChaptersExpanded((v) => !v)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setChaptersExpanded((v) => !v); }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
           >
             {chaptersExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            <Sparkles size={12} className="text-indigo-400" />
+            <Sparkles size={12} className="text-amber-400" />
             <span className="flex-1 text-left">Story Outline</span>
-            <span className="text-[10px] text-zinc-600">{chapterNodes.length}</span>
+            <span className="text-xs text-zinc-600">{chapterNodes.length}</span>
             <button
               onClick={(e) => { e.stopPropagation(); }}
               className="p-0.5 text-zinc-600 hover:text-indigo-400 rounded"
@@ -201,7 +204,7 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
           {chaptersExpanded && chapterNodes.length > 0 && (
             <div className="ml-4 border-l border-zinc-800">
               {chapterNodes.map((node) => {
-                const { title, chapterNumber, branchLabel } = node.data;
+                const { title, chapterNumber, branchLabel, summary } = node.data;
                 const isBranch = Boolean(branchLabel);
 
                 return (
@@ -210,15 +213,20 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
                       onClick={() => onNavigateToChapter?.(node.id)}
                       className="w-full flex items-center gap-1.5 px-3 py-1.5 group hover:bg-zinc-800/50"
                     >
-                      {isBranch && (
-                        <Sparkles size={10} className="text-amber-400 shrink-0" />
-                      )}
-                      <span className="text-[10px] text-zinc-600 shrink-0 w-4 text-right">
-                        {chapterNumber}.
-                      </span>
-                      <span className={`text-xs flex-1 truncate text-left group-hover:text-zinc-200 transition-colors ${isBranch ? 'text-amber-400/80' : 'text-zinc-300'}`}>
-                        {title || `Chapter ${chapterNumber}`}
-                      </span>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="flex items-center gap-1">
+                          {isBranch && (
+                            <Sparkles size={10} className="text-amber-400 shrink-0" />
+                          )}
+                          <span className={`text-xs truncate group-hover:text-zinc-200 transition-colors ${isBranch ? 'text-amber-400/80' : 'text-zinc-300'}`}>
+                            第 {chapterNumber} 章 {title || `Chapter ${chapterNumber}`}
+                          </span>
+                        </div>
+                        {summary && (
+                          <p className="text-[11px] text-zinc-600 truncate mt-0.5">{summary}</p>
+                        )}
+                      </div>
+                      <ChevronRight size={12} className="text-zinc-700 shrink-0" />
                     </button>
                   </div>
                 );
@@ -227,7 +235,7 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
           )}
 
           {chaptersExpanded && chapterNodes.length === 0 && (
-            <p className="ml-4 px-3 py-1 text-[10px] text-zinc-600 italic">No chapters yet</p>
+            <p className="ml-4 px-3 py-1 text-[11px] text-zinc-600">No chapters yet</p>
           )}
         </div>
 
@@ -242,12 +250,12 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
                 tabIndex={0}
                 onClick={() => toggleType(type)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleType(type); }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:text-zinc-200 hover:bg-zinc-800/50 cursor-pointer"
               >
                 {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 <Icon size={12} />
                 <span className="flex-1 text-left">{label}</span>
-                <span className="text-[10px] text-zinc-600">{items.length}</span>
+                <span className="text-xs text-zinc-600">{items.length}</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleStartCreate(type); }}
                   className="p-0.5 text-zinc-600 hover:text-indigo-400 rounded"
@@ -342,7 +350,7 @@ export function ScriptAssetsSidebar({ collapsed, onToggle, onExport, onNavigateT
               )}
 
               {isExpanded && items.length === 0 && (
-                <p className="ml-4 px-3 py-1 text-[10px] text-zinc-600 italic">No {label.toLowerCase()} yet</p>
+                <p className="ml-4 px-3 py-1 text-[11px] text-zinc-600">No {label.toLowerCase()} yet</p>
               )}
             </div>
           );

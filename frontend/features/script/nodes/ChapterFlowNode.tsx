@@ -104,8 +104,8 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
       className={[
         'w-[520px] rounded-xl border bg-zinc-900 shadow-xl transition-colors relative group',
         selected
-          ? 'border-indigo-500 ring-1 ring-indigo-500/30'
-          : 'border-zinc-700',
+          ? 'border-purple-500 ring-1 ring-purple-500/30'
+          : 'border-zinc-700/50',
         nodeData.branchType ? 'border-l-4 border-l-amber-500' : '',
       ]
         .filter(Boolean)
@@ -133,12 +133,12 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
       />
 
       {/* ------------------------------------------------------------------ */}
-      {/* Chapter label                                                        */}
+      {/* Chapter label — outside header, top of node                         */}
       {/* ------------------------------------------------------------------ */}
       <div className="flex items-center gap-1.5 px-4 pt-3 pb-0">
-        <FileText size={12} className="text-indigo-400 flex-shrink-0" />
-        <span className="text-[11px] text-indigo-400 font-medium tracking-wide">
-          Chapter {nodeData.chapterNumber}: {nodeData.title || 'Untitled'}
+        <FileText size={12} className="text-zinc-500 flex-shrink-0" />
+        <span className="text-xs text-zinc-500">
+          第 {nodeData.chapterNumber} 章 {nodeData.title || 'Untitled'}
         </span>
         {nodeData.branchLabel && (
           <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-400 font-medium">
@@ -148,16 +148,16 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Header row: circle number + editable title                          */}
+      {/* Header row: purple circle number + editable title                   */}
       {/* ------------------------------------------------------------------ */}
       <div className="flex items-center gap-3 px-4 pt-2 pb-3 border-b border-zinc-800">
-        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-[12px] font-bold text-white flex-shrink-0">
+        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-purple-600 text-sm font-bold text-white flex-shrink-0">
           {nodeData.chapterNumber}
         </span>
 
         {titleEditing ? (
           <input
-            className="flex-1 bg-transparent text-sm font-semibold text-white outline-none border-b border-indigo-500 py-0.5"
+            className="flex-1 bg-transparent text-base font-medium text-white outline-none border-b border-purple-500 py-0.5"
             value={titleInput}
             onChange={(e) => setTitleInput(e.target.value)}
             onBlur={handleTitleBlur}
@@ -167,7 +167,7 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
           />
         ) : (
           <button
-            className="flex-1 text-left text-sm font-semibold text-zinc-100 truncate hover:text-white"
+            className="flex-1 text-left text-base font-medium text-white truncate hover:text-zinc-100"
             onDoubleClick={() => setTitleEditing(true)}
           >
             {nodeData.title || 'Untitled Chapter'}
@@ -201,8 +201,8 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
               if (e.key === 'Enter' || e.key === ' ') setEditingNodeId(id);
             }}
             className={[
-              'min-h-[80px] px-3 py-2 rounded-lg border text-xs text-zinc-400 leading-relaxed cursor-text',
-              'transition-colors hover:border-indigo-500/50 hover:text-zinc-300',
+              'min-h-[200px] px-4 py-3 rounded-lg border text-xs text-zinc-400 leading-relaxed cursor-text',
+              'transition-colors hover:border-purple-500/50 hover:text-zinc-300',
               'border-zinc-800 bg-zinc-800/40',
             ].join(' ')}
           >
@@ -216,38 +216,49 @@ export const ChapterFlowNode = memo(({ id, data, selected }: NodeProps<ScriptNod
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Footer                                                               */}
+      {/* Summary row                                                          */}
       {/* ------------------------------------------------------------------ */}
-      <div className="flex items-center gap-2 px-4 pb-3">
-        {/* Summary / expand */}
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {nodeData.summary && (
-            <span className="text-[11px] text-zinc-500 truncate flex-1">
-              {nodeData.summary}
-            </span>
-          )}
+      {nodeData.summary && (
+        <div className="flex items-center gap-2 px-4 pb-2">
+          <span className="text-[11px] text-zinc-500 truncate flex-1">
+            摘要: {nodeData.summary}
+          </span>
           <button
             onClick={() => openExpandDialog(id, nodeData.title, nodeData.summary)}
-            className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-indigo-400 px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors flex-shrink-0"
+            className="flex items-center text-amber-500 hover:text-amber-400 transition-colors flex-shrink-0"
             title="Expand from summary"
           >
-            <Sparkles size={12} />
+            <Sparkles size={18} />
           </button>
         </div>
+      )}
 
-        {/* Create Branch button */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Footer: Create Branch button (full width)                           */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="px-4 pb-4">
+        {!nodeData.summary && (
+          <button
+            onClick={() => openExpandDialog(id, nodeData.title, nodeData.summary)}
+            className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-amber-400 mb-2 transition-colors"
+            title="Expand from summary"
+          >
+            <Sparkles size={14} />
+            <span>Add summary</span>
+          </button>
+        )}
         <button
           onClick={() => openBranchDialog(id, nodeData.title, nodeData.summary)}
-          className="flex items-center gap-1.5 text-[11px] font-medium text-white px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 transition-all shadow-sm flex-shrink-0"
+          className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 transition-all shadow-sm"
           title="Create branch"
         >
-          <GitBranch size={12} />
+          <GitBranch size={14} />
           Create Branch
         </button>
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Source handle + green connection dot                                */}
+      {/* Source handle — green connection dot                                */}
       {/* ------------------------------------------------------------------ */}
       <Handle
         type="source"

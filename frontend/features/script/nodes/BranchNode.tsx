@@ -29,9 +29,10 @@ export const BranchNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) =
 
   return (
     <div
-      className={`w-[320px] rounded-xl border border-l-4 border-l-amber-500 bg-zinc-900 shadow-lg transition-colors ${
-        selected ? 'border-indigo-500 ring-1 ring-indigo-500/30' : 'border-zinc-700'
-      }`}
+      className={[
+        'w-[300px] rounded-xl border border-l-[3px] border-l-amber-500 bg-zinc-900 shadow-lg transition-colors',
+        selected ? 'border-purple-500 ring-1 ring-purple-500/30' : 'border-zinc-700',
+      ].join(' ')}
     >
       <Handle
         type="target"
@@ -50,12 +51,12 @@ export const BranchNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) =
 
       {/* Title Row */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-        <span className="flex items-center justify-center w-5 h-5 rounded bg-purple-700/70 text-[10px] font-bold text-purple-200 shrink-0">
-          {data.chapterNumber}
+        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-600 text-[11px] font-bold text-white shrink-0">
+          {(data as ChapterNodeData).chapterNumber}
         </span>
         {titleEditing ? (
           <input
-            className="flex-1 bg-transparent text-sm font-semibold text-white outline-none border-b border-purple-500"
+            className="flex-1 bg-transparent text-sm font-medium text-white outline-none border-b border-purple-500"
             value={titleInput}
             onChange={(e) => setTitleInput(e.target.value)}
             onBlur={handleTitleBlur}
@@ -64,7 +65,7 @@ export const BranchNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) =
           />
         ) : (
           <button
-            className="flex-1 text-left text-sm font-semibold text-zinc-100 truncate hover:text-white"
+            className="flex-1 text-left text-sm font-medium text-zinc-100 truncate hover:text-white"
             onDoubleClick={() => setTitleEditing(true)}
           >
             {data.title || 'Untitled Branch'}
@@ -81,14 +82,14 @@ export const BranchNode = memo(({ id, data, selected }: NodeProps<ScriptNode>) =
       >
         {isEditing ? (
           <ScriptTipTapEditor
-            contentJson={data.contentJson ?? null}
+            contentJson={(data as ChapterNodeData).contentJson ?? null}
             onUpdate={handleContentUpdate}
             placeholder="Start writing..."
             editable
           />
         ) : (
           <p className="text-xs text-zinc-400 leading-relaxed">
-            {data.content?.trim() || (
+            {(data as ChapterNodeData).content?.trim() || (
               <span className="text-zinc-600 italic">Start writing...</span>
             )}
           </p>
