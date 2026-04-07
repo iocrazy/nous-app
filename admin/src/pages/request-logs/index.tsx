@@ -7,13 +7,9 @@ import {
   Card,
   Space,
   Tabs,
-  Switch,
 } from '@arco-design/web-react'
 import {
   IconCopy,
-  IconExport,
-  IconPause,
-  IconPlayArrow,
 } from '@arco-design/web-react/icon'
 import {
   useReactTable,
@@ -26,8 +22,9 @@ import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
 import type { RequestLog, FrontendError, AppLog } from '../../api/endpoints/request-logs'
-import { exportToCsv } from '../../utils/csv-export'
 import { formatDateTime } from '../../utils/format'
+import { LogsToolbarExtra } from './LogsToolbarExtra'
+import { useLogsToolbar } from './useLogsToolbar'
 import { supabase } from '../../auth/supabase'
 import '../../components/notion-table/notion-table.css'
 
@@ -305,7 +302,10 @@ function RequestLogsTab() {
     </div>
   ), [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<RequestLog>({
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<RequestLog>({
     tableKey: 'request-logs',
     columns,
     defaultSorts: [{ field: 'timestamp', direction: 'desc' }],
@@ -329,27 +329,38 @@ function RequestLogsTab() {
     },
   })
 
-  const exportButton = (
-    <Button
-      icon={<IconExport />}
-      size="small"
-      onClick={() => exportToCsv(
-        `request-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
-        [
-          { key: 'timestamp', label: 'Time' },
-          { key: 'method', label: 'Method' },
-          { key: 'path', label: 'Path' },
-          { key: 'status_code', label: 'Status' },
-          { key: 'response_time_ms', label: 'Response Time (ms)' },
-          { key: 'user_email', label: 'User' },
-          { key: 'ip_address', label: 'IP Address' },
-          { key: 'request_id', label: 'Request ID' },
-        ],
-      )}
-    >
-      Export
-    </Button>
+  const csvColumns = useMemo(() => [
+    { key: 'timestamp', label: 'Time' },
+    { key: 'method', label: 'Method' },
+    { key: 'path', label: 'Path' },
+    { key: 'status_code', label: 'Status' },
+    { key: 'response_time_ms', label: 'Response Time (ms)' },
+    { key: 'user_email', label: 'User' },
+    { key: 'ip_address', label: 'IP Address' },
+    { key: 'request_id', label: 'Request ID' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'timestamp',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+    csvColumns,
+    filePrefix: 'request-logs',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+    />
   )
 
   return (
@@ -359,7 +370,7 @@ function RequestLogsTab() {
       pagination={pagination}
       onPageChange={setPage}
       isLoading={isLoading}
-      toolbarExtra={exportButton}
+      toolbarExtra={toolbarExtra}
       emptyText="No request logs found"
       scrollX={1100}
       expandedRowRender={expandedRowRender}
@@ -495,7 +506,10 @@ function FrontendErrorsTab() {
     </div>
   ), [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<FrontendError>({
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<FrontendError>({
     tableKey: 'frontend-errors',
     columns,
     defaultSorts: [{ field: 'created_at', direction: 'desc' }],
@@ -516,25 +530,36 @@ function FrontendErrorsTab() {
     },
   })
 
-  const exportButton = (
-    <Button
-      icon={<IconExport />}
-      size="small"
-      onClick={() => exportToCsv(
-        `frontend-errors-${new Date().toISOString().slice(0, 10)}.csv`,
-        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
-        [
-          { key: 'created_at', label: 'Time' },
-          { key: 'error_type', label: 'Type' },
-          { key: 'message', label: 'Message' },
-          { key: 'url', label: 'URL' },
-          { key: 'user_email', label: 'User' },
-          { key: 'stack', label: 'Stack Trace' },
-        ],
-      )}
-    >
-      Export
-    </Button>
+  const csvColumns = useMemo(() => [
+    { key: 'created_at', label: 'Time' },
+    { key: 'error_type', label: 'Type' },
+    { key: 'message', label: 'Message' },
+    { key: 'url', label: 'URL' },
+    { key: 'user_email', label: 'User' },
+    { key: 'stack', label: 'Stack Trace' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'created_at',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+    csvColumns,
+    filePrefix: 'frontend-errors',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+    />
   )
 
   return (
@@ -544,7 +569,7 @@ function FrontendErrorsTab() {
       pagination={pagination}
       onPageChange={setPage}
       isLoading={isLoading}
-      toolbarExtra={exportButton}
+      toolbarExtra={toolbarExtra}
       emptyText="No frontend errors found"
       expandedRowRender={expandedRowRender}
     />
@@ -670,7 +695,10 @@ function ApplicationLogsTab() {
     </div>
   ), [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<AppLog>({
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<AppLog>({
     tableKey: 'app-logs',
     columns,
     defaultSorts: [{ field: 'logged_at', direction: 'desc' }],
@@ -707,9 +735,9 @@ function ApplicationLogsTab() {
         { event: 'INSERT', schema: 'public', table: 'application_logs' },
         (payload) => {
           const row = payload.new as AppLog
-          // Filter out infrastructure noise in Live Tail
           const NOISE_MODULES = ['httpx', 'uvicorn.access', 'uvicorn.error', 'celery.beat', 'celery.app.trace']
           if (NOISE_MODULES.includes(row.module || '')) return
+          if (paused) return
           setRealtimeLogs((prev) => [row, ...prev].slice(0, LIVE_TAIL_MAX))
           setNewIds((prev) => {
             const next = new Set(prev)
@@ -730,7 +758,7 @@ function ApplicationLogsTab() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [liveTail])
+  }, [liveTail, paused])
 
   // Auto-scroll when not paused
   useEffect(() => {
@@ -739,59 +767,64 @@ function ApplicationLogsTab() {
     }
   }, [realtimeLogs, liveTail, paused])
 
-  const handleToggleLiveTail = useCallback((checked: boolean) => {
-    setLiveTail(checked)
-    if (!checked) {
-      setPaused(false)
-      setRealtimeLogs([])
-      setNewIds(new Set())
-    }
+  const handleLiveStart = useCallback(() => {
+    setLiveTail(true)
+    setPaused(false)
+    setRealtimeLogs([])
+    setNewIds(new Set())
   }, [])
 
-  // Build toolbar extra: Live tail toggle + export button
-  const liveTailControls = (
-    <Space size={8}>
-      <Switch
-        checked={liveTail}
-        onChange={handleToggleLiveTail}
-        checkedText="Live"
-        uncheckedText="Live"
-      />
-      {liveTail && (
-        <>
-          <Tag color="green" size="small">{realtimeLogs.length} entries</Tag>
-          <Button
-            type="text"
-            size="mini"
-            icon={paused ? <IconPlayArrow /> : <IconPause />}
-            onClick={() => setPaused((p) => !p)}
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
-        </>
-      )}
-      <Button
-        icon={<IconExport />}
-        size="small"
-        onClick={() => {
-          const data = liveTail ? realtimeLogs : table.getRowModel().rows.map((r) => r.original)
-          exportToCsv(
-            `app-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-            data as unknown as Record<string, unknown>[],
-            [
-              { key: 'logged_at', label: 'Time' },
-              { key: 'level', label: 'Level' },
-              { key: 'module', label: 'Module' },
-              { key: 'function', label: 'Function' },
-              { key: 'message', label: 'Message' },
-              { key: 'exception', label: 'Exception' },
-            ],
-          )
-        }}
-      >
-        Export
-      </Button>
-    </Space>
+  const handleLiveStop = useCallback(() => {
+    setLiveTail(false)
+    setPaused(false)
+    setRealtimeLogs([])
+    setNewIds(new Set())
+  }, [])
+
+  const handleLivePause = useCallback(() => {
+    setPaused((p) => !p)
+  }, [])
+
+  const csvColumns = useMemo(() => [
+    { key: 'logged_at', label: 'Time' },
+    { key: 'level', label: 'Level' },
+    { key: 'module', label: 'Module' },
+    { key: 'function', label: 'Function' },
+    { key: 'message', label: 'Message' },
+    { key: 'exception', label: 'Exception' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'logged_at',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => {
+      const data = liveTail ? realtimeLogs : table.getRowModel().rows.map((r) => r.original)
+      return data as unknown as Record<string, unknown>[]
+    },
+    csvColumns,
+    filePrefix: 'app-logs',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+      showLive
+      liveTail={liveTail}
+      livePaused={paused}
+      liveCount={realtimeLogs.length}
+      onLiveStart={handleLiveStart}
+      onLiveStop={handleLiveStop}
+      onLivePause={handleLivePause}
+    />
   )
 
   // Live tail table: reuse same columns + expandedRowRender
@@ -832,12 +865,11 @@ function ApplicationLogsTab() {
     })
   }, [])
 
-  // Unified layout: toolbar always visible, live tail replaces only the table body
   if (liveTail) {
     const liveRows = liveTable.getRowModel().rows
     return (
       <Card>
-        <NotionTableToolbar {...toolbarProps} extra={liveTailControls} />
+        <NotionTableToolbar {...toolbarProps} extra={toolbarExtra} />
         <style>{`
           @keyframes liveTailHighlight {
             from { background-color: var(--color-primary-1); }
@@ -927,7 +959,7 @@ function ApplicationLogsTab() {
       pagination={pagination}
       onPageChange={setPage}
       isLoading={isLoading}
-      toolbarExtra={liveTailControls}
+      toolbarExtra={toolbarExtra}
       emptyText="No application logs found"
       expandedRowRender={expandedRowRender}
     />
