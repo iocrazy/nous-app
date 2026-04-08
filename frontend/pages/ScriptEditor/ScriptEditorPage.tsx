@@ -237,6 +237,12 @@ export function ScriptEditorPage() {
             onExport={() => setShowExport(true)}
             onImport={() => setShowImport(true)}
             onSave={handleSave}
+            onRename={async (newName) => {
+              if (newName !== scriptName && scriptId) {
+                setScriptName(newName);
+                await updateScriptProject(scriptId, { name: newName }).catch(console.error);
+              }
+            }}
             saving={saving}
           >
             {/* Save button */}

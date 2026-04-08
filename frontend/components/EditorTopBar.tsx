@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Save, ArrowLeft, Trash2, Copy, Download, Upload, Settings } from 'lucide-react';
+import { ChevronDown, Save, ArrowLeft, Trash2, Copy, Download, Upload, Settings, Pencil } from 'lucide-react';
 
 interface EditorTopBarProps {
   projectName: string;
@@ -143,7 +143,7 @@ export function EditorTopBar({
           ref={logoButtonRef}
           type="button"
           onClick={() => setLogoMenuOpen((v) => !v)}
-          className={`flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors ${logoMenuOpen ? 'bg-zinc-700' : ''}`}
+          className={`flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-800 ${logoMenuOpen ? 'bg-zinc-800' : ''}`}
         >
           {/* MediaHub logo mark — simple spark shape */}
           <svg
@@ -160,7 +160,7 @@ export function EditorTopBar({
           </svg>
           <ChevronDown
             size={12}
-            className={`text-zinc-400 ml-0.5 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
+            className={`text-zinc-600 ml-0.5 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
@@ -241,6 +241,7 @@ export function EditorTopBar({
           >
             <PlainMenuItem
               label="Rename"
+              icon={<Pencil size={14} />}
               onClick={handleRenameStart}
             />
             <PlainMenuItem
