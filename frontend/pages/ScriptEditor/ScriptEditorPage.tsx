@@ -239,30 +239,6 @@ export function ScriptEditorPage() {
             onSave={handleSave}
             saving={saving}
           >
-            {/* Inline name edit */}
-            {editingName ? (
-              <input
-                className="text-sm text-white bg-zinc-800 outline-none border border-indigo-500 rounded px-2 py-0.5"
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                onBlur={handleNameBlur}
-                onKeyDown={(e) => e.key === 'Enter' && handleNameBlur()}
-                autoFocus
-              />
-            ) : (
-              <button
-                type="button"
-                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                onDoubleClick={() => {
-                  setNameInput(scriptName);
-                  setEditingName(true);
-                }}
-                title="Double-click to rename"
-              >
-                Rename
-              </button>
-            )}
-
             {/* Save button */}
             <button
               type="button"
