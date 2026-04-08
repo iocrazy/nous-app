@@ -244,18 +244,8 @@ export function ScriptEditorPage() {
               }
             }}
             saving={saving}
-          >
-            {/* Save button */}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-            >
-              <Save size={13} />
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-          </EditorTopBar>
+          />
+
 
           {/* Toolbar */}
           <ScriptToolbar onCreateStory={() => setShowCreateStory(true)} />

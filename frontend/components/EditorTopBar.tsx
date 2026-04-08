@@ -170,19 +170,10 @@ export function EditorTopBar({
             ref={logoMenuRef}
             className="absolute top-full left-0 mt-1 w-52 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 text-sm"
           >
-            {onSave && (
-              <MenuItem
-                icon={<Save size={14} />}
-                label="Save"
-                shortcut="⌘S"
-                onClick={() => handleLogoMenuAction(onSave)}
-                disabled={saving}
-              />
-            )}
             <MenuItem
-              icon={<Save size={14} />}
-              label="Save as..."
-              onClick={() => setLogoMenuOpen(false)}
+              icon={<ArrowLeft size={14} />}
+              label="Back to project"
+              onClick={() => handleLogoMenuAction(onBack)}
             />
 
             <div className="my-1 border-t border-zinc-700" />
@@ -191,14 +182,6 @@ export function EditorTopBar({
               icon={<Settings size={14} />}
               label="Preferences..."
               onClick={() => setLogoMenuOpen(false)}
-            />
-
-            <div className="my-1 border-t border-zinc-700" />
-
-            <MenuItem
-              icon={<ArrowLeft size={14} />}
-              label="Back to project"
-              onClick={() => handleLogoMenuAction(onBack)}
             />
           </div>
         )}
