@@ -183,12 +183,19 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
         name_zh=request.name_zh,
     )
 
-    # Set group_id if provided
-    if request.group_id and created:
+    # Set group_id: use provided value, or default to "Uncategorized" group
+    if created:
         from app.db.supabase_client import get_async_supabase_admin
         client = await get_async_supabase_admin()
-        await client.table("tags").update({"group_id": request.group_id}).eq("id", created["id"]).execute()
-        created["group_id"] = request.group_id
+        group_id = request.group_id
+        if not group_id:
+            # Find the Uncategorized group
+            result = await client.table("tag_groups").select("id").eq("name", "Uncategorized").limit(1).execute()
+            if result.data:
+                group_id = str(result.data[0]["id"])
+        if group_id:
+            await client.table("tags").update({"group_id": group_id}).eq("id", created["id"]).execute()
+            created["group_id"] = group_id
 
     return {"success": True, "data": created}
 
