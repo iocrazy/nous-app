@@ -45,11 +45,11 @@ export function EditorLoadingScreen({ visible }: EditorLoadingScreenProps) {
       >
         {/* Logo */}
         <svg
-          width="32"
-          height="32"
+          width="56"
+          height="56"
           viewBox="0 0 24 24"
           fill="none"
-          className="text-indigo-400 mb-6"
+          className="text-indigo-500 mb-3"
         >
           <path
             d="M12 2L9.5 9.5H2L7.75 13.75L5.5 21L12 16.75L18.5 21L16.25 13.75L22 9.5H14.5L12 2Z"
@@ -57,9 +57,12 @@ export function EditorLoadingScreen({ visible }: EditorLoadingScreenProps) {
           />
         </svg>
 
+        {/* Brand name */}
+        <span className="text-xs text-zinc-600 mb-6 tracking-widest uppercase">MediaHub</span>
+
         {/* Progress bar */}
-        <div className="w-48 h-0.5 bg-zinc-800 rounded-full overflow-hidden">
-          <div className="editor-loading-bar-inner h-full bg-white rounded-full" />
+        <div className="w-64 h-1 bg-zinc-800 rounded-full overflow-hidden">
+          <div className="editor-loading-bar-inner h-full bg-indigo-500 rounded-full" />
         </div>
       </div>
     </>

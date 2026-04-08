@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Save, ArrowLeft, Trash2, Copy, Download, Upload, FolderOpen } from 'lucide-react';
+import { ChevronDown, Save, ArrowLeft, Trash2, Copy, Download, Upload, Settings } from 'lucide-react';
 
 interface EditorTopBarProps {
   projectName: string;
@@ -136,14 +136,14 @@ export function EditorTopBar({
   }
 
   return (
-    <div className="h-11 flex items-center px-3 gap-3 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 select-none">
+    <div className="h-11 flex items-center px-3 gap-1 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 select-none">
       {/* Logo + dropdown trigger */}
       <div className="relative">
         <button
           ref={logoButtonRef}
           type="button"
           onClick={() => setLogoMenuOpen((v) => !v)}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-md hover:bg-zinc-800 transition-colors"
+          className={`flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 rounded-lg px-2 py-1.5 transition-colors ${logoMenuOpen ? 'bg-zinc-700' : ''}`}
         >
           {/* MediaHub logo mark — simple spark shape */}
           <svg
@@ -151,7 +151,7 @@ export function EditorTopBar({
             height="18"
             viewBox="0 0 24 24"
             fill="none"
-            className="text-indigo-400 flex-shrink-0"
+            className="text-indigo-500 flex-shrink-0"
           >
             <path
               d="M12 2L9.5 9.5H2L7.75 13.75L5.5 21L12 16.75L18.5 21L16.25 13.75L22 9.5H14.5L12 2Z"
@@ -160,15 +160,15 @@ export function EditorTopBar({
           </svg>
           <ChevronDown
             size={12}
-            className={`text-zinc-500 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
+            className={`text-zinc-400 ml-0.5 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
-        {/* Logo dropdown menu — simplified */}
+        {/* Logo dropdown menu — app-level actions */}
         {logoMenuOpen && (
           <div
             ref={logoMenuRef}
-            className="absolute top-full left-0 mt-1 w-48 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 text-sm"
+            className="absolute top-full left-0 mt-1 w-52 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 text-sm"
           >
             {onSave && (
               <MenuItem
@@ -179,6 +179,19 @@ export function EditorTopBar({
                 disabled={saving}
               />
             )}
+            <MenuItem
+              icon={<Save size={14} />}
+              label="Save as..."
+              onClick={() => setLogoMenuOpen(false)}
+            />
+
+            <div className="my-1 border-t border-zinc-700" />
+
+            <MenuItem
+              icon={<Settings size={14} />}
+              label="Preferences..."
+              onClick={() => setLogoMenuOpen(false)}
+            />
 
             <div className="my-1 border-t border-zinc-700" />
 
@@ -190,6 +203,9 @@ export function EditorTopBar({
           </div>
         )}
       </div>
+
+      {/* Divider between logo and project name */}
+      <div className="w-px h-5 bg-zinc-700 mx-2" />
 
       {/* Project name + dropdown trigger */}
       <div className="relative">
@@ -207,9 +223,9 @@ export function EditorTopBar({
           <div
             ref={projectTriggerRef}
             onClick={() => setProjectMenuOpen((v) => !v)}
-            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer"
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer transition-colors ${projectMenuOpen ? 'bg-zinc-800' : ''}`}
           >
-            <span className="text-sm text-zinc-300 truncate max-w-xs">{projectName}</span>
+            <span className="text-sm font-medium text-zinc-200 truncate max-w-xs">{projectName}</span>
             <ChevronDown
               size={14}
               className={`text-zinc-500 flex-shrink-0 transition-transform ${projectMenuOpen ? 'rotate-180' : ''}`}
@@ -217,7 +233,7 @@ export function EditorTopBar({
           </div>
         )}
 
-        {/* Project dropdown menu */}
+        {/* Project dropdown menu — project-level actions */}
         {projectMenuOpen && !isRenaming && (
           <div
             ref={projectMenuRef}
@@ -229,6 +245,7 @@ export function EditorTopBar({
             />
             <PlainMenuItem
               label="Duplicate"
+              icon={<Copy size={14} />}
               onClick={() => handleProjectMenuAction(() => onDuplicate?.())}
             />
 
@@ -237,20 +254,17 @@ export function EditorTopBar({
             <PlainMenuItem
               label="Export..."
               shortcut="⌃⇧E"
+              icon={<Download size={14} />}
               onClick={() => handleProjectMenuAction(() => onExport?.())}
             />
             <PlainMenuItem
               label="Import..."
+              icon={<Upload size={14} />}
               onClick={() => handleProjectMenuAction(() => onImport?.())}
             />
 
             <div className="border-t border-zinc-700 my-1" />
 
-            <PlainMenuItem
-              label="Go to project"
-              icon={<FolderOpen size={14} />}
-              onClick={() => handleProjectMenuAction(onBack)}
-            />
             <PlainMenuItem
               label="Move to trash"
               icon={<Trash2 size={14} />}
