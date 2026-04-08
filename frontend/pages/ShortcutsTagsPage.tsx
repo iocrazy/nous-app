@@ -157,7 +157,7 @@ export const ShortcutsTagsPage: React.FC = () => {
       try {
         const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
         const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value.trim())}&langpair=${langPair}`
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value.trim())}&langpair=${langPair}&de=8512939@qq.com`
         );
         if (!res.ok) return;
         const data = await res.json();
