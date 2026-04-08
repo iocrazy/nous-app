@@ -44,8 +44,8 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagNameZh, setNewTagNameZh] = useState('');
+  const [newTagInput, setNewTagInput] = useState('');
+  const [translatedName, setTranslatedName] = useState('');
   const [newTagGroupId, setNewTagGroupId] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -142,54 +142,44 @@ export const ShortcutsTagsPage: React.FC = () => {
     return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
   }, [tags]);
 
-  // Auto-translate between en↔zh using MyMemory API
+  // Auto-translate: detect input language, translate to the other
   const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
 
-  const autoTranslate = useCallback((text: string, direction: 'en2zh' | 'zh2en') => {
+  const handleInputChange = useCallback((value: string) => {
+    setNewTagInput(value);
     if (translateTimerRef.current) clearTimeout(translateTimerRef.current);
-    if (!text.trim()) {
-      if (direction === 'en2zh') setNewTagNameZh('');
-      else setNewTagName('');
+    if (!value.trim()) {
+      setTranslatedName('');
       return;
     }
     translateTimerRef.current = setTimeout(async () => {
       try {
-        const langPair = direction === 'en2zh' ? 'en|zh' : 'zh|en';
+        const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
         const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.trim())}&langpair=${langPair}`
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value.trim())}&langpair=${langPair}`
         );
         if (!res.ok) return;
         const data = await res.json();
         const translated = data?.responseData?.translatedText;
-        if (translated && translated !== text) {
-          if (direction === 'en2zh') setNewTagNameZh(translated);
-          else setNewTagName(translated);
+        if (translated && translated !== value) {
+          setTranslatedName(translated);
         }
       } catch {
-        // Silently fail — translation is optional
+        // Translation is optional
       }
     }, 600);
   }, []);
 
-  // Detect language: has any CJK char → Chinese, otherwise English
-  const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
-
-  const handleNameChange = useCallback((value: string) => {
-    setNewTagName(value);
-    if (!isChinese(value)) {
-      autoTranslate(value, 'en2zh');
-    }
-  }, [autoTranslate]);
-
-  const handleNameZhChange = useCallback((value: string) => {
-    setNewTagNameZh(value);
-    if (isChinese(value)) {
-      autoTranslate(value, 'zh2en');
-    }
-  }, [autoTranslate]);
-
   const handleCreateTag = useCallback(async () => {
-    if (!newTagName.trim() || !token) return;
+    const input = newTagInput.trim();
+    if (!input || !token) return;
+
+    // Determine which is name (en) and which is name_zh based on input language
+    const inputIsChinese = isChinese(input);
+    const name = inputIsChinese ? (translatedName || input) : input;
+    const name_zh = inputIsChinese ? input : (translatedName || null);
+
     setCreating(true);
     setCreateError(null);
     try {
@@ -197,8 +187,8 @@ export const ShortcutsTagsPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: newTagName.trim(),
-          name_zh: newTagNameZh.trim() || null,
+          name,
+          name_zh,
           group_id: newTagGroupId || null,
         }),
       });
@@ -213,8 +203,8 @@ export const ShortcutsTagsPage: React.FC = () => {
         const data = await tagsRes.json();
         setTags(data.tags || []);
       }
-      setNewTagName('');
-      setNewTagNameZh('');
+      setNewTagInput('');
+      setTranslatedName('');
       setNewTagGroupId('');
       setShowCreateForm(false);
     } catch (err) {
@@ -222,7 +212,7 @@ export const ShortcutsTagsPage: React.FC = () => {
     } finally {
       setCreating(false);
     }
-  }, [newTagName, newTagNameZh, newTagGroupId, token]);
+  }, [newTagInput, translatedName, newTagGroupId, token]);
 
   /** Get display label (may be Chinese), but always use English name for storage */
   const getStorageName = (tag: Tag) => tag.name;
@@ -311,19 +301,18 @@ export const ShortcutsTagsPage: React.FC = () => {
         <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 space-y-3">
           <input
             type="text"
-            value={newTagName}
-            onChange={(e) => handleNameChange(e.target.value)}
-            placeholder={lang === 'zh' ? '标签名称 (英文，自动翻译)' : 'Tag name (English, auto-translate)'}
+            value={newTagInput}
+            onChange={(e) => handleInputChange(e.target.value)}
+            placeholder={lang === 'zh' ? '输入标签名（中文或英文）' : 'Enter tag name (Chinese or English)'}
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
             autoFocus
           />
-          <input
-            type="text"
-            value={newTagNameZh}
-            onChange={(e) => handleNameZhChange(e.target.value)}
-            placeholder={lang === 'zh' ? '中文名称 (自动翻译)' : 'Chinese name (auto-translate)'}
-            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
-          />
+          {translatedName && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 text-xs">
+              <span className="text-zinc-500">{isChinese(newTagInput) ? 'EN:' : 'ZH:'}</span>
+              <span className="text-indigo-400">{translatedName}</span>
+            </div>
+          )}
           <select
             value={newTagGroupId}
             onChange={(e) => setNewTagGroupId(e.target.value)}
@@ -339,7 +328,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           )}
           <button
             onClick={handleCreateTag}
-            disabled={!newTagName.trim() || creating}
+            disabled={!newTagInput.trim() || creating}
             className="w-full py-2 rounded-lg bg-indigo-600 text-sm font-medium text-white disabled:opacity-40 transition-colors hover:bg-indigo-500 active:scale-[0.98]"
           >
             {creating
