@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
 
 interface Tag {
@@ -142,6 +142,52 @@ export const ShortcutsTagsPage: React.FC = () => {
     return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
   }, [tags]);
 
+  // Auto-translate between en↔zh using MyMemory API
+  const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const autoTranslate = useCallback((text: string, direction: 'en2zh' | 'zh2en') => {
+    if (translateTimerRef.current) clearTimeout(translateTimerRef.current);
+    if (!text.trim()) {
+      if (direction === 'en2zh') setNewTagNameZh('');
+      else setNewTagName('');
+      return;
+    }
+    translateTimerRef.current = setTimeout(async () => {
+      try {
+        const langPair = direction === 'en2zh' ? 'en|zh' : 'zh|en';
+        const res = await fetch(
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.trim())}&langpair=${langPair}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const translated = data?.responseData?.translatedText;
+        if (translated && translated !== text) {
+          if (direction === 'en2zh') setNewTagNameZh(translated);
+          else setNewTagName(translated);
+        }
+      } catch {
+        // Silently fail — translation is optional
+      }
+    }, 600);
+  }, []);
+
+  // Detect language: has any CJK char → Chinese, otherwise English
+  const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
+
+  const handleNameChange = useCallback((value: string) => {
+    setNewTagName(value);
+    if (!isChinese(value)) {
+      autoTranslate(value, 'en2zh');
+    }
+  }, [autoTranslate]);
+
+  const handleNameZhChange = useCallback((value: string) => {
+    setNewTagNameZh(value);
+    if (isChinese(value)) {
+      autoTranslate(value, 'zh2en');
+    }
+  }, [autoTranslate]);
+
   const handleCreateTag = useCallback(async () => {
     if (!newTagName.trim() || !token) return;
     setCreating(true);
@@ -266,16 +312,16 @@ export const ShortcutsTagsPage: React.FC = () => {
           <input
             type="text"
             value={newTagName}
-            onChange={(e) => setNewTagName(e.target.value)}
-            placeholder={lang === 'zh' ? '标签名称 (英文)' : 'Tag name (English)'}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder={lang === 'zh' ? '标签名称 (英文，自动翻译)' : 'Tag name (English, auto-translate)'}
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
             autoFocus
           />
           <input
             type="text"
             value={newTagNameZh}
-            onChange={(e) => setNewTagNameZh(e.target.value)}
-            placeholder={lang === 'zh' ? '中文名称 (可选)' : 'Chinese name (optional)'}
+            onChange={(e) => handleNameZhChange(e.target.value)}
+            placeholder={lang === 'zh' ? '中文名称 (自动翻译)' : 'Chinese name (auto-translate)'}
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
           />
           <select
