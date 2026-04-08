@@ -1,14 +1,20 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Tag as TagIcon, FolderOpen, Check, Flame } from 'lucide-react';
+import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
 
 interface Tag {
   id: string;
   name: string;
   name_zh: string | null;
   color: string;
+  group_id: string | null;
   group_name: string | null;
   media_count: number;
   type: string;
+}
+
+interface TagGroup {
+  id: string;
+  name: string;
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -37,6 +43,12 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagNameZh, setNewTagNameZh] = useState('');
+  const [newTagGroupId, setNewTagGroupId] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Read params from both query string and hash fragment
   const params = new URLSearchParams(window.location.search);
@@ -119,6 +131,53 @@ export const ShortcutsTagsPage: React.FC = () => {
     return entries;
   }, [tags]);
 
+  // Extract unique tag groups for create form dropdown
+  const tagGroups = useMemo<TagGroup[]>(() => {
+    const seen = new Map<string, string>();
+    for (const tag of tags) {
+      if (tag.group_id && tag.group_name && !seen.has(tag.group_id)) {
+        seen.set(tag.group_id, tag.group_name);
+      }
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  }, [tags]);
+
+  const handleCreateTag = useCallback(async () => {
+    if (!newTagName.trim() || !token) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTagName.trim(),
+          name_zh: newTagNameZh.trim() || null,
+          group_id: newTagGroupId || null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed' }));
+        throw new Error(err.detail || `Error ${res.status}`);
+      }
+      // Reload tags
+      const fetchUrl = `${API_BASE}/api/v1/auth/temp-token/${token}/tags?enabled_only=true`;
+      const tagsRes = await fetch(fetchUrl);
+      if (tagsRes.ok) {
+        const data = await tagsRes.json();
+        setTags(data.tags || []);
+      }
+      setNewTagName('');
+      setNewTagNameZh('');
+      setNewTagGroupId('');
+      setShowCreateForm(false);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create tag');
+    } finally {
+      setCreating(false);
+    }
+  }, [newTagName, newTagNameZh, newTagGroupId, token]);
+
   /** Get display label (may be Chinese), but always use English name for storage */
   const getStorageName = (tag: Tag) => tag.name;
 
@@ -182,15 +241,67 @@ export const ShortcutsTagsPage: React.FC = () => {
     <div className="min-h-screen bg-zinc-950 text-white pb-28">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-800 px-4 py-3">
-        <h1 className="text-lg font-semibold text-center">
-          {lang === 'zh' ? '选择标签' : 'Select Tags'}
-        </h1>
-        {selected.size > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="w-8" />
+          <h1 className="text-lg font-semibold text-center">
+            {lang === 'zh' ? '选择标签' : 'Select Tags'}
+          </h1>
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+          >
+            {showCreateForm ? <X size={16} /> : <Plus size={16} />}
+          </button>
+        </div>
+        {selected.size > 0 && !showCreateForm && (
           <p className="text-xs text-zinc-400 text-center mt-1">
             {lang === 'zh' ? `已选 ${selected.size} 个` : `${selected.size} selected`}
           </p>
         )}
       </div>
+
+      {/* Create tag form */}
+      {showCreateForm && (
+        <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 space-y-3">
+          <input
+            type="text"
+            value={newTagName}
+            onChange={(e) => setNewTagName(e.target.value)}
+            placeholder={lang === 'zh' ? '标签名称 (英文)' : 'Tag name (English)'}
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+            autoFocus
+          />
+          <input
+            type="text"
+            value={newTagNameZh}
+            onChange={(e) => setNewTagNameZh(e.target.value)}
+            placeholder={lang === 'zh' ? '中文名称 (可选)' : 'Chinese name (optional)'}
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+          />
+          <select
+            value={newTagGroupId}
+            onChange={(e) => setNewTagGroupId(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white outline-none focus:border-indigo-500"
+          >
+            <option value="">{lang === 'zh' ? '选择分组 (可选)' : 'Select group (optional)'}</option>
+            {tagGroups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+          {createError && (
+            <p className="text-xs text-red-400">{createError}</p>
+          )}
+          <button
+            onClick={handleCreateTag}
+            disabled={!newTagName.trim() || creating}
+            className="w-full py-2 rounded-lg bg-indigo-600 text-sm font-medium text-white disabled:opacity-40 transition-colors hover:bg-indigo-500 active:scale-[0.98]"
+          >
+            {creating
+              ? (lang === 'zh' ? '创建中...' : 'Creating...')
+              : (lang === 'zh' ? '创建标签' : 'Create Tag')}
+          </button>
+        </div>
+      )}
 
       {/* Tag groups */}
       <div className="px-4 py-3 space-y-5">
