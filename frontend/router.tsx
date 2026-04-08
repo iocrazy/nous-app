@@ -110,8 +110,7 @@ export const router = createBrowserRouter([
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
-          { path: 'projects/:projectId/storyboard/:storyboardId', element: <Navigate to="." replace /> },
-          { path: 'projects/:projectId/scripts/:scriptId', element: <Navigate to="." replace /> },
+          // Script & Storyboard editors handled by fullscreen routes below
         ],
       },
 
