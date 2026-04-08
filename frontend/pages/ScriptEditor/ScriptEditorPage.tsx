@@ -247,9 +247,6 @@ export function ScriptEditorPage() {
           />
 
 
-          {/* Toolbar */}
-          <ScriptToolbar onCreateStory={() => setShowCreateStory(true)} />
-
           {/* Sidebar + main content */}
           <div className="flex flex-1 overflow-hidden">
             <ScriptAssetsSidebar
