@@ -379,11 +379,36 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                         aweme_response = item
                                         break
                                 else:
-                                    # 没有找到匹配的aweme_id，记录日志并继续等待下一个响应
+                                    # aweme_list 没有匹配 — /note/ 页面常见（post 列表不含当前帖）
+                                    # 主动用 DrissionPage cookie 请求 detail API
                                     logger.warning(
-                                        f"在当前响应中没有找到匹配的aweme_id: {target_aweme_id}，继续等待下一个响应"
+                                        f"在当前响应中没有找到匹配的aweme_id: {target_aweme_id}，"
+                                        "尝试主动请求 detail API"
                                     )
-                                    continue  # 继续while循环，等待下一个响应
+                                    try:
+                                        cookies = {c["name"]: c["value"] for c in instance.page.cookies()}
+                                        detail_url = (
+                                            f"https://www.douyin.com/aweme/v1/web/aweme/detail/"
+                                            f"?device_platform=webapp&aid=6383&aweme_id={target_aweme_id}"
+                                        )
+                                        import httpx
+                                        async with httpx.AsyncClient(timeout=10) as client:
+                                            resp = await client.get(
+                                                detail_url,
+                                                headers={"User-Agent": instance.page.user_agent},
+                                                cookies=cookies,
+                                            )
+                                            if resp.status_code == 200:
+                                                detail_data = resp.json()
+                                                if detail_data.get("aweme_detail"):
+                                                    logger.info(
+                                                        f"主动 detail API 成功获取 aweme_id={target_aweme_id}"
+                                                    )
+                                                    aweme_response = detail_data["aweme_detail"]
+                                                    break
+                                    except Exception as detail_err:
+                                        logger.debug(f"主动 detail API 请求失败: {detail_err}")
+                                    continue  # fallback: 继续 while 循环等待
 
                             logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
                             return aweme_response
