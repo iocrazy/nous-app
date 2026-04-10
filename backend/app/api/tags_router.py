@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
