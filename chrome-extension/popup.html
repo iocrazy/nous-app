@@ -35,9 +35,11 @@
       <div id="createTagForm" class="create-tag-form" style="display:none;">
         <input type="text" id="newTagInput" placeholder="Tag name (auto-translate)">
         <div id="translatePreview" class="translate-preview" style="display:none;"></div>
-        <select id="newTagGroup">
-          <option value="">Select group (optional)</option>
-        </select>
+        <div class="custom-select" id="newTagGroupWrapper">
+          <div class="custom-select-trigger" id="newTagGroupTrigger">Select group (optional)</div>
+          <div class="custom-select-options" id="newTagGroupOptions" style="display:none;"></div>
+          <input type="hidden" id="newTagGroup" value="">
+        </div>
         <button id="createTagBtn">Create</button>
         <div id="createTagStatus" class="status"></div>
       </div>

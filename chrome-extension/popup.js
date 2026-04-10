@@ -251,6 +251,8 @@ const createTagForm = document.getElementById('createTagForm');
 const newTagInput = document.getElementById('newTagInput');
 const translatePreview = document.getElementById('translatePreview');
 const newTagGroup = document.getElementById('newTagGroup');
+const newTagGroupTrigger = document.getElementById('newTagGroupTrigger');
+const newTagGroupOptions = document.getElementById('newTagGroupOptions');
 const createTagBtn = document.getElementById('createTagBtn');
 const createTagStatus = document.getElementById('createTagStatus');
 
@@ -266,16 +268,45 @@ createTagToggle.addEventListener('click', () => {
   }
 });
 
+// Custom select toggle
+newTagGroupTrigger.addEventListener('click', () => {
+  const open = newTagGroupOptions.style.display !== 'none';
+  newTagGroupOptions.style.display = open ? 'none' : 'block';
+});
+
+// Close on outside click
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('newTagGroupWrapper').contains(e.target)) {
+    newTagGroupOptions.style.display = 'none';
+  }
+});
+
+function selectGroup(value, label) {
+  newTagGroup.value = value;
+  newTagGroupTrigger.textContent = label;
+  newTagGroupTrigger.classList.toggle('has-value', !!value);
+  newTagGroupOptions.style.display = 'none';
+}
+
 function populateGroupDropdown() {
   const seen = new Set();
-  newTagGroup.innerHTML = '<option value="">Select group (optional)</option>';
+  newTagGroupOptions.innerHTML = '';
+
+  // Default option
+  const defaultOpt = document.createElement('div');
+  defaultOpt.className = 'custom-select-option' + (!newTagGroup.value ? ' selected' : '');
+  defaultOpt.textContent = 'Select group (optional)';
+  defaultOpt.addEventListener('click', () => selectGroup('', 'Select group (optional)'));
+  newTagGroupOptions.appendChild(defaultOpt);
+
   for (const tag of allTags) {
     if (tag.group_name && tag.group_id && !seen.has(tag.group_id)) {
       seen.add(tag.group_id);
-      const opt = document.createElement('option');
-      opt.value = tag.group_id;
+      const opt = document.createElement('div');
+      opt.className = 'custom-select-option';
       opt.textContent = tag.group_name;
-      newTagGroup.appendChild(opt);
+      opt.addEventListener('click', () => selectGroup(tag.group_id, tag.group_name));
+      newTagGroupOptions.appendChild(opt);
     }
   }
 }
@@ -356,6 +387,7 @@ createTagBtn.addEventListener('click', async () => {
     newTagInput.value = '';
     translatePreview.style.display = 'none';
     translatePreview.dataset.translated = '';
+    selectGroup('', 'Select group (optional)');
     createTagStatus.textContent = 'Created!';
     createTagStatus.className = 'status success';
     setTimeout(() => { createTagStatus.textContent = ''; }, 2000);
