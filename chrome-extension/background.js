@@ -31,7 +31,7 @@ async function pushUrl(tabId, url) {
   await showToast(tabId, 'Pushing to MediaHub...', 'info');
 
   // Read config
-  const config = await chrome.storage.sync.get(['apiUrl', 'apiKey']);
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
   if (!config.apiUrl || !config.apiKey) {
     await showToast(tabId, 'Not configured. Click extension icon to set up.', 'error');
     return;

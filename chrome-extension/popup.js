@@ -19,7 +19,7 @@ let allTags = [];
 let currentTabUrl = '';
 
 // Init: check if configured, show appropriate view
-chrome.storage.sync.get(['apiUrl', 'apiKey'], (config) => {
+chrome.storage.local.get(['apiUrl', 'apiKey'], (config) => {
   if (config.apiUrl && config.apiKey) {
     showPushView(config);
   } else {
@@ -31,7 +31,7 @@ chrome.storage.sync.get(['apiUrl', 'apiKey'], (config) => {
 function showSettingsView() {
   settingsView.style.display = 'block';
   pushView.style.display = 'none';
-  chrome.storage.sync.get(['apiUrl', 'apiKey'], (result) => {
+  chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
     if (result.apiUrl) apiUrlInput.value = result.apiUrl;
     if (result.apiKey) apiKeyInput.value = result.apiKey;
   });
@@ -44,7 +44,7 @@ saveBtn.addEventListener('click', () => {
   if (!apiUrl) { showMessage('API URL is required', 'error'); return; }
   if (!apiKey) { showMessage('API Key is required', 'error'); return; }
 
-  chrome.storage.sync.set({ apiUrl, apiKey }, () => {
+  chrome.storage.local.set({ apiUrl, apiKey }, () => {
     showMessage('Saved!', 'success');
     setTimeout(() => showPushView({ apiUrl, apiKey }), 800);
   });
@@ -182,7 +182,7 @@ pushBtn.addEventListener('click', async () => {
   pushBtn.textContent = 'Pushing...';
   pushStatus.textContent = '';
 
-  const config = await chrome.storage.sync.get(['apiUrl', 'apiKey']);
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
 
   try {
     // 1. Push URL
