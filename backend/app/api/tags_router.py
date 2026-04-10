@@ -85,6 +85,19 @@ async def delete_tag_group(auth: AuthDep, group_id: str):
     return {"success": True}
 
 
+class TagGroupReorderRequest(BaseModel):
+    group_ids: List[str] = Field(..., description="Ordered list of group IDs")
+
+
+@router.put("/groups/reorder")
+async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
+    """Update sort_order for all groups based on the provided order."""
+    client = await get_async_supabase_admin()
+    for idx, group_id in enumerate(body.group_ids):
+        await client.table("tag_groups").update({"sort_order": idx}).eq("id", group_id).execute()
+    return {"success": True}
+
+
 @router.get("", response_model=TagListResponse)
 async def list_tags(
     auth: AuthDep,

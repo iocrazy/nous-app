@@ -27,6 +27,7 @@ import {
   createTag,
   createTagGroup,
   deleteTagGroup,
+  reorderTagGroups,
   updateTag,
   deleteTag,
   Tag,
@@ -93,6 +94,8 @@ export const TagsSettings: React.FC = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [dragGroupId, setDragGroupId] = useState<string | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
 
   // Load tags and groups
   useEffect(() => {
@@ -313,6 +316,40 @@ export const TagsSettings: React.FC = () => {
     }
   };
 
+  const handleDragStart = (groupId: string) => {
+    setDragGroupId(groupId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, groupId: string) => {
+    e.preventDefault();
+    if (groupId !== dragGroupId) setDragOverGroupId(groupId);
+  };
+
+  const handleDrop = async (targetGroupId: string) => {
+    if (!dragGroupId || dragGroupId === targetGroupId) {
+      setDragGroupId(null);
+      setDragOverGroupId(null);
+      return;
+    }
+    const oldIndex = groups.findIndex((g) => g.id === dragGroupId);
+    const newIndex = groups.findIndex((g) => g.id === targetGroupId);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = [...groups];
+    const [moved] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, moved);
+    setGroups(reordered);
+    setDragGroupId(null);
+    setDragOverGroupId(null);
+
+    try {
+      await reorderTagGroups(reordered.map((g) => g.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reorder');
+      loadData();
+    }
+  };
+
   const enabledCount = tags.filter((t) => t.enabled !== false).length;
 
   return (
@@ -425,16 +462,27 @@ export const TagsSettings: React.FC = () => {
 
             {/* Group list */}
             {groups.map((group) => (
-              <div key={group.id} className="group/item relative">
+              <div
+                key={group.id}
+                className={`group/item relative ${dragOverGroupId === group.id ? 'border-t-2 border-indigo-500' : ''}`}
+                draggable
+                onDragStart={() => handleDragStart(group.id)}
+                onDragOver={(e) => handleDragOver(e, group.id)}
+                onDragLeave={() => setDragOverGroupId(null)}
+                onDrop={() => handleDrop(group.id)}
+                onDragEnd={() => { setDragGroupId(null); setDragOverGroupId(null); }}
+              >
                 <button
                   onClick={() => setSelectedGroup(group.name)}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    dragGroupId === group.id ? 'opacity-40' : ''
+                  } ${
                     selectedGroup === group.name
                       ? 'bg-indigo-500/15 text-indigo-400'
                       : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
                   }`}
                 >
-                  <GripVertical size={12} className="text-zinc-600 shrink-0" />
+                  <GripVertical size={12} className="text-zinc-600 shrink-0 cursor-grab active:cursor-grabbing" />
                   <FolderOpen size={14} className="shrink-0" />
                   <span className="flex-1 text-left truncate">{group.name}</span>
                   <span className="text-xs text-zinc-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>

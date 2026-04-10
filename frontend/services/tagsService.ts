@@ -102,6 +102,22 @@ export const createTagGroup = async (name: string): Promise<TagGroup> => {
 };
 
 /**
+ * Reorder tag groups
+ */
+export const reorderTagGroups = async (groupIds: string[]): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/tags/groups/reorder`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ group_ids: groupIds }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to reorder' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+};
+
+/**
  * Delete a tag group
  */
 export const deleteTagGroup = async (groupId: string): Promise<void> => {
