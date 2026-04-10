@@ -25,6 +25,8 @@ import {
   fetchTags,
   fetchTagGroups,
   createTag,
+  createTagGroup,
+  deleteTagGroup,
   updateTag,
   deleteTag,
   Tag,
@@ -85,6 +87,12 @@ export const TagsSettings: React.FC = () => {
 
   // Sidebar selection: null = All, '__uncategorized__' = Uncategorized, group name = specific group
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+
+  // Group management
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
 
   // Load tags and groups
   useEffect(() => {
@@ -266,6 +274,45 @@ export const TagsSettings: React.FC = () => {
     }
   };
 
+  // Group management handlers
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim()) return;
+    setCreatingGroup(true);
+    try {
+      const created = await createTagGroup(newGroupName.trim());
+      setGroups((prev) => [...prev, created]);
+      setNewGroupName('');
+      setShowCreateGroup(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create group');
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    try {
+      await deleteTagGroup(groupId);
+      setGroups((prev) => prev.filter((g) => g.id !== groupId));
+      // Tags in this group become uncategorized — refresh
+      setTags((prev) =>
+        prev.map((t) => {
+          const group = groups.find((g) => g.id === groupId);
+          if (group && t.group_name === group.name) {
+            return { ...t, group_name: null, group_id: null };
+          }
+          return t;
+        })
+      );
+      setDeletingGroupId(null);
+      if (selectedGroup && groups.find((g) => g.id === groupId)?.name === selectedGroup) {
+        setSelectedGroup(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete group');
+    }
+  };
+
   const enabledCount = tags.filter((t) => t.enabled !== false).length;
 
   return (
@@ -343,24 +390,80 @@ export const TagsSettings: React.FC = () => {
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
                 Groups ({groups.length})
               </span>
+              <button
+                onClick={() => setShowCreateGroup(!showCreateGroup)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                title="Add group"
+              >
+                {showCreateGroup ? <X size={14} /> : <Plus size={14} />}
+              </button>
             </div>
+
+            {/* Create group form */}
+            {showCreateGroup && (
+              <div className="px-3 pb-2">
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
+                    placeholder="Group name"
+                    autoFocus
+                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={handleCreateGroup}
+                    disabled={!newGroupName.trim() || creatingGroup}
+                    className="px-2 py-1.5 rounded-md bg-indigo-600 text-xs text-white disabled:opacity-40 hover:bg-indigo-500 transition-colors"
+                  >
+                    {creatingGroup ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Group list */}
             {groups.map((group) => (
-              <button
-                key={group.id}
-                onClick={() => setSelectedGroup(group.name)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  selectedGroup === group.name
-                    ? 'bg-indigo-500/15 text-indigo-400'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
-                }`}
-              >
-                <GripVertical size={12} className="text-zinc-600 shrink-0" />
-                <FolderOpen size={14} className="shrink-0" />
-                <span className="flex-1 text-left truncate">{group.name}</span>
-                <span className="text-xs text-zinc-500">{groupCounts.get(group.name) || 0}</span>
-              </button>
+              <div key={group.id} className="group/item relative">
+                <button
+                  onClick={() => setSelectedGroup(group.name)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    selectedGroup === group.name
+                      ? 'bg-indigo-500/15 text-indigo-400'
+                      : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                  }`}
+                >
+                  <GripVertical size={12} className="text-zinc-600 shrink-0" />
+                  <FolderOpen size={14} className="shrink-0" />
+                  <span className="flex-1 text-left truncate">{group.name}</span>
+                  <span className="text-xs text-zinc-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>
+                </button>
+                {/* Delete button on hover */}
+                {deletingGroupId === group.id ? (
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      className="p-1 rounded text-red-400 hover:bg-red-500/20 text-[10px]"
+                    >
+                      <Check size={12} />
+                    </button>
+                    <button
+                      onClick={() => setDeletingGroupId(null)}
+                      className="p-1 rounded text-zinc-400 hover:bg-zinc-700 text-[10px]"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeletingGroupId(group.id); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/item:block p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>

@@ -53,6 +53,38 @@ async def list_tag_groups(auth: AuthDep):
     return TagGroupsListResponse(groups=groups)
 
 
+class TagGroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+
+
+@router.post("/groups", response_model=TagGroupItem, status_code=status.HTTP_201_CREATED)
+async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
+    """Create a new tag group."""
+    client = await get_async_supabase_admin()
+    # Get max sort_order
+    existing = await client.table("tag_groups").select("sort_order").order("sort_order", desc=True).limit(1).execute()
+    max_order = existing.data[0]["sort_order"] if existing.data else 0
+    result = await client.table("tag_groups").insert({
+        "name": body.name,
+        "sort_order": max_order + 1,
+    }).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create tag group")
+    g = result.data[0]
+    return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
+
+
+@router.delete("/groups/{group_id}", status_code=status.HTTP_200_OK)
+async def delete_tag_group(auth: AuthDep, group_id: str):
+    """Delete a tag group. Tags in this group become uncategorized."""
+    client = await get_async_supabase_admin()
+    # Move tags to uncategorized (set group_id to NULL)
+    await client.table("tags").update({"group_id": None}).eq("group_id", group_id).execute()
+    # Delete the group
+    await client.table("tag_groups").delete().eq("id", group_id).execute()
+    return {"success": True}
+
+
 @router.get("", response_model=TagListResponse)
 async def list_tags(
     auth: AuthDep,

@@ -85,6 +85,38 @@ export const fetchTagGroups = async (): Promise<TagGroup[]> => {
 };
 
 /**
+ * Create a new tag group
+ */
+export const createTagGroup = async (name: string): Promise<TagGroup> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/tags/groups`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to create group' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+};
+
+/**
+ * Delete a tag group
+ */
+export const deleteTagGroup = async (groupId: string): Promise<void> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/tags/groups/${groupId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete group' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+};
+
+/**
  * Create a new tag
  */
 export const createTag = async (tag: TagCreate): Promise<Tag> => {
