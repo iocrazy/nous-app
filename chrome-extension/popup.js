@@ -185,38 +185,28 @@ pushBtn.addEventListener('click', async () => {
   const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
 
   try {
-    // 1. Push URL
+    // Push URL with tags in a single request
+    const fetchBody = {
+      url: currentTabUrl,
+      video_bool: true,
+      cover_bool: true,
+    };
+    if (selectedTags.size > 0) {
+      fetchBody.tag_ids = Array.from(selectedTags);
+    }
+
     const res = await fetch(`${config.apiUrl}/api/v1/media/fetch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': config.apiKey,
       },
-      body: JSON.stringify({
-        url: currentTabUrl,
-        video_bool: true,
-        cover_bool: true,
-      }),
+      body: JSON.stringify(fetchBody),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
       throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
-    }
-
-    const data = await res.json();
-
-    // 2. If tags selected and we got a media ID, add tags
-    if (selectedTags.size > 0 && data.media_id) {
-      const tagIds = Array.from(selectedTags);
-      await fetch(`${config.apiUrl}/api/v1/tags/media/${data.media_id}/tags`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': config.apiKey,
-        },
-        body: JSON.stringify({ tag_ids: tagIds }),
-      });
     }
 
     pushStatus.textContent = 'Pushed!';
