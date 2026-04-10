@@ -244,3 +244,126 @@ pushBtn.addEventListener('click', async () => {
   pushBtn.disabled = false;
   updatePushBtn();
 });
+
+// --- Create Tag ---
+const createTagToggle = document.getElementById('createTagToggle');
+const createTagForm = document.getElementById('createTagForm');
+const newTagInput = document.getElementById('newTagInput');
+const translatePreview = document.getElementById('translatePreview');
+const newTagGroup = document.getElementById('newTagGroup');
+const createTagBtn = document.getElementById('createTagBtn');
+const createTagStatus = document.getElementById('createTagStatus');
+
+let translateTimer = null;
+
+createTagToggle.addEventListener('click', () => {
+  const visible = createTagForm.style.display !== 'none';
+  createTagForm.style.display = visible ? 'none' : 'flex';
+  createTagToggle.textContent = visible ? '+' : '×';
+  if (!visible) {
+    newTagInput.focus();
+    populateGroupDropdown();
+  }
+});
+
+function populateGroupDropdown() {
+  const seen = new Set();
+  newTagGroup.innerHTML = '<option value="">Select group (optional)</option>';
+  for (const tag of allTags) {
+    if (tag.group_name && tag.group_id && !seen.has(tag.group_id)) {
+      seen.add(tag.group_id);
+      const opt = document.createElement('option');
+      opt.value = tag.group_id;
+      opt.textContent = tag.group_name;
+      newTagGroup.appendChild(opt);
+    }
+  }
+}
+
+const isChinese = (text) => /[\u4e00-\u9fff]/.test(text);
+
+newTagInput.addEventListener('input', () => {
+  const value = newTagInput.value.trim();
+  if (translateTimer) clearTimeout(translateTimer);
+  if (!value) {
+    translatePreview.style.display = 'none';
+    return;
+  }
+  translateTimer = setTimeout(async () => {
+    try {
+      const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
+      const res = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value)}&langpair=${langPair}&de=8512939@qq.com`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const translated = data?.responseData?.translatedText;
+      if (translated && translated !== value) {
+        translatePreview.textContent = `${isChinese(value) ? 'EN' : 'ZH'}: ${translated}`;
+        translatePreview.style.display = 'block';
+        translatePreview.dataset.translated = translated;
+      }
+    } catch {}
+  }, 600);
+});
+
+createTagBtn.addEventListener('click', async () => {
+  const input = newTagInput.value.trim();
+  if (!input) return;
+
+  const inputIsChinese = isChinese(input);
+  const translated = translatePreview.dataset.translated || '';
+  const name = inputIsChinese ? (translated || input) : input;
+  const name_zh = inputIsChinese ? input : (translated || null);
+
+  createTagBtn.disabled = true;
+  createTagBtn.textContent = 'Creating...';
+  createTagStatus.textContent = '';
+
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/tags`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': config.apiKey,
+      },
+      body: JSON.stringify({ name, name_zh }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+    }
+
+    // Set group_id if selected (PUT /tags/:id)
+    const created = await res.json();
+    const groupId = newTagGroup.value;
+    if (groupId && created.id) {
+      await fetch(`${config.apiUrl}/api/v1/tags/${created.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': config.apiKey,
+        },
+        body: JSON.stringify({ group_id: groupId }),
+      }).catch(() => {});
+    }
+
+    // Reload tags
+    await loadTags(config);
+    newTagInput.value = '';
+    translatePreview.style.display = 'none';
+    translatePreview.dataset.translated = '';
+    createTagStatus.textContent = 'Created!';
+    createTagStatus.className = 'status success';
+    setTimeout(() => { createTagStatus.textContent = ''; }, 2000);
+  } catch (err) {
+    createTagStatus.textContent = err.message;
+    createTagStatus.className = 'status error';
+  }
+
+  createTagBtn.disabled = false;
+  createTagBtn.textContent = 'Create';
+});

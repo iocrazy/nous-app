@@ -98,13 +98,59 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
 .section-label {
   font-size: 11px;
   font-weight: 600;
   color: #71717a;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 8px;
+}
+
+.icon-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.icon-btn:hover {
+  background: #3f3f46;
+  color: #fff;
+}
+
+.create-tag-form {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.create-tag-form input,
+.create-tag-form select {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.create-tag-form button {
+  font-size: 12px;
+  padding: 6px;
+}
+
+.translate-preview {
+  font-size: 11px;
+  color: #818cf8;
+  padding: 2px 8px;
 }
 
 .tags-loading {

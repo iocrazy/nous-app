@@ -26,7 +26,22 @@
     <div id="pushView" style="display:none;">
       <div class="current-url" id="currentUrl"></div>
 
-      <div class="section-label">Select Tags</div>
+      <div class="section-label-row">
+        <span class="section-label">Select Tags</span>
+        <button id="createTagToggle" class="icon-btn" title="Create tag">+</button>
+      </div>
+
+      <!-- Create tag form (hidden by default) -->
+      <div id="createTagForm" class="create-tag-form" style="display:none;">
+        <input type="text" id="newTagInput" placeholder="Tag name (auto-translate)">
+        <div id="translatePreview" class="translate-preview" style="display:none;"></div>
+        <select id="newTagGroup">
+          <option value="">Select group (optional)</option>
+        </select>
+        <button id="createTagBtn">Create</button>
+        <div id="createTagStatus" class="status"></div>
+      </div>
+
       <div id="tagsLoading" class="tags-loading">Loading tags...</div>
       <div id="tagsContainer" class="tags-container"></div>
 
