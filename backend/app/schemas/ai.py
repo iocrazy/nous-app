@@ -37,12 +37,26 @@ class AISettingsUpdate(BaseModel):
 
 
 class AISettingsResponse(BaseModel):
-    """Response body for AI settings."""
+    """Response body for AI settings.
+
+    Returns the full settings blob so the frontend can render
+    providers, task_assignment, toggles, etc. without field mapping.
+    """
 
     ai_providers: Dict[str, Any] = Field(default_factory=dict)
     whisper_provider: str = "openai_api"
     default_summary_model: str = "gpt-4o-mini"
     default_analysis_model: str = "gpt-4o"
+    # Frontend-consumed fields
+    ai_enabled: bool = True
+    auto_transcribe: bool = False
+    auto_summarize: bool = False
+    preferred_language: str = "auto"
+    task_assignment: Dict[str, str] = Field(default_factory=lambda: {
+        "transcription": "",
+        "summarization": "",
+        "visual_analysis": "",
+    })
 
 
 class TestConnectionRequest(BaseModel):

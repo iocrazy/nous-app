@@ -40,10 +40,13 @@ async def get_ai_settings(auth: AuthDep):
         return AISettingsResponse(
             ai_providers=ai_settings.get("ai_providers", {}),
             whisper_provider=ai_settings.get("whisper_provider", "openai_api"),
-            default_summary_model=ai_settings.get(
-                "default_summary_model", "gpt-4o-mini"
-            ),
+            default_summary_model=ai_settings.get("default_summary_model", "gpt-4o-mini"),
             default_analysis_model=ai_settings.get("default_analysis_model", "gpt-4o"),
+            ai_enabled=ai_settings.get("ai_enabled", True),
+            auto_transcribe=ai_settings.get("auto_transcribe", False),
+            auto_summarize=ai_settings.get("auto_summarize", False),
+            preferred_language=ai_settings.get("preferred_language", "auto"),
+            task_assignment=ai_settings.get("task_assignment", {}),
         )
 
     except Exception as e:

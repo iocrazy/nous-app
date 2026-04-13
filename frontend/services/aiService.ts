@@ -261,7 +261,23 @@ export const getAISettings = async (): Promise<AISettings> => {
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+
+  // Map backend field names to frontend AISettings shape
+  return {
+    ai_enabled: data.ai_enabled ?? true,
+    auto_transcribe: data.auto_transcribe ?? false,
+    auto_summarize: data.auto_summarize ?? false,
+    preferred_language: data.preferred_language ?? 'auto',
+    providers: data.ai_providers ?? {},
+    task_assignment: {
+      transcription: data.task_assignment?.transcription ?? '',
+      summarization: data.task_assignment?.summarization ?? '',
+      visual_analysis: data.task_assignment?.visual_analysis ?? '',
+      image_generation: data.task_assignment?.image_generation ?? '',
+      script_generation: data.task_assignment?.script_generation ?? '',
+    },
+  } as AISettings;
 };
 
 export const saveAISettings = async (
