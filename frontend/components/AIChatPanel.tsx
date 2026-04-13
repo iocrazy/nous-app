@@ -63,22 +63,25 @@ export function AIChatPanel({
     void (async () => {
       try {
         const [fetchedAgents, fetchedSessions] = await Promise.all([
-          fetchAgents(projectId),
-          fetchSessions(projectId),
+          fetchAgents(projectId).catch(() => []),
+          fetchSessions(projectId).catch(() => []),
         ]);
 
         if (cancelled) return;
 
-        setAgents(fetchedAgents);
-        setSessions(fetchedSessions);
+        const agentList = Array.isArray(fetchedAgents) ? fetchedAgents : [];
+        const sessionList = Array.isArray(fetchedSessions) ? fetchedSessions : [];
 
-        if (fetchedAgents.length > 0) {
-          setSelectedAgentId(fetchedAgents[0].id);
+        setAgents(agentList);
+        setSessions(sessionList);
+
+        if (agentList.length > 0) {
+          setSelectedAgentId(agentList[0].id);
         }
 
-        if (fetchedSessions.length > 0) {
+        if (sessionList.length > 0) {
           // Auto-select the most recent session
-          const firstSession = fetchedSessions[0];
+          const firstSession = sessionList[0];
           setActiveSessionId(firstSession.id);
           await loadSessionMessages(firstSession.id, cancelled);
         } else {
