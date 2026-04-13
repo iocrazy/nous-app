@@ -24,6 +24,7 @@ import {
   MessageSquare,
   Cloud,
   ImageIcon,
+  Mic,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
@@ -108,6 +109,16 @@ const PROVIDER_META: Record<
     ],
     summaryModels: ['qwen3.5-plus', 'qwen3-max', 'qwen-plus', 'qwen-turbo'],
     analysisModels: ['qwen3.5-plus', 'qwen3-vl-plus', 'qwen-vl-max'],
+  },
+  volcengine: {
+    name: 'Volcengine',
+    description: 'ByteDance Seed-ASR — 火山引擎语音识别',
+    icon: <Mic size={18} />,
+    color: 'cyan',
+    whisperModels: ['seed-asr'],
+    models: [],
+    apiKeyLabel: 'Access Token',
+    appIdField: true,
   },
   ollama: {
     name: 'Ollama',
@@ -812,6 +823,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                             {showApiKeys[providerKey] ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* App ID (for volcengine) */}
+                    {(meta as Record<string, unknown>).appIdField && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                          <Key size={12} />
+                          App ID
+                        </label>
+                        <input
+                          type="text"
+                          value={config.app_id || ''}
+                          onChange={(e) => updateProviderField(providerKey, 'app_id' as keyof AIProviderConfig, e.target.value)}
+                          placeholder="Enter App ID"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                        />
                       </div>
                     )}
 

@@ -272,7 +272,8 @@ export const saveAISettings = async (
   // Map frontend AISettings shape to backend AISettingsUpdate schema
   const backendPayload = {
     ai_providers: settings.providers,
-    whisper_provider: settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
+    whisper_provider: settings.task_assignment?.transcription?.startsWith('volcengine') ? 'volcengine'
+      : settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
     default_summary_model: settings.task_assignment?.summarization || 'gpt-4o-mini',
     default_analysis_model: settings.task_assignment?.visual_analysis || 'gpt-4o',
     // Include frontend-specific fields as extra data for persistence

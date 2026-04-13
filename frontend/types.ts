@@ -489,6 +489,7 @@ export type VideoAnalysis = MediaAnalysis;
 export interface AIProviderConfig {
   enabled: boolean;
   api_key?: string;
+  app_id?: string;
   base_url?: string;
   models?: string[];
   selected_model?: string;
@@ -505,6 +506,7 @@ export interface AISettings {
     openai?: AIProviderConfig;
     deepseek?: AIProviderConfig;
     doubao?: AIProviderConfig;
+    volcengine?: AIProviderConfig;
     ollama?: AIProviderConfig;
     lmstudio?: AIProviderConfig;
   };
