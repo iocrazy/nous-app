@@ -86,15 +86,21 @@ export function AIChatPanel({
           await loadSessionMessages(firstSession.id, cancelled);
         } else {
           // No sessions — create a new one
-          const newSession = await createSession({
-            projectId,
-            contextType,
-            contextId,
-            title: 'New conversation',
-          });
-          if (cancelled) return;
-          setSessions([newSession]);
-          setActiveSessionId(newSession.id);
+          try {
+            const newSession = await createSession({
+              projectId,
+              contextType,
+              contextId,
+              title: 'New conversation',
+            });
+            if (cancelled) return;
+            if (newSession?.id) {
+              setSessions([newSession]);
+              setActiveSessionId(newSession.id);
+            }
+          } catch {
+            // Session creation failed — panel works without active session
+          }
         }
       } catch (err) {
         console.error('[AIChatPanel] Init failed:', err);
@@ -236,10 +242,10 @@ export function AIChatPanel({
     [handleSend],
   );
 
-  const sessionItems: SessionItem[] = sessions.map((s) => ({
+  const sessionItems: SessionItem[] = (sessions || []).filter(Boolean).map((s) => ({
     id: s.id,
-    title: s.title,
-    updated_at: s.updated_at,
+    title: s.title ?? 'Untitled',
+    updated_at: s.updated_at ?? '',
   }));
 
   const hasMessages = messages.length > 0 || streaming;
