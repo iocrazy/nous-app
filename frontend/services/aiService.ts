@@ -2,7 +2,7 @@
 import { AISettings, TranscriptData, SummaryData } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
-import { unwrapResponse } from '../utils/apiHelpers';
+// unwrapResponse removed — AI APIs return data directly, not {success, data} wrapper
 
 // ─── Chat/Agent Types ─────────────────────────────────────────────────────────
 
@@ -72,7 +72,8 @@ export async function fetchAgents(projectId?: string): Promise<AIAgent[]> {
   if (projectId) params.set('project_id', projectId);
   const query = params.toString() ? `?${params}` : '';
   const res = await fetch(`${getApiUrl()}/api/v1/ai/agents${query}`, { headers });
-  return unwrapResponse<AIAgent[]>(res);
+  if (!res.ok) throw new Error(`fetchAgents failed: ${res.status}`);
+  return res.json();
 }
 
 export async function createAgent(data: Partial<AIAgent>): Promise<AIAgent> {
@@ -82,7 +83,8 @@ export async function createAgent(data: Partial<AIAgent>): Promise<AIAgent> {
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<AIAgent>(res);
+  if (!res.ok) throw new Error(`Agent API failed: ${res.status}`);
+  return res.json();
 }
 
 export async function updateAgent(id: string, data: Partial<AIAgent>): Promise<AIAgent> {
@@ -92,7 +94,8 @@ export async function updateAgent(id: string, data: Partial<AIAgent>): Promise<A
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<AIAgent>(res);
+  if (!res.ok) throw new Error(`Agent API failed: ${res.status}`);
+  return res.json();
 }
 
 export async function deleteAgent(id: string): Promise<void> {
@@ -122,7 +125,8 @@ export async function createSession(data: {
       context_id: data.contextId,
     }),
   });
-  return unwrapResponse<AISession>(res);
+  if (!res.ok) throw new Error(`Session API failed: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchSessions(projectId?: string): Promise<AISession[]> {
@@ -131,7 +135,8 @@ export async function fetchSessions(projectId?: string): Promise<AISession[]> {
   if (projectId) params.set('project_id', projectId);
   const query = params.toString() ? `?${params}` : '';
   const res = await fetch(`${getApiUrl()}/api/v1/ai/sessions${query}`, { headers });
-  return unwrapResponse<AISession[]>(res);
+  if (!res.ok) throw new Error(`fetchSessions failed: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchSessionWithMessages(
@@ -145,7 +150,8 @@ export async function fetchSessionWithMessages(
     `${getApiUrl()}/api/v1/ai/sessions/${sessionId}?${params}`,
     { headers },
   );
-  return unwrapResponse<AISessionWithMessages>(res);
+  if (!res.ok) throw new Error(`fetchSessionWithMessages failed: ${res.status}`);
+  return res.json();
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
@@ -170,7 +176,8 @@ export async function sendMessage(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, agent_id: agentId, context }),
   });
-  return unwrapResponse<AIChatResponse>(res);
+  if (!res.ok) throw new Error(`sendMessage failed: ${res.status}`);
+  return res.json();
 }
 
 export function streamMessage(
@@ -274,7 +281,8 @@ export async function callAgent(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, context, project_id: projectId }),
   });
-  return unwrapResponse<unknown>(res);
+  if (!res.ok) throw new Error(`callAgent failed: ${res.status}`);
+  return res.json();
 }
 
 // ─── Usage ────────────────────────────────────────────────────────────────────
@@ -284,7 +292,8 @@ export async function fetchUsage(projectId?: string, days = 30): Promise<AIUsage
   const params = new URLSearchParams({ days: String(days) });
   if (projectId) params.set('project_id', projectId);
   const res = await fetch(`${getApiUrl()}/api/v1/ai/usage?${params}`, { headers });
-  return unwrapResponse<AIUsageStat>(res);
+  if (!res.ok) throw new Error(`fetchUsage failed: ${res.status}`);
+  return res.json();
 }
 
 // ─── Legacy imports (kept for existing code) ──────────────────────────────────

@@ -98,8 +98,8 @@ export function AIChatPanel({
               setSessions([newSession]);
               setActiveSessionId(newSession.id);
             }
-          } catch {
-            // Session creation failed — panel works without active session
+          } catch (sessionErr) {
+            console.error('[AIChatPanel] Auto-create session failed:', sessionErr);
           }
         }
       } catch (err) {
