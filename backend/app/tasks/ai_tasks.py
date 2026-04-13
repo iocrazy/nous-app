@@ -263,28 +263,72 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": f"Audio file not found: {audio_path}"}
 
-        # Load user AI settings
-        ai_settings = _get_ai_settings(user_id)
-        provider_key = "openai"  # Whisper is only available via OpenAI
-        provider_config = _get_provider_config(ai_settings, provider_key)
+        # Load user AI settings and determine transcription provider
+        from app.core.config import settings
 
-        # Fall back to env config
-        if not provider_config.get("api_key"):
-            from app.core.config import settings
+        whisper_provider = settings.WHISPER_PROVIDER
 
-            provider_config["api_key"] = settings.OPENAI_API_KEY
+        if whisper_provider == "volcengine" and settings.VOLCENGINE_APP_ID:
+            # Use Volcengine Seed-ASR (requires public audio URL)
+            from app.services.volcengine_asr_service import VolcengineASRService
 
-        service = WhisperService(
-            provider_key=provider_key,
-            provider_config=provider_config,
-        )
+            _update_unified_progress(unified_task_id, 10, "Preparing audio...")
 
-        result = run_async(
-            service.transcribe_and_save(
-                media_id=media_id,
-                audio_path=audio_path,
+            # Build public audio URL with signed media token
+            download_path = video.get("download_path", "")
+            video_dir = os.path.dirname(download_path)
+            audio_filename = os.path.basename(audio_path)
+
+            # Generate signed media token (same format as media_auth.py)
+            import hashlib, hmac as hmac_mod, time as time_mod
+            expires_at = int(time_mod.time()) + 3600  # 1 hour
+            payload = f"{user_id}.{expires_at}"
+            from app.api.media_auth import _get_secret
+            sig = hmac_mod.new(
+                _get_secret().encode(), payload.encode(), hashlib.sha256
+            ).hexdigest()[:32]
+            media_token = f"{payload}.{sig}"
+
+            audio_url = (
+                f"{settings.MEDIA_PUBLIC_URL}/media/"
+                f"{video_dir}/{audio_filename}?token={media_token}"
             )
-        )
+
+            _update_unified_progress(unified_task_id, 20, "Transcribing via Volcengine...")
+
+            ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
+            audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
+
+            service = VolcengineASRService(
+                app_id=settings.VOLCENGINE_APP_ID,
+                access_token=settings.VOLCENGINE_ACCESS_TOKEN,
+            )
+            result = run_async(
+                service.transcribe_and_save(
+                    media_id=media_id,
+                    audio_url=audio_url,
+                    audio_format=audio_format,
+                )
+            )
+        else:
+            # Default: OpenAI Whisper API
+            ai_settings = _get_ai_settings(user_id)
+            provider_key = "openai"
+            provider_config = _get_provider_config(ai_settings, provider_key)
+
+            if not provider_config.get("api_key"):
+                provider_config["api_key"] = settings.OPENAI_API_KEY
+
+            service = WhisperService(
+                provider_key=provider_key,
+                provider_config=provider_config,
+            )
+            result = run_async(
+                service.transcribe_and_save(
+                    media_id=media_id,
+                    audio_path=audio_path,
+                )
+            )
 
         logger.success(f"[AI] Transcription complete for {platform_id}")
         _update_unified_progress(unified_task_id, 100, "Transcription complete")
