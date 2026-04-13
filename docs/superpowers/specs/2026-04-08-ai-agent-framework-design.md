@@ -459,7 +459,254 @@ frontend/features/script/CreateStoryDialog.tsx     # 迁移到 AgentService API
 supabase/migrations/117_ai_agent_framework.sql
 ```
 
-## 9. Migration Strategy
+## 9. Context Window Management
+
+### 9.1 Truncation Strategy
+
+qwen-max context window = 32K tokens。长对话必然超出，必须截断。
+
+构建 messages 数组的策略：
+
+```
+1. system_prompt（Agent persona + rules + skill）     ← 始终保留
+2. 最近 N 条消息（倒序取，保留最新的对话）               ← 动态截断
+3. 可选：首条用户消息（保留任务初始上下文）               ← 如果空间允许
+```
+
+```python
+MAX_CONTEXT_TOKENS = 28000  # 留 4K 给 completion
+
+def _build_messages(self, agent, session, skill, context):
+    system_prompt = self._build_system_prompt(agent, skill, context)
+    system_tokens = estimate_tokens(system_prompt)
+
+    remaining = MAX_CONTEXT_TOKENS - system_tokens
+    messages = [{"role": "system", "content": system_prompt}]
+
+    # 从最新到最旧加载消息，直到填满 token 预算
+    history = await self._load_history(session.id, limit=50)
+    history.reverse()  # 最旧在前
+
+    selected = []
+    token_sum = 0
+    for msg in reversed(history):  # 从最新开始选
+        msg_tokens = estimate_tokens(msg.content)
+        if token_sum + msg_tokens > remaining:
+            break
+        selected.insert(0, msg)
+        token_sum += msg_tokens
+
+    messages.extend([{"role": m.role, "content": m.content} for m in selected])
+    return messages
+```
+
+### 9.2 Session Token Counter
+
+`ai_sessions` 表增加缓存字段，避免每次聚合查询：
+
+```sql
+ALTER TABLE ai_sessions ADD COLUMN total_tokens INT DEFAULT 0;
+ALTER TABLE ai_sessions ADD COLUMN message_count INT DEFAULT 0;
+```
+
+每次消息写入时同步更新（单条 UPDATE，不需要额外查询）。
+
+## 10. Security
+
+### 10.1 Agent Persona Protection
+
+Agent 分为两类：
+- **预设 Agent**（系统创建）：`created_by = NULL`，persona 只读，普通用户不可修改
+- **用户自定义 Agent**：`created_by = user_id`，仅创建者和团队管理员可修改
+
+Persona 内容白名单校验（后端写入时检查）：
+- 禁止包含 `"ignore"`, `"disregard"`, `"forget"` 等 prompt injection 关键词
+- 最大长度限制：5000 字符
+- 不允许包含 `<script>`, `javascript:` 等代码注入
+
+### 10.2 Session Authorization
+
+所有 Session 操作必须校验归属：
+
+```python
+async def _verify_session_access(self, session_id: str, user_id: str):
+    session = await self.session_repo.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if session.user_id != user_id:
+        raise HTTPException(403, "Access denied")
+    return session
+```
+
+### 10.3 Points Pre-check
+
+调用 LLM 前先检查积分余额：
+
+```python
+async def call_agent(self, ...):
+    # 预估消耗（按 max_tokens 上限估算）
+    estimated_cost = calculate_cost(agent.model, 1000, agent.max_tokens)
+    user_points = await self.points_service.get_balance(user_id)
+    if user_points < estimated_cost:
+        raise HTTPException(402, "Insufficient points")
+
+    # 调用 LLM
+    result = await self._call_llm(messages, agent.config)
+
+    # 按实际消耗扣除
+    actual_cost = calculate_cost(agent.model, result.usage.prompt_tokens, result.usage.completion_tokens)
+    await self.points_service.deduct(user_id, actual_cost)
+```
+
+### 10.4 Input Validation
+
+- 用户消息最大长度：10000 字符
+- config_json schema 校验：只允许 `model`, `temperature`, `max_tokens` 字段
+- Agent Rules 最大条目数：20 条/Agent
+
+## 11. Streaming Support
+
+### 11.1 Backend SSE Endpoint
+
+```python
+@router.post("/ai/sessions/{session_id}/chat/stream")
+async def chat_stream(session_id: str, body: ChatRequest, user: AuthDep):
+    """Server-Sent Events streaming endpoint."""
+
+    async def event_generator():
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST",
+                f"{settings.LLM_API_URL}/chat/completions",
+                json={**payload, "stream": True},
+                headers=headers,
+            ) as resp:
+                full_content = ""
+                async for line in resp.aiter_lines():
+                    if line.startswith("data: "):
+                        chunk = json.loads(line[6:])
+                        if chunk["choices"][0].get("delta", {}).get("content"):
+                            text = chunk["choices"][0]["delta"]["content"]
+                            full_content += text
+                            yield f"data: {json.dumps({'content': text})}\n\n"
+
+                # 流结束后保存完整消息 + 记录 token
+                await save_message(session_id, "assistant", full_content)
+                await log_usage(...)
+                yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+```
+
+### 11.2 Frontend EventSource
+
+```typescript
+function streamChat(sessionId: string, message: string, onChunk: (text: string) => void) {
+  const eventSource = new EventSource(`${API_BASE}/api/v1/ai/sessions/${sessionId}/chat/stream`);
+  // 或使用 fetch + ReadableStream 处理 POST 请求的 SSE
+}
+```
+
+### 11.3 Non-streaming Fallback
+
+Streaming 为可选功能。默认走非 streaming 的 `POST /chat` 端点。前端根据用户偏好或模型能力选择。
+
+## 12. Error Handling
+
+### 12.1 LLM 调用失败
+
+| 错误 | 处理 | 用户看到 |
+|------|------|---------|
+| 网络超时 | 重试 2 次（指数退避） | "AI service is slow, retrying..." |
+| 429 Rate Limit | 等待 Retry-After + 重试 | "AI service is busy, please wait..." |
+| 500 Server Error | 不重试，返回错误 | "AI service unavailable" |
+| 无效 JSON 响应 | 不重试，记录日志 | "AI returned invalid response" |
+| 内容过滤 | 不重试 | "Content was filtered by safety policy" |
+
+### 12.2 Pipeline 错误
+
+链式调用中间失败时：
+- 已消耗的 token 正常记录（不回滚积分）
+- 返回到失败步骤之前的最后有效结果
+- 前端显示"Pipeline partially completed: step N failed"
+
+### 12.3 消息保存失败
+
+LLM 已返回但数据库写入失败时：
+- 返回结果给用户（不阻塞）
+- 异步重试消息保存（3 次）
+- 失败后记录到 application_logs
+
+## 13. AI Chat Panel — Interaction States
+
+| 状态 | UI |
+|------|-----|
+| Empty (新 Session) | 居中 sparkles 图标 + "Start a conversation" + 建议操作按钮 |
+| Loading (等待 AI) | 消息区底部 TypingIndicator 动画 |
+| Streaming | 消息逐字显示，底部有 "Stop generating" 按钮 |
+| Error (发送失败) | 消息旁红色提示 + "Retry" 按钮 |
+| Session loading | 消息区骨架屏 |
+| Token 不足 | 输入框禁用 + 提示 "Insufficient points" |
+| Apply success | Toast "Content applied to Chapter N" + Undo 按钮（5秒内） |
+| Apply fail | Toast error |
+
+### 13.1 Message Bubble 设计
+
+每条 AI 消息显示：
+- **Agent 名称标签**（如 "Writer", "Editor"）在消息气泡顶部
+- 消息内容
+- Token 消耗（小字灰色）
+- 操作按钮：[Apply to Chapter] [Copy]
+
+### 13.2 Apply to Chapter 流程
+
+1. 用户点击 "Apply to Chapter"
+2. 弹出章节选择 Popover（列出当前 Script 的所有章节）
+3. 默认选中当前正在编辑的章节（如果有）
+4. 点击章节 → 内容替换到 TipTap 编辑器
+5. Toast 提示 "Applied to Chapter N" + Undo 按钮（5 秒）
+6. Undo 恢复原内容
+
+### 13.3 Session List Item
+
+每个 Session 显示：
+- 标题（可编辑）
+- 最后消息时间（relative: "2h ago"）
+- 消息条数
+- 当前 Session 高亮
+
+### 13.4 Shared Chat Components
+
+从现有 Storyboard ChatPanel 提取共用组件：
+
+```
+frontend/components/chat/
+├── MessageBubble.tsx         — 消息气泡（复用）
+├── TypingIndicator.tsx       — 打字指示器（复用）
+├── ChatInput.tsx             — 输入框 + 发送按钮（复用）
+└── EmptyState.tsx            — 空 Session 状态（复用）
+```
+
+AIChatPanel 和 Storyboard ChatPanel 都引用这些共享组件。
+
+## 14. Review Findings (已整合)
+
+- [x] 上下文截断策略 (Section 9)
+- [x] Persona 注入防护 + Agent 权限 (Section 10.1)
+- [x] Session 归属鉴权 (Section 10.2)
+- [x] 积分预检 (Section 10.3)
+- [x] Streaming 实现方案 (Section 11)
+- [x] 输入长度限制 + config schema 校验 (Section 10.4)
+- [x] LLM 调用重试策略 (Section 12.1)
+- [x] Pipeline 错误处理 (Section 12.2)
+- [x] 交互状态覆盖 (Section 13)
+- [x] Message Bubble 显示 Agent 名称 (Section 13.1)
+- [x] Apply to Chapter 流程 + Undo (Section 13.2)
+- [x] Session 列表信息补充 (Section 13.3)
+- [x] 共享 Chat 组件 (Section 13.4)
+- [x] ai_sessions 增加 total_tokens + message_count (Section 9.2)
+
+## 15. Migration Strategy
 
 分阶段迁移，不破坏现有功能：
 
