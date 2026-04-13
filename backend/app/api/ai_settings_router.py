@@ -107,6 +107,7 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
         provider_key=body.provider_key,
         config={
             "api_key": body.api_key,
+            "app_id": body.app_id,
             "base_url": body.base_url,
             "model": body.model,
         },

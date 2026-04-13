@@ -314,7 +314,7 @@ export const saveAISettings = async (
 
 export const testAIConnection = async (
   provider: string,
-  config: { base_url?: string; api_key?: string }
+  config: { base_url?: string; api_key?: string; app_id?: string }
 ): Promise<{ success: boolean; models?: string[]; error?: string }> => {
   const apiUrl = getApiUrl();
 

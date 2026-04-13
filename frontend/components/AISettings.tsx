@@ -350,6 +350,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         const result = await testAIConnectionApi(providerKey, {
           base_url: provider.base_url,
           api_key: provider.api_key,
+          app_id: provider.app_id,
         });
 
         if (result.success) {

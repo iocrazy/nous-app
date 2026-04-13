@@ -63,9 +63,10 @@ class TestConnectionRequest(BaseModel):
     """Request body for testing an AI provider connection."""
 
     provider_key: str = Field(
-        ..., description="Provider key: openai, deepseek, doubao, ollama, lmstudio"
+        ..., description="Provider key: openai, deepseek, doubao, volcengine, ollama, lmstudio"
     )
     api_key: Optional[str] = Field(default="", description="API key for the provider")
+    app_id: Optional[str] = Field(default="", description="App ID (for volcengine)")
     base_url: Optional[str] = Field(default="", description="Custom base URL")
     model: Optional[str] = Field(default="", description="Model to use")
 
