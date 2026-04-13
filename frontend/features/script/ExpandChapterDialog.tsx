@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import { X, BookOpen, Loader2, ChevronRight } from 'lucide-react';
 import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
 import { expandChapter } from '../../services/scriptService';
@@ -124,7 +125,11 @@ export function ExpandChapterDialog({ isOpen, onClose, chapterId, title, summary
                   [&_.scene-heading]:text-orange-400 [&_.scene-heading]:font-semibold [&_.scene-heading]:uppercase [&_.scene-heading]:tracking-wide
                   [&_.dialogue]:text-orange-300 [&_.dialogue]:italic
                   [&_p]:text-zinc-300 [&_p]:mb-2"
-                dangerouslySetInnerHTML={{ __html: resultHtml }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(resultHtml, {
+                    ALLOWED_TAGS: ['h2', 'h3', 'p', 'strong', 'em', 'hr', 'br', 'ul', 'ol', 'li', 'span'],
+                  }),
+                }}
               />
             </div>
           )}

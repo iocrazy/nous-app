@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import { Copy, Check } from 'lucide-react';
 
 export interface MessageBubbleProps {
@@ -57,7 +58,13 @@ export function MessageBubble({
         <div
           className="px-3 py-2 prose prose-invert prose-sm max-w-none"
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: content }}
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(content, {
+              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'p', 'strong', 'em', 'code', 'pre',
+                             'hr', 'br', 'ul', 'ol', 'li', 'blockquote', 'a', 'span'],
+              ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+            }),
+          }}
         />
 
         <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-zinc-700/50">
