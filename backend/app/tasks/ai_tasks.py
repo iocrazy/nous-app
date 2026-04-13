@@ -250,12 +250,18 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
         media_id = video["id"]
 
-        # Resolve audio path
+        # Resolve audio path — check mp3 first (already extracted by downloader), then wav
         if not audio_path:
             base_path = Utils.get_download_base_path()
             download_path = video.get("download_path", "")
             video_dir = os.path.dirname(os.path.join(base_path, download_path))
-            audio_path = os.path.join(video_dir, f"{platform_id}_audio.wav")
+            for candidate_name in ["audio.mp3", f"{platform_id}_audio.wav"]:
+                candidate = os.path.join(video_dir, candidate_name)
+                if os.path.exists(candidate):
+                    audio_path = candidate
+                    break
+            if not audio_path:
+                audio_path = os.path.join(video_dir, f"{platform_id}_audio.wav")
 
         if not os.path.exists(audio_path):
             logger.error(f"[AI] Audio file not found: {audio_path}")
@@ -584,18 +590,52 @@ def chain_ai_pipeline(
 
     tasks = []
     if transcript_bool:
-        # extract_audio_task(platform_id, user_id, resource_id, unified_task_id, next_task_id, _dedup_key)
-        tasks.append(extract_audio_task.si(
-            platform_id, user_id, resource_id,
-            task_ids.get('extract'), task_ids.get('transcribe'),
-            _dedup_key=dedup_key,
-        ))
-        # transcribe_audio_task(platform_id, user_id, audio_path, resource_id, unified_task_id, next_task_id, _dedup_key)
-        tasks.append(transcribe_audio_task.si(
-            platform_id, user_id, None, resource_id,
-            task_ids.get('transcribe'), task_ids.get('summary'),
-            _dedup_key=dedup_key,
-        ))
+        # Check if audio file already exists (skip extract if so)
+        existing_audio = None
+        try:
+            from app.core.utils import Utils
+            from app.repositories.media_repository import MediaRepository
+            repo = MediaRepository()
+            video = run_async(repo.get_by_platform_id(platform_id))
+            if video:
+                base_path = Utils.get_download_base_path()
+                download_path = video.get("download_path", "")
+                video_dir = os.path.dirname(os.path.join(base_path, download_path))
+                # Check for existing audio files (mp3 first, then wav)
+                for ext in ["audio.mp3", f"{platform_id}_audio.wav"]:
+                    candidate = os.path.join(video_dir, ext)
+                    if os.path.exists(candidate):
+                        existing_audio = candidate
+                        break
+        except Exception as e:
+            logger.debug(f"[AI] Audio existence check failed: {e}")
+
+        if existing_audio:
+            logger.info(f"[AI] Audio already exists, skipping extract: {existing_audio}")
+            # Skip extract, mark it as completed immediately
+            if 'extract' in task_ids:
+                try:
+                    run_async(tracker.complete(task_ids['extract']))
+                except Exception:
+                    pass
+            # Go straight to transcribe with the existing audio path
+            tasks.append(transcribe_audio_task.si(
+                platform_id, user_id, existing_audio, resource_id,
+                task_ids.get('transcribe'), task_ids.get('summary'),
+                _dedup_key=dedup_key,
+            ))
+        else:
+            # No audio yet, run full extract → transcribe chain
+            tasks.append(extract_audio_task.si(
+                platform_id, user_id, resource_id,
+                task_ids.get('extract'), task_ids.get('transcribe'),
+                _dedup_key=dedup_key,
+            ))
+            tasks.append(transcribe_audio_task.si(
+                platform_id, user_id, None, resource_id,
+                task_ids.get('transcribe'), task_ids.get('summary'),
+                _dedup_key=dedup_key,
+            ))
 
     if summary_bool and transcript_bool:
         # generate_summary_task(platform_id, user_id, resource_id, unified_task_id, _dedup_key)
