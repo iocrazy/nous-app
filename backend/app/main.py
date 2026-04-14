@@ -8,6 +8,9 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.api import api_router
 from app.api.frontend_config_router import load_config as load_frontend_config
@@ -128,6 +131,8 @@ tags_metadata = [
     },
 ]
 
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+
 app = FastAPI(
     lifespan=lifespan,
     title=settings.APP_NAME,
@@ -184,6 +189,9 @@ def custom_openapi():
 
 
 app.openapi = custom_openapi
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.exception_handler(Exception)

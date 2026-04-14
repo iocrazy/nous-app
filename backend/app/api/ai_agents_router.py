@@ -13,8 +13,10 @@ Route groups:
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
@@ -44,6 +46,18 @@ _INJECTION_KEYWORDS: List[str] = [
 ]
 
 router = APIRouter(prefix="/ai", tags=["AI Agents"])
+limiter = Limiter(key_func=get_remote_address)
+
+# Warn-only patterns for user messages (do not block, just log)
+_MESSAGE_INJECTION_PATTERNS: List[str] = [
+    "ignore all previous",
+    "ignore above",
+    "disregard",
+    "forget your instructions",
+    "you are now",
+    "new instructions",
+    "system prompt",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +74,21 @@ def _check_persona_injection(persona: str) -> None:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Persona contains disallowed content: '{keyword}'",
             )
+
+
+def _check_message_injection(message: str) -> None:
+    """Warn-level check for potential prompt injection in user messages.
+
+    Does NOT raise — users may have legitimate use cases that contain these
+    phrases.  Only logs a warning for monitoring purposes.
+    """
+    lower = message.lower()
+    for pattern in _MESSAGE_INJECTION_PATTERNS:
+        if pattern in lower:
+            logger.warning(
+                f"Potential prompt injection detected: '{pattern}' in user message"
+            )
+            break
 
 
 def _agent_row_to_out(row: dict) -> AgentOut:
@@ -289,9 +318,11 @@ async def delete_agent(agent_id: str, user: AuthDep = None) -> None:
     "/agents/{agent_id}/call",
     summary="Call an agent (auto-creates session if none provided)",
 )
+@limiter.limit("10/minute")
 async def call_agent(
     agent_id: str,
     body: AgentCallRequest,
+    request: Request,
     user: AuthDep = None,
 ) -> dict:
     """Invoke an agent with an arbitrary context payload.
@@ -302,6 +333,7 @@ async def call_agent(
       forwarded to the LLM — include it in *context* if the agent needs it.
     """
     message = str(body.context.get("message", ""))
+    _check_message_injection(message)
     svc = AgentService()
     try:
         result = await svc.call_agent(
@@ -414,9 +446,11 @@ async def _resolve_default_agent_id() -> Optional[str]:
     "/sessions/{session_id}/chat",
     summary="Send a message in an existing session",
 )
+@limiter.limit("10/minute")
 async def chat(
     session_id: str,
     body: ChatRequest,
+    request: Request,
     user: AuthDep = None,
 ) -> dict:
     """Send *message* inside *session_id* and receive an AI reply.
@@ -424,6 +458,8 @@ async def chat(
     When *agent_id* is not provided the default 'Writer' preset is used.
     Returns 404 if no agent can be resolved.
     """
+    _check_message_injection(body.message)
+
     agent_id = body.agent_id
     if not agent_id:
         agent_id = await _resolve_default_agent_id()
