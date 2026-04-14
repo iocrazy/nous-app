@@ -263,8 +263,22 @@ OptionalAuthDep = Annotated[Optional[AuthContext], Depends(get_optional_auth)]
 
 
 async def get_team_id_for_user(user_id: str) -> Optional[str]:
-    """Return the first team_id for a user, or None."""
+    """Return the personal team_id for a user, falling back to any team."""
     admin = await _get_async_supabase_admin()
+
+    # Prefer personal team (downloads always go to personal team)
+    personal = (
+        await admin.table("teams")
+        .select("id")
+        .eq("owner_id", user_id)
+        .eq("is_personal", True)
+        .limit(1)
+        .execute()
+    )
+    if personal.data:
+        return str(personal.data[0]["id"])
+
+    # Fallback: any team membership
     result = (
         await admin.table("team_members")
         .select("team_id")
@@ -272,7 +286,7 @@ async def get_team_id_for_user(user_id: str) -> Optional[str]:
         .limit(1)
         .execute()
     )
-    return result.data[0]["team_id"] if result.data else None
+    return str(result.data[0]["team_id"]) if result.data else None
 
 
 async def require_team_id(user_id: str) -> str:
