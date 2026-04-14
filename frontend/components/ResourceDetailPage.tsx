@@ -632,14 +632,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   }, [resource?.mime_type, refreshCommentMarkers]);
 
   // ─── AI: load existing transcript/summary on tab switch ───
+  // Always try to load when switching to transcript tab (don't rely solely on transcript_status)
   useEffect(() => {
-    if (rightTab === 'transcript' && resource?.transcript_status === 'completed' && !transcript) {
+    if (rightTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (rightTab === 'analysis' && resource?.summary_status === 'completed' && !summary) {
+    if (rightTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
     }
-  }, [rightTab, resource?.transcript_status, resource?.summary_status]);
+  }, [rightTab]);
 
   const loadTranscript = useCallback(async () => {
     try {
@@ -647,8 +648,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setTranscriptError(null);
       const data = await getTranscriptByResource(resourceId);
       setTranscript(data);
-    } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript');
+    } catch {
+      // 404 = no transcript yet, not an error to display
     } finally {
       setTranscriptLoading(false);
     }
@@ -660,23 +661,29 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setSummaryError(null);
       const data = await getSummaryByResource(resourceId);
       setSummary(data);
-    } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to load summary');
+    } catch {
+      // 404 = no summary yet
     } finally {
       setSummaryLoading(false);
     }
   }, [resourceId]);
 
+  // Track transcription status for loading animation
+  const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
+
   const handleTranscribe = async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
+      setTranscribeStatus('processing');
       await triggerTranscriptionByResource(resourceId);
       // Poll for completion
       const data = await pollForResult(() => getTranscriptByResource(resourceId), 3000, 60);
       setTranscript(data);
+      setTranscribeStatus('completed');
     } catch (err) {
       setTranscriptError(err instanceof Error ? err.message : 'Failed to transcribe');
+      setTranscribeStatus('failed');
     } finally {
       setTranscriptLoading(false);
     }
@@ -1414,8 +1421,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             />
           ) : rightTab === 'transcript' ? (
             <div className="overflow-y-auto flex-1 p-4 space-y-4 animate-in fade-in duration-300">
-              {/* Processing state */}
-              {resource.transcript_status === 'processing' && (
+              {/* Processing state (from DB status or active transcription) */}
+              {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
                   <h3 className="text-sm font-medium text-zinc-200">Transcribing...</h3>
@@ -1423,8 +1430,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
               )}
 
-              {/* Not started */}
-              {(!resource.transcript_status || resource.transcript_status === 'pending' || resource.transcript_status === 'none') && !transcript && !transcriptLoading && (
+              {/* Not started — no transcript loaded and not processing */}
+              {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && resource.transcript_status !== 'processing' && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
                     <FileText size={28} className="text-zinc-500" />
@@ -1450,27 +1457,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
               )}
 
-              {/* Failed */}
-              {resource.transcript_status === 'failed' && !transcript && (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="p-4 bg-red-500/10 rounded-full mb-4">
-                    <AlertCircle size={28} className="text-red-400" />
-                  </div>
-                  <h3 className="text-sm font-medium text-zinc-200">Transcription Failed</h3>
-                  <p className="text-xs text-zinc-500 mt-1 mb-4">Something went wrong. Please try again.</p>
-                  <button
-                    onClick={handleTranscribe}
-                    disabled={transcriptLoading}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {transcriptLoading ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {/* Loading existing */}
-              {transcriptLoading && resource.transcript_status === 'completed' && (
+              {/* Loading existing transcript */}
+              {transcriptLoading && transcribeStatus !== 'processing' && (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 size={20} className="animate-spin text-indigo-400" />
                 </div>
