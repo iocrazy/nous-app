@@ -61,9 +61,10 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI transcription by resource_id."""
     resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
 
-    # === Points check ===
+    # === Points check — charge the resource owner's personal team ===
     points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
+    resource_owner = resource.get("creator_id") or auth.user_id
+    _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
@@ -119,9 +120,10 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI summary by resource_id."""
     resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
 
-    # === Points check ===
+    # === Points check — charge the resource owner's personal team ===
     points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
+    resource_owner = resource.get("creator_id") or auth.user_id
+    _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
     if _team_id:
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
