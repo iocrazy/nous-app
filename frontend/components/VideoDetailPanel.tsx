@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
-  Clock, Tag, ChevronRight, Brain, AlertCircle,
+  Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
@@ -100,6 +100,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<'segments' | 'fulltext'>('segments');
+  const [exportOpen, setExportOpen] = useState(false);
 
   // Load existing transcript/summary when tab changes — always try to load
   useEffect(() => {
@@ -391,49 +393,100 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <span>{transcript.segments.length} segments</span>
                 </div>
 
-                {/* Segments */}
+                {/* Content area */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar divide-y divide-zinc-800/50">
-                    {transcript.segments.map((seg, i) => (
-                      <div
-                        key={i}
-                        className="flex gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
-                      >
-                        <button
-                          className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
-                          title="Click to seek (coming soon)"
-                        >
-                          [{formatTimestamp(seg.start)}]
-                        </button>
-                        <p className="text-sm text-zinc-300 leading-relaxed">{seg.text}</p>
+                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                    {transcriptView === 'segments' ? (
+                      <div className="divide-y divide-zinc-800/50">
+                        {transcript.segments.map((seg, i) => (
+                          <div
+                            key={i}
+                            className="flex gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
+                          >
+                            <button
+                              className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                              title="Click to seek (coming soon)"
+                            >
+                              [{formatTimestamp(seg.start)}]
+                            </button>
+                            <p className="text-sm text-zinc-300 leading-relaxed">{seg.text}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : (
+                      <div className="p-4">
+                        <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                          {transcript.text}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Export footer */}
-                <div className="flex flex-wrap gap-2">
+                {/* Toolbar */}
+                <div className="flex items-center gap-2">
+                  {/* View toggle */}
+                  <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => setTranscriptView('segments')}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                        transcriptView === 'segments'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <List size={12} />
+                      Segments
+                    </button>
+                    <button
+                      onClick={() => setTranscriptView('fulltext')}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                        transcriptView === 'fulltext'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <AlignLeft size={12} />
+                      Full Text
+                    </button>
+                  </div>
+
+                  {/* Copy */}
                   <button
                     onClick={handleCopyTranscript}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
+                    className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
                   >
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? 'Copied!' : 'Copy All'}
+                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    {copied ? 'Copied!' : 'Copy'}
                   </button>
-                  <button
-                    onClick={handleExportSRT}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
-                  >
-                    <Download size={14} />
-                    Export SRT
-                  </button>
-                  <button
-                    onClick={handleExportTXT}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
-                  >
-                    <Download size={14} />
-                    Export TXT
-                  </button>
+
+                  {/* Export dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setExportOpen(!exportOpen)}
+                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    >
+                      <Download size={12} />
+                      Export
+                      <ChevronDown size={10} />
+                    </button>
+                    {exportOpen && (
+                      <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]">
+                        <button
+                          onClick={() => { handleExportSRT(); setExportOpen(false); }}
+                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                        >
+                          Export SRT
+                        </button>
+                        <button
+                          onClick={() => { handleExportTXT(); setExportOpen(false); }}
+                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                        >
+                          Export TXT
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

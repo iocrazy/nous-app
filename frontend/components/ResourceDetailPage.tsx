@@ -32,6 +32,8 @@ import {
   Pencil,
   Star,
   FolderOpen,
+  List,
+  AlignLeft,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -345,6 +347,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<'segments' | 'fulltext'>('segments');
+  const [exportOpen, setExportOpen] = useState(false);
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
   const [annotationActive, setAnnotationActive] = useState(false);
   const [pendingAnnotations, setPendingAnnotations] = useState<NormalizedAnnotation[]>([]);
@@ -1480,46 +1484,98 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   </div>
 
                   <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar divide-y divide-zinc-800/50">
-                      {transcript.segments.map((seg, i) => (
-                        <div
-                          key={i}
-                          className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
-                        >
-                          <button
-                            className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
-                            onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
-                          >
-                            [{formatTimestamp(seg.start)}]
-                          </button>
-                          <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                      {transcriptView === 'segments' ? (
+                        <div className="divide-y divide-zinc-800/50">
+                          {transcript.segments.map((seg, i) => (
+                            <div
+                              key={i}
+                              className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
+                            >
+                              <button
+                                className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                                onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
+                              >
+                                [{formatTimestamp(seg.start)}]
+                              </button>
+                              <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      ) : (
+                        <div className="p-3">
+                          <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                            {transcript.text}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-1.5">
+                  {/* Toolbar */}
+                  <div className="flex items-center gap-1.5">
+                    {/* View toggle */}
+                    <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setTranscriptView('segments')}
+                        className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
+                          transcriptView === 'segments'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <List size={10} />
+                        Segments
+                      </button>
+                      <button
+                        onClick={() => setTranscriptView('fulltext')}
+                        className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
+                          transcriptView === 'fulltext'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <AlignLeft size={10} />
+                        Full Text
+                      </button>
+                    </div>
+
+                    {/* Copy */}
                     <button
                       onClick={handleCopyTranscript}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                      className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
                     >
-                      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                       {copied ? 'Copied!' : 'Copy'}
                     </button>
-                    <button
-                      onClick={handleExportSRT}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
-                    >
-                      <Download size={12} />
-                      SRT
-                    </button>
-                    <button
-                      onClick={handleExportTXT}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
-                    >
-                      <Download size={12} />
-                      TXT
-                    </button>
+
+                    {/* Export dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setExportOpen(!exportOpen)}
+                        className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
+                      >
+                        <Download size={10} />
+                        Export
+                        <ChevronDown size={8} />
+                      </button>
+                      {exportOpen && (
+                        <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]">
+                          <button
+                            onClick={() => { handleExportSRT(); setExportOpen(false); }}
+                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          >
+                            Export SRT
+                          </button>
+                          <button
+                            onClick={() => { handleExportTXT(); setExportOpen(false); }}
+                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          >
+                            Export TXT
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
