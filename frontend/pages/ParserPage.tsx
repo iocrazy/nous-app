@@ -239,7 +239,6 @@ export function ParserPage() {
                     key={`${item.platform_id}-${idx}`}
                     data={item}
                     onClick={() => {
-                       console.log("Clicked batch item:", item.title);
                     }}
                     isShared={sharedVideoIds.includes(item.platform_id)}
                   />

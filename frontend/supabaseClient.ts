@@ -121,7 +121,6 @@ const initializeClient = (): SupabaseClient | null => {
         fetch: bigIntSafeFetch,      // Prevent Snowflake BIGINT ID precision loss
       },
     });
-    console.log(`Supabase Client initialized with URL: ${supabaseUrl}`);
     return newClient;
   } catch (error) {
     console.error("Failed to initialize Supabase client:", error);

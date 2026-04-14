@@ -103,9 +103,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
         if (result.totalCount >= 0) setTotalCount(result.totalCount);
-        if (result.data.length === 0) {
-          console.log("Supabase connected but returned no data.");
-        }
       } else {
         setLibrary(MOCK_LIBRARY);
         setHasMoreData(false);
@@ -243,7 +240,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         'postgres_changes',
         { event: '*', schema: 'public', table: 'parsed_media' },
         async (payload) => {
-          console.log('Realtime update:', payload.eventType, payload);
           const { data: { session } } = await supabase.auth.getSession();
           if (!session?.user) return;
           const user = session.user;
@@ -288,9 +284,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
+      .subscribe();
 
     // Resources realtime — tracks download status changes (video_download_status, etc.)
     const resourceChannel = supabase
@@ -340,7 +334,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         'postgres_changes',
         { event: '*', schema: 'public', table: 'resource_tags' },
         async (payload) => {
-          console.log('Resource tags realtime update:', payload.eventType, payload);
           const newRecord = payload.new as { resource_id: string; tag_id: string };
           const oldRecord = payload.old as { resource_id: string; tag_id: string };
           const resourceId = newRecord?.resource_id || oldRecord?.resource_id;
@@ -375,12 +368,9 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           );
         }
       )
-      .subscribe((status) => {
-        console.log('Resource tags realtime subscription status:', status);
-      });
+      .subscribe();
 
     return () => {
-      console.log('Unsubscribing from video tags realtime channel');
       supabase.removeChannel(tagsChannel);
     };
   }, [initialLoadComplete, isAuthenticated]);

@@ -96,12 +96,10 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
       if (searchMode === 'keyword') {
         // Quick Search: 先本地搜索，结果不足时补充后端搜索
         const localResults = localSearch(q, library, 20);
-        console.log(`Local search: ${localResults.total} results in ${localResults.processing_time_ms}ms`);
         results = localResults.results;
 
         // 如果本地结果少于 5 条，自动查后端补充（可能有更多在未缓存的数据中）
         if (results.length < 5 && library.length >= 100) {
-          console.log('Local results insufficient, querying backend...');
           try {
             const backendResults = await hybridSearch(q, {}, 20, 0);
             // 合并结果，去重
@@ -112,7 +110,6 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
                 existingIds.add(item.platform_id);
               }
             }
-            console.log(`Combined: ${results.length} total results`);
           } catch (backendError) {
             console.warn('Backend search failed, using local results only:', backendError);
           }

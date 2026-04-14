@@ -146,7 +146,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           filter: `id=eq.${video.id}`,
         },
         (payload) => {
-          console.log('[PlayerPage] Realtime update for media:', payload.new);
           setVideo((prev) => prev ? { ...prev, ...payload.new } as Video : prev);
         }
       )
