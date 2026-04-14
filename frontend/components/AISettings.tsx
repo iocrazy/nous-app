@@ -416,22 +416,32 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       const meta = PROVIDER_META[key];
       const config = getProviderConfig(key);
 
-      if (taskType === 'transcription' && meta?.whisperModels) {
-        for (const model of meta.whisperModels) {
+      if (taskType === 'transcription') {
+        if (meta?.whisperModels) {
+          for (const model of meta.whisperModels) {
+            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
+          }
+        }
+        // Skip providers without whisperModels for transcription
+      } else if (taskType === 'summarization') {
+        if (meta?.summaryModels) {
+          for (const model of meta.summaryModels) {
+            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
+          }
+        } else if (meta?.models?.length) {
+          // General LLM provider without explicit summaryModels
+          const model = config.selected_model || meta.models[0];
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-      } else if (taskType === 'summarization' && meta?.summaryModels) {
-        for (const model of meta.summaryModels) {
+      } else if (taskType === 'visual_analysis') {
+        if (meta?.analysisModels) {
+          for (const model of meta.analysisModels) {
+            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
+          }
+        } else if (meta?.models?.length) {
+          const model = config.selected_model || meta.models[0];
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-      } else if (taskType === 'visual_analysis' && meta?.analysisModels) {
-        for (const model of meta.analysisModels) {
-          options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-        }
-      } else {
-        // Fallback: use selected model or provider name
-        const model = config.selected_model || meta?.models[0] || '';
-        options.push({ value: key, label: model ? `${name} ${model}` : name });
       }
     }
 
