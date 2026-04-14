@@ -236,6 +236,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
     logger.info(f"[AI] Starting transcription for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Transcribing...")
 
+    provider_key = "unknown"
     try:
         from app.core.utils import Utils
         from app.repositories.media_repository import MediaRepository
@@ -249,6 +250,19 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             return {"status": "failed", "error": "Video not found"}
 
         media_id = video["id"]
+
+        # Resolve resource_id — required for per-resource transcript storage
+        if not resource_id:
+            # Legacy path: find a resource linked to this media
+            from app.repositories.resources_repository import ResourcesRepository
+            res_repo = ResourcesRepository()
+            resource = run_async(res_repo.get_resource_by_media_id(media_id))
+            if resource:
+                resource_id = str(resource["id"])
+            else:
+                logger.error(f"[AI] No resource found for media {media_id}")
+                _update_status(platform_id, "transcript_status", "failed")
+                return {"status": "failed", "error": "No resource linked to this media"}
 
         # Resolve audio path — check mp3 first (already extracted by downloader), then wav
         if not audio_path:
@@ -309,13 +323,19 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
             audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
 
+            # Determine model version from task assignment (e.g. "volcengine:seed-asr" or "volcengine:bigasr")
+            from app.services.volcengine_asr_service import RESOURCE_V1, RESOURCE_V2
+            model_part = transcription_assignment.split(":", 1)[1] if ":" in transcription_assignment else "seed-asr"
+            asr_resource = RESOURCE_V1 if "bigasr" in model_part or "1.0" in model_part else RESOURCE_V2
+
             service = VolcengineASRService(
                 app_id=volcengine_config.get("app_id", ""),
                 access_token=volcengine_config.get("api_key", ""),
+                asr_resource_id=asr_resource,
             )
             result = run_async(
                 service.transcribe_and_save(
-                    media_id=media_id,
+                    resource_id=resource_id,
                     audio_url=audio_url,
                     audio_format=audio_format,
                 )
@@ -333,7 +353,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             )
             result = run_async(
                 service.transcribe_and_save(
-                    media_id=media_id,
+                    resource_id=resource_id,
                     audio_path=audio_path,
                 )
             )
@@ -399,6 +419,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
     logger.info(f"[AI] Starting summary generation for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Generating summary...")
 
+    summary_model = "unknown"
     try:
         from app.repositories.ai_repository import AIRepository
         from app.repositories.media_repository import MediaRepository
@@ -413,11 +434,23 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
 
         media_id = video["id"]
 
-        # Get transcript
+        # Resolve resource_id for per-resource transcript/summary storage
+        if not resource_id:
+            from app.repositories.resources_repository import ResourcesRepository
+            res_repo = ResourcesRepository()
+            resource = run_async(res_repo.get_resource_by_media_id(media_id))
+            if resource:
+                resource_id = str(resource["id"])
+            else:
+                logger.error(f"[AI] No resource found for media {media_id}")
+                _update_status(platform_id, "summary_status", "failed")
+                return {"status": "failed", "error": "No resource linked to this media"}
+
+        # Get transcript by resource_id
         ai_repo = AIRepository()
-        transcript = run_async(ai_repo.get_transcript(media_id))
+        transcript = run_async(ai_repo.get_transcript(resource_id))
         if not transcript or not transcript.get("full_text"):
-            logger.warning(f"[AI] No transcript for {platform_id}, cannot summarize")
+            logger.warning(f"[AI] No transcript for resource {resource_id}, cannot summarize")
             _update_resource_status(resource_id, "summary_status", "failed")
             _update_status(platform_id, "summary_status", "failed")
             return {"status": "failed", "error": "No transcript available"}
@@ -448,7 +481,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
 
         result = run_async(
             service.generate_summary_and_save(
-                media_id=media_id,
+                resource_id=resource_id,
                 transcript_text=transcript["full_text"],
                 video_info=video_info,
                 model=summary_model,

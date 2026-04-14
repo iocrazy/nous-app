@@ -305,42 +305,56 @@ class AIProviderFactory:
 
     @classmethod
     async def _test_volcengine(cls, config: dict) -> dict:
-        """Test Volcengine ASR connectivity by submitting a tiny probe request."""
+        """Test Volcengine ASR connectivity.
+
+        Supports both old console (app_id + api_key) and new console (api_key only).
+        Tests both model versions (1.0 bigasr / 2.0 seedasr) and returns available ones.
+        """
         import httpx
 
         app_id = config.get("app_id", "")
-        access_token = config.get("api_key", "")
-        if not app_id or not access_token:
-            return {"success": False, "models": None, "error": "App ID and Access Token are required"}
+        api_key = config.get("api_key", "")
+        if not api_key:
+            return {"success": False, "models": None, "error": "API Key is required"}
 
         try:
             headers = {
                 "Content-Type": "application/json",
-                "X-Api-App-Key": app_id,
-                "X-Api-Access-Key": access_token,
-                "X-Api-Resource-Id": "volc.seedasr.auc",
                 "X-Api-Request-Id": "test-connection",
                 "X-Api-Sequence": "-1",
             }
-            # Submit a minimal request with an empty audio URL — will fail fast
-            # but a valid auth response (even error) proves credentials work
+            if app_id:
+                headers["X-Api-App-Key"] = app_id
+                headers["X-Api-Access-Key"] = api_key
+            else:
+                headers["X-Api-Key"] = api_key
+
+            models_available = []
+            last_error = ""
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
-                    headers=headers,
-                    json={
-                        "user": {"uid": "test"},
-                        "audio": {"format": "mp3", "url": "https://example.com/test.mp3"},
-                        "request": {"model_name": "bigmodel"},
-                    },
-                )
-                status_code = resp.headers.get("X-Api-Status-Code", "")
-                # 20000000 = success, 40000001 = invalid audio (but auth passed)
-                if status_code.startswith("2") or status_code.startswith("4"):
-                    return {"success": True, "models": ["seed-asr"], "error": None}
-                else:
-                    msg = resp.headers.get("X-Api-Message", f"Status: {status_code}")
-                    return {"success": False, "models": None, "error": msg}
+                for resource_id, model_name in [
+                    ("volc.seedasr.auc", "seed-asr"),
+                    ("volc.bigasr.auc", "bigasr"),
+                ]:
+                    test_headers = {**headers, "X-Api-Resource-Id": resource_id}
+                    resp = await client.post(
+                        "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
+                        headers=test_headers,
+                        json={
+                            "user": {"uid": "test"},
+                            "audio": {"format": "mp3", "url": "https://example.com/test.mp3"},
+                            "request": {"model_name": "bigmodel"},
+                        },
+                    )
+                    status_code = resp.headers.get("X-Api-Status-Code", "")
+                    if status_code.startswith("2") or status_code.startswith("4"):
+                        models_available.append(model_name)
+                    else:
+                        last_error = resp.headers.get("X-Api-Message", f"Status: {status_code}")
+
+                if models_available:
+                    return {"success": True, "models": models_available, "error": None}
+                return {"success": False, "models": None, "error": last_error or "No model access granted"}
         except Exception as e:
             return {"success": False, "models": None, "error": str(e)}
 

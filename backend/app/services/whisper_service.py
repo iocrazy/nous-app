@@ -73,31 +73,29 @@ class WhisperService:
 
     async def transcribe_and_save(
         self,
-        media_id: str,
+        resource_id: str,
         audio_path: str,
         language: str = "auto",
         whisper_model: str = "whisper-1",
     ) -> Optional[TranscriptResult]:
         """Transcribe audio and persist the result to the database.
 
-        Updates media status to 'processing' before starting and
-        'completed' or 'failed' after.
+        Args:
+            resource_id: ID of the resource to associate the transcript with.
+            audio_path: Path to the audio file.
+            language: Language code or 'auto'.
+            whisper_model: Whisper model name.
         """
-        await self._repo.update_media_ai_status(
-            media_id, "transcript_status", "processing"
-        )
-
         try:
             result = await self.transcribe(audio_path, language, whisper_model)
 
-            # Persist to database
             segments_json = [
                 {"start": s.start, "end": s.end, "text": s.text}
                 for s in result.segments
             ]
 
             await self._repo.save_transcript(
-                media_id,
+                resource_id,
                 {
                     "language": result.language,
                     "full_text": result.text,
@@ -107,15 +105,9 @@ class WhisperService:
                 },
             )
 
-            await self._repo.update_media_ai_status(
-                media_id, "transcript_status", "completed"
-            )
-            logger.info(f"Transcript saved for media {media_id}")
+            logger.info(f"Transcript saved for resource {resource_id}")
             return result
 
         except Exception as e:
-            logger.error(f"Transcription failed for media {media_id}: {e}")
-            await self._repo.update_media_ai_status(
-                media_id, "transcript_status", "failed"
-            )
+            logger.error(f"Transcription failed for resource {resource_id}: {e}")
             raise

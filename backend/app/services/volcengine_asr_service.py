@@ -5,6 +5,9 @@ Async submit → poll workflow:
 1. POST /submit  → submit audio URL for recognition
 2. POST /query   → poll until result is ready
 
+Supports both old console (App-Key + Access-Key) and new console (X-Api-Key).
+Supports model 1.0 (volc.bigasr.auc) and 2.0 (volc.seedasr.auc).
+
 Docs: https://www.volcengine.com/docs/6561/1354868
 """
 
@@ -21,32 +24,45 @@ from app.services.ai_provider import TranscriptResult, TranscriptSegment
 SUBMIT_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
 QUERY_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
 
-# Resource IDs
-RESOURCE_STANDARD_V2 = "volc.seedasr.auc"
+# Resource IDs (model versions)
+RESOURCE_V1 = "volc.bigasr.auc"      # 豆包录音文件识别模型 1.0
+RESOURCE_V2 = "volc.seedasr.auc"     # 豆包录音文件识别模型 2.0
 
 
 class VolcengineASRService:
-    """火山引擎 Seed-ASR 录音文件识别服务"""
+    """火山引擎 Seed-ASR 录音文件识别服务
+
+    Authentication modes:
+    - New console: only api_key → sent as X-Api-Key header
+    - Old console: app_id + api_key → sent as X-Api-App-Key + X-Api-Access-Key
+    """
 
     def __init__(
         self,
         app_id: str = "",
         access_token: str = "",
-        resource_id: str = RESOURCE_STANDARD_V2,
+        asr_resource_id: str = RESOURCE_V2,
     ):
         self._app_id = app_id
         self._access_token = access_token
-        self._resource_id = resource_id
+        self._asr_resource_id = asr_resource_id
         self._repo = AIRepository()
 
     def _build_headers(self, request_id: str, include_sequence: bool = False) -> dict:
         headers = {
             "Content-Type": "application/json",
-            "X-Api-App-Key": self._app_id,
-            "X-Api-Access-Key": self._access_token,
-            "X-Api-Resource-Id": self._resource_id,
+            "X-Api-Resource-Id": self._asr_resource_id,
             "X-Api-Request-Id": request_id,
         }
+
+        if self._app_id:
+            # Old console: App-Key + Access-Key
+            headers["X-Api-App-Key"] = self._app_id
+            headers["X-Api-Access-Key"] = self._access_token
+        else:
+            # New console: single X-Api-Key
+            headers["X-Api-Key"] = self._access_token
+
         if include_sequence:
             headers["X-Api-Sequence"] = "-1"
         return headers
@@ -82,14 +98,20 @@ class VolcengineASRService:
                 "model_name": "bigmodel",
                 "enable_itn": True,
                 "enable_punc": True,
+                "enable_ddc": True,
             },
         }
 
         async with httpx.AsyncClient(timeout=30) as client:
-            logger.info(f"[VolcASR] Submitting: {audio_url[:80]}...")
+            submit_headers = self._build_headers(request_id, include_sequence=True)
+            auth_mode = "X-Api-Key" if not self._app_id else "App-Key+Access-Key"
+            logger.info(
+                f"[VolcASR] Submitting ({auth_mode}, resource={self._asr_resource_id}): "
+                f"{audio_url[:80]}..."
+            )
             resp = await client.post(
                 SUBMIT_URL,
-                headers=self._build_headers(request_id, include_sequence=True),
+                headers=submit_headers,
                 json=submit_payload,
             )
 
@@ -161,15 +183,17 @@ class VolcengineASRService:
 
     async def transcribe_and_save(
         self,
-        media_id: str,
+        resource_id: str,
         audio_url: str,
         audio_format: str = "mp3",
     ) -> Optional[TranscriptResult]:
-        """Transcribe and persist result to database."""
-        await self._repo.update_media_ai_status(
-            media_id, "transcript_status", "processing"
-        )
+        """Transcribe and persist result to database.
 
+        Args:
+            resource_id: ID of the resource to associate the transcript with.
+            audio_url: Publicly accessible URL of the audio file.
+            audio_format: Audio format (mp3, wav, ogg).
+        """
         try:
             result = await self.transcribe(audio_url, audio_format)
 
@@ -179,25 +203,19 @@ class VolcengineASRService:
             ]
 
             await self._repo.save_transcript(
-                media_id,
+                resource_id,
                 {
                     "language": result.language,
                     "full_text": result.text,
                     "segments": segments_json,
-                    "whisper_model": "volcengine-seed-asr",
+                    "whisper_model": f"volcengine-{self._asr_resource_id}",
                     "duration_seconds": result.duration,
                 },
             )
 
-            await self._repo.update_media_ai_status(
-                media_id, "transcript_status", "completed"
-            )
-            logger.info(f"[VolcASR] Transcript saved for media {media_id}")
+            logger.info(f"[VolcASR] Transcript saved for resource {resource_id}")
             return result
 
         except Exception as e:
-            logger.error(f"[VolcASR] Failed for media {media_id}: {e}")
-            await self._repo.update_media_ai_status(
-                media_id, "transcript_status", "failed"
-            )
+            logger.error(f"[VolcASR] Failed for resource {resource_id}: {e}")
             raise

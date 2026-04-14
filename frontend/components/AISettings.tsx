@@ -112,12 +112,12 @@ const PROVIDER_META: Record<
   },
   volcengine: {
     name: 'Volcengine',
-    description: 'ByteDance Seed-ASR — 火山引擎语音识别',
+    description: 'ByteDance — 火山引擎语音识别',
     icon: <Mic size={18} />,
     color: 'cyan',
-    whisperModels: ['seed-asr'],
+    whisperModels: ['bigasr', 'seed-asr'],
     models: [],
-    apiKeyLabel: 'Access Token',
+    apiKeyLabel: 'Access Token / API Key',
     appIdField: true,
   },
   ollama: {
