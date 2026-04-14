@@ -1,0 +1,257 @@
+// frontend/hooks/useResourcesDisplay.ts
+
+/**
+ * Display-layer computations for ResourcesViewInner.
+ * Handles filter/sort/breadcrumb/recycled item derivation.
+ */
+
+import { useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
+import type { SortBy } from '../contexts/ResourcesContext';
+import type { BreadcrumbSegment } from '../components/Breadcrumb';
+
+export type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+
+interface UseResourcesDisplayOptions {
+  sidebarView: string;
+  resources: ResourceItem[];
+  downloadedResources: ResourceItem[];
+  trashedResources: ResourceItem[];
+  trashedFolders: Folder[];
+  recycleFolderItems: ResourceItem[];
+  recycleFolderId: string | null;
+  childFolders: Folder[];
+  sortBy: SortBy;
+  debouncedSearch: string;
+  resourceTagNamesMap: Record<string, string>;
+  aiSearchMatchedMediaIds: Set<string> | null;
+  scopeType: 'personal' | 'team';
+  selectedFolderId: string | null | undefined;
+  selectedLibraryId: string | null | undefined;
+  selectedSmartFolderId: string | null | undefined;
+  isSharedView: boolean;
+  isRecycleView: boolean;
+  isDownloadsView: boolean;
+  smartFolders: SmartCollection[];
+  libraries: Library[];
+  folderChain: Folder[];
+  navigate: (path: string) => void;
+  resPath: (path: string) => string;
+  setRecycleFolderId: (id: string | null) => void;
+}
+
+export function useResourcesDisplay({
+  sidebarView,
+  resources,
+  downloadedResources,
+  trashedResources,
+  trashedFolders,
+  recycleFolderItems,
+  recycleFolderId,
+  childFolders,
+  sortBy,
+  debouncedSearch,
+  resourceTagNamesMap,
+  aiSearchMatchedMediaIds,
+  scopeType,
+  selectedFolderId,
+  selectedLibraryId,
+  selectedSmartFolderId,
+  isSharedView,
+  isRecycleView,
+  isDownloadsView,
+  smartFolders,
+  libraries,
+  folderChain,
+  navigate,
+  resPath,
+  setRecycleFolderId,
+}: UseResourcesDisplayOptions) {
+  const { t } = useTranslation();
+
+  const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
+
+  // ─── Recycle bin items ─────────────────────────────
+  const recycleItems = useMemo(() => {
+    if (!recycleFolderId) {
+      const trashedFolderIds = new Set(trashedFolders.map((f) => String(f.id)));
+      return trashedResources.filter((item) => {
+        const fid = item.folder_id ? String(item.folder_id) : null;
+        return !fid || !trashedFolderIds.has(fid);
+      });
+    }
+    return recycleFolderItems;
+  }, [trashedResources, trashedFolders, recycleFolderId, recycleFolderItems]);
+
+  const recycleSubFolders = useMemo(() => {
+    if (!recycleFolderId) {
+      const trashedIds = new Set(trashedFolders.map((f) => String(f.id)));
+      return trashedFolders.filter((f) => !f.parent_id || !trashedIds.has(String(f.parent_id)));
+    }
+    return trashedFolders.filter((f) => f.parent_id && String(f.parent_id) === recycleFolderId);
+  }, [trashedFolders, recycleFolderId]);
+
+  const trashedFolderPreviews = useMemo(() => {
+    const map: Record<string, Array<{ resource_id?: string | null; thumbnail_path?: string | null; cover_image_path?: string | null; mime_type?: string | null }>> = {};
+    for (const item of trashedResources) {
+      const fid = item.folder_id ? String(item.folder_id) : null;
+      if (!fid) continue;
+      if (!map[fid]) map[fid] = [];
+      if (map[fid].length < 4) {
+        const r = item.resource;
+        map[fid].push({ resource_id: r?.id ? String(r.id) : null, thumbnail_path: r?.thumbnail_path || null, cover_image_path: r?.cover_image_path || null, mime_type: r?.mime_type || null });
+      }
+    }
+    return map;
+  }, [trashedResources]);
+
+  // ─── Current items (view-aware) ────────────────────
+  const currentItems = useMemo(() => {
+    if (sidebarView === 'recycle') return recycleItems;
+    if (sidebarView === 'downloads') return downloadedResources;
+    return resources;
+  }, [sidebarView, recycleItems, downloadedResources, resources]);
+
+  // ─── Filter & sort ─────────────────────────────────
+  const filteredItems = useMemo(() => {
+    let items = currentItems;
+    if (activeFilters.size > 0) {
+      items = items.filter((item) => {
+        const mime = item.resource?.mime_type || '';
+        if (activeFilters.has('video') && mime.startsWith('video/')) return true;
+        if (activeFilters.has('image') && mime.startsWith('image/')) return true;
+        if (activeFilters.has('audio') && mime.startsWith('audio/')) return true;
+        if (activeFilters.has('document') && (mime.startsWith('application/pdf') || mime.startsWith('application/msword') || mime.startsWith('application/vnd.') || mime.startsWith('text/'))) return true;
+        if (activeFilters.has('other')) {
+          const isKnown = mime.startsWith('video/') || mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('application/pdf') || mime.startsWith('application/msword') || mime.startsWith('application/vnd.') || mime.startsWith('text/');
+          if (!isKnown) return true;
+        }
+        return false;
+      });
+    }
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.trim().toLowerCase();
+      items = items.filter((item) => {
+        const filename = (item.resource?.filename || '').toLowerCase();
+        const notes = (item.resource?.notes || '').toLowerCase();
+        const tagNames = (resourceTagNamesMap[String(item.resource?.id)] || '').toLowerCase();
+        return filename.includes(q) || notes.includes(q) || tagNames.includes(q);
+      });
+    }
+    if (aiSearchMatchedMediaIds) {
+      items = items.filter((item) => {
+        const mediaId = item.resource?.media_id;
+        return mediaId && aiSearchMatchedMediaIds.has(String(mediaId));
+      });
+    }
+    return items;
+  }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds, resourceTagNamesMap]);
+
+  const sortedItems = useMemo(() => {
+    const items = [...filteredItems];
+    switch (sortBy) {
+      case 'newest': return items.sort((a, b) => new Date(b.resource?.created_at ?? b.created_at).getTime() - new Date(a.resource?.created_at ?? a.created_at).getTime());
+      case 'oldest': return items.sort((a, b) => new Date(a.resource?.created_at ?? a.created_at).getTime() - new Date(b.resource?.created_at ?? b.created_at).getTime());
+      case 'name-az': return items.sort((a, b) => (a.resource?.filename ?? '').localeCompare(b.resource?.filename ?? ''));
+      case 'name-za': return items.sort((a, b) => (b.resource?.filename ?? '').localeCompare(a.resource?.filename ?? ''));
+      case 'largest': return items.sort((a, b) => (b.resource?.file_size_bytes ?? 0) - (a.resource?.file_size_bytes ?? 0));
+      case 'smallest': return items.sort((a, b) => (a.resource?.file_size_bytes ?? 0) - (b.resource?.file_size_bytes ?? 0));
+      default: return items;
+    }
+  }, [filteredItems, sortBy]);
+
+  const filteredFolders = useMemo(() => {
+    if (!debouncedSearch.trim()) return childFolders;
+    const q = debouncedSearch.trim().toLowerCase();
+    return childFolders.filter((f) => f.name.toLowerCase().includes(q));
+  }, [childFolders, debouncedSearch]);
+
+  const allSelectableIds = useMemo(() => {
+    const ids: string[] = [];
+    filteredFolders.forEach((f) => ids.push(`folder:${f.id}`));
+    sortedItems.forEach((i) => ids.push(`item:${i.id}`));
+    return ids;
+  }, [filteredFolders, sortedItems]);
+
+  // ─── Breadcrumb ────────────────────────────────────
+  const breadcrumbSegments = useMemo((): BreadcrumbSegment[] => {
+    if (isSharedView) return [{ label: t('resources.sharedManagement') }];
+    if (isRecycleView) {
+      const segments: BreadcrumbSegment[] = [{ label: t('resources.recycleBin'), onClick: recycleFolderId ? () => setRecycleFolderId(null) : undefined }];
+      if (recycleFolderId) {
+        const chain: Folder[] = [];
+        let currentId: string | null = recycleFolderId;
+        while (currentId) {
+          const f = trashedFolders.find((tf) => String(tf.id) === currentId);
+          if (!f) break;
+          chain.unshift(f);
+          currentId = f.parent_id ? String(f.parent_id) : null;
+          if (currentId && !trashedFolders.some((tf) => String(tf.id) === currentId)) break;
+        }
+        chain.forEach((f, idx) => {
+          segments.push({ label: f.name, onClick: idx === chain.length - 1 ? undefined : () => setRecycleFolderId(String(f.id)) });
+        });
+      }
+      return segments;
+    }
+    if (isDownloadsView) return [{ label: t('resources.downloads') }];
+    if (selectedSmartFolderId) {
+      const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
+      return [{ label: t('resources.smartFolders'), onClick: () => {} }, { label: sf?.name ?? '' }];
+    }
+    if (scopeType === 'team' && selectedLibraryId) {
+      const lib = libraries.find((l) => String(l.id) === selectedLibraryId);
+      const libName = lib?.name ?? t('resources.allFiles');
+      const segs: BreadcrumbSegment[] = [{ label: libName, onClick: selectedFolderId ? () => navigate(resPath(`/resources/library/${selectedLibraryId}`)) : undefined }];
+      if (selectedFolderId && folderChain.length > 0) {
+        folderChain.forEach((f, idx) => {
+          segs.push({ label: f.name, onClick: idx === folderChain.length - 1 ? undefined : () => navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${f.id}`)) });
+        });
+      }
+      return segs;
+    }
+    const segs: BreadcrumbSegment[] = [{ label: t('resources.myResources'), onClick: selectedFolderId ? () => navigate(resPath('/resources')) : undefined }];
+    if (selectedFolderId && folderChain.length > 0) {
+      folderChain.forEach((f, idx) => {
+        segs.push({ label: f.name, onClick: idx === folderChain.length - 1 ? undefined : () => navigate(resPath(`/resources/folder/${f.id}`)) });
+      });
+    }
+    return segs;
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders, setRecycleFolderId]);
+
+  // ─── Filter toggle + options ───────────────────────
+  const toggleFilter = useCallback((type: FilterType) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }, []);
+
+  const filterOptions: { value: FilterType; label: string }[] = [
+    { value: 'video', label: t('smartFolder.fileTypes.video') },
+    { value: 'image', label: t('smartFolder.fileTypes.image') },
+    { value: 'audio', label: t('smartFolder.fileTypes.audio') },
+    { value: 'document', label: t('smartFolder.fileTypes.document') },
+    { value: 'other', label: t('smartFolder.fileTypes.other') },
+  ];
+
+  const sortOptions: { value: SortBy; label: string }[] = [
+    { value: 'newest', label: t('resources.sortNewest') },
+    { value: 'oldest', label: t('resources.sortOldest') },
+    { value: 'name-az', label: t('resources.sortNameAZ') },
+    { value: 'name-za', label: t('resources.sortNameZA') },
+    { value: 'largest', label: t('resources.sortLargest') },
+    { value: 'smallest', label: t('resources.sortSmallest') },
+  ];
+
+  return {
+    activeFilters, setActiveFilters, toggleFilter,
+    recycleItems, recycleSubFolders, trashedFolderPreviews,
+    currentItems, filteredItems, sortedItems,
+    filteredFolders, allSelectableIds,
+    breadcrumbSegments, filterOptions, sortOptions,
+  };
+}
