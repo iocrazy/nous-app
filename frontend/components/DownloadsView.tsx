@@ -151,7 +151,7 @@ export const DownloadsView: React.FC = () => {
   }, [library, isSearchActive, searchResults, searchQuery, tagSearchMap]);
 
   // ─── Resource data mapping (notes/rating/id from resources table) ───
-  const [resourceDataMap, setResourceDataMap] = useState<Record<string, { id: string; notes: string | null; rating: number }>>({});
+  const [resourceDataMap, setResourceDataMap] = useState<Record<string, { id: string; notes: string | null; rating: number; transcript_status?: string; summary_status?: string; visual_analysis_status?: string }>>({});
 
   useEffect(() => {
     if (library.length === 0) return;
@@ -163,13 +163,13 @@ export const DownloadsView: React.FC = () => {
 
     supabase
       .from('resources')
-      .select('id, media_id, notes, rating')
+      .select('id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status')
       .in('media_id', mediaIds)
       .then(({ data, error }) => {
         if (error || !data) return;
-        const map: Record<string, { id: string; notes: string | null; rating: number }> = {};
+        const map: Record<string, { id: string; notes: string | null; rating: number; transcript_status?: string; summary_status?: string; visual_analysis_status?: string }> = {};
         for (const row of data) {
-          if (row.media_id) map[row.media_id] = { id: String(row.id), notes: row.notes, rating: row.rating || 0 };
+          if (row.media_id) map[row.media_id] = { id: String(row.id), notes: row.notes, rating: row.rating || 0, transcript_status: row.transcript_status, summary_status: row.summary_status, visual_analysis_status: row.visual_analysis_status };
         }
         setResourceDataMap(map);
       });
@@ -797,6 +797,7 @@ export const DownloadsView: React.FC = () => {
                     key={item.platform_id}
                     data={item}
                     resourceId={resourceIdMap[item.id]}
+                    aiStatus={resourceDataMap[item.id]}
                     onClick={(e) => handleVideoClick(item, e)}
                     onDoubleClick={() => handleVideoDoubleClick(item)}
                     onContextMenu={handleContextMenu}
