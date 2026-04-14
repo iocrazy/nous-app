@@ -576,19 +576,41 @@ def chain_ai_pipeline(
     except Exception as e:
         logger.warning(f"[AI] Dedup check failed, proceeding normally: {e}")
 
+    # Check if audio file already exists BEFORE creating tasks
+    existing_audio = None
+    if transcript_bool:
+        try:
+            from app.core.utils import Utils
+            from app.repositories.media_repository import MediaRepository
+            repo = MediaRepository()
+            video = run_async(repo.get_by_platform_id(platform_id))
+            if video:
+                base_path = Utils.get_download_base_path()
+                download_path = video.get("download_path", "")
+                video_dir = os.path.dirname(os.path.join(base_path, download_path))
+                for ext in ["audio.mp3", f"{platform_id}_audio.wav"]:
+                    candidate = os.path.join(video_dir, ext)
+                    if os.path.exists(candidate):
+                        existing_audio = candidate
+                        break
+        except Exception as e:
+            logger.debug(f"[AI] Audio existence check failed: {e}")
+
     try:
         from app.services.unified_task_manager import get_task_manager
         tracker = get_task_manager()
 
         if transcript_bool:
-            task_ids['extract'] = run_async(tracker.create(
-                user_id=user_id,
-                task_type="ai_extract",
-                title=f"Audio Extract: {platform_id}",
-                media_id=platform_id,
-                resource_id=resource_id,
-                group_id=group_id,
-            ))
+            # Only create extract task if no existing audio
+            if not existing_audio:
+                task_ids['extract'] = run_async(tracker.create(
+                    user_id=user_id,
+                    task_type="ai_extract",
+                    title=f"Audio Extract: {platform_id}",
+                    media_id=platform_id,
+                    resource_id=resource_id,
+                    group_id=group_id,
+                ))
             task_ids['transcribe'] = run_async(tracker.create(
                 user_id=user_id,
                 task_type="ai_transcription",
@@ -609,8 +631,9 @@ def chain_ai_pipeline(
             ))
 
         # Start the first task
-        if 'extract' in task_ids:
-            run_async(tracker.start(task_ids['extract']))
+        first_task = 'extract' if 'extract' in task_ids else 'transcribe'
+        if first_task in task_ids:
+            run_async(tracker.start(task_ids[first_task]))
 
     except Exception as e:
         logger.warning(f"[AI] Failed to create unified tasks: {e}")
@@ -623,34 +646,8 @@ def chain_ai_pipeline(
 
     tasks = []
     if transcript_bool:
-        # Check if audio file already exists (skip extract if so)
-        existing_audio = None
-        try:
-            from app.core.utils import Utils
-            from app.repositories.media_repository import MediaRepository
-            repo = MediaRepository()
-            video = run_async(repo.get_by_platform_id(platform_id))
-            if video:
-                base_path = Utils.get_download_base_path()
-                download_path = video.get("download_path", "")
-                video_dir = os.path.dirname(os.path.join(base_path, download_path))
-                # Check for existing audio files (mp3 first, then wav)
-                for ext in ["audio.mp3", f"{platform_id}_audio.wav"]:
-                    candidate = os.path.join(video_dir, ext)
-                    if os.path.exists(candidate):
-                        existing_audio = candidate
-                        break
-        except Exception as e:
-            logger.debug(f"[AI] Audio existence check failed: {e}")
-
         if existing_audio:
             logger.info(f"[AI] Audio already exists, skipping extract: {existing_audio}")
-            # Skip extract, mark it as completed immediately
-            if 'extract' in task_ids:
-                try:
-                    run_async(tracker.complete(task_ids['extract']))
-                except Exception:
-                    pass
             # Go straight to transcribe with the existing audio path
             tasks.append(transcribe_audio_task.si(
                 platform_id, user_id, existing_audio, resource_id,
