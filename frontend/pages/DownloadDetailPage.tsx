@@ -647,6 +647,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           >
               <VideoDetailPanel
                 video={video}
+                resourceId={resourceId || undefined}
                 onClose={handleBack}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}

@@ -6,13 +6,17 @@ import {
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
 import {
-  triggerTranscription, getTranscript,
-  triggerSummary, getSummary,
+  triggerTranscription, triggerTranscriptionByResource,
+  getTranscript, getTranscriptByResource,
+  triggerSummary, triggerSummaryByResource,
+  getSummary, getSummaryByResource,
   triggerVisualAnalysis,
+  pollForResult,
 } from '../services/aiService';
 
 interface VideoDetailPanelProps {
   video: Video;
+  resourceId?: string;
   onClose: () => void;
   onUpdate?: (id: string, updates: Partial<Video>) => void;
   onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
@@ -70,6 +74,7 @@ const downloadTextFile = (content: string, filename: string, mimeType: string) =
 
 export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   video,
+  resourceId,
   onClose,
   onUpdate,
   onDelete,
@@ -96,52 +101,69 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Load existing transcript/summary when tab changes
+  // Load existing transcript/summary when tab changes — always try to load
   useEffect(() => {
-    if (activeTab === 'transcript' && video.transcript_status === 'completed' && !transcript) {
+    if (activeTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (activeTab === 'analysis' && video.summary_status === 'completed' && !summary) {
+    if (activeTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
     }
-  }, [activeTab, video.transcript_status, video.summary_status]);
+  }, [activeTab]);
 
   const loadTranscript = useCallback(async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
-      const data = await getTranscript(video.platform_id);
+      const data = resourceId
+        ? await getTranscriptByResource(resourceId)
+        : await getTranscript(video.platform_id);
       setTranscript(data);
-    } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript');
+    } catch {
+      // 404 = no transcript yet, not an error to display
     } finally {
       setTranscriptLoading(false);
     }
-  }, [video.platform_id]);
+  }, [video.platform_id, resourceId]);
 
   const loadSummary = useCallback(async () => {
     try {
       setSummaryLoading(true);
       setSummaryError(null);
-      const data = await getSummary(video.platform_id);
+      const data = resourceId
+        ? await getSummaryByResource(resourceId)
+        : await getSummary(video.platform_id);
       setSummary(data);
-    } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to load summary');
+    } catch {
+      // 404 = no summary yet
     } finally {
       setSummaryLoading(false);
     }
-  }, [video.platform_id]);
+  }, [video.platform_id, resourceId]);
+
+  const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
 
   const handleTranscribe = async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
-      await triggerTranscription(video.platform_id);
+      setTranscribeStatus('processing');
+      if (resourceId) {
+        await triggerTranscriptionByResource(resourceId);
+        const data = await pollForResult(() => getTranscriptByResource(resourceId), 3000, 60);
+        setTranscript(data);
+      } else {
+        await triggerTranscription(video.platform_id);
+        const data = await pollForResult(() => getTranscript(video.platform_id), 3000, 60);
+        setTranscript(data);
+      }
+      setTranscribeStatus('completed');
       if (onUpdate) {
-        onUpdate(video.platform_id, { transcript_status: 'processing' });
+        onUpdate(video.platform_id, { transcript_status: 'completed' });
       }
     } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to start transcription');
+      setTranscriptError(err instanceof Error ? err.message : 'Failed to transcribe');
+      setTranscribeStatus('failed');
     } finally {
       setTranscriptLoading(false);
     }
@@ -151,12 +173,20 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setSummaryLoading(true);
       setSummaryError(null);
-      await triggerSummary(video.platform_id);
+      if (resourceId) {
+        await triggerSummaryByResource(resourceId);
+        const data = await pollForResult(() => getSummaryByResource(resourceId), 3000, 60);
+        setSummary(data);
+      } else {
+        await triggerSummary(video.platform_id);
+        const data = await pollForResult(() => getSummary(video.platform_id), 3000, 60);
+        setSummary(data);
+      }
       if (onUpdate) {
-        onUpdate(video.platform_id, { summary_status: 'processing' });
+        onUpdate(video.platform_id, { summary_status: 'completed' });
       }
     } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to start summarization');
+      setSummaryError(err instanceof Error ? err.message : 'Failed to summarize');
     } finally {
       setSummaryLoading(false);
     }
