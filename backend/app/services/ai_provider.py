@@ -347,7 +347,9 @@ class AIProviderFactory:
                         },
                     )
                     status_code = resp.headers.get("X-Api-Status-Code", "")
-                    if status_code.startswith("2") or status_code.startswith("4"):
+                    # 20xxxxxx = success, 40xxxxxx = client error (auth passed, bad input)
+                    # 45xxxxxx = resource not granted (permission denied) — must reject
+                    if status_code.startswith("20") or status_code.startswith("40"):
                         models_available.append(model_name)
                     else:
                         last_error = resp.headers.get("X-Api-Message", f"Status: {status_code}")
