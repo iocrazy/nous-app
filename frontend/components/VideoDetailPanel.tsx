@@ -303,19 +303,37 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         {/* Transcript Tab */}
         {activeTab === 'transcript' && (
           <div className="space-y-4 animate-in fade-in duration-300">
-            {/* Processing state */}
-            {video.transcript_status === 'processing' && (
+            {/* Processing state — active transcription in progress */}
+            {transcribeStatus === 'processing' && !transcript && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
-                <h3 className="text-lg font-medium text-zinc-200">Transcribing...</h3>
-                <p className="text-sm text-zinc-500 mt-1">
-                  This may take a few minutes depending on video length.
+                <div className="relative mb-6">
+                  <div className="w-16 h-16 rounded-full border-2 border-indigo-500/20" />
+                  <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Brain size={24} className="text-indigo-400" />
+                  </div>
+                </div>
+                <h3 className="text-base font-medium text-zinc-200">Transcribing Audio...</h3>
+                <p className="text-sm text-zinc-500 mt-2 max-w-[280px]">
+                  AI is processing the audio. This may take a few minutes depending on the length.
                 </p>
+                <div className="mt-4 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                  <span className="text-xs text-indigo-400/70">Processing</span>
+                </div>
               </div>
             )}
 
-            {/* Not started / pending */}
-            {(!video.transcript_status || video.transcript_status === 'pending') && !transcript && !transcriptLoading && (
+            {/* Loading existing transcript from server */}
+            {transcriptLoading && transcribeStatus !== 'processing' && !transcript && (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 size={24} className="animate-spin text-indigo-400 mb-3" />
+                <p className="text-xs text-zinc-500">Loading transcript...</p>
+              </div>
+            )}
+
+            {/* Not started — no transcript and not loading/processing */}
+            {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
                   <FileText size={32} className="text-zinc-500" />
@@ -329,11 +347,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   disabled={transcriptLoading}
                   className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
-                  {transcriptLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Brain size={18} />
-                  )}
+                  <Brain size={18} />
                   Transcribe
                 </button>
                 {transcriptError && (
@@ -342,38 +356,6 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     {transcriptError}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Failed state */}
-            {video.transcript_status === 'failed' && !transcript && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="p-4 bg-red-500/10 rounded-full mb-4">
-                  <AlertCircle size={32} className="text-red-400" />
-                </div>
-                <h3 className="text-lg font-medium text-zinc-200">Transcription Failed</h3>
-                <p className="text-sm text-zinc-500 mt-1 mb-6">
-                  Something went wrong. Please try again.
-                </p>
-                <button
-                  onClick={handleTranscribe}
-                  disabled={transcriptLoading}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                >
-                  {transcriptLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Brain size={18} />
-                  )}
-                  Retry Transcription
-                </button>
-              </div>
-            )}
-
-            {/* Loading existing transcript */}
-            {transcriptLoading && video.transcript_status === 'completed' && (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 size={24} className="animate-spin text-indigo-400" />
               </div>
             )}
 
