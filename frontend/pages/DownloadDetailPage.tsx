@@ -1,29 +1,24 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import React from 'react';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
-  Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2, X,
-  Video as VideoIcon, Image as ImageIcon, Music, CloudDownload,
+  Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
+  Video as VideoIcon,
 } from 'lucide-react';
-import { Video } from '../types';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
-import { fetchVideoByDisplayId, updateItem, getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
-import { trashResourceByMediaId, trashResourceByPlatformId } from '../services/resourceService';
-import { getVideoUrl, isVideoType, isAlbumType } from '../utils/awemeType';
+import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
+import { getVideoUrl, isAlbumType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
-import { updateResource, getVersionHlsUrl } from '../services/resourceService';
-import { useToast } from '../components/Toast';
-import { useAuth } from '../contexts/AuthContext';
-import { useLibraryContext } from '../contexts/LibraryContext';
-import { getSupabaseClient, isSupabaseConfigured, getSupabaseAccessToken } from '../supabaseClient';
+import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
+import { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
+import { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
 
-const MIN_PANEL_WIDTH = 380;
-const MAX_PANEL_WIDTH = 800;
-const DEFAULT_PANEL_WIDTH = 560;
+export { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
+export { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
+export { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
 
 interface DownloadDetailPageProps {
   resourceId?: string;
@@ -31,199 +26,24 @@ interface DownloadDetailPageProps {
 }
 
 export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId }: DownloadDetailPageProps = {}) {
-  const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const from = searchParams.get('from');
-
-  // Support both: direct URL params (legacy /player/:displayId) and props (from ResourceDetailPage)
-  const effectiveDisplayId = propMediaId || displayId;
-
-  const [video, setVideo] = useState<Video | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-  const playerRef = useRef<HTMLVideoElement | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
-  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isFetching, setIsFetching] = useState(false);
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
-  );
-  const { addToast } = useToast();
-  const { mediaToken } = useAuth();
-  const { setLibrary } = useLibraryContext();
-  const isDragging = useRef(false);
-
-  // Track mobile breakpoint for responsive layout
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)');
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  const dragStartX = useRef(0);
-  const dragStartWidth = useRef(0);
-
-  // Resource-level data (from resources table, linked via media_id)
-  const [resourceId, setResourceId] = useState<string | null>(null);
-  const [resourceRating, setResourceRating] = useState(0);
-  const [resourceNotes, setResourceNotes] = useState('');
-  const [hlsUrl, setHlsUrl] = useState<string | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-
-  const handleTimeUpdate = useCallback((seconds: number) => {
-    setCurrentTime(seconds);
-  }, []);
-
-  const handleDurationChange = useCallback((seconds: number) => {
-    setDuration(seconds);
-  }, []);
-
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isDragging.current = true;
-    dragStartX.current = e.clientX;
-    dragStartWidth.current = panelWidth;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const handleMouseMove = (ev: MouseEvent) => {
-      if (!isDragging.current) return;
-      const delta = dragStartX.current - ev.clientX;
-      const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, dragStartWidth.current + delta));
-      setPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      isDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [panelWidth]);
-
-  useEffect(() => {
-    if (!effectiveDisplayId) return;
-
-    setIsLoading(true);
-    setNotFound(false);
-
-    fetchVideoByDisplayId(effectiveDisplayId).then((data) => {
-      if (data) {
-        setVideo(data);
-      } else {
-        setNotFound(true);
-      }
-      setIsLoading(false);
-    });
-  }, [effectiveDisplayId]);
-
-  // Realtime: auto-refresh when this parsed_media record is updated (e.g. download completes)
-  useEffect(() => {
-    if (!video?.id) return;
-    const supabase = getSupabaseClient();
-    if (!isSupabaseConfigured() || !supabase) return;
-
-    const channel = supabase
-      .channel(`player_media_${video.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'parsed_media',
-          filter: `id=eq.${video.id}`,
-        },
-        (payload) => {
-          setVideo((prev) => prev ? { ...prev, ...payload.new } as Video : prev);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [video?.id]);
-
-  // Fetch associated resource (rating/notes/HLS) from resources + resource_versions
-  useEffect(() => {
-    if (!video?.id) return;
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    (async () => {
-      // Step 1: Get the resource linked to this parsed_media
-      const { data: resource } = await supabase
-        .from('resources')
-        .select('id, rating, notes, current_version, mime_type')
-        .eq('media_id', video.id)
-        .limit(1)
-        .maybeSingle();
-
-      if (!resource) return;
-
-      const resId = String(resource.id);
-      setResourceId(resId);
-      setResourceRating(resource.rating || 0);
-      setResourceNotes(resource.notes || '');
-
-      // Step 2: Check if the current version has completed HLS transcoding
-      // NOTE: Don't gate on resource.mime_type — it's often null.
-      // Let the version's hls_path + transcode_status decide.
-      const { data: versions } = await supabase
-        .from('resource_versions')
-        .select('id, hls_path, transcode_status, version_number')
-        .eq('resource_id', resource.id)
-        .eq('version_number', resource.current_version || 1)
-        .limit(1)
-        .maybeSingle();
-
-      if (versions?.hls_path && versions.transcode_status === 'completed') {
-        const token = await getSupabaseAccessToken();
-        setAuthToken(token);
-        setHlsUrl(getVersionHlsUrl(resId, String(versions.id), token || undefined));
-      }
-    })();
-  }, [video?.id]);
-
-  const handleRatingChange = useCallback(async (rating: number) => {
-    if (!resourceId) return;
-    setResourceRating(rating);
-    try {
-      await updateResource(resourceId, { rating });
-    } catch (err) {
-      console.error('Failed to update rating:', err);
-    }
-  }, [resourceId]);
-
-  const handleNotesChange = useCallback((notes: string) => {
-    setResourceNotes(notes);
-  }, []);
-
-  const handleNotesBlur = useCallback(async () => {
-    if (!resourceId) return;
-    try {
-      await updateResource(resourceId, { notes: resourceNotes || null });
-    } catch (err) {
-      console.error('Failed to update notes:', err);
-    }
-  }, [resourceId, resourceNotes]);
+  const detail = useDownloadDetail({ propResourceId, propMediaId });
+  const {
+    video, isLoading, notFound, playerRef,
+    resourceId, resourceRating, resourceNotes, hlsUrl, authToken, mediaToken,
+    panelWidth, showDownloadMenu, showMoreMenu, isShareModalOpen, showDeleteDialog,
+    isDeleting, isDownloading, isFetching, isMobile,
+    setShowDownloadMenu, setShowMoreMenu, setIsShareModalOpen, setShowDeleteDialog,
+    setIsDeleting, setIsDownloading, setIsFetching,
+    handleTimeUpdate, handleDurationChange, handleResizeStart,
+    handleRatingChange, handleNotesChange, handleNotesBlur,
+    handleUpdate, handleDelete, handleBack, addToast,
+  } = detail;
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
     if (!video?.platform_id) return;
     setShowDownloadMenu(false);
+    setShowMoreMenu(false);
     setIsDownloading(true);
     const onSuccess = (f: string) => addToast(`Downloaded: ${f}`, 'success');
     // Use title as filename base, fallback to platform_id
@@ -300,55 +120,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     }
   };
 
-  // When embedded from ResourceDetailPage, use browser back; otherwise navigate explicitly
-  const isEmbedded = !!propResourceId;
-
-  const handleBack = () => {
-    navigate(-1);
-  };
-
-  const handleUpdate = async (id: string, updates: Partial<Video>) => {
-    const updated = await updateItem(id, updates);
-    setVideo((prev) => (prev ? { ...prev, ...updated } : prev));
-  };
-
-  const handleDelete = async (_id: string, deleteFiles: boolean) => {
-    if (!video) return;
-    let trashed = false;
-    try {
-      // Use platform_id for trash (same method as DownloadsView batch delete)
-      if (video.platform_id) {
-        if (teamId) {
-          await trashResourceByPlatformId(video.platform_id, 'team', teamId);
-        } else {
-          await trashResourceByPlatformId(video.platform_id);
-        }
-      } else if (video.id) {
-        await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
-      }
-      trashed = true;
-    } catch (err) {
-      console.error('Trash failed:', err);
-      // Try by media_id as fallback (resource might exist with different lookup)
-      try {
-        if (video.id) {
-          await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
-          trashed = true;
-        } else {
-          throw new Error('No video id');
-        }
-      } catch (err2) {
-        console.error('Trash by media_id also failed:', err2);
-        addToast('Failed to move to trash', 'error');
-        return;
-      }
-    }
-    // Remove from library list so user sees it gone when navigating back
-    setLibrary(prev => prev.filter(item => item.platform_id !== video.platform_id));
-    addToast(trashed ? 'Moved to trash' : 'Deleted', 'success');
-    handleBack();
-  };
-
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
@@ -416,113 +187,15 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 <span className="hidden sm:inline">Download</span>
               </button>
               {showDownloadMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowDownloadMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[180px]">
-                    {(() => {
-                      // User-level download status (from resource, overlaid by backend detail endpoint)
-                      const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
-                      const isPending = (s?: string) => { const l = s?.toLowerCase(); return l === 'pending' || l === 'downloading'; };
-                      const isFailed = (s?: string) => s?.toLowerCase() === 'failed';
-
-                      // Defense: if status says "completed" but no actual file path, treat as unfetched
-                      const hasVideoFile = !!(video.download_path || video.hls_path);
-                      const hasCoverFile = !!video.cover_download_path;
-                      const hasAudioFile = !!video.music_download_path;
-
-                      const videoStatus = isCompleted(video.video_download_status) && !hasVideoFile ? undefined : video.video_download_status;
-                      const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
-                      const audioStatus = isCompleted(video.music_download_status) && !hasAudioFile ? undefined : video.music_download_status;
-
-                      const btnClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors";
-                      const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-500 flex items-center gap-2 cursor-default";
-                      return (
-                        <div className="py-1">
-                          {/* Video */}
-                          {isVideoType(video.media_type) && (
-                            isCompleted(videoStatus) ? (
-                              <button onClick={() => handleToolbarDownload('video')} className={btnClass}>
-                                <VideoIcon size={13} className="text-indigo-400" /> Video
-                              </button>
-                            ) : isPending(videoStatus) ? (
-                              <button disabled className={disabledClass}>
-                                <Loader2 size={13} className="text-indigo-400 animate-spin" /> Video Downloading...
-                              </button>
-                            ) : isFailed(videoStatus) ? (
-                              <button onClick={() => handleFetchMedia({ video: true })} className={btnClass}>
-                                <CloudDownload size={13} className="text-red-400" /> Retry Video
-                              </button>
-                            ) : video.original_url ? (
-                              <button onClick={() => handleFetchMedia({ video: true })} className={btnClass}>
-                                <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
-                              </button>
-                            ) : null
-                          )}
-                          {/* Images (carousel/image content) */}
-                          {video.image_download_urls && video.image_download_urls.length > 0 && (
-                            <button onClick={() => handleToolbarDownload('images')} className={btnClass}>
-                              <ImageIcon size={13} className="text-pink-400" /> Images ({video.image_download_urls.length})
-                            </button>
-                          )}
-                          {/* Cover */}
-                          {isCompleted(coverStatus) ? (
-                            <button onClick={() => handleToolbarDownload('cover')} className={btnClass}>
-                              <ImageIcon size={13} className="text-emerald-400" /> Cover
-                            </button>
-                          ) : isPending(coverStatus) ? (
-                            <button disabled className={disabledClass}>
-                              <Loader2 size={13} className="text-emerald-400 animate-spin" /> Cover Downloading...
-                            </button>
-                          ) : isFailed(coverStatus) ? (
-                            <button onClick={() => handleFetchMedia({ cover: true })} className={btnClass}>
-                              <CloudDownload size={13} className="text-red-400" /> Retry Cover
-                            </button>
-                          ) : video.original_url ? (
-                            <button onClick={() => handleFetchMedia({ cover: true })} className={btnClass}>
-                              <CloudDownload size={13} className="text-emerald-400" /> Fetch Cover
-                            </button>
-                          ) : null}
-                          {/* Audio */}
-                          {(() => {
-                            const isAlbum = isAlbumType(video.media_type);
-                            if (hasAudioFile) {
-                              // File exists → direct download
-                              return (
-                                <button onClick={() => handleToolbarDownload('audio')} className={btnClass}>
-                                  <Music size={13} className="text-amber-400" /> Download Audio
-                                </button>
-                              );
-                            }
-                            if (isPending(audioStatus)) {
-                              return (
-                                <button disabled className={disabledClass}>
-                                  <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbum ? 'Downloading Audio...' : 'Extracting Audio...'}
-                                </button>
-                              );
-                            }
-                            if (isAlbum && video.original_url) {
-                              // Album: re-parse to download audio
-                              return (
-                                <button onClick={() => handleFetchMedia({ video: false, cover: false })} className={btnClass}>
-                                  <Music size={13} className="text-amber-400" /> Download Audio
-                                </button>
-                              );
-                            }
-                            if (!isAlbum && hasVideoFile) {
-                              // Video: extract audio from video file
-                              return (
-                                <button onClick={() => handleExtractAudio()} className={btnClass}>
-                                  <Music size={13} className="text-amber-400" /> Extract Audio
-                                </button>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </>
+                <DownloadMenuDropdown
+                  video={video}
+                  isDownloading={isDownloading}
+                  isFetching={isFetching}
+                  onClose={() => setShowDownloadMenu(false)}
+                  onDownload={handleToolbarDownload}
+                  onFetchMedia={handleFetchMedia}
+                  onExtractAudio={handleExtractAudio}
+                />
               )}
             </div>
 
@@ -676,55 +349,30 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                         <>
                           <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
                           <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
-                            {(() => {
-                              const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
-                              const hasVideoFile = !!(video.download_path || video.hls_path);
-                              const hasCoverFile = !!video.cover_download_path;
-                              const hasAudioFile = !!video.music_download_path;
-                              const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors";
-                              return (
-                                <>
-                                  {isCompleted(video.video_download_status) && hasVideoFile && (
-                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('video'); }} className={btnClass}>
-                                      <Download size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Download Images' : 'Download Video'}
-                                    </button>
-                                  )}
-                                  {!isCompleted(video.video_download_status) && video.original_url && (
-                                    <button onClick={() => { setShowMoreMenu(false); handleFetchMedia({ video: true }); }} className={btnClass}>
-                                      <CloudDownload size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Fetch Images' : 'Fetch Video'}
-                                    </button>
-                                  )}
-                                  {isCompleted(video.cover_download_status) && hasCoverFile && (
-                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('cover'); }} className={btnClass}>
-                                      <Download size={13} className="text-emerald-400" /> Download Cover
-                                    </button>
-                                  )}
-                                  {hasAudioFile && (
-                                    <button onClick={() => { setShowMoreMenu(false); handleToolbarDownload('audio'); }} className={btnClass}>
-                                      <Download size={13} className="text-amber-400" /> Download Audio
-                                    </button>
-                                  )}
-                                  {video.original_url && (
-                                    <a
-                                      href={video.original_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className={btnClass}
-                                      onClick={() => setShowMoreMenu(false)}
-                                    >
-                                      <ExternalLink size={13} /> Open Original
-                                    </a>
-                                  )}
-                                  <div className="border-t border-zinc-700 my-1" />
-                                  <button
-                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
-                                    onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}
-                                  >
-                                    <Trash2 size={13} /> Delete
-                                  </button>
-                                </>
-                              );
-                            })()}
+                            <MobileDownloadMenu
+                              video={video}
+                              onClose={() => setShowMoreMenu(false)}
+                              onDownload={handleToolbarDownload}
+                              onFetchMedia={handleFetchMedia}
+                            />
+                            {video.original_url && (
+                              <a
+                                href={video.original_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                onClick={() => setShowMoreMenu(false)}
+                              >
+                                <ExternalLink size={13} /> Open Original
+                              </a>
+                            )}
+                            <div className="border-t border-zinc-700 my-1" />
+                            <button
+                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+                              onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}
+                            >
+                              <Trash2 size={13} /> Delete
+                            </button>
                           </div>
                         </>
                       )}
@@ -738,83 +386,20 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
 
       {/* Move to Trash Dialog */}
       {showDeleteDialog && (
-        <div
-          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setShowDeleteDialog(false)}
-        >
-          <div
-            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-500/10 rounded-lg">
-                  <Trash2 className="w-5 h-5 text-amber-500" />
-                </div>
-                <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
-              </div>
-              <button
-                onClick={() => setShowDeleteDialog(false)}
-                className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              <p className="text-sm text-zinc-400">
-                This item will be moved to the Recycle Bin. You can restore it later.
-              </p>
-              <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-                <img
-                  src={(video.cover_urls?.[0]) || "https://picsum.photos/80/80"}
-                  alt="Preview"
-                  className="w-12 h-12 rounded-lg object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">
-                    {video.title || 'Untitled'}
-                  </p>
-                  <p className="text-xs text-zinc-500">@{video.author}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-3 px-5 py-4 bg-zinc-800/30 border-t border-zinc-800">
-              <button
-                onClick={() => setShowDeleteDialog(false)}
-                className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  setIsDeleting(true);
-                  try {
-                    await handleDelete(video.id, false);
-                  } finally {
-                    setIsDeleting(false);
-                    setShowDeleteDialog(false);
-                  }
-                }}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Moving...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4" />
-                    Move to Trash
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteDialog
+          video={video}
+          isDeleting={isDeleting}
+          onClose={() => setShowDeleteDialog(false)}
+          onConfirm={async () => {
+            setIsDeleting(true);
+            try {
+              await handleDelete(video.id, false);
+            } finally {
+              setIsDeleting(false);
+              setShowDeleteDialog(false);
+            }
+          }}
+        />
       )}
 
       {/* Share Modal */}
