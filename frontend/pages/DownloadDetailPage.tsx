@@ -378,26 +378,27 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-      <div className="flex flex-col h-full p-2 sm:p-4 md:p-0">
-        <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
+      {/* Mobile: floating back button overlaying content */}
+      <button
+        onClick={handleBack}
+        className="sm:hidden fixed top-16 left-3 z-40 p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+      >
+        <ArrowLeft size={22} className="drop-shadow-md" />
+      </button>
+
+      <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
+        {/* Desktop header only */}
+        <div className="hidden sm:flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 mb-2 shrink-0">
           {/* Left: back + title */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-            {/* Mobile: circular back button only */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
               onClick={handleBack}
-              className="sm:hidden w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 transition-colors shrink-0"
-            >
-              <ArrowLeft size={16} />
-            </button>
-            {/* Desktop: back + title */}
-            <button
-              onClick={handleBack}
-              className="hidden sm:flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+              className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
             >
               <ArrowLeft size={16} />
               <span>Back</span>
             </button>
-            <span className="hidden sm:block text-sm text-zinc-200 font-medium truncate">
+            <span className="text-sm text-zinc-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}
             </span>
           </div>
@@ -588,7 +589,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         </div>
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
-          <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
+          <div className="w-full h-[55vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
             {video.media_type && isAlbumType(video.media_type) ? (
               <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
