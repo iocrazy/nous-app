@@ -292,7 +292,7 @@ try:
                 if file_type == "file" and res.data.get("file_path"):
                     result = res.data["file_path"]
                 elif file_type == "cover":
-                    result = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
+                    result = res.data.get("thumbnail_path") or res.data.get("cover_image_path")
                 if result:
                     creator_id = res.data.get("creator_id")
                     resource_id = res.data["id"]

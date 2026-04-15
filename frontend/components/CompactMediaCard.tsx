@@ -242,6 +242,8 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             alt={data.title}
             className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingAnyScrub ? 'invisible' : ''}`}
             referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
             onError={() => setImageError(true)}
           />
         )}
