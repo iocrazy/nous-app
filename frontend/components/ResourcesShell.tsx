@@ -46,7 +46,7 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({
       <ResourcesSidebar {...sidebarProps} />
 
       {/* Center panel: Main content */}
-      <div className="flex-1 min-w-0 flex flex-col pt-14">
+      <div className="flex-1 min-w-0 flex flex-col sm:pt-14">
         {children}
       </div>
 
