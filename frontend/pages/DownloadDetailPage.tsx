@@ -381,9 +381,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       {/* Mobile: floating back button overlaying content */}
       <button
         onClick={handleBack}
-        className="sm:hidden fixed top-16 left-3 z-40 p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+        className="sm:hidden fixed top-2.5 left-3 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
       >
-        <ArrowLeft size={22} className="drop-shadow-md" />
+        <ArrowLeft size={20} className="drop-shadow-md" />
       </button>
 
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
@@ -632,13 +632,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               </div>
             )}
             {video.author && (
-              <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none">
+              <div className="absolute top-2.5 right-3 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none max-w-[60%]">
                 {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
                   <img src={`/icons/${video.source_platform}.svg`} alt="" className="w-4 h-4" />
                 ) : (
                   <UserRound size={16} className="opacity-70" />
                 )}
-                <span>@{video.author}</span>
+                <span className="truncate">@{video.author}</span>
               </div>
             )}
           </div>
