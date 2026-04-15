@@ -118,6 +118,43 @@ export const DownloadsView: React.FC = () => {
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQueryText, setSearchQueryText] = useState('');
 
+  // ─── Pull-to-refresh (mobile) ───
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const pullStartY = useRef(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+
+  const handlePullStart = useCallback((e: React.TouchEvent) => {
+    if (window.innerWidth >= 768) return; // desktop: skip
+    const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
+    if (scrollTop <= 0) {
+      pullStartY.current = e.touches[0].clientY;
+    }
+  }, []);
+
+  const handlePullMove = useCallback((e: React.TouchEvent) => {
+    if (window.innerWidth >= 768 || pullRefreshing) return;
+    const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
+    if (scrollTop > 0) { setPullDistance(0); return; }
+    const delta = e.touches[0].clientY - pullStartY.current;
+    if (delta > 0) {
+      setPullDistance(Math.min(delta * 0.4, 80));
+    }
+  }, [pullRefreshing]);
+
+  const handlePullEnd = useCallback(() => {
+    if (pullDistance >= 50 && !pullRefreshing) {
+      setPullRefreshing(true);
+      setPullDistance(50);
+      loadLibraryData().finally(() => {
+        setPullRefreshing(false);
+        setPullDistance(0);
+      });
+    } else {
+      setPullDistance(0);
+    }
+  }, [pullDistance, pullRefreshing, loadLibraryData]);
+
   // ─── Local filtered library (supports tag search via extraSearchMap) ───
   const filteredLibrary = useMemo(() => {
     if (isSearchActive) {
@@ -737,8 +774,12 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
+        ref={contentScrollRef}
         className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0 h-full min-h-0' : 'px-3 pt-3 pb-5'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+        onTouchStart={handlePullStart}
+        onTouchMove={handlePullMove}
+        onTouchEnd={handlePullEnd}
         onClick={(e) => {
           // Click on empty area → deselect all (same as My Resources)
           const target = e.target as HTMLElement;
@@ -751,6 +792,20 @@ export const DownloadsView: React.FC = () => {
           }
         }}
       >
+        {/* Pull-to-refresh indicator (mobile only) */}
+        {pullDistance > 0 && (
+          <div
+            className="md:hidden flex items-center justify-center transition-all"
+            style={{ height: pullDistance, opacity: Math.min(pullDistance / 60, 1) }}
+          >
+            <RefreshCw
+              size={18}
+              className={`text-zinc-400 transition-transform ${pullRefreshing ? 'animate-spin' : ''}`}
+              style={{ transform: `rotate(${Math.min(pullDistance * 3, 360)}deg)` }}
+            />
+          </div>
+        )}
+
         {/* Mobile header — hidden on feed view and desktop */}
         <div className={`md:hidden flex items-center gap-2 mb-1 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
           <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
