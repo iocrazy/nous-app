@@ -20,6 +20,7 @@ import { Alerts } from './pages/alerts'
 import { TranscodeList } from './pages/transcode'
 import { TranscodeConfig } from './pages/transcode-config'
 import { TaskCenter } from './pages/tasks'
+import { AIModelsPage } from './pages/ai'
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/tasks" element={<TaskCenter />} />
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/credits" element={<CreditsPage />} />
+              <Route path="/ai" element={<AIModelsPage />} />
               <Route path="/monitoring" element={<MonitoringDashboard />} />
               <Route path="/search" element={<GlobalSearch />} />
               <Route path="/audit-logs" element={<AuditLogList />} />
