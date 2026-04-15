@@ -18,6 +18,7 @@ from .table_preferences_router import router as table_preferences_router
 from .credits_router import router as credits_router
 from .tags_router import router as tags_router
 from .celery_router import router as celery_router
+from .nous_router import router as nous_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -92,3 +93,4 @@ admin_router.include_router(table_preferences_router, prefix="/table-preferences
 admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Credits"])
 admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
+admin_router.include_router(nous_router, prefix="/nous-models", tags=["Admin - Nous Models"])

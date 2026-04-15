@@ -519,6 +519,15 @@ export interface AISettings {
   };
 }
 
+// Nous Platform Model (admin-configured, pay with points)
+export interface NousModelPublic {
+  name: string;
+  display_name: string;
+  category: 'transcription' | 'summarization' | 'analysis';
+  pricing_type: 'per_hour' | 'per_request' | 'per_token';
+  pricing_value: number;
+}
+
 // Points System Types
 export interface PointPackage {
   id: string;

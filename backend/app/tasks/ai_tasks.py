@@ -288,6 +288,28 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
         ai_settings = _get_ai_settings(user_id)
         transcription_assignment = ai_settings.get("task_assignment", {}).get("transcription", "openai:whisper-1")
+
+        # Check if using a Nous platform model
+        if transcription_assignment.startswith("nous-"):
+            from app.repositories.nous_repository import NousRepository
+            nous_repo = NousRepository()
+            nous_model = run_async(nous_repo.get_by_name(transcription_assignment))
+            if nous_model:
+                # Override provider config with Nous platform config
+                transcription_assignment = f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                ai_settings = {
+                    **ai_settings,
+                    "ai_providers": {
+                        nous_model["actual_provider"]: {
+                            "api_key": nous_model["api_key"],
+                            "app_id": nous_model.get("app_id", ""),
+                            "base_url": nous_model.get("base_url", ""),
+                            "enabled": True,
+                        }
+                    },
+                }
+                logger.info(f"[AI] Using Nous model '{nous_model['name']}' -> {transcription_assignment}")
+
         provider_key = transcription_assignment.split(":")[0] if ":" in transcription_assignment else transcription_assignment
 
         if provider_key == "volcengine":

@@ -38,6 +38,7 @@ class PointsService:
         action_type: str,
         reference_id: Optional[str] = None,
         count: int = 1,
+        override_cost: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Atomic flow: look up pricing, verify team balance, verify member
@@ -50,26 +51,29 @@ class PointsService:
             action_type: The action identifier (e.g. 'video_parse').
             reference_id: Optional reference to a related entity.
             count: Multiplier for the base cost (batch operations).
+            override_cost: If provided, skip pricing lookup and use this cost directly
+                          (used for Nous duration-based billing).
 
         Returns:
             Dict with keys: success, points_cost, balance_after, reason.
         """
-        # 1. Get pricing for this action
-        pricing = await self.repo.get_pricing(action_type)
-        if pricing is None:
-            # No pricing configured -- allow for free
-            logger.info(
-                f"No pricing for action '{action_type}'; allowing for free "
-                f"(team={team_id}, user={user_id})"
-            )
-            return {
-                "success": True,
-                "points_cost": 0,
-                "balance_after": None,
-                "reason": None,
-            }
-
-        points_cost = pricing["points_cost"] * count
+        if override_cost is not None:
+            points_cost = override_cost
+        else:
+            # 1. Get pricing for this action
+            pricing = await self.repo.get_pricing(action_type)
+            if pricing is None:
+                logger.info(
+                    f"No pricing for action '{action_type}'; allowing for free "
+                    f"(team={team_id}, user={user_id})"
+                )
+                return {
+                    "success": True,
+                    "points_cost": 0,
+                    "balance_after": None,
+                    "reason": None,
+                }
+            points_cost = pricing["points_cost"] * count
 
         # If the action costs 0 points, short-circuit
         if points_cost == 0:

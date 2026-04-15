@@ -119,3 +119,17 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
 async def list_providers():
     """List available AI provider keys."""
     return {"providers": AIProviderFactory.available_providers()}
+
+
+@router.get("/nous-models")
+async def list_nous_models(category: str = None):
+    """List enabled Nous models (public, no API keys).
+
+    Returns models available for users to select in Task Assignment.
+    If no models are configured, returns empty list.
+    """
+    from app.repositories.nous_repository import NousRepository
+
+    repo = NousRepository()
+    models = await repo.list_enabled(category)
+    return {"models": models}

@@ -61,22 +61,54 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI transcription by resource_id."""
     resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
 
-    # === Points check — charge the resource owner's personal team ===
+    # === Nous billing — only charge if user selected a nous-* model ===
+    from app.repositories.user_settings_repository import UserSettingsRepository
+    from app.repositories.nous_repository import NousRepository
+    import math
+
+    settings_repo = UserSettingsRepository()
+    user_settings = await settings_repo.get_by_user_id(auth.user_id)
+    ai_settings = (user_settings or {}).get("settings_json", {}).get("ai_settings", {})
+    selected_model = ai_settings.get("task_assignment", {}).get("transcription", "")
+
     points_service = PointsService()
     resource_owner = resource.get("creator_id") or auth.user_id
     _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
-    if _team_id:
+    _is_nous = selected_model.startswith("nous-")
+
+    if _is_nous and _team_id:
+        # Look up Nous model pricing
+        nous_repo = NousRepository()
+        nous_model = await nous_repo.get_by_name(selected_model)
+        if not nous_model or not nous_model.get("is_enabled"):
+            raise HTTPException(status_code=400, detail=f"Nous model '{selected_model}' not available")
+
+        # Compute cost by media duration
+        media_repo = MediaRepository()
+        media = await media_repo.get_by_platform_id(platform_id)
+        duration_seconds = float(media.get("duration", 0)) if media else 0
+        if duration_seconds <= 0:
+            duration_seconds = 60  # fallback: charge 1 minute minimum
+
+        pricing_value = float(nous_model["pricing_value"])
+        if nous_model["pricing_type"] == "per_hour":
+            _points_cost = max(1, math.ceil(duration_seconds / 3600 * pricing_value))
+        else:
+            _points_cost = max(1, int(pricing_value))
+
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
             user_id=auth.user_id,
             action_type="ai_transcription",
+            reference_id=resource_id,
+            override_cost=_points_cost,
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
         _points_cost = points_result.get("points_cost", 0)
-    # === End points check ===
+    # === End billing ===
 
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
@@ -112,6 +144,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         "message": "Transcription queued",
         "resource_id": resource_id,
         "platform_id": platform_id,
+        "points_charged": _points_cost,
     }
 
 

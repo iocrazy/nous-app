@@ -1,5 +1,5 @@
 
-import { AISettings, TranscriptData, SummaryData } from '../types';
+import { AISettings, TranscriptData, SummaryData, NousModelPublic } from '../types';
 import { getAuthHeaders } from './parserService';
 
 // --- Polling Helper ---
@@ -310,6 +310,19 @@ export const saveAISettings = async (
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
+};
+
+// --- Nous Models ---
+
+export const getNousModels = async (category?: string): Promise<NousModelPublic[]> => {
+  const apiUrl = getApiUrl();
+  const params = category ? `?category=${category}` : '';
+  const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return data.models || [];
 };
 
 export const testAIConnection = async (

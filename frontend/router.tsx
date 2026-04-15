@@ -26,6 +26,7 @@ const ShortcutsTagsPage = lazy(() => import('./pages/ShortcutsTagsPage').then(m 
 const StoryboardWorkbench = lazy(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
 const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
 const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
+const AdminNousModelsPage = lazy(() => import('./pages/admin/AdminNousModelsPage').then(m => ({ default: m.AdminNousModelsPage })));
 
 function PageLoader() {
   return (
@@ -82,6 +83,9 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <AppLayout />, children: [
         { index: true, element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
       ]},
+
+      // Admin routes (no team scope, admin role required)
+      { path: 'admin/nous-models', element: <SuspenseWrap><AdminNousModelsPage /></SuspenseWrap> },
 
       // Team-scoped routes
       {

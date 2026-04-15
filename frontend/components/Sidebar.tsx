@@ -21,6 +21,7 @@ import {
   Share2,
   PanelLeftClose,
   PanelLeftOpen,
+  Brain,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -119,6 +120,7 @@ interface SidebarProps {
   permissions: string[];
   isViewEnabled?: (viewKey: string) => boolean;
   userName?: string;
+  userRole?: string;
 
   // Project context (for project mode)
   activeProject: Project | null;
@@ -196,6 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   permissions,
   isViewEnabled = () => true,
   userName,
+  userRole,
   activeProject,
   isLibraryOpen: _isLibraryOpen,
   isSettingsOpen: _isSettingsOpen,
@@ -347,6 +350,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </>
           )}
+
+          {userRole === 'admin' && (
+            <>
+              <Divider />
+              <SidebarItem icon={Brain} label="Nous Models" active={location.pathname === '/admin/nous-models'} onClick={() => navigate('/admin/nous-models')} collapsed={collapsed} />
+            </>
+          )}
         </nav>
 
         <VersionFooter collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
@@ -390,6 +400,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <Divider />
 
         <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
+
+        {userRole === 'admin' && (
+          <>
+            <Divider />
+            <SidebarItem icon={Brain} label="Nous Models" active={location.pathname === '/admin/nous-models'} onClick={() => navigate('/admin/nous-models')} collapsed={collapsed} />
+          </>
+        )}
       </nav>
 
       <VersionFooter collapsed={collapsed} onToggleCollapse={onToggleCollapse} />

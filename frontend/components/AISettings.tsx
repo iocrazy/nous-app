@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Brain,
   Zap,
@@ -26,8 +26,8 @@ import {
   ImageIcon,
   Mic,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig } from '../types';
-import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
+import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic } from '../types';
+import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { useSettingsStore } from '../stores/settingsStore';
 
@@ -228,6 +228,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
+
+  useEffect(() => {
+    getNousModels().then(setNousModels).catch(() => {});
+  }, []);
 
   // Toggle AI globally
   const toggleAIEnabled = () => {
@@ -443,6 +448,28 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
       }
+    }
+
+    // Append Nous platform models for the matching category
+    const categoryMap: Record<string, string> = {
+      transcription: 'transcription',
+      summarization: 'summarization',
+      visual_analysis: 'analysis',
+    };
+    const nousCategory = categoryMap[taskType];
+    const matchingNousModels = nousModels.filter((m) => m.category === nousCategory);
+
+    for (const model of matchingNousModels) {
+      const pricingLabel =
+        model.pricing_type === 'per_hour'
+          ? `${model.pricing_value} pts/hr`
+          : model.pricing_type === 'per_request'
+            ? `${model.pricing_value} pts`
+            : `${model.pricing_value} pts/1k tokens`;
+      options.push({
+        value: model.name,
+        label: `${model.display_name} (${pricingLabel})`,
+      });
     }
 
     if (options.length === 0) {

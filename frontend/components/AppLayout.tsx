@@ -430,6 +430,7 @@ function AppLayoutInner() {
         permissions={userPermissions}
         isViewEnabled={isViewEnabled}
         userName={userProfile?.name}
+        userRole={userProfile?.role}
         activeProject={selectedProject}
         isLibraryOpen={isLibraryOpen}
         isSettingsOpen={isSettingsOpen}
