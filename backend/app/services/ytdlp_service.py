@@ -169,7 +169,7 @@ class YtdlpService:
         cmd = [
             "yt-dlp",
             "-f",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
             "--merge-output-format",
             "mp4",
             "--no-playlist",
