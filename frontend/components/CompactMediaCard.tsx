@@ -253,7 +253,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           <video
             ref={videoScrubRef}
             src={videoUrl}
-            preload="auto"
+            preload="metadata"
             muted
             playsInline
             className="absolute inset-0 w-full h-full object-contain bg-black z-[5]"

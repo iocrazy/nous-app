@@ -145,12 +145,16 @@ const FeedItem = ({
 
   const imageUrl = item.image_download_urls?.[0] || coverUrl || null;
 
-  // Setup HLS.js for .m3u8 video playback
+  // Setup HLS.js for .m3u8 video playback with tight buffer limits
   useEffect(() => {
     if (!isHlsUrl || !videoRef.current || !videoUrl) return;
 
     if (Hls.isSupported()) {
-      const hls = new Hls();
+      const hls = new Hls({
+        maxBufferLength: 10,
+        maxBufferSize: 10 * 1024 * 1024,
+        maxMaxBufferLength: 20,
+      });
       hls.loadSource(videoUrl);
       hls.attachMedia(videoRef.current);
       hlsRef.current = hls;
@@ -158,10 +162,17 @@ const FeedItem = ({
       videoRef.current.src = videoUrl;
     }
 
+    // Explicit release on unmount: free decoder buffers
+    const videoEl = videoRef.current;
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        videoEl.load();
       }
     };
   }, [videoUrl, isHlsUrl]);
@@ -180,6 +191,17 @@ const FeedItem = ({
       }
     }
   }, [isPlaying]);
+
+  // Pause when tab/app hidden to save bandwidth + decoder
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden && videoRef.current) {
+        videoRef.current.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
 
   return (
     <div 
@@ -206,6 +228,7 @@ const FeedItem = ({
             loop
             muted={isMuted}
             playsInline
+            preload={isPlaying ? 'auto' : 'metadata'}
             onCanPlay={() => setIsBuffering(false)}
             onWaiting={() => setIsBuffering(true)}
             onPlaying={() => setIsBuffering(false)}
