@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
+from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import AIRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -60,6 +61,21 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
 async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI transcription by resource_id."""
     resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+
+    # === Dedup: reject if already processing ===
+    _admin = await _get_admin()
+    _active = (
+        await _admin.table("unified_tasks")
+        .select("id")
+        .eq("resource_id", resource_id)
+        .eq("task_type", "ai_transcription")
+        .in_("status", ["pending", "processing", "running"])
+        .limit(1)
+        .execute()
+    )
+    if _active.data:
+        return {"message": "Transcription already in progress", "resource_id": resource_id}
+    # === End dedup ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
     from app.repositories.user_settings_repository import UserSettingsRepository
@@ -152,6 +168,21 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
 async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI summary by resource_id."""
     resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+
+    # === Dedup: reject if already processing ===
+    _admin = await _get_admin()
+    _active = (
+        await _admin.table("unified_tasks")
+        .select("id")
+        .eq("resource_id", resource_id)
+        .eq("task_type", "ai_summary")
+        .in_("status", ["pending", "processing", "running"])
+        .limit(1)
+        .execute()
+    )
+    if _active.data:
+        return {"message": "Summary already in progress", "resource_id": resource_id}
+    # === End dedup ===
 
     # === Points check — charge the resource owner's personal team ===
     points_service = PointsService()
