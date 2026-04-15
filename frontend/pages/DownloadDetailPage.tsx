@@ -382,14 +382,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
           {/* Left: back + title */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+            {/* Mobile: circular back button only */}
             <button
               onClick={handleBack}
-              className="flex items-center gap-1 sm:gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+              className="sm:hidden w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 transition-colors shrink-0"
             >
               <ArrowLeft size={16} />
-              <span className="hidden sm:inline">Back</span>
             </button>
-            <span className="text-xs sm:text-sm text-zinc-200 font-medium truncate">
+            {/* Desktop: back + title */}
+            <button
+              onClick={handleBack}
+              className="hidden sm:flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+            >
+              <ArrowLeft size={16} />
+              <span>Back</span>
+            </button>
+            <span className="hidden sm:block text-sm text-zinc-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}
             </span>
           </div>
