@@ -39,6 +39,7 @@ class PointsService:
         reference_id: Optional[str] = None,
         count: int = 1,
         override_cost: Optional[int] = None,
+        description: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Atomic flow: look up pricing, verify team balance, verify member
@@ -53,6 +54,8 @@ class PointsService:
             count: Multiplier for the base cost (batch operations).
             override_cost: If provided, skip pricing lookup and use this cost directly
                           (used for Nous duration-based billing).
+            description: Optional human-readable description to override the
+                        generic "Consumed N points for action" message.
 
         Returns:
             Dict with keys: success, points_cost, balance_after, reason.
@@ -149,7 +152,7 @@ class PointsService:
                 "type": "consume",
                 "reference_type": action_type,
                 "reference_id": reference_id,
-                "description": f"Consumed {points_cost} points for {action_type}",
+                "description": description or f"Consumed {points_cost} points for {action_type}",
             }
         )
 

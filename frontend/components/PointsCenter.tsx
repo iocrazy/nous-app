@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive, Search, Filter, ExternalLink } from 'lucide-react';
 import { TeamQuota, PointTransaction, PointPricing, PointPackage } from '../types';
 import {
   fetchPointsBalance,
@@ -29,6 +29,24 @@ const formatPrice = (cents: number): string => {
   return `\u00A5${(cents / 100).toFixed(2)}`;
 };
 
+/** Reference type options for the action filter dropdown. */
+const REFERENCE_TYPE_OPTIONS = [
+  { value: '', label: 'All Actions' },
+  { value: 'video_parse', label: 'Video Parse' },
+  { value: 'ai_transcription', label: 'AI Transcription' },
+  { value: 'ai_summary', label: 'AI Summary' },
+  { value: 'welcome_bonus', label: 'Welcome Bonus' },
+  { value: 'refund', label: 'Refund' },
+] as const;
+
+/** Date range options. */
+const DATE_RANGE_OPTIONS = [
+  { value: 0, label: 'All Time' },
+  { value: 7, label: 'Last 7 Days' },
+  { value: 30, label: 'Last 30 Days' },
+  { value: 90, label: 'Last 90 Days' },
+] as const;
+
 export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage }) => {
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<TeamQuota | null>(null);
@@ -37,13 +55,39 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
   const [packages, setPackages] = useState<PointPackage[]>([]);
   const [_usageStats, setUsageStats] = useState<any>(null);
 
+  // Transaction filters
+  const [searchText, setSearchText] = useState('');
+  const [referenceTypeFilter, setReferenceTypeFilter] = useState('');
+  const [daysFilter, setDaysFilter] = useState(0);
+  const [txLoading, setTxLoading] = useState(false);
+
+  const loadTransactions = useCallback(async () => {
+    setTxLoading(true);
+    try {
+      const txData = await fetchPointsTransactions(
+        teamId,
+        50,
+        0,
+        undefined,
+        referenceTypeFilter || undefined,
+        searchText || undefined,
+        daysFilter > 0 ? daysFilter : undefined,
+      );
+      setTransactions(txData);
+    } catch {
+      setTransactions([]);
+    } finally {
+      setTxLoading(false);
+    }
+  }, [teamId, referenceTypeFilter, searchText, daysFilter]);
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
         const [balanceData, txData, pricingData, pkgData, usageData] = await Promise.all([
           fetchPointsBalance(teamId).catch(() => null),
-          fetchPointsTransactions(teamId, 20).catch(() => []),
+          fetchPointsTransactions(teamId, 50).catch(() => []),
           fetchPointsPricing().catch(() => []),
           fetchPackages().catch(() => []),
           fetchUsageStats(teamId).catch(() => null),
@@ -61,6 +105,24 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
 
     loadData();
   }, [teamId]);
+
+  // Reload transactions when filters change (skip initial load)
+  useEffect(() => {
+    if (!loading) {
+      loadTransactions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referenceTypeFilter, daysFilter]);
+
+  // Debounced search
+  useEffect(() => {
+    if (loading) return;
+    const timer = setTimeout(() => {
+      loadTransactions();
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText]);
 
   if (loading) {
     return (
@@ -182,11 +244,55 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
 
       {/* ── Transaction History ──────────────────────────────── */}
       <section>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-4">Recent Transactions</h2>
+        <h2 className="text-lg font-semibold text-zinc-100 mb-4">Transaction History</h2>
 
-        {transactions.length === 0 ? (
+        {/* Search & Filter Bar */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Search input */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search transactions..."
+              className="w-full pl-9 pr-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+            />
+          </div>
+
+          {/* Action type filter */}
+          <div className="relative">
+            <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <select
+              value={referenceTypeFilter}
+              onChange={(e) => setReferenceTypeFilter(e.target.value)}
+              className="pl-8 pr-8 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-amber-500/50 appearance-none cursor-pointer transition-colors"
+            >
+              {REFERENCE_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date range filter */}
+          <select
+            value={daysFilter}
+            onChange={(e) => setDaysFilter(Number(e.target.value))}
+            className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-amber-500/50 appearance-none cursor-pointer transition-colors"
+          >
+            {DATE_RANGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {txLoading ? (
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-12 text-center text-zinc-500">
-            No transactions yet
+            Loading...
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-12 text-center text-zinc-500">
+            No transactions found
           </div>
         ) : (
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800/50">
@@ -198,28 +304,54 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
                   className="flex items-center gap-4 px-5 py-4 hover:bg-zinc-800/30 transition-colors"
                 >
                   <div
-                    className={`p-2 rounded-lg ${
+                    className={`p-2 rounded-lg shrink-0 ${
                       isCredit ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
                     }`}
                   >
                     {isCredit ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-300 truncate">
+                    <p className="text-sm text-zinc-300">
                       {tx.description || tx.type}
                     </p>
-                    <p className="text-xs text-zinc-500">
-                      {new Date(tx.created_at).toLocaleString()}
-                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {/* Reference type badge */}
+                      {tx.reference_type && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-700/60 text-zinc-400">
+                          {tx.reference_type}
+                        </span>
+                      )}
+                      {/* Reference ID link */}
+                      {tx.reference_id && (
+                        <a
+                          href={`/resources/${tx.reference_id}`}
+                          className="inline-flex items-center gap-0.5 text-[10px] text-amber-400/70 hover:text-amber-400 transition-colors"
+                          title={`Resource: ${tx.reference_id}`}
+                        >
+                          <ExternalLink size={10} />
+                          <span className="font-mono">{tx.reference_id.slice(0, 8)}...</span>
+                        </a>
+                      )}
+                      <span className="text-[10px] text-zinc-600">
+                        {new Date(tx.created_at).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
-                  <span
-                    className={`text-sm font-semibold tabular-nums ${
-                      isCredit ? 'text-green-400' : 'text-red-400'
-                    }`}
-                  >
-                    {isCredit ? '+' : ''}
-                    {tx.amount}
-                  </span>
+                  <div className="text-right shrink-0">
+                    <span
+                      className={`text-sm font-semibold tabular-nums ${
+                        isCredit ? 'text-green-400' : 'text-red-400'
+                      }`}
+                    >
+                      {isCredit ? '+' : ''}
+                      {tx.amount}
+                    </span>
+                    {tx.balance_after !== null && tx.balance_after !== undefined && (
+                      <p className="text-[10px] text-zinc-600 tabular-nums">
+                        bal: {tx.balance_after}
+                      </p>
+                    )}
+                  </div>
                 </div>
               );
             })}

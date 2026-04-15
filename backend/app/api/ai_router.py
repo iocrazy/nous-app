@@ -34,8 +34,8 @@ async def _get_media_or_404(platform_id: str) -> dict:
     return media
 
 
-async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]:
-    """Resolve resource_id -> resource dict + platform_id, or raise 404."""
+async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str, dict]:
+    """Resolve resource_id -> (resource dict, platform_id, media dict), or raise 404."""
     repo = ResourcesRepository()
     resource = await repo.get_resource_by_id(resource_id)
     if not resource or not resource.get("media_id"):
@@ -49,7 +49,17 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
     if not media:
         raise HTTPException(status_code=404, detail="Linked media not found")
 
-    return resource, media["platform_id"]
+    return resource, media["platform_id"], media
+
+
+def _format_duration_short(seconds: float) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
 
 # ------------------------------------------------------------------
@@ -60,7 +70,7 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
 @router.post("/transcribe/resource/{resource_id}")
 async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI transcription by resource_id."""
-    resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
@@ -100,9 +110,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         if not nous_model or not nous_model.get("is_enabled"):
             raise HTTPException(status_code=400, detail=f"Nous model '{selected_model}' not available")
 
-        # Compute cost by media duration
-        media_repo = MediaRepository()
-        media = await media_repo.get_by_platform_id(platform_id)
+        # Compute cost by media duration (reuse media from resolver)
         duration_seconds = float(media.get("duration", 0)) if media else 0
         if duration_seconds <= 0:
             duration_seconds = 60  # fallback: charge 1 minute minimum
@@ -113,6 +121,14 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         else:
             _points_cost = max(1, int(pricing_value))
 
+        # Build detailed description for transaction record
+        video_title = (media.get("title") or platform_id)[:50]
+        dur_str = _format_duration_short(duration_seconds) if duration_seconds > 0 else ""
+        _description = f"AI Transcription: {video_title} ({selected_model}"
+        if dur_str:
+            _description += f", {dur_str}"
+        _description += ")"
+
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
@@ -120,6 +136,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
             action_type="ai_transcription",
             reference_id=resource_id,
             override_cost=_points_cost,
+            description=_description,
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
@@ -167,7 +184,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
 @router.post("/summarize/resource/{resource_id}")
 async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI summary by resource_id."""
-    resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
@@ -190,11 +207,17 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
     if _team_id:
+        # Build detailed description for transaction record
+        video_title = (media.get("title") or platform_id)[:50]
+        _description = f"AI Summary: {video_title}"
+
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
             user_id=auth.user_id,
             action_type="ai_summary",
+            reference_id=resource_id,
+            description=_description,
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
@@ -270,7 +293,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 @router.post("/analyze/resource/{resource_id}")
 async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
     """Trigger visual analysis by resource_id (not yet implemented)."""
-    resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
     raise HTTPException(
         status_code=501,

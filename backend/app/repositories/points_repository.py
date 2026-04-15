@@ -420,9 +420,12 @@ class PointsRepository:
         limit: int = 50,
         offset: int = 0,
         type_filter: Optional[str] = None,
+        reference_type_filter: Optional[str] = None,
+        search: Optional[str] = None,
+        days: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Get transaction history for a team with pagination and optional type filter.
+        Get transaction history for a team with pagination and optional filters.
 
         Args:
             team_id: UUID of the team.
@@ -430,6 +433,10 @@ class PointsRepository:
             offset: Number of rows to skip.
             type_filter: Optional transaction type filter
                          (e.g. 'purchase', 'consume').
+            reference_type_filter: Optional reference_type (action type) filter
+                                   (e.g. 'ai_transcription', 'ai_summary').
+            search: Optional text to search in the description field (case-insensitive).
+            days: Optional filter to last N days.
 
         Returns:
             List of transaction row dicts ordered by created_at DESC.
@@ -441,6 +448,17 @@ class PointsRepository:
             )
             if type_filter:
                 query = query.eq("type", type_filter)
+            if reference_type_filter:
+                query = query.eq("reference_type", reference_type_filter)
+            if search:
+                query = query.ilike("description", f"%{search}%")
+            if days is not None:
+                from datetime import datetime, timedelta, timezone
+
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=days)
+                ).isoformat()
+                query = query.gte("created_at", cutoff)
             query = query.order("created_at", desc=True)
             query = query.range(offset, offset + limit - 1)
             result = await query.execute()
