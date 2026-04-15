@@ -524,6 +524,7 @@ async def serve_resource_cover(resource_id: str):
                 return FileResponse(
                     path=str(full_path),
                     media_type=mime or "image/jpeg",
+                    headers={"Cache-Control": "public, max-age=604800, immutable"},
                 )
 
         # Fallback for image files: serve the original file as cover

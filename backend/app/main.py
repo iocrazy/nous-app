@@ -336,8 +336,12 @@ try:
             logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
         return ()
 
-    def _serve_file(file_path: str) -> FileResponse:
-        """Resolve a relative file path and return a FileResponse."""
+    def _serve_file(file_path: str, cache_immutable: bool = False) -> FileResponse:
+        """Resolve a relative file path and return a FileResponse.
+
+        cache_immutable=True sets long-lived caching (7 days, immutable) for
+        content-addressed files like thumbnails and covers that never change.
+        """
         import mimetypes
 
         full_path = (_media_base_path / file_path).resolve()
@@ -347,13 +351,16 @@ try:
             raise HTTPException(status_code=404, detail="File not found")
 
         mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        headers = {
+            "Referrer-Policy": "no-referrer",
+            "Content-Disposition": "inline",
+        }
+        if cache_immutable:
+            headers["Cache-Control"] = "public, max-age=604800, immutable"
         return FileResponse(
             str(full_path),
             media_type=mime_type,
-            headers={
-                "Referrer-Policy": "no-referrer",
-                "Content-Disposition": "inline",
-            },
+            headers=headers,
         )
 
     async def _check_permissions(
@@ -448,7 +455,7 @@ try:
         user_id = await _authenticate_media_request(request, token, share_token, review_token)
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "cover")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
-        return _serve_file(file_path)
+        return _serve_file(file_path, cache_immutable=True)
 
     @app.get("/media/{file_path:path}")
     async def serve_media_by_path(

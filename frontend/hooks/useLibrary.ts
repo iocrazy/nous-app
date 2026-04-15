@@ -90,8 +90,16 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     }));
   }, [activeLibraryTab, selectedTeamId, libraryViewMode]);
 
+  // Abort controller for in-flight library queries — cancelled on re-load/unmount
+  const libraryAbortRef = useRef<AbortController | null>(null);
+
   // --- Data Loading ---
   const loadLibraryData = async () => {
+    // Cancel any previous in-flight request
+    libraryAbortRef.current?.abort();
+    const controller = new AbortController();
+    libraryAbortRef.current = controller;
+
     setIsLoadingLibrary(true);
     setLibraryError(null);
     setCurrentPage(0);
@@ -99,7 +107,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     try {
       if (isSupabaseConfigured()) {
         const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-        const result = await fetchLibraryPaginated(0, isMobile ? 10 : 20);
+        const result = await fetchLibraryPaginated(0, isMobile ? 10 : 20, controller.signal);
+        if (controller.signal.aborted) return;
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
@@ -129,7 +138,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     try {
       const nextPage = currentPage + 1;
       const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-      const result = await fetchLibraryPaginated(nextPage, isMobile ? 10 : 20);
+      const controller = new AbortController();
+      libraryAbortRef.current?.abort();
+      libraryAbortRef.current = controller;
+      const result = await fetchLibraryPaginated(nextPage, isMobile ? 10 : 20, controller.signal);
+      if (controller.signal.aborted) return;
       if (result.data.length > 0) {
         setLibrary(prev => [...prev, ...result.data]);
         setCurrentPage(nextPage);

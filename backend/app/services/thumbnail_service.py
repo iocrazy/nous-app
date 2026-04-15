@@ -80,8 +80,9 @@ class ThumbnailService:
                 )
                 return None
 
-            # Target: save thumbnail.jpg in the same directory as source file
-            thumb_abs = abs_path.parent / "thumbnail.jpg"
+            # Target: save thumbnail.webp in the same directory as source file
+            # (webp ≈ 30-50% smaller than jpeg at equivalent quality)
+            thumb_abs = abs_path.parent / "thumbnail.webp"
 
             if mime_type.startswith("video/"):
                 ok = await self._generate_video_thumbnail(str(abs_path), str(thumb_abs))
@@ -136,7 +137,9 @@ class ThumbnailService:
                 "-i", src_path,
                 "-vframes", "1",
                 "-vf", f"scale={THUMBNAIL_MAX_WIDTH}:-1",
-                "-q:v", "3",
+                "-c:v", "libwebp",
+                "-quality", "80",
+                "-preset", "photo",
                 dst_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -319,7 +322,7 @@ class ThumbnailService:
                         Image.LANCZOS,
                     )
 
-                img.save(dst_path, format="JPEG", quality=THUMBNAIL_QUALITY)
+                img.save(dst_path, format="WEBP", quality=THUMBNAIL_QUALITY, method=4)
                 return True
 
         except Exception as e:
