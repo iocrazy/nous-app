@@ -424,30 +424,26 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       const meta = PROVIDER_META[key];
       const config = getProviderConfig(key);
 
+      // Use detected models from server if available, otherwise hardcoded list
+      const detectedModels: string[] = config.models || [];
+
       if (taskType === 'transcription') {
-        if (meta?.whisperModels) {
-          for (const model of meta.whisperModels) {
-            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-          }
+        const models = meta?.whisperModels || [];
+        for (const model of models) {
+          options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-        // Skip providers without whisperModels for transcription
       } else if (taskType === 'summarization') {
-        if (meta?.summaryModels) {
-          for (const model of meta.summaryModels) {
-            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-          }
-        } else if (meta?.models?.length) {
-          // General LLM provider without explicit summaryModels
-          const model = config.selected_model || meta.models[0];
+        const models = detectedModels.length > 0
+          ? detectedModels
+          : (meta?.summaryModels || meta?.models || []);
+        for (const model of models) {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
       } else if (taskType === 'visual_analysis') {
-        if (meta?.analysisModels) {
-          for (const model of meta.analysisModels) {
-            options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-          }
-        } else if (meta?.models?.length) {
-          const model = config.selected_model || meta.models[0];
+        const models = detectedModels.length > 0
+          ? detectedModels
+          : (meta?.analysisModels || meta?.models || []);
+        for (const model of models) {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
       }
