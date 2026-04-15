@@ -122,7 +122,33 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         : await getTranscript(video.platform_id);
       setTranscript(data);
     } catch {
-      // 404 = no transcript yet, not an error to display
+      // 404 = no transcript yet — check if transcription is in progress
+      if (resourceId) {
+        try {
+          const { getSupabaseClient } = await import('../supabaseClient');
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            const { data: tasks } = await supabase
+              .from('unified_tasks')
+              .select('status')
+              .eq('resource_id', resourceId)
+              .eq('task_type', 'ai_transcription')
+              .in('status', ['pending', 'processing', 'running'])
+              .limit(1);
+            if (tasks && tasks.length > 0) {
+              // Active transcription task found — show processing and poll
+              setTranscribeStatus('processing');
+              const result = await pollForResult(
+                () => getTranscriptByResource(resourceId!), 3000, 120
+              );
+              setTranscript(result);
+              setTranscribeStatus('completed');
+            }
+          }
+        } catch {
+          // ignore — just stay on empty state
+        }
+      }
     } finally {
       setTranscriptLoading(false);
     }
