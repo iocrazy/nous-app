@@ -400,13 +400,23 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
-    supabase
-      .from('resource_tags')
-      .select('resource_id, tag:tags(name)')
-      .in('resource_id', resourceIds)
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const map: Record<string, string> = {};
+    // Batch query to avoid URL length limits (Kong/nginx reject overly long GETs → 502)
+    const CHUNK = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < resourceIds.length; i += CHUNK) {
+      chunks.push(resourceIds.slice(i, i + CHUNK));
+    }
+    Promise.all(
+      chunks.map(ids =>
+        supabase
+          .from('resource_tags')
+          .select('resource_id, tag:tags(name)')
+          .in('resource_id', ids)
+      ),
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      for (const { data, error } of results) {
+        if (error || !data) continue;
         for (const row of data) {
           const rid = String(row.resource_id);
           const tag = row.tag as { name: string } | { name: string }[] | null;
@@ -415,8 +425,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
             map[rid] = map[rid] ? `${map[rid]} ${tagName}` : tagName;
           }
         }
-        setResourceTagNamesMap(map);
-      });
+      }
+      setResourceTagNamesMap(map);
+    });
   }, [resources, downloadedResources]);
 
   // Load trashed resources

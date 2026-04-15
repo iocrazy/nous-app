@@ -234,17 +234,27 @@ export const DownloadsView: React.FC = () => {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
-    supabase
-      .from('resource_tags')
-      .select('resource_id, tag:tags(name)')
-      .in('resource_id', resourceIds)
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const resourceToMediaId: Record<string, string> = {};
-        for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
-          resourceToMediaId[rd.id] = mediaId;
-        }
-        const map: Record<string, string> = {};
+    // Batch query to avoid URL length limits (Kong/nginx reject overly long GETs → 502)
+    const CHUNK = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < resourceIds.length; i += CHUNK) {
+      chunks.push(resourceIds.slice(i, i + CHUNK));
+    }
+    Promise.all(
+      chunks.map(ids =>
+        supabase
+          .from('resource_tags')
+          .select('resource_id, tag:tags(name)')
+          .in('resource_id', ids)
+      ),
+    ).then((results) => {
+      const resourceToMediaId: Record<string, string> = {};
+      for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
+        resourceToMediaId[rd.id] = mediaId;
+      }
+      const map: Record<string, string> = {};
+      for (const { data, error } of results) {
+        if (error || !data) continue;
         for (const row of data) {
           const mediaId = resourceToMediaId[String(row.resource_id)];
           if (!mediaId) continue;
@@ -254,8 +264,9 @@ export const DownloadsView: React.FC = () => {
             map[mediaId] = map[mediaId] ? `${map[mediaId]} ${tagName}` : tagName;
           }
         }
-        setTagSearchMap(map);
-      });
+      }
+      setTagSearchMap(map);
+    });
   }, [resourceDataMap]);
 
   // ─── Search handlers ──────────────────────────────
