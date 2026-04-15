@@ -177,8 +177,23 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
+            from app.services.unified_task_manager import get_task_manager
 
-            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id, resource_id)
+            # Create unified task for Task Center visibility
+            tracker = get_task_manager()
+            task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_summary",
+                title=f"Summarize: {platform_id}",
+                media_id=platform_id,
+                resource_id=resource_id,
+            )
+            await tracker.start(task_id)
+
+            await asyncio.to_thread(
+                generate_summary_task.delay,
+                platform_id, auth.user_id, resource_id, task_id,
+            )
             return {
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
@@ -332,8 +347,22 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
+            from app.services.unified_task_manager import get_task_manager
 
-            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id, _resource_id)
+            tracker = get_task_manager()
+            task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_summary",
+                title=f"Summarize: {platform_id}",
+                media_id=platform_id,
+                resource_id=_resource_id,
+            )
+            await tracker.start(task_id)
+
+            await asyncio.to_thread(
+                generate_summary_task.delay,
+                platform_id, auth.user_id, _resource_id, task_id,
+            )
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
             # No transcript, run full pipeline
