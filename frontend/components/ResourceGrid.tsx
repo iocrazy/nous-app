@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Clock,
   FolderOpen,
@@ -290,73 +291,78 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     <div className="flex-1 min-w-0 flex flex-col">
       {/* Mobile breadcrumb navigation */}
       <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
-        {isMobileSearchOpen ? (
-          <div className="flex items-center w-full gap-2 animate-in slide-in-from-right-4 duration-200">
-            <Search size={16} className="text-zinc-400 shrink-0" />
-            <input
-              autoFocus
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onQueryChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchQuery.trim()) {
-                  onAISearch(searchQuery, 'hybrid');
+        {(selectedFolderId || isRecycleView) && (
+          <button
+            onClick={() => {
+              if (isRecycleView) {
+                if (recycleFolderId) {
+                  setRecycleFolderId(null);
+                } else {
+                  navigate(resPath('/resources'));
                 }
-                if (e.key === 'Escape') {
-                  setIsMobileSearchOpen(false);
-                  onSearchClear();
-                }
-              }}
-              placeholder={t('resources.searchFiles')}
-              className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
-            />
-            <button
-              onClick={() => {
-                setIsMobileSearchOpen(false);
-                onSearchClear();
-              }}
-              className="p-1 text-zinc-400 hover:text-zinc-200"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        ) : (
-          <>
-            {(selectedFolderId || isRecycleView) && (
-              <button
-                onClick={() => {
-                  if (isRecycleView) {
-                    if (recycleFolderId) {
-                      setRecycleFolderId(null);
-                    } else {
-                      navigate(resPath('/resources'));
+              } else if (folderChain.length > 1) {
+                const parentId = folderChain[folderChain.length - 2]?.id;
+                navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
+              } else {
+                navigate(resPath('/resources'));
+              }
+            }}
+            className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
+          >
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        <div className="flex-1 min-w-0">
+          <Breadcrumb segments={breadcrumbSegments} />
+        </div>
+      </div>
+
+      {/* Mobile search overlay — floating pill top-right (matches DownloadsView) */}
+      {!isRecycleView && !isSharedView && createPortal(
+        <div className="md:hidden fixed top-2.5 right-3 z-40 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end">
+            {isMobileSearchOpen ? (
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                <input
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => onQueryChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim()) {
+                      onAISearch(searchQuery, 'hybrid');
                     }
-                  } else if (folderChain.length > 1) {
-                    const parentId = folderChain[folderChain.length - 2]?.id;
-                    navigate(resPath(parentId ? `/resources/folder/${parentId}` : '/resources'));
-                  } else {
-                    navigate(resPath('/resources'));
-                  }
-                }}
-                className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
-              >
-                <ChevronLeft size={22} />
-              </button>
-            )}
-            <div className="flex-1 min-w-0">
-              <Breadcrumb segments={breadcrumbSegments} />
-            </div>
-            {!isRecycleView && !isSharedView && (
+                    if (e.key === 'Escape') {
+                      setIsMobileSearchOpen(false);
+                      onSearchClear();
+                    }
+                  }}
+                  placeholder={t('resources.searchFiles')}
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                />
+                <button
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    onSearchClear();
+                  }}
+                  className="ml-2 text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
               <button
                 onClick={() => setIsMobileSearchOpen(true)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg transition-colors shrink-0"
+                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
               >
-                <Search size={20} />
+                <Search size={20} className="drop-shadow-md" />
               </button>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* Toolbar -- desktop only */}
       <div
