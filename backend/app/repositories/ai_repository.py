@@ -65,7 +65,7 @@ class AIRepository:
                 .maybe_single()
                 .execute()
             )
-            return result.data
+            return result.data if result else None
         except Exception as e:
             logger.error(f"Failed to get transcript for resource {resource_id}: {e}")
             return None
@@ -109,7 +109,7 @@ class AIRepository:
                 .maybe_single()
                 .execute()
             )
-            return result.data
+            return result.data if result else None
         except Exception as e:
             logger.error(f"Failed to get summary for resource {resource_id}: {e}")
             return None
