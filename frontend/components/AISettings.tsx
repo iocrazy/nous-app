@@ -74,10 +74,13 @@ const PROVIDER_META: Record<
   },
   doubao: {
     name: 'Doubao',
-    description: 'ByteDance cloud AI',
+    description: 'ByteDance Ark — 豆包大模型',
     icon: <Globe size={18} />,
     color: 'violet',
-    models: ['doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
+    defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
+    summaryModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite'],
+    analysisModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215'],
   },
   minimax: {
     name: 'MiniMax',
