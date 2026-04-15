@@ -148,8 +148,8 @@ function AppLayoutInner() {
   // mobile uses natural scroll (no h-screen) so infinite scroll works
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'resources'
-      ? 'pt-14 pb-20 sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden'
-      : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
+      ? 'pt-12 pb-20 sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden'
+      : 'px-4 pt-12 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
   }`;
 
   // Helper: build team-scoped path
