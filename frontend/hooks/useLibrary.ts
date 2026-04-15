@@ -207,7 +207,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           loadMoreLibrary();
         }
       },
-      { threshold: 0.1, rootMargin: '100px' }
+      { threshold: 0.01, rootMargin: '600px' }
     );
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
