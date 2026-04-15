@@ -806,15 +806,6 @@ export const DownloadsView: React.FC = () => {
           </div>
         )}
 
-        {/* Mobile header — hidden on feed view and desktop */}
-        <div className={`md:hidden flex items-center gap-2 mb-1 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
-          <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
-          {!isLoadingLibrary && (
-            <span className="text-[11px] text-zinc-600 tabular-nums">
-              {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
-            </span>
-          )}
-        </div>
 
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">

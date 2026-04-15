@@ -289,9 +289,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   return (
     <div className="flex-1 min-w-0 flex flex-col">
-      {/* Mobile breadcrumb navigation */}
-      <div className="md:hidden border-b border-zinc-800/60 px-3 py-2.5 min-h-[40px] flex items-center gap-2">
-        {(selectedFolderId || isRecycleView) && (
+      {/* Mobile breadcrumb navigation — hidden at root, shown inside folders */}
+      {(selectedFolderId || isRecycleView) && (
+        <div className="md:hidden px-3 py-2.5 min-h-[40px] flex items-center gap-2">
           <button
             onClick={() => {
               if (isRecycleView) {
@@ -311,11 +311,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           >
             <ChevronLeft size={22} />
           </button>
-        )}
-        <div className="flex-1 min-w-0">
-          <Breadcrumb segments={breadcrumbSegments} />
+          <div className="flex-1 min-w-0">
+            <Breadcrumb segments={breadcrumbSegments} />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Mobile search overlay — floating pill top-right (matches DownloadsView) */}
       {!isRecycleView && !isSharedView && createPortal(
