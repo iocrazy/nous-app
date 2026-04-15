@@ -5,6 +5,7 @@ import { StatsChart } from '../components/StatsChart';
 import { TasksPanel } from '../components/TasksPanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { SystemMonitorPanel } from '../components/SystemMonitorPanel';
+import { AdminNousModelsPage } from './admin/AdminNousModelsPage';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../hooks/useNavigation';
 import { useTeamContext } from '../contexts/TeamContext';
@@ -94,6 +95,7 @@ export function DashboardPage() {
       {dashboardSubView === 'tasks' && <TasksPanel />}
       {dashboardSubView === 'logs' && <LogsPanel />}
       {dashboardSubView === 'monitor' && userProfile.role === 'admin' && <SystemMonitorPanel />}
+      {dashboardSubView === 'nous-models' && userProfile.role === 'admin' && <AdminNousModelsPage />}
     </div>
   );
 }

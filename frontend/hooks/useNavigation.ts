@@ -22,7 +22,7 @@ export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId 
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'tasks' | 'logs' | 'monitor'>('overview');
+  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'tasks' | 'logs' | 'monitor' | 'nous-models'>('overview');
   const [isDashboardMenuOpen, setIsDashboardMenuOpen] = useState(false);
 
   // Dashboard Stats
