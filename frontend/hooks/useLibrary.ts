@@ -98,7 +98,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
-        const result = await fetchLibraryPaginated(0);
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+        const result = await fetchLibraryPaginated(0, isMobile ? 10 : 20);
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
@@ -127,7 +128,8 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setIsLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
-      const result = await fetchLibraryPaginated(nextPage);
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      const result = await fetchLibraryPaginated(nextPage, isMobile ? 10 : 20);
       if (result.data.length > 0) {
         setLibrary(prev => [...prev, ...result.data]);
         setCurrentPage(nextPage);
