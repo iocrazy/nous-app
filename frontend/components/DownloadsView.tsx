@@ -752,22 +752,13 @@ export const DownloadsView: React.FC = () => {
         }}
       >
         {/* Mobile header — hidden on feed view and desktop */}
-        <div className={`md:hidden flex items-center justify-between mb-3 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
-            {!isLoadingLibrary && (
-              <span className="text-[11px] text-zinc-600 tabular-nums">
-                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={loadLibraryData}
-            disabled={isLoadingLibrary}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
-          >
-            <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
-          </button>
+        <div className={`md:hidden flex items-center gap-2 mb-1 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
+          <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
+          {!isLoadingLibrary && (
+            <span className="text-[11px] text-zinc-600 tabular-nums">
+              {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
+            </span>
+          )}
         </div>
 
         {libraryError && (
