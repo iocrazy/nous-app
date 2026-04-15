@@ -85,7 +85,9 @@ export const router = createBrowserRouter([
       ]},
 
       // Admin routes (no team scope, admin role required)
-      { path: 'admin/nous-models', element: <SuspenseWrap><AdminNousModelsPage /></SuspenseWrap> },
+      { path: 'admin', element: <AppLayout />, children: [
+        { path: 'nous-models', element: <SuspenseWrap><AdminNousModelsPage /></SuspenseWrap> },
+      ]},
 
       // Team-scoped routes
       {
