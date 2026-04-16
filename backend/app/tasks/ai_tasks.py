@@ -605,7 +605,8 @@ def chain_ai_pipeline(
     except Exception as e:
         logger.warning(f"[AI] Dedup check failed, proceeding normally: {e}")
 
-    # Check if audio file already exists BEFORE creating tasks
+    # Check if audio file already exists BEFORE creating tasks.
+    # Priority: DB music_download_path → disk audio.m4a → disk audio.mp3
     existing_audio = None
     if transcript_bool:
         try:
@@ -615,13 +616,23 @@ def chain_ai_pipeline(
             video = run_async(repo.get_by_platform_id(platform_id))
             if video:
                 base_path = Utils.get_download_base_path()
-                download_path = video.get("download_path", "")
-                video_dir = os.path.dirname(os.path.join(base_path, download_path))
-                for ext in ["audio.m4a", "audio.mp3", f"{platform_id}_audio.wav"]:
-                    candidate = os.path.join(video_dir, ext)
-                    if os.path.exists(candidate):
-                        existing_audio = candidate
-                        break
+
+                # 1. Check DB music_download_path first (written by download task)
+                music_path = video.get("music_download_path")
+                if music_path and not music_path.startswith("http"):
+                    full = os.path.join(base_path, music_path)
+                    if os.path.exists(full):
+                        existing_audio = full
+
+                # 2. Fallback: scan disk for known audio filenames
+                if not existing_audio:
+                    download_path = video.get("download_path", "")
+                    video_dir = os.path.dirname(os.path.join(base_path, download_path))
+                    for name in ["audio.m4a", "audio.mp3"]:
+                        candidate = os.path.join(video_dir, name)
+                        if os.path.exists(candidate):
+                            existing_audio = candidate
+                            break
         except Exception as e:
             logger.debug(f"[AI] Audio existence check failed: {e}")
 
