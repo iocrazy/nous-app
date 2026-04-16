@@ -173,7 +173,8 @@ class DownloaderService:
 
     @staticmethod
     async def download_file(
-        url: str, file_path: str, headers: Dict[str, Any] = None, progress_tracker=None
+        url: str, file_path: str, headers: Dict[str, Any] = None, progress_tracker=None,
+        platform_id: str = None,
     ) -> bool:
         """
         Download a single file with optional progress tracking
@@ -183,12 +184,30 @@ class DownloaderService:
             file_path: Save path
             headers: Request headers
             progress_tracker: Optional progress tracker (DownloadProgressTracker instance)
+            platform_id: Optional platform ID for looking up cached browser cookies (Douyin)
 
         Returns:
             bool: Whether download was successful
         """
         if not headers:
             headers = Utils.get_headers()
+        else:
+            headers = dict(headers)  # copy to avoid mutating caller's dict
+
+        # Douyin CDN returns 403 for httpx requests. If DrissionPage cached browser
+        # cookies during parse, merge them into the Cookie header.
+        if platform_id and "douyin" in url.lower():
+            try:
+                from app.core.redis import get_sync_redis
+                r = get_sync_redis()
+                cached = r.get(f"douyin_browser_cookies:{platform_id}")
+                if cached:
+                    cookie_value = cached.decode() if isinstance(cached, bytes) else cached
+                    existing = headers.get("Cookie", "")
+                    headers["Cookie"] = f"{existing}; {cookie_value}" if existing else cookie_value
+                    logger.debug(f"[Download/File] Using cached browser cookies for {platform_id}")
+            except Exception as e:
+                logger.debug(f"[Download/File] Cookie lookup failed: {e}")
 
         try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -485,7 +504,8 @@ class DownloaderService:
             for idx, url in enumerate(video_urls):
                 logger.info(f"[Download/Video] Trying URL {idx+1}/{len(video_urls)} for {platform_id}: {url[:100]}")
                 success = await DownloaderService.download_file(
-                    url, video_full_path, headers, progress_tracker
+                    url, video_full_path, headers, progress_tracker,
+                    platform_id=platform_id,
                 )
                 if not success:
                     download_errors.append(f"URL{idx+1}: download_file returned False")
@@ -586,7 +606,8 @@ class DownloaderService:
 
     @staticmethod
     async def download_slide_item(
-        index: int, url_list: list, slides_dir: str, is_video: bool, headers: dict
+        index: int, url_list: list, slides_dir: str, is_video: bool, headers: dict,
+        platform_id: str = None,
     ) -> dict:
         """Download a single slide item (image or video clip) to the slides/ subfolder.
 
@@ -614,7 +635,7 @@ class DownloaderService:
 
         for j, url in enumerate(url_list):
             try:
-                if await DownloaderService.download_file(url, file_path, headers):
+                if await DownloaderService.download_file(url, file_path, headers, platform_id=platform_id):
                     return {"success": True, "path": file_path}
             except Exception as e:
                 logger.warning(f"Slide {filename} URL {j} failed: {e}")
@@ -829,7 +850,8 @@ class DownloaderService:
                     for i, (url_list, is_video) in enumerate(slide_items):
                         task = tg.create_task(
                             DownloaderService.download_slide_item(
-                                i, url_list, slides_dir, is_video, headers
+                                i, url_list, slides_dir, is_video, headers,
+                                platform_id=platform_id,
                             )
                         )
                         download_tasks.append(task)

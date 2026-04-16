@@ -421,6 +421,31 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                     continue  # 继续while循环，等待下一个响应
 
                             logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
+                            # Cache browser cookies in Redis so downloader can reuse the authenticated
+                            # session. Douyin video CDN returns 403 without these cookies.
+                            try:
+                                cookie_parts = []
+                                for c in instance.page.cookies():
+                                    domain = (c.get("domain") or "").lower()
+                                    if "douyin" in domain:
+                                        cookie_parts.append(f"{c['name']}={c.get('value', '')}")
+                                if cookie_parts:
+                                    cookie_header = "; ".join(cookie_parts)
+                                    try:
+                                        from app.core.redis import get_sync_redis
+                                        r = get_sync_redis()
+                                        redis_key = f"douyin_browser_cookies:{target_aweme_id}"
+                                        r.setex(redis_key, 600, cookie_header)  # 10 min TTL
+                                        logger.info(
+                                            f"[DrissionPage] Cached {len(cookie_parts)} cookies to Redis "
+                                            f"(key={redis_key})"
+                                        )
+                                    except Exception as redis_err:
+                                        logger.warning(
+                                            f"[DrissionPage] Failed to cache cookies to Redis: {redis_err}"
+                                        )
+                            except Exception as cookie_err:
+                                logger.warning(f"[DrissionPage] Failed to export cookies: {cookie_err}")
                             return aweme_response
 
                         else:
