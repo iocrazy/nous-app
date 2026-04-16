@@ -56,6 +56,49 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
+    # Record deployment log — read build-info.json baked in by CI
+    try:
+        import json
+        from pathlib import Path
+
+        build_info_path = Path("/app/build-info.json")
+        if build_info_path.exists():
+            info = json.loads(build_info_path.read_text(encoding="utf-8"))
+            sha = info.get("commit_sha")
+            if sha:
+                from app.db import get_async_supabase_admin
+                sb = await get_async_supabase_admin()
+                exists = await (
+                    sb.table("deployment_logs")
+                    .select("id")
+                    .eq("service", "backend")
+                    .eq("commit_sha", sha)
+                    .limit(1)
+                    .execute()
+                )
+                if exists.data:
+                    logger.info(f"Deployment {sha} already logged, skip")
+                else:
+                    row = {
+                        "service": info.get("service", "backend"),
+                        "version": info.get("version") or "latest",
+                        "commit_sha": sha,
+                        "commit_count": int(info.get("commit_count") or 0),
+                        "commits": info.get("commits") or [],
+                        "summary": info.get("summary") or "",
+                        "deployed_by": info.get("deployed_by") or "ci",
+                        "status": "success",
+                        "metadata": {"run_id": info.get("run_id")},
+                    }
+                    await sb.table("deployment_logs").insert(row).execute()
+                    logger.success(
+                        f"Deployment logged: {sha} ({row['commit_count']} commits)"
+                    )
+        else:
+            logger.debug("build-info.json not found, skip deployment log")
+    except Exception as e:
+        logger.warning(f"Failed to record deployment log: {e}")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     try:
