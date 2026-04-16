@@ -256,19 +256,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
 
-                # Broaden listener to cover Douyin API variants:
-                # - aweme/post/ : user post lists
-                # - aweme/detail/ : classic video detail
-                # - note/detail/ : image-text (note) pages
-                # - aweme/v1/web/ : newer web-endpoint videos
-                # - aweme/v2/ : v2 variants
-                api_patterns = [
-                    "aweme/post/",
-                    "aweme/detail/",
-                    "note/detail/",
-                    "aweme/v1/web/",
-                    "aweme/v2/",
-                ]
+                api_patterns = ["aweme/post/", "aweme/detail/"]
                 instance.page.listen.start(api_patterns)
 
                 logger.debug("API请求监听已启动")
