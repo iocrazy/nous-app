@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
-import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
@@ -376,6 +376,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
         {/* AI Status Icons — prefer resource status over parsed_media status */}
         <div className="flex items-center gap-1.5">
+          <div title={data.extract_audio_path || data.music_download_path ? 'Audio extracted' : 'No audio'}>
+            <AudioLines size={11} className={data.extract_audio_path || data.music_download_path ? 'text-emerald-400' : 'text-zinc-700'} />
+          </div>
           <div title={`Transcript: ${aiStatus?.transcript_status || data.transcript_status || 'none'}`}>
             <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status)} />
           </div>
