@@ -149,34 +149,44 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
             _update_status(platform_id, "transcript_status", "failed")
             return {"status": "failed", "error": f"File not found: {full_video_path}"}
 
-        # Output audio path alongside the video
+        # Reuse existing audio file (m4a/mp3) if present, skip ffmpeg extraction
         video_dir = os.path.dirname(full_video_path)
-        audio_filename = f"{platform_id}_audio.wav"
-        audio_path = os.path.join(video_dir, audio_filename)
+        existing_audio = None
+        for name in ["audio.m4a", "audio.mp3"]:
+            candidate = os.path.join(video_dir, name)
+            if os.path.exists(candidate):
+                existing_audio = candidate
+                break
 
-        # Extract audio using ffmpeg
-        import subprocess
+        if existing_audio:
+            audio_path = existing_audio
+            logger.info(f"[AI] Reusing existing audio: {audio_path}")
+        else:
+            audio_filename = f"{platform_id}_audio.wav"
+            audio_path = os.path.join(video_dir, audio_filename)
 
-        cmd = [
-            "ffmpeg",
-            "-i",
-            full_video_path,
-            "-vn",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-y",
-            audio_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            import subprocess
 
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
+            cmd = [
+                "ffmpeg",
+                "-i",
+                full_video_path,
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-y",
+                audio_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-        logger.success(f"[AI] Audio extracted: {audio_path}")
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
+
+            logger.success(f"[AI] Audio extracted: {audio_path}")
         _update_unified_progress(unified_task_id, 100, "Audio extracted")
         _complete_unified(unified_task_id)
         _start_unified(next_task_id)
@@ -269,7 +279,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             base_path = Utils.get_download_base_path()
             download_path = video.get("download_path", "")
             video_dir = os.path.dirname(os.path.join(base_path, download_path))
-            for candidate_name in ["audio.mp3", f"{platform_id}_audio.wav"]:
+            for candidate_name in ["audio.m4a", "audio.mp3", f"{platform_id}_audio.wav"]:
                 candidate = os.path.join(video_dir, candidate_name)
                 if os.path.exists(candidate):
                     audio_path = candidate
@@ -610,7 +620,7 @@ def chain_ai_pipeline(
                 base_path = Utils.get_download_base_path()
                 download_path = video.get("download_path", "")
                 video_dir = os.path.dirname(os.path.join(base_path, download_path))
-                for ext in ["audio.mp3", f"{platform_id}_audio.wav"]:
+                for ext in ["audio.m4a", "audio.mp3", f"{platform_id}_audio.wav"]:
                     candidate = os.path.join(video_dir, ext)
                     if os.path.exists(candidate):
                         existing_audio = candidate
