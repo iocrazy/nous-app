@@ -377,7 +377,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         {/* AI Status Icons — prefer resource status over parsed_media status */}
         <div className="flex items-center gap-1.5">
           <div title={data.extract_audio_path || data.music_download_path ? 'Audio extracted' : 'No audio'}>
-            <AudioLines size={11} className={data.extract_audio_path || data.music_download_path ? 'text-cyan-400' : 'text-zinc-700'} />
+            <AudioLines size={11} className={data.extract_audio_path || data.music_download_path ? 'text-emerald-400' : 'text-zinc-700'} />
           </div>
           <div title={`Transcript: ${aiStatus?.transcript_status || data.transcript_status || 'none'}`}>
             <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status, 'text-indigo-400')} />
