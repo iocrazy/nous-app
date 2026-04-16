@@ -62,10 +62,10 @@ async function showPushView(config) {
   settingsView.style.display = 'none';
   pushView.style.display = 'block';
 
-  // Get current tab URL
+  // Pre-fill with current tab URL, but input is editable so user can paste anything
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   currentTabUrl = tab?.url || '';
-  currentUrlEl.textContent = currentTabUrl || 'No URL';
+  currentUrlEl.value = currentTabUrl;
   currentUrlEl.title = currentTabUrl;
 
   // Load tags
@@ -172,7 +172,8 @@ function updatePushBtn() {
 
 // --- Push Action ---
 pushBtn.addEventListener('click', async () => {
-  if (!currentTabUrl) {
+  const urlToPush = (currentUrlEl.value || '').trim();
+  if (!urlToPush) {
     pushStatus.textContent = 'No URL to push';
     pushStatus.className = 'status error';
     return;
@@ -187,7 +188,7 @@ pushBtn.addEventListener('click', async () => {
   try {
     // Push URL with tags in a single request
     const fetchBody = {
-      url: currentTabUrl,
+      url: urlToPush,
       video_bool: true,
       cover_bool: true,
     };

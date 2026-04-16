@@ -86,16 +86,24 @@ button:disabled {
 
 /* Push view */
 .current-url {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   font-size: 12px;
-  color: #a1a1aa;
+  color: #e4e4e7;
   background: #18181b;
   border: 1px solid #27272a;
   border-radius: 6px;
   padding: 6px 10px;
   margin-bottom: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  outline: none;
+  font-family: inherit;
+}
+.current-url:focus {
+  border-color: #6366f1;
+}
+.current-url::placeholder {
+  color: #52525b;
 }
 
 .section-label-row {
