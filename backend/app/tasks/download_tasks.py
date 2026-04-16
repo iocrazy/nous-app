@@ -1405,6 +1405,24 @@ def download_unified_task(
             except Exception as e:
                 logger.warning(f"[Download/DB] Failed to update resource status for {platform_id}: {e}")
 
+        # Generate thumbnail + preview sprite for hover scrub
+        if resource_id:
+            try:
+                from app.services.thumbnail_service import ThumbnailService
+                from app.repositories.resources_repository import ResourcesRepository as _RR3
+                _res3 = _RR3()
+                _resource = run_async(_res3.get_resource_by_id(resource_id))
+                if _resource and _resource.get("file_path") and _resource.get("mime_type", "").startswith("video/"):
+                    thumb_svc = ThumbnailService()
+                    run_async(thumb_svc.generate_thumbnail(
+                        resource_id=resource_id,
+                        file_path=_resource["file_path"],
+                        mime_type=_resource["mime_type"],
+                    ))
+                    logger.info(f"[Download/Post] Thumbnail + sprite generated for resource={resource_id}")
+            except Exception as e:
+                logger.warning(f"[Download/Post] Thumbnail generation failed for resource={resource_id}: {e}")
+
         # Chain HLS transcode for video files
         _maybe_chain_transcode(platform_id, user_id)
 
