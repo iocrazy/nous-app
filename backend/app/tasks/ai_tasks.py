@@ -152,7 +152,7 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
         # Reuse existing audio file (m4a/mp3) if present, skip ffmpeg extraction
         video_dir = os.path.dirname(full_video_path)
         existing_audio = None
-        for name in ["audio.m4a", "audio.mp3", "audio.wav"]:
+        for name in ["audio.m4a", "audio.mp3"]:
             candidate = os.path.join(video_dir, name)
             if os.path.exists(candidate):
                 existing_audio = candidate
@@ -162,7 +162,7 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
             audio_path = existing_audio
             logger.info(f"[AI] Reusing existing audio: {audio_path}")
         else:
-            audio_path = os.path.join(video_dir, "audio.mp3")
+            audio_path = os.path.join(video_dir, "audio.m4a")
 
             import subprocess
 
@@ -171,8 +171,8 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
                 "-i",
                 full_video_path,
                 "-vn",
-                "-codec:a", "libmp3lame",
-                "-q:a", "4",
+                "-codec:a", "aac",
+                "-b:a", "128k",
                 "-ar", "16000",
                 "-ac", "1",
                 "-y",
@@ -276,7 +276,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             base_path = Utils.get_download_base_path()
             download_path = video.get("download_path", "")
             video_dir = os.path.dirname(os.path.join(base_path, download_path))
-            for candidate_name in ["audio.m4a", "audio.mp3", "audio.wav", f"{platform_id}_audio.wav"]:
+            for candidate_name in ["audio.m4a", "audio.mp3"]:
                 candidate = os.path.join(video_dir, candidate_name)
                 if os.path.exists(candidate):
                     audio_path = candidate
