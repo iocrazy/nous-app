@@ -493,16 +493,46 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
 
         # Load user AI settings
         ai_settings = _get_ai_settings(user_id)
-        summary_model = ai_settings.get("default_summary_model", "gpt-4o-mini")
 
-        # Determine provider from settings
-        provider_key = "openai"
+        # Read summary task assignment (e.g. "openai:gpt-4o-mini", "volcengine:doubao-...")
+        summary_assignment = ai_settings.get("task_assignment", {}).get(
+            "summary", f"openai:{ai_settings.get('default_summary_model', 'gpt-4o-mini')}"
+        )
+
+        # Resolve Nous platform models to their actual provider
+        if summary_assignment.startswith("nous-"):
+            from app.repositories.nous_repository import NousRepository
+            nous_repo = NousRepository()
+            nous_model = run_async(nous_repo.get_by_name(summary_assignment))
+            if nous_model:
+                summary_assignment = f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                ai_settings = {
+                    **ai_settings,
+                    "ai_providers": {
+                        nous_model["actual_provider"]: {
+                            "api_key": nous_model["api_key"],
+                            "app_id": nous_model.get("app_id", ""),
+                            "base_url": nous_model.get("base_url", ""),
+                            "enabled": True,
+                        }
+                    },
+                }
+                logger.info(f"[AI] Using Nous model '{nous_model['name']}' -> {summary_assignment}")
+
+        # Split provider:model
+        if ":" in summary_assignment:
+            provider_key, summary_model = summary_assignment.split(":", 1)
+        else:
+            provider_key, summary_model = "openai", summary_assignment
+
         provider_config = _get_provider_config(ai_settings, provider_key)
 
-        if not provider_config.get("api_key"):
+        # Fallback: use global OpenAI key if user didn't configure a per-user one for OpenAI
+        if provider_key == "openai" and not provider_config.get("api_key"):
             from app.core.config import settings
-
             provider_config["api_key"] = settings.OPENAI_API_KEY
+
+        logger.info(f"[AI] Summary using provider={provider_key}, model={summary_model}")
 
         service = LLMAnalysisService(
             provider_key=provider_key,

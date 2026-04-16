@@ -250,6 +250,7 @@ class AIProviderFactory:
         "openai": OpenAIProvider,
         "deepseek": DeepSeekProvider,
         "doubao": DoubaoProvider,
+        "volcengine": DoubaoProvider,  # 火山引擎 = doubao LLM (alias)
         "minimax": MiniMaxProvider,
         "kimi": KimiProvider,
         "qwen": QwenProvider,
