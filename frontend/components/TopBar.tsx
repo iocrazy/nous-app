@@ -343,7 +343,7 @@ const AvatarMenu: React.FC<{
 }> = ({ user, onSignOut, onOpenSettings }) => {
   const { t } = useTranslation();
   return (
-    <PanelShell className="w-56 sm:left-0 sm:right-auto">
+    <PanelShell className="w-56">
       {/* User info header */}
       <div className="px-4 py-3 border-b border-zinc-800">
         <p className="text-sm font-semibold text-zinc-200 truncate">{user.name}</p>
@@ -472,8 +472,49 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 hidden sm:flex items-center justify-between px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
-      {/* Left: Avatar Menu — desktop only (mobile: bottom tab "Me") */}
+    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-30 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
+      {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
+      <div className="hidden sm:block">
+        <LanguageSwitcher />
+      </div>
+
+      {/* Search — desktop only (Phase 2+) */}
+      <div className="hidden sm:block">
+        <IconButton
+          title={t('topbar.search')}
+          onClick={() => { /* Cmd+K search — Phase 2+ */ }}
+        >
+          <Search size={18} />
+        </IconButton>
+      </div>
+
+      {/* Task Center — hidden on mobile (accessible via MobileProfilePage) */}
+      <div ref={taskCenterRef} className="relative hidden sm:block">
+        <IconButton
+          title={t('topbar.taskCenter')}
+          onClick={() => togglePanel('taskCenter')}
+          active={openPanel === 'taskCenter'}
+          badge={badgeCount > 0 ? badgeCount : undefined}
+        >
+          <ListTodo size={18} />
+        </IconButton>
+        {openPanel === 'taskCenter' && <TaskCenterPanel />}
+      </div>
+
+      {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}
+      <div ref={notificationsRef} className="relative hidden sm:block">
+        <IconButton
+          title={t('topbar.notifications')}
+          onClick={() => togglePanel('notifications')}
+          active={openPanel === 'notifications'}
+          badge={unreadCount}
+        >
+          <Bell size={18} />
+        </IconButton>
+        {openPanel === 'notifications' && <NotificationsPanel />}
+      </div>
+
+      {/* Avatar Menu — desktop only, stays on far right */}
       <div ref={avatarRef} className="relative hidden sm:block">
         <button
           title={t('topbar.account')}
@@ -488,50 +529,6 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         {openPanel === 'avatar' && user && (
           <AvatarMenu user={user} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
         )}
-      </div>
-
-      {/* Right: tools */}
-      <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
-        {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
-        <div className="hidden sm:block">
-          <LanguageSwitcher />
-        </div>
-
-        {/* Search — desktop only (Phase 2+) */}
-        <div className="hidden sm:block">
-          <IconButton
-            title={t('topbar.search')}
-            onClick={() => { /* Cmd+K search — Phase 2+ */ }}
-          >
-            <Search size={18} />
-          </IconButton>
-        </div>
-
-        {/* Task Center — hidden on mobile (accessible via MobileProfilePage) */}
-        <div ref={taskCenterRef} className="relative hidden sm:block">
-          <IconButton
-            title={t('topbar.taskCenter')}
-            onClick={() => togglePanel('taskCenter')}
-            active={openPanel === 'taskCenter'}
-            badge={badgeCount > 0 ? badgeCount : undefined}
-          >
-            <ListTodo size={18} />
-          </IconButton>
-          {openPanel === 'taskCenter' && <TaskCenterPanel />}
-        </div>
-
-        {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}
-        <div ref={notificationsRef} className="relative hidden sm:block">
-          <IconButton
-            title={t('topbar.notifications')}
-            onClick={() => togglePanel('notifications')}
-            active={openPanel === 'notifications'}
-            badge={unreadCount}
-          >
-            <Bell size={18} />
-          </IconButton>
-          {openPanel === 'notifications' && <NotificationsPanel />}
-        </div>
       </div>
     </header>
   );
