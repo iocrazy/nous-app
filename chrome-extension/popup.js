@@ -32,7 +32,7 @@ function showSettingsView() {
   settingsView.style.display = 'block';
   pushView.style.display = 'none';
   chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
-    if (result.apiUrl) apiUrlInput.value = result.apiUrl;
+    apiUrlInput.value = result.apiUrl || 'https://mediahubserver.heygo.cn:88';
     if (result.apiKey) apiKeyInput.value = result.apiKey;
   });
 }
