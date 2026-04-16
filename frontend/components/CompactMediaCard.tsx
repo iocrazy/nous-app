@@ -34,12 +34,12 @@ interface CompactMediaCardProps {
 }
 
 // Helper to get AI status icon styling
-const getAIStatusClass = (status?: string): string => {
+const getAIStatusClass = (status?: string, completedColor: string = 'text-emerald-400'): string => {
   switch (status) {
     case 'processing':
       return 'animate-spin text-indigo-400';
     case 'completed':
-      return 'text-emerald-400';
+      return completedColor;
     case 'failed':
       return 'text-red-400';
     default:
@@ -377,16 +377,16 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         {/* AI Status Icons — prefer resource status over parsed_media status */}
         <div className="flex items-center gap-1.5">
           <div title={data.extract_audio_path || data.music_download_path ? 'Audio extracted' : 'No audio'}>
-            <Mic size={11} className={data.extract_audio_path || data.music_download_path ? 'text-emerald-400' : 'text-zinc-700'} />
+            <Mic size={11} className={data.extract_audio_path || data.music_download_path ? 'text-cyan-400' : 'text-zinc-700'} />
           </div>
           <div title={`Transcript: ${aiStatus?.transcript_status || data.transcript_status || 'none'}`}>
-            <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status)} />
+            <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status, 'text-indigo-400')} />
           </div>
           <div title={`Summary: ${aiStatus?.summary_status || data.summary_status || 'none'}`}>
-            <Sparkles size={11} className={getAIStatusClass(aiStatus?.summary_status || data.summary_status)} />
+            <Sparkles size={11} className={getAIStatusClass(aiStatus?.summary_status || data.summary_status, 'text-amber-400')} />
           </div>
           <div title={`Analysis: ${aiStatus?.visual_analysis_status || data.visual_analysis_status || 'none'}`}>
-            <Eye size={11} className={getAIStatusClass(aiStatus?.visual_analysis_status || data.visual_analysis_status)} />
+            <Eye size={11} className={getAIStatusClass(aiStatus?.visual_analysis_status || data.visual_analysis_status, 'text-violet-400')} />
           </div>
         </div>
 
