@@ -184,6 +184,13 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
 
             logger.success(f"[AI] Audio extracted: {audio_path}")
+
+            # Write extract_audio_path to DB
+            from app.core.utils import Utils as _Utils
+            _base = _Utils.get_download_base_path()
+            _rel = os.path.relpath(audio_path, _base)
+            run_async(MediaRepository().update(platform_id, {"extract_audio_path": _rel}))
+
         _update_unified_progress(unified_task_id, 100, "Audio extracted")
         _complete_unified(unified_task_id)
         _start_unified(next_task_id)
@@ -606,7 +613,7 @@ def chain_ai_pipeline(
         logger.warning(f"[AI] Dedup check failed, proceeding normally: {e}")
 
     # Check if audio file already exists BEFORE creating tasks.
-    # Priority: DB music_download_path → disk audio.m4a → disk audio.mp3
+    # Priority: DB extract_audio_path → DB music_download_path → disk audio.m4a/mp3
     existing_audio = None
     if transcript_bool:
         try:
@@ -617,12 +624,14 @@ def chain_ai_pipeline(
             if video:
                 base_path = Utils.get_download_base_path()
 
-                # 1. Check DB music_download_path first (written by download task)
-                music_path = video.get("music_download_path")
-                if music_path and not music_path.startswith("http"):
-                    full = os.path.join(base_path, music_path)
-                    if os.path.exists(full):
-                        existing_audio = full
+                # 1. Check DB extract_audio_path (written by _extract_audio_from_video)
+                for db_field in ["extract_audio_path", "music_download_path"]:
+                    db_path = video.get(db_field)
+                    if db_path and not db_path.startswith("http"):
+                        full = os.path.join(base_path, db_path)
+                        if os.path.exists(full):
+                            existing_audio = full
+                            break
 
                 # 2. Fallback: scan disk for known audio filenames
                 if not existing_audio:
