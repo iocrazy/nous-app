@@ -544,12 +544,31 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         }
 
     except Exception as e:
+        from celery.exceptions import Retry as _CeleryRetry
+        # Celery's Retry is a subclass of Exception — let it propagate unchanged
+        if isinstance(e, _CeleryRetry):
+            raise
         logger.error(f"[AI] Summary generation failed for {platform_id}: {e}")
-        if self.request.retries < self.max_retries:
+
+        err_msg = str(e)[:200]
+        retrying = self.request.retries < self.max_retries
+        if retrying:
+            # Update unified_task with retry progress so user sees it's not dead
+            try:
+                from app.services.unified_task_manager import get_task_manager
+                _tracker = get_task_manager()
+                run_async(_tracker.update_progress(
+                    unified_task_id,
+                    10,
+                    subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries}): {err_msg}",
+                ))
+            except Exception:
+                pass
             raise self.retry(exc=e)
+
         _update_resource_status(resource_id, "summary_status", "failed")
         _update_status(platform_id, "summary_status", "failed")
-        _fail_unified(unified_task_id, f"Summary generation failed: {e}")
+        _fail_unified(unified_task_id, f"Summary generation failed: {err_msg}")
         run_async(
             log_user_action(
                 user_id=user_id,
@@ -557,10 +576,10 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
                 message=f"Summary generation failed: {platform_id}",
                 status="error",
                 aweme_id=platform_id,
-                details={"error": str(e)[:200], "model": summary_model},
+                details={"error": err_msg, "model": summary_model},
             )
         )
-        return {"status": "failed", "platform_id": platform_id, "error": str(e)}
+        return {"status": "failed", "platform_id": platform_id, "error": err_msg}
 
 
 def chain_ai_pipeline(

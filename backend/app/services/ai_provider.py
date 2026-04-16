@@ -64,7 +64,7 @@ class OpenAIProvider(AIProvider):
         self, api_key: str = "", base_url: str = "", model: str = "gpt-4o", **kwargs
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
-        client_kwargs = {"api_key": api_key}
+        client_kwargs = {"api_key": api_key, "timeout": 120.0, "max_retries": 2}
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)

@@ -28,7 +28,7 @@ async def find_candidates(limit: int | None) -> list[dict]:
         supabase.table("resources")
         .select("id,file_path,mime_type,thumbnail_path")
         .is_("thumbnail_path", "null")
-        .not_.is_("file_path", "null")
+        .neq("file_path", "")
         .eq("is_trashed", False)
     )
     if limit:
