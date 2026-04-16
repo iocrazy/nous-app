@@ -111,6 +111,9 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
+            "--socket-timeout", "15",
+            "--retries", "2",
+            *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
             url,
         ]
@@ -121,10 +124,19 @@ class YtdlpService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            # Keep timeout < Celery's soft_time_limit (120s) so we surface the
+            # real stderr instead of getting killed with SoftTimeLimitExceeded.
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90)
         except asyncio.TimeoutError:
-            logger.error(f"[yt-dlp] Metadata fetch timed out: {url}")
-            raise RuntimeError(f"yt-dlp metadata fetch timed out for {url}")
+            try:
+                proc.kill()
+                # Try to read whatever stderr yt-dlp has written so far
+                _out, _err = await asyncio.wait_for(proc.communicate(), timeout=2)
+                stderr_snippet = _err.decode("utf-8", errors="replace")[:500] if _err else ""
+            except Exception:
+                stderr_snippet = ""
+            logger.error(f"[yt-dlp] Metadata fetch timed out after 90s: {url}\n--- stderr ---\n{stderr_snippet}")
+            raise RuntimeError(f"yt-dlp timed out (90s). Likely network unreachable. stderr: {stderr_snippet[:200]}")
 
         if proc.returncode != 0:
             error_msg = stderr.decode("utf-8", errors="replace").strip()
@@ -177,6 +189,7 @@ class YtdlpService:
             "--newline",
             "--progress-template",
             "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
             "-o",
             output_template,
@@ -291,6 +304,7 @@ class YtdlpService:
             "0",  # Best quality
             "--no-playlist",
             "--no-warnings",
+            *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
             "-o",
             output_template,
@@ -455,6 +469,34 @@ class YtdlpService:
         except Exception as e:
             logger.warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
         return None
+
+    @staticmethod
+    def _get_proxy_args(url: str) -> list[str]:
+        """Return ['--proxy', 'http://...'] for platforms that need it.
+
+        Reads from env vars in priority order:
+          1. YT_DLP_PROXY_YOUTUBE / YT_DLP_PROXY (platform-specific / generic)
+          2. HTTPS_PROXY, HTTP_PROXY, ALL_PROXY (standard env vars)
+
+        Only applied for YouTube / Twitter by default (domestic platforms
+        like Douyin, Bilibili don't need proxy and would break).
+        """
+        import os
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").lower()
+        needs_proxy_hosts = ("youtube.com", "youtu.be", "twitter.com", "x.com")
+        if not any(h in host for h in needs_proxy_hosts):
+            return []
+        proxy = (
+            os.environ.get("YT_DLP_PROXY_YOUTUBE")
+            or os.environ.get("YT_DLP_PROXY")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("ALL_PROXY")
+        )
+        if proxy:
+            return ["--proxy", proxy]
+        return []
 
     @staticmethod
     def _get_cookie_args(url: str, user_id: Optional[str] = None) -> list[str]:
