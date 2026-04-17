@@ -1,12 +1,13 @@
 """Admin API routes for Task Center management."""
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.tasks_repository import AdminTasksRepository
 from app.schemas.admin import (
     AdminTaskResponse,
     AdminTaskListResponse,
@@ -22,39 +23,32 @@ VALID_TASK_TYPES = {
     "parse", "download", "upload", "transcode",
     "ai_pipeline", "ai_extract", "ai_transcription", "ai_summary",
 }
+VALID_SORT_FIELDS = {"created_at", "started_at", "completed_at", "status"}
 
 
 @router.get("/stats", response_model=AdminTaskStatsResponse)
 async def get_task_stats(auth: AdminAuthDep):
     """Get task status distribution counts."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTasksRepository()
 
-    # Total count
-    total_result = (
-        await supabase.table("unified_tasks")
-        .select("id", count="exact")
-        .execute()
+    # Run the 6 counter queries concurrently so the stats page returns in
+    # one network round-trip worth of Supabase latency instead of six.
+    total, pending, processing, completed, failed, cancelled = await asyncio.gather(
+        repo.count_total(),
+        repo.count_by_status("pending"),
+        repo.count_by_status("processing"),
+        repo.count_by_status("completed"),
+        repo.count_by_status("failed"),
+        repo.count_by_status("cancelled"),
     )
-    total = total_result.count or 0
-
-    # Count by each status
-    status_counts = {}
-    for s in VALID_STATUSES:
-        result = (
-            await supabase.table("unified_tasks")
-            .select("id", count="exact")
-            .eq("status", s)
-            .execute()
-        )
-        status_counts[s] = result.count or 0
 
     return AdminTaskStatsResponse(
         total=total,
-        pending=status_counts.get("pending", 0),
-        processing=status_counts.get("processing", 0),
-        completed=status_counts.get("completed", 0),
-        failed=status_counts.get("failed", 0),
-        cancelled=status_counts.get("cancelled", 0),
+        pending=pending,
+        processing=processing,
+        completed=completed,
+        failed=failed,
+        cancelled=cancelled,
     )
 
 
@@ -70,43 +64,22 @@ async def list_tasks(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List all tasks with pagination, filtering, and user email lookup."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTasksRepository()
 
-    query = (
-        supabase.table("unified_tasks")
-        .select(
-            "id, user_id, task_type, status, phase, title, subtitle, "
-            "progress, speed, total_bytes, error_msg, error_code, "
-            "resource_id, media_id, celery_task_id, metadata, "
-            "created_at, started_at, completed_at",
-            count="exact",
-        )
+    status_param = status_filter if status_filter in VALID_STATUSES else None
+    type_param = task_type if task_type in VALID_TASK_TYPES else None
+    sort_field = sort_by if sort_by in VALID_SORT_FIELDS else "created_at"
+
+    rows, total = await repo.list(
+        page=page,
+        page_size=page_size,
+        status=status_param,
+        task_type=type_param,
+        search=search,
+        sort_by=sort_field,
+        sort_desc=(sort_order != "asc"),
     )
 
-    # Filters
-    if status_filter and status_filter in VALID_STATUSES:
-        query = query.eq("status", status_filter)
-    if task_type and task_type in VALID_TASK_TYPES:
-        query = query.eq("task_type", task_type)
-    if search:
-        query = query.ilike("title", f"%{search}%")
-
-    # Sorting
-    valid_sort_fields = {"created_at", "started_at", "completed_at", "status"}
-    if sort_by not in valid_sort_fields:
-        sort_by = "created_at"
-    desc = sort_order != "asc"
-    query = query.order(sort_by, desc=desc)
-
-    # Pagination
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-    rows = result.data or []
-    total = result.count or 0
-
-    # Batch lookup user emails from auth.users
     user_ids = list({r["user_id"] for r in rows if r.get("user_id")})
     email_map: dict[str, str] = {}
     if user_ids:
@@ -142,10 +115,7 @@ async def list_tasks(
     ]
 
     return AdminTaskListResponse(
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size,
+        items=items, total=total, page=page, page_size=page_size
     )
 
 
@@ -156,31 +126,21 @@ async def cancel_task(
     request: Request,
 ):
     """Cancel a pending or processing task."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTasksRepository()
 
-    # Verify task exists and is cancellable
-    result = (
-        await supabase.table("unified_tasks")
-        .select("id, status, celery_task_id")
-        .eq("id", task_id)
-        .single()
-        .execute()
-    )
-
-    if not result.data:
+    task = await repo.get(task_id)
+    if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task not found",
         )
 
-    task = result.data
     if task["status"] not in ("pending", "processing"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot cancel task with status '{task['status']}'",
         )
 
-    # Revoke Celery task if applicable
     celery_task_id = task.get("celery_task_id")
     if celery_task_id:
         try:
@@ -189,15 +149,8 @@ async def cancel_task(
         except Exception as e:
             logger.warning(f"[Admin] Failed to revoke Celery task {celery_task_id}: {e}")
 
-    # Update task status
-    await (
-        supabase.table("unified_tasks")
-        .update({"status": "cancelled", "phase": "cancelled"})
-        .eq("id", task_id)
-        .execute()
-    )
+    await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"})
 
-    # Audit log
     await create_audit_log(
         admin_id=auth.user_id,
         action="task_cancel",
@@ -218,34 +171,27 @@ async def retry_task(
     request: Request,
 ):
     """Retry a failed task by resetting its status."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTasksRepository()
 
-    # Verify task exists and is retryable
-    result = (
-        await supabase.table("unified_tasks")
-        .select("id, status, task_type")
-        .eq("id", task_id)
-        .single()
-        .execute()
-    )
-
-    if not result.data:
+    task = await repo.get(task_id)
+    if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task not found",
         )
 
-    task = result.data
     if task["status"] != "failed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot retry task with status '{task['status']}', only failed tasks can be retried",
+            detail=(
+                f"Cannot retry task with status '{task['status']}', "
+                f"only failed tasks can be retried"
+            ),
         )
 
-    # Reset task status
-    await (
-        supabase.table("unified_tasks")
-        .update({
+    await repo.update(
+        task_id,
+        {
             "status": "pending",
             "phase": "queued",
             "progress": 0,
@@ -253,12 +199,9 @@ async def retry_task(
             "error_code": None,
             "started_at": None,
             "completed_at": None,
-        })
-        .eq("id", task_id)
-        .execute()
+        },
     )
 
-    # Audit log
     await create_audit_log(
         admin_id=auth.user_id,
         action="task_retry",

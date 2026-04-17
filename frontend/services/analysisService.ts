@@ -2,8 +2,7 @@
  * Analysis Service - AI-powered video analysis
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // Types
 export interface AnalysisStatus {
@@ -49,130 +48,41 @@ export interface AnalysisStats {
   embedding_count: number;
 }
 
-/**
- * Get analysis status for a video
- */
-export const getAnalysisStatus = async (mediaId: number): Promise<AnalysisStatus> => {
-  const apiUrl = getApiUrl();
+export const getAnalysisStatus = async (
+  mediaId: number,
+): Promise<AnalysisStatus> =>
+  apiClient.get<AnalysisStatus>(`/api/v1/analysis/status/${mediaId}`);
 
-  const response = await fetch(`${apiUrl}/api/v1/analysis/status/${mediaId}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
+export const getVideoAnalysis = async (
+  mediaId: number,
+): Promise<VideoAnalysisResult> =>
+  apiClient.get<VideoAnalysisResult>(`/api/v1/analysis/video/${mediaId}`);
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get status' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Get full analysis results for a video
- */
-export const getVideoAnalysis = async (mediaId: number): Promise<VideoAnalysisResult> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${mediaId}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get analysis' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Trigger analysis for a single video
- */
 export const analyzeVideo = async (
   mediaId: number,
-  forceReanalyze: boolean = false
-): Promise<AnalyzeResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/analysis/analyze/${mediaId}`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ force_reanalyze: forceReanalyze }),
+  forceReanalyze: boolean = false,
+): Promise<AnalyzeResponse> =>
+  apiClient.post<AnalyzeResponse>(`/api/v1/analysis/analyze/${mediaId}`, {
+    force_reanalyze: forceReanalyze,
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to start analysis' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Trigger batch analysis for multiple videos
- */
 export const batchAnalyze = async (
   mediaIds?: number[],
   limit: number = 50,
-  forceReanalyze: boolean = false
-): Promise<BatchAnalyzeResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/analysis/batch`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({
-      media_ids: mediaIds,
-      limit,
-      force_reanalyze: forceReanalyze,
-    }),
+  forceReanalyze: boolean = false,
+): Promise<BatchAnalyzeResponse> =>
+  apiClient.post<BatchAnalyzeResponse>('/api/v1/analysis/batch', {
+    media_ids: mediaIds,
+    limit,
+    force_reanalyze: forceReanalyze,
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to start batch analysis' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
+export const getAnalysisStats = async (): Promise<AnalysisStats> =>
+  apiClient.get<AnalysisStats>('/api/v1/analysis/stats');
 
-  return response.json();
-};
-
-/**
- * Get overall analysis statistics
- */
-export const getAnalysisStats = async (): Promise<AnalysisStats> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/analysis/stats`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get stats' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Get suggested tags for a video
- */
 export const getSuggestedTags = async (mediaId: number): Promise<string[]> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/analysis/video/${mediaId}/suggested-tags`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get suggested tags' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
+  const data = await apiClient.get<{ suggested_tags?: string[] }>(
+    `/api/v1/analysis/video/${mediaId}/suggested-tags`,
+  );
   return data.suggested_tags || [];
 };
