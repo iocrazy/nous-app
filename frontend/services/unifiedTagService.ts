@@ -49,8 +49,11 @@ export function invalidateAllTagsCache() {
 
 export async function createTag(data: {
   name: string;
+  name_zh?: string;
   color?: string;
+  icon?: string;
   type?: 'system' | 'user';
+  group_id?: string | null;
 }): Promise<Tag> {
   const apiUrl = getApiUrl();
   const res = await fetch(`${apiUrl}/api/v1/tags`, {
@@ -71,6 +74,136 @@ export async function deleteTag(tagId: string): Promise<void> {
   });
   if (!res.ok) throw new Error('Failed to delete tag');
   invalidateAllTagsCache();
+}
+
+// ─── Update tag + tag groups + statistics ────────────────
+// These endpoints live on /api/v1/tags/*; consolidating them here so
+// callers no longer need to import the legacy tagsService alongside.
+
+export interface TagUpdate {
+  name?: string;
+  color?: string;
+  icon?: string;
+  enabled?: boolean;
+  group_id?: string | null;
+  sort_order?: number;
+}
+
+export async function updateTag(
+  tagId: string,
+  updates: TagUpdate,
+): Promise<Tag> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/${tagId}`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to update tag' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  invalidateAllTagsCache();
+  return res.json();
+}
+
+export interface TagGroup {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export async function fetchTagGroups(): Promise<TagGroup[]> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/groups`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to fetch tag groups' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.groups || [];
+}
+
+export async function createTagGroup(name: string): Promise<TagGroup> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/groups`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to create group' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteTagGroup(groupId: string): Promise<void> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/groups/${groupId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to delete group' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+}
+
+export async function reorderTagGroups(groupIds: string[]): Promise<void> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/groups/reorder`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ group_ids: groupIds }),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to reorder' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+}
+
+export interface TagStatistics {
+  success: boolean;
+  top_tags: {
+    id: string;
+    name: string;
+    color: string;
+    icon?: string;
+    type: string;
+    count: number;
+  }[];
+  total_tagged_videos: number;
+}
+
+export async function fetchTagStatistics(
+  limit: number = 10,
+): Promise<TagStatistics> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(
+    `${apiUrl}/api/v1/tags/statistics?limit=${limit}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to fetch tag statistics' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
 // ─── Resource tag associations ────────────────────────────

@@ -21,8 +21,9 @@ import {
   Circle,
   GripVertical,
 } from 'lucide-react';
+import type { Tag } from '../types';
 import {
-  fetchTags,
+  fetchAllTags as fetchTags,
   fetchTagGroups,
   createTag,
   createTagGroup,
@@ -30,9 +31,8 @@ import {
   reorderTagGroups,
   updateTag,
   deleteTag,
-  Tag,
-  TagGroup,
-} from '../services/tagsService';
+  type TagGroup,
+} from '../services/unifiedTagService';
 
 // Color palette for tags
 const TAG_COLORS = [
