@@ -7,7 +7,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.tags_repository import AdminTagsRepository
 
 
 router = APIRouter()
@@ -68,27 +68,11 @@ class TagReorder(BaseModel):
 @router.get("/groups")
 async def list_groups(auth: AdminAuthDep):
     """List all tag groups with tag counts."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTagsRepository()
 
-    # Get groups ordered by sort_order
-    result = await (
-        supabase.table("tag_groups")
-        .select("*")
-        .order("sort_order")
-        .order("created_at")
-        .execute()
-    )
-    groups = result.data or []
+    groups = await repo.list_groups()
+    all_tags = await repo.all_tag_group_ids()
 
-    # Get tag counts per group
-    tags_result = await (
-        supabase.table("tags")
-        .select("group_id")
-        .execute()
-    )
-    all_tags = tags_result.data or []
-
-    # Count tags per group + uncategorized + total
     group_counts: dict[str, int] = {}
     uncategorized = 0
     for t in all_tags:
@@ -112,84 +96,42 @@ async def list_groups(auth: AdminAuthDep):
 @router.post("/groups")
 async def create_group(body: TagGroupCreate, auth: AdminAuthDep):
     """Create a new tag group."""
-    supabase = await get_async_supabase_admin()
-
-    # Get max sort_order
-    existing = await (
-        supabase.table("tag_groups")
-        .select("sort_order")
-        .order("sort_order", desc=True)
-        .limit(1)
-        .execute()
-    )
-    max_order = existing.data[0]["sort_order"] if existing.data else 0
-
-    result = await (
-        supabase.table("tag_groups")
-        .insert({"name": body.name, "sort_order": max_order + 1})
-        .execute()
-    )
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    max_order = await repo.max_group_sort_order()
+    group = await repo.create_group(body.name, max_order + 1)
+    if not group:
         raise HTTPException(status_code=500, detail="Failed to create group")
-
-    return {"success": True, "group": result.data[0]}
+    return {"success": True, "group": group}
 
 
 @router.patch("/groups/{group_id}")
 async def update_group(group_id: str, body: TagGroupUpdate, auth: AdminAuthDep):
     """Update a tag group."""
-    supabase = await get_async_supabase_admin()
-
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    result = await (
-        supabase.table("tag_groups")
-        .update(update_data)
-        .eq("id", group_id)
-        .execute()
-    )
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    group = await repo.update_group(group_id, update_data)
+    if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
-    return {"success": True, "group": result.data[0]}
+    return {"success": True, "group": group}
 
 
 @router.delete("/groups/{group_id}")
 async def delete_group(group_id: str, auth: AdminAuthDep):
     """Delete a tag group. Tags become uncategorized."""
-    supabase = await get_async_supabase_admin()
-
-    # Tags' group_id is SET NULL on delete via FK constraint
-    result = await (
-        supabase.table("tag_groups")
-        .delete()
-        .eq("id", group_id)
-        .execute()
-    )
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    if not await repo.delete_group(group_id):
         raise HTTPException(status_code=404, detail="Group not found")
-
     return {"success": True}
 
 
 @router.post("/groups/reorder")
 async def reorder_groups(body: TagGroupReorder, auth: AdminAuthDep):
     """Bulk reorder groups. IDs list defines the new order."""
-    supabase = await get_async_supabase_admin()
-
-    for idx, gid in enumerate(body.ids):
-        await (
-            supabase.table("tag_groups")
-            .update({"sort_order": idx})
-            .eq("id", gid)
-            .execute()
-        )
-
+    repo = AdminTagsRepository()
+    await repo.reorder_groups(body.ids)
     return {"success": True}
 
 
@@ -209,68 +151,37 @@ async def list_tags(
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ):
     """List all tags with pagination, search, and group filtering."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTagsRepository()
+    rows, total = await repo.list_tags(
+        page=page,
+        page_size=page_size,
+        search=search,
+        group_id=group_id,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
 
-    query = supabase.table("tags").select("*, tag_groups(name)", count="exact")
-
-    # Filter by group
-    if group_id == "uncategorized":
-        query = query.is_("group_id", "null")
-    elif group_id:
-        query = query.eq("group_id", group_id)
-
-    # Search
-    if search:
-        query = query.or_(f"name.ilike.%{search}%,name_zh.ilike.%{search}%")
-
-    # Sort
-    if sort_by and sort_order:
-        query = query.order(sort_by, desc=(sort_order == "desc"))
-    else:
-        query = query.order("sort_order").order("created_at", desc=True)
-
-    # Paginate
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-
-    # Get usage counts for returned tags
-    tag_ids = [str(t["id"]) for t in (result.data or [])]
-    usage_counts: dict[str, int] = {}
-    if tag_ids:
-        counts_result = await (
-            supabase.table("resource_tags")
-            .select("tag_id")
-            .in_("tag_id", tag_ids)
-            .execute()
-        )
-        # Count per tag_id
-        for row in (counts_result.data or []):
-            tid = str(row["tag_id"])
-            usage_counts[tid] = usage_counts.get(tid, 0) + 1
+    # Hydrate display fields
+    tag_ids = [str(t["id"]) for t in rows]
+    usage_counts = await repo.usage_counts(tag_ids)
 
     items = []
-    for t in (result.data or []):
+    for t in rows:
         item = {**t}
-        item["group_name"] = t.get("tag_groups", {}).get("name") if t.get("tag_groups") else None
+        item["group_name"] = (
+            t.get("tag_groups", {}).get("name") if t.get("tag_groups") else None
+        )
         item.pop("tag_groups", None)
         item["usage_count"] = usage_counts.get(str(t["id"]), 0)
         items.append(item)
 
-    return {
-        "success": True,
-        "items": items,
-        "total": result.count or 0,
-    }
+    return {"success": True, "items": items, "total": total}
 
 
 @router.post("")
 async def create_tag(body: TagCreate, auth: AdminAuthDep):
     """Create a new system tag."""
-    supabase = await get_async_supabase_admin()
-
-    insert_data = {
+    insert_data: dict = {
         "name": body.name,
         "type": "system",
         "color": body.color,
@@ -283,20 +194,17 @@ async def create_tag(body: TagCreate, auth: AdminAuthDep):
     if body.group_id:
         insert_data["group_id"] = body.group_id
 
-    result = await supabase.table("tags").insert(insert_data).execute()
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    tag = await repo.create_tag(insert_data)
+    if not tag:
         raise HTTPException(status_code=500, detail="Failed to create tag")
-
-    return {"success": True, "tag": result.data[0]}
+    return {"success": True, "tag": tag}
 
 
 @router.patch("/{tag_id}")
 async def update_tag(tag_id: str, body: TagUpdate, auth: AdminAuthDep):
     """Update a tag."""
-    supabase = await get_async_supabase_admin()
-
-    update_data = {}
+    update_data: dict = {}
     for field in ["name", "name_zh", "color", "icon", "sort_order"]:
         val = getattr(body, field, None)
         if val is not None:
@@ -309,68 +217,40 @@ async def update_tag(tag_id: str, body: TagUpdate, auth: AdminAuthDep):
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    result = await (
-        supabase.table("tags")
-        .update(update_data)
-        .eq("id", tag_id)
-        .execute()
-    )
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    tag = await repo.update_tag(tag_id, update_data)
+    if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-
-    return {"success": True, "tag": result.data[0]}
+    return {"success": True, "tag": tag}
 
 
 @router.delete("/{tag_id}")
 async def delete_tag(tag_id: str, auth: AdminAuthDep):
     """Delete a tag and its resource associations."""
-    supabase = await get_async_supabase_admin()
-
-    # Delete resource_tags associations first
-    await supabase.table("resource_tags").delete().eq("tag_id", tag_id).execute()
-
-    # Delete tag
-    result = await supabase.table("tags").delete().eq("id", tag_id).execute()
-
-    if not result.data:
+    repo = AdminTagsRepository()
+    if not await repo.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail="Tag not found")
-
     return {"success": True}
 
 
 @router.post("/batch")
 async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
     """Batch operations on tags: move, delete, or change color."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTagsRepository()
 
     if body.action == "move":
         gid = body.group_id if body.group_id else None
-        for tid in body.tag_ids:
-            await (
-                supabase.table("tags")
-                .update({"group_id": gid})
-                .eq("id", tid)
-                .execute()
-            )
+        await repo.batch_set_group(body.tag_ids, gid)
         return {"success": True, "message": f"Moved {len(body.tag_ids)} tags"}
 
     elif body.action == "delete":
-        for tid in body.tag_ids:
-            await supabase.table("resource_tags").delete().eq("tag_id", tid).execute()
-            await supabase.table("tags").delete().eq("id", tid).execute()
+        await repo.batch_delete(body.tag_ids)
         return {"success": True, "message": f"Deleted {len(body.tag_ids)} tags"}
 
     elif body.action == "color":
         if not body.color:
             raise HTTPException(status_code=400, detail="Color required for color action")
-        for tid in body.tag_ids:
-            await (
-                supabase.table("tags")
-                .update({"color": body.color})
-                .eq("id", tid)
-                .execute()
-            )
+        await repo.batch_set_color(body.tag_ids, body.color)
         return {"success": True, "message": f"Updated color for {len(body.tag_ids)} tags"}
 
     else:
@@ -380,14 +260,6 @@ async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
 @router.post("/reorder")
 async def reorder_tags(body: TagReorder, auth: AdminAuthDep):
     """Reorder tags within a group."""
-    supabase = await get_async_supabase_admin()
-
-    for idx, tid in enumerate(body.tag_ids):
-        await (
-            supabase.table("tags")
-            .update({"sort_order": idx})
-            .eq("id", tid)
-            .execute()
-        )
-
+    repo = AdminTagsRepository()
+    await repo.reorder_tags(body.tag_ids)
     return {"success": True}
