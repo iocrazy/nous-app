@@ -3,9 +3,7 @@ import {
   Card,
   Input,
   Tag,
-  Space,
   Typography,
-  Button,
   Empty,
   Spin,
   Radio,
@@ -21,7 +19,7 @@ import {
 } from '@arco-design/web-react/icon'
 import { supabase } from '../../auth/supabase'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
 interface CommitEntry {
   sha: string

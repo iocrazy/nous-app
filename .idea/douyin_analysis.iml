@@ -3,6 +3,10 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.worktrees/Feature-admin-design/backend/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.worktrees/async-download/backend/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.worktrees/dev/backend/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/.venv" />
     </content>
     <orderEntry type="jdk" jdkName="venv312" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
