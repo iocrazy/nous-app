@@ -64,26 +64,10 @@ import { ResourcesProvider, useResourcesContext } from '../contexts/ResourcesCon
 import type { SortBy } from '../contexts/ResourcesContext';
 import { ResourcesShell } from './ResourcesShell';
 import { ResourceGrid } from './ResourceGrid';
-
-// ─── Upload constants ────────────────────────────────────
-
-const BLOCKED_EXTENSIONS = new Set([
-  '.exe', '.bat', '.cmd', '.msi', '.scr', '.pif', '.com',
-  '.sh', '.bash', '.ps1', '.vbs', '.wsf', '.jar',
-]);
-
-const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
-
-function validateFile(file: File): string | null {
-  const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-  if (BLOCKED_EXTENSIONS.has(ext)) {
-    return 'invalidFileType';
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return 'fileTooLarge';
-  }
-  return null;
-}
+import {
+  MAX_FILE_SIZE,
+  validateFile,
+} from '../utils/uploadValidation';
 
 // ─── Props ─────────────────────────────────────────────
 
