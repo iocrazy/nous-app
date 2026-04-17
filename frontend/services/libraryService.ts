@@ -1,16 +1,15 @@
 import { Library } from '../types';
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
+
+interface Envelope<T> {
+  data?: T;
+}
 
 export async function fetchLibraries(scopeId: string): Promise<Library[]> {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_id: scopeId });
-  const response = await fetch(`${apiUrl}/api/v1/libraries?${params}`, {
-    headers: await getAuthHeaders(),
+  const response = await apiClient.get<Envelope<Library[]>>('/api/v1/libraries', {
+    query: { scope_id: scopeId },
   });
-  if (!response.ok) throw new Error('Failed to fetch libraries');
-  const json = await response.json();
-  return json.data || [];
+  return response.data || [];
 }
 
 export async function createLibrary(data: {
@@ -19,37 +18,26 @@ export async function createLibrary(data: {
   icon?: string;
   color?: string;
 }): Promise<Library> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/libraries`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ ...data, scope_type: 'team' }),
+  const response = await apiClient.post<Envelope<Library>>('/api/v1/libraries', {
+    ...data,
+    scope_type: 'team',
   });
-  if (!response.ok) throw new Error('Failed to create library');
-  const json = await response.json();
-  return json.data;
+  if (!response.data) throw new Error('Empty response from createLibrary');
+  return response.data;
 }
 
 export async function updateLibrary(
   libraryId: string,
-  data: { name?: string; icon?: string; color?: string; sort_order?: number }
+  data: { name?: string; icon?: string; color?: string; sort_order?: number },
 ): Promise<Library> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/libraries/${libraryId}`, {
-    method: 'PATCH',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to update library');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.patch<Envelope<Library>>(
+    `/api/v1/libraries/${libraryId}`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from updateLibrary');
+  return response.data;
 }
 
 export async function deleteLibrary(libraryId: string): Promise<void> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/libraries/${libraryId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete library');
+  await apiClient.delete(`/api/v1/libraries/${libraryId}`);
 }

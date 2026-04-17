@@ -4,10 +4,9 @@ import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
-from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.stats_repository import AdminStatsRepository
 from app.schemas.admin import AdminStatsResponse
 
 router = APIRouter()
@@ -16,46 +15,37 @@ router = APIRouter()
 @router.get("/overview", response_model=AdminStatsResponse)
 async def get_overview_stats(auth: AdminAuthDep):
     """Get dashboard overview statistics."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminStatsRepository()
 
     today = datetime.utcnow().date()
     today_start = datetime.combine(today, datetime.min.time())
 
-    async def get_active_users() -> int:
-        """Get active users today from user_logs."""
-        try:
-            result = await supabase.table("user_logs").select("user_id").gte("created_at", today_start.isoformat()).execute()
-            return len(set(log["user_id"] for log in result.data)) if result.data else 0
-        except Exception:
-            return 0
-
-    # Execute all queries concurrently
     (
-        users_result,
-        videos_result,
-        teams_result,
-        downloads_result,
-        new_users_result,
-        new_videos_result,
+        total_users,
+        total_videos,
+        total_teams,
+        total_downloads,
+        new_users_today,
+        new_videos_today,
         active_users_today,
     ) = await asyncio.gather(
-        supabase.table("user_profiles").select("id", count="exact").execute(),
-        supabase.table("parsed_media").select("id", count="exact").execute(),
-        supabase.table("teams").select("id", count="exact").execute(),
-        supabase.table("parsed_media").select("id", count="exact").eq("video_download_status", "completed").execute(),
-        supabase.table("user_profiles").select("id", count="exact").gte("created_at", today_start.isoformat()).execute(),
-        supabase.table("parsed_media").select("id", count="exact").gte("created_at", today_start.isoformat()).execute(),
-        get_active_users(),
+        repo.count_user_profiles(),
+        repo.count_parsed_media(),
+        repo.count_teams(),
+        repo.count_parsed_media(video_download_status="completed"),
+        repo.count_user_profiles(since=today_start),
+        repo.count_parsed_media(since=today_start),
+        repo.distinct_active_users_since(today_start),
     )
 
     return AdminStatsResponse(
-        total_users=users_result.count or 0,
-        total_videos=videos_result.count or 0,
-        total_teams=teams_result.count or 0,
-        total_downloads=downloads_result.count or 0,
+        total_users=total_users,
+        total_videos=total_videos,
+        total_teams=total_teams,
+        total_downloads=total_downloads,
         active_users_today=active_users_today,
-        new_users_today=new_users_result.count or 0,
-        new_videos_today=new_videos_result.count or 0,
+        new_users_today=new_users_today,
+        new_videos_today=new_videos_today,
     )
 
 
@@ -65,13 +55,12 @@ async def get_user_growth(
     days: int = Query(30, ge=7, le=365),
 ):
     """Get user registration growth over time."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminStatsRepository()
     start_date = datetime.utcnow() - timedelta(days=days)
-
-    result = await supabase.table("user_profiles").select("created_at").gte("created_at", start_date.isoformat()).execute()
+    rows = await repo.user_registrations_since(start_date)
 
     daily_counts: dict[str, int] = {}
-    for user in result.data:
+    for user in rows:
         day = user["created_at"][:10]
         daily_counts[day] = daily_counts.get(day, 0) + 1
 
@@ -92,13 +81,12 @@ async def get_video_stats(
     days: int = Query(30, ge=7, le=365),
 ):
     """Get video statistics over time."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminStatsRepository()
     start_date = datetime.utcnow() - timedelta(days=days)
-
-    result = await supabase.table("parsed_media").select("created_at, video_download_status").gte("created_at", start_date.isoformat()).execute()
+    rows = await repo.video_status_history(start_date)
 
     daily_data: dict[str, dict[str, int]] = {}
-    for video in result.data:
+    for video in rows:
         day = video["created_at"][:10]
         status = video["video_download_status"]
 
@@ -126,19 +114,18 @@ async def get_video_stats(
 @router.get("/storage")
 async def get_storage_stats(auth: AdminAuthDep):
     """Get storage usage statistics."""
-    supabase = await get_async_supabase_admin()
-
-    result = await supabase.table("parsed_media").select("user_id, video_download_status").eq("video_download_status", "completed").execute()
+    repo = AdminStatsRepository()
+    rows = await repo.completed_videos_by_user()
 
     user_video_counts: dict[str, int] = {}
-    for video in result.data:
+    for video in rows:
         user_id = video["user_id"]
         user_video_counts[user_id] = user_video_counts.get(user_id, 0) + 1
 
     top_users = sorted(user_video_counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
     return {
-        "total_videos_downloaded": len(result.data),
+        "total_videos_downloaded": len(rows),
         "unique_users": len(user_video_counts),
         "top_users": [{"user_id": u[0], "video_count": u[1]} for u in top_users],
     }

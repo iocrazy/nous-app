@@ -7,8 +7,7 @@
  * ReBAC permission system.
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 export interface EffectivePermission {
   role: string;
@@ -24,18 +23,14 @@ export const fetchEffectiveRole = async (
   objectId: string,
   teamId: string,
 ): Promise<EffectivePermission> => {
-  const headers = await getAuthHeaders();
-  const params = new URLSearchParams({
-    object_type: objectType,
-    object_id: objectId,
-    team_id: teamId,
+  const json = await apiClient.get<
+    EffectivePermission | { data: EffectivePermission }
+  >('/api/v1/resources/permissions', {
+    query: {
+      object_type: objectType,
+      object_id: objectId,
+      team_id: teamId,
+    },
   });
-  const res = await fetch(`${getApiUrl()}/api/v1/resources/permissions?${params}`, {
-    headers,
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch permissions: ${res.status}`);
-  }
-  const json = await res.json();
-  return json.data ?? json;
+  return 'data' in json ? json.data : json;
 };

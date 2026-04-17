@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.audit_logs_repository import AuditLogsRepository
 from app.schemas.admin import (
     AuditLogResponse,
     AuditLogListResponse,
@@ -76,43 +76,26 @@ async def list_audit_logs(
     - **start_date**: Filter logs from this date
     - **end_date**: Filter logs until this date
     """
-    supabase = await get_async_supabase_admin()
+    repo = AuditLogsRepository()
+    rows, total = await repo.list(
+        page=page,
+        page_size=page_size,
+        admin_id=admin_id,
+        action=action,
+        target_type=target_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    # Build query
-    query = supabase.table("audit_logs").select("*", count="exact")
-
-    # Apply filters
-    if admin_id:
-        query = query.eq("admin_id", admin_id)
-    if action:
-        query = query.eq("action", action)
-    if target_type:
-        query = query.eq("target_type", target_type)
-    if start_date:
-        query = query.gte("created_at", start_date.isoformat())
-    if end_date:
-        query = query.lte("created_at", end_date.isoformat())
-
-    # Order by created_at descending (newest first)
-    query = query.order("created_at", desc=True)
-
-    # Apply pagination
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    # Execute query
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return AuditLogListResponse(items=[], total=0, page=page, page_size=page_size)
 
     # Batch fetch admin info (avoiding N+1 queries)
-    admin_ids = list(set(log["admin_id"] for log in result.data if log.get("admin_id")))
+    admin_ids = list({log["admin_id"] for log in rows if log.get("admin_id")})
     admin_info = await batch_get_user_info(admin_ids)
 
-    # Build response items
     items = []
-    for log in result.data:
+    for log in rows:
         aid = log["admin_id"]
         admin_email, admin_username = admin_info.get(aid, (None, None))
         items.append(AuditLogResponse(
@@ -130,7 +113,7 @@ async def list_audit_logs(
 
     return AuditLogListResponse(
         items=items,
-        total=result.count or len(items),
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -145,19 +128,8 @@ async def get_audit_actions(
 
     Returns a list of all unique action types that have been logged.
     """
-    supabase = await get_async_supabase_admin()
-
-    # Query distinct actions
-    result = await supabase.table("audit_logs").select("action").execute()
-
-    if not result.data:
-        return []
-
-    # Extract unique actions
-    actions = list(set(log["action"] for log in result.data if log.get("action")))
-    actions.sort()
-
-    return actions
+    repo = AuditLogsRepository()
+    return await repo.list_distinct_actions()
 
 
 @router.get("/stats", response_model=AuditStatsResponse)
@@ -175,15 +147,11 @@ async def get_audit_stats(
     - Target type
     - Day
     """
-    supabase = await get_async_supabase_admin()
-
-    # Calculate start date
+    repo = AuditLogsRepository()
     start_date = datetime.utcnow() - timedelta(days=days)
+    logs = await repo.list_since(start_date)
 
-    # Get all logs in the time period
-    result = await supabase.table("audit_logs").select("*").gte("created_at", start_date.isoformat()).execute()
-
-    if not result.data:
+    if not logs:
         return AuditStatsResponse(
             by_action=[],
             by_target=[],
@@ -191,7 +159,6 @@ async def get_audit_stats(
             total=0,
         )
 
-    logs = result.data
     total = len(logs)
 
     # Count by action
