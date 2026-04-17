@@ -1,0 +1,84 @@
+import React from 'react';
+import { Loader2, Trash2, X } from 'lucide-react';
+import { Video } from '../../types';
+
+interface DeleteDialogProps {
+  video: Video;
+  isDeleting: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDialogProps) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/10 rounded-lg">
+              <Trash2 className="w-5 h-5 text-amber-500" />
+            </div>
+            <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-sm text-zinc-400">
+            This item will be moved to the Recycle Bin. You can restore it later.
+          </p>
+          <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+            <img
+              src={(video.cover_urls?.[0]) || "https://picsum.photos/80/80"}
+              alt="Preview"
+              className="w-12 h-12 rounded-lg object-cover"
+              referrerPolicy="no-referrer"
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white font-medium truncate">
+                {video.title || 'Untitled'}
+              </p>
+              <p className="text-xs text-zinc-500">@{video.author}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 px-5 py-4 bg-zinc-800/30 border-t border-zinc-800">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors border border-zinc-700"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isDeleting}
+            className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Moving...
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4" />
+                Move to Trash
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
