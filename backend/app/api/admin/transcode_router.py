@@ -9,7 +9,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
-from app.db import get_async_supabase_admin
+from app.repositories.admin.transcode_repository import AdminTranscodeRepository
 from app.schemas.admin import (
     AdminTranscodeVersionResponse,
     AdminTranscodeListResponse,
@@ -52,30 +52,14 @@ def _scan_hls_tiers(hls_path: str) -> dict[str, bool]:
 @router.get("/stats", response_model=AdminTranscodeStatsResponse)
 async def get_transcode_stats(auth: AdminAuthDep):
     """Get transcode status distribution for video resource versions."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTranscodeRepository()
 
-    # Total video versions
-    total_result = (
-        await supabase.table("resource_versions")
-        .select("id", count="exact")
-        .like("mime_type", "video/%")
-        .execute()
+    # Total + 4 status counts concurrently instead of 5 sequential queries.
+    total, status_counts = await asyncio.gather(
+        repo.count_total_video_versions(),
+        repo.status_counts(["completed", "processing", "failed", "pending"]),
     )
-    total = total_result.count or 0
 
-    # Count by each transcode_status
-    status_counts = {}
-    for s in ("completed", "processing", "failed", "pending"):
-        result = (
-            await supabase.table("resource_versions")
-            .select("id", count="exact")
-            .like("mime_type", "video/%")
-            .eq("transcode_status", s)
-            .execute()
-        )
-        status_counts[s] = result.count or 0
-
-    # Not transcoded = NULL transcode_status
     not_transcoded = total - sum(status_counts.values())
 
     return AdminTranscodeStatsResponse(
@@ -100,80 +84,30 @@ async def list_transcode_versions(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List video resource versions with transcode info."""
-    supabase = await get_async_supabase_admin()
-
-    # Build base query: resource_versions joined with resources
-    query = (
-        supabase.table("resource_versions")
-        .select(
-            "id, resource_id, version_number, filename, file_size_bytes, "
-            "mime_type, transcode_status, hls_path, transcode_at, created_at",
-            count="exact",
-        )
-        .like("mime_type", "video/%")
+    # Route status_filter through the repo's validator set
+    resolved_status = (
+        status_filter if status_filter in VALID_STATUSES else None
     )
 
-    # Status filter
-    if status_filter:
-        if status_filter == "null":
-            query = query.is_("transcode_status", "null")
-        elif status_filter in VALID_STATUSES:
-            query = query.eq("transcode_status", status_filter)
+    repo = AdminTranscodeRepository()
+    rows, total = await repo.list_video_versions(
+        page=page,
+        page_size=page_size,
+        status_filter=resolved_status,
+        min_size_mb=min_size_mb,
+        sort_by=sort_by or "created_at",
+        sort_desc=(sort_order != "asc"),
+    )
 
-    # Size filter
-    if min_size_mb and min_size_mb > 0:
-        query = query.gte("file_size_bytes", min_size_mb * 1024 * 1024)
-
-    # Sorting
-    valid_sort_fields = {"created_at", "file_size_bytes", "transcode_at", "resource_id"}
-    if sort_by not in valid_sort_fields:
-        sort_by = "created_at"
-    desc = sort_order != "asc"
-    query = query.order(sort_by, desc=desc)
-
-    # Pagination
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-    rows = result.data or []
-    total = result.count or 0
-
-    # Collect resource_ids to look up parsed_media info
+    # Lookup display fields (title / cover / author) for each resource_id
     resource_ids = list({r["resource_id"] for r in rows if r.get("resource_id")})
-
-    # Get resources → media_id mapping
     media_info_map: dict[str, dict] = {}
     if resource_ids:
-        res_result = (
-            await supabase.table("resources")
-            .select("id, media_id")
-            .in_("id", resource_ids)
-            .execute()
-        )
-        media_id_map = {
-            str(r["id"]): str(r["media_id"])
-            for r in (res_result.data or [])
-            if r.get("media_id")
-        }
-
-        # Get parsed_media for video_title, cover_url, author
-        media_ids = list(set(media_id_map.values()))
-        if media_ids:
-            media_result = (
-                await supabase.table("parsed_media")
-                .select("id, title, cover_urls, cover_download_path, source_platform, author")
-                .in_("id", media_ids)
-                .execute()
-            )
-            media_by_id = {
-                str(m["id"]): m for m in (media_result.data or [])
-            }
-
-            # Map resource_id → media info
-            for res_id, mid in media_id_map.items():
-                if mid in media_by_id:
-                    media_info_map[res_id] = media_by_id[mid]
+        media_id_map = await repo.resources_to_media(resource_ids)
+        media_by_id = await repo.media_info_bulk(list(set(media_id_map.values())))
+        for res_id, mid in media_id_map.items():
+            if mid in media_by_id:
+                media_info_map[res_id] = media_by_id[mid]
 
     # Search filter (post-query on title/filename since PostgREST can't join-search)
     if search:
@@ -229,21 +163,12 @@ async def retry_transcode(
     request: Request,
 ):
     """Retry HLS transcode for a specific resource version."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTranscodeRepository()
 
-    # Verify version exists and is a video
-    result = (
-        await supabase.table("resource_versions")
-        .select("id, resource_id, mime_type")
-        .eq("id", version_id)
-        .single()
-        .execute()
-    )
-
-    if not result.data:
+    version = await repo.get_version(version_id)
+    if not version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    version = result.data
     mime_type = version.get("mime_type") or ""
     if not mime_type.startswith("video/"):
         raise HTTPException(
@@ -257,12 +182,8 @@ async def retry_transcode(
     # NOTE: cannot call maybe_trigger_transcode() here because it uses
     # run_async(asyncio.run()) which crashes inside an already-running
     # event loop (FastAPI's async handler).
-    await (
-        supabase.table("resource_versions")
-        .update({"transcode_status": "pending"})
-        .eq("id", version_id)
-        .execute()
-    )
+    await repo.mark_pending(version_id)
+
     from app.tasks.transcode_tasks import transcode_to_hls
     await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, auth.user_id)
 
@@ -287,26 +208,8 @@ async def batch_transcode(
     action: str = Query(..., pattern="^(retry_failed|transcode_new)$"),
 ):
     """Batch transcode operations: retry failed or transcode new (untranscoded)."""
-    supabase = await get_async_supabase_admin()
-
-    if action == "retry_failed":
-        result = (
-            await supabase.table("resource_versions")
-            .select("id, resource_id, mime_type")
-            .like("mime_type", "video/%")
-            .eq("transcode_status", "failed")
-            .execute()
-        )
-    else:  # transcode_new
-        result = (
-            await supabase.table("resource_versions")
-            .select("id, resource_id, mime_type")
-            .like("mime_type", "video/%")
-            .is_("transcode_status", "null")
-            .execute()
-        )
-
-    versions = result.data or []
+    repo = AdminTranscodeRepository()
+    versions = await repo.list_versions_for_batch(action)
     queued = 0
 
     # Dispatch Celery tasks directly (cannot use maybe_trigger_transcode in async context)
@@ -316,12 +219,7 @@ async def batch_transcode(
         try:
             vid = str(v["id"])
             rid = str(v["resource_id"])
-            await (
-                supabase.table("resource_versions")
-                .update({"transcode_status": "pending"})
-                .eq("id", vid)
-                .execute()
-            )
+            await repo.mark_pending(vid)
             await asyncio.to_thread(transcode_to_hls.delay, rid, vid, auth.user_id)
             queued += 1
         except Exception as e:
@@ -356,14 +254,8 @@ VALID_PRESETS = {"ultrafast", "veryfast", "fast", "medium", "slow", "veryslow", 
 
 async def _load_transcode_settings_from_db() -> dict:
     """Load transcode settings from system_settings table."""
-    supabase = await get_async_supabase_admin()
-    result = await (
-        supabase.table("system_settings")
-        .select("key, value")
-        .like("key", "transcode_%")
-        .execute()
-    )
-    db_map = {row["key"]: row["value"] for row in (result.data or [])}
+    repo = AdminTranscodeRepository()
+    db_map = await repo.load_settings()
     return {
         "transcode_enabled": db_map.get("transcode_enabled", settings.TRANSCODE_ENABLED),
         "transcode_tiers": db_map.get("transcode_tiers", settings.TRANSCODE_TIERS),
@@ -426,7 +318,7 @@ async def update_transcode_settings(
         )
 
     # Save to database
-    supabase = await get_async_supabase_admin()
+    repo = AdminTranscodeRepository()
     changes = {}
     field_to_db_key = {
         "transcode_enabled": "transcode_enabled",
@@ -440,11 +332,7 @@ async def update_transcode_settings(
     for field, db_key in field_to_db_key.items():
         value = getattr(body, field, None)
         if value is not None:
-            await (
-                supabase.table("system_settings")
-                .upsert({"key": db_key, "value": value, "updated_by": auth.user_id})
-                .execute()
-            )
+            await repo.upsert_setting(db_key, value, auth.user_id)
             changes[field] = value
             # Also update in-memory settings
             settings_attr = {
