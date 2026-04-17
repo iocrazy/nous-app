@@ -4,8 +4,7 @@
  * Handles CRUD operations for API keys via the backend API.
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // Backend API response types
 export interface ApiKeyScopeInfo {
@@ -35,7 +34,7 @@ export interface ApiKeyResponse {
 export interface ApiKeyCreateResponse extends ApiKeyResponse {
   success: boolean;
   message: string;
-  secret_key: string;  // Full key, only returned once!
+  secret_key: string; // Full key, only returned once!
 }
 
 export interface ApiKeyListResponse {
@@ -53,7 +52,7 @@ export interface CreateApiKeyRequest {
   name: string;
   description?: string;
   scopes: string[];
-  expires_at?: string;  // ISO date string
+  expires_at?: string; // ISO date string
   rate_limit?: number;
 }
 
@@ -68,37 +67,21 @@ export interface UpdateApiKeyRequest {
  * Get available API scopes
  */
 export async function getAvailableScopes(): Promise<ApiKeyScopeInfo[]> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys/scopes`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to get scopes: ${response.statusText}`);
-  }
-
-  const data: ApiKeyScopesResponse = await response.json();
+  const data = await apiClient.get<ApiKeyScopesResponse>(
+    '/api/v1/api-keys/scopes',
+  );
   return data.scopes;
 }
 
 /**
  * List all API keys for the current user
  */
-export async function listApiKeys(includeRevoked: boolean = false): Promise<ApiKeyResponse[]> {
-  const url = new URL(`${getApiUrl()}/api/v1/api-keys`);
-  url.searchParams.set('include_revoked', includeRevoked.toString());
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: await getAuthHeaders(),
+export async function listApiKeys(
+  includeRevoked: boolean = false,
+): Promise<ApiKeyResponse[]> {
+  const data = await apiClient.get<ApiKeyListResponse>('/api/v1/api-keys', {
+    query: { include_revoked: includeRevoked },
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to list keys: ${response.statusText}`);
-  }
-
-  const data: ApiKeyListResponse = await response.json();
   return data.keys;
 }
 
@@ -106,82 +89,42 @@ export async function listApiKeys(includeRevoked: boolean = false): Promise<ApiK
  * Create a new API key
  * IMPORTANT: The secret_key is only returned once in the response!
  */
-export async function createApiKey(request: CreateApiKeyRequest): Promise<ApiKeyCreateResponse> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to create key: ${response.statusText}`);
-  }
-
-  return response.json();
+export async function createApiKey(
+  request: CreateApiKeyRequest,
+): Promise<ApiKeyCreateResponse> {
+  return apiClient.post<ApiKeyCreateResponse>('/api/v1/api-keys', request);
 }
 
 /**
  * Get a specific API key by key_id
  */
 export async function getApiKey(keyId: string): Promise<ApiKeyResponse> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to get key: ${response.statusText}`);
-  }
-
-  return response.json();
+  return apiClient.get<ApiKeyResponse>(`/api/v1/api-keys/${keyId}`);
 }
 
 /**
  * Update an API key
  */
-export async function updateApiKey(keyId: string, request: UpdateApiKeyRequest): Promise<ApiKeyResponse> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
-    method: 'PATCH',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to update key: ${response.statusText}`);
-  }
-
-  return response.json();
+export async function updateApiKey(
+  keyId: string,
+  request: UpdateApiKeyRequest,
+): Promise<ApiKeyResponse> {
+  return apiClient.patch<ApiKeyResponse>(
+    `/api/v1/api-keys/${keyId}`,
+    request,
+  );
 }
 
 /**
  * Delete an API key (hard delete)
  */
 export async function deleteApiKey(keyId: string): Promise<void> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to delete key: ${response.statusText}`);
-  }
+  await apiClient.delete(`/api/v1/api-keys/${keyId}`);
 }
 
 /**
  * Revoke an API key (soft delete)
  */
 export async function revokeApiKey(keyId: string): Promise<void> {
-  const response = await fetch(`${getApiUrl()}/api/v1/api-keys/${keyId}/revoke`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `Failed to revoke key: ${response.statusText}`);
-  }
+  await apiClient.post(`/api/v1/api-keys/${keyId}/revoke`);
 }

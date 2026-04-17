@@ -7,31 +7,30 @@
  * polling order status, and listing order history.
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 import { PointPackage, PaymentOrder } from '../types';
+
+interface Envelope<T> {
+  success: boolean;
+  message?: string;
+  data: T;
+}
+
+function unwrap<T>(result: Envelope<T>): T {
+  if (!result.success) {
+    throw new Error(result.message || 'Request failed');
+  }
+  return result.data;
+}
 
 /**
  * Fetch all available point packages for purchase.
  */
 export const fetchPackages = async (): Promise<PointPackage[]> => {
-  const url = `${getApiUrl()}/api/v1/payment/packages`;
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to fetch packages' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
-  if (!result.success) {
-    throw new Error(result.message || 'Failed to fetch packages');
-  }
-  return result.data;
+  const result = await apiClient.get<Envelope<PointPackage[]>>(
+    '/api/v1/payment/packages',
+  );
+  return unwrap(result);
 };
 
 /**
@@ -40,56 +39,37 @@ export const fetchPackages = async (): Promise<PointPackage[]> => {
 export const createOrder = async (
   packageId: string,
   paymentMethod: 'wechat' | 'alipay',
-  teamId: string
+  teamId: string,
 ): Promise<PaymentOrder> => {
-  const url = `${getApiUrl()}/api/v1/payment/create-order`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({
+  const result = await apiClient.post<Envelope<PaymentOrder>>(
+    '/api/v1/payment/create-order',
+    {
       package_id: packageId,
       payment_method: paymentMethod,
       team_id: teamId,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to create order' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
-  if (!result.success) {
-    throw new Error(result.message || 'Failed to create order');
-  }
-  return result.data;
+    },
+  );
+  return unwrap(result);
 };
 
 /**
  * Poll the status of a payment order.
- * Returns the current status, points amount, and paid timestamp.
  */
 export const pollOrderStatus = async (
-  orderId: string
-): Promise<{ payment_status: string; points_amount: number; paid_at: string | null }> => {
-  const url = `${getApiUrl()}/api/v1/payment/order/${orderId}/status`;
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to poll order status' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
-  if (!result.success) {
-    throw new Error(result.message || 'Failed to poll order status');
-  }
-  return result.data;
+  orderId: string,
+): Promise<{
+  payment_status: string;
+  points_amount: number;
+  paid_at: string | null;
+}> => {
+  const result = await apiClient.get<
+    Envelope<{
+      payment_status: string;
+      points_amount: number;
+      paid_at: string | null;
+    }>
+  >(`/api/v1/payment/order/${orderId}/status`);
+  return unwrap(result);
 };
 
 /**
@@ -98,28 +78,11 @@ export const pollOrderStatus = async (
 export const fetchOrders = async (
   teamId?: string,
   limit: number = 20,
-  offset: number = 0
+  offset: number = 0,
 ): Promise<PaymentOrder[]> => {
-  const params = new URLSearchParams();
-  if (teamId) params.set('team_id', teamId);
-  params.set('limit', String(limit));
-  params.set('offset', String(offset));
-
-  const url = `${getApiUrl()}/api/v1/payment/orders?${params.toString()}`;
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to fetch orders' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
-  if (!result.success) {
-    throw new Error(result.message || 'Failed to fetch orders');
-  }
-  return result.data;
+  const result = await apiClient.get<Envelope<PaymentOrder[]>>(
+    '/api/v1/payment/orders',
+    { query: { team_id: teamId, limit, offset } },
+  );
+  return unwrap(result);
 };

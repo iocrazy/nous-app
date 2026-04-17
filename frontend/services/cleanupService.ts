@@ -2,8 +2,7 @@
  * Cleanup Service - Storage cleanup suggestions and actions
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // Types
 export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
@@ -94,182 +93,65 @@ export interface BatchCleanupResponse {
 }
 
 /**
- * Get all cleanup data in a single optimized call
- * This is the preferred method as it reduces network round trips
+ * Get all cleanup data in a single optimized call.
+ * This is the preferred method as it reduces network round trips.
  */
 export const getCleanupData = async (
   limit: number = 50,
-  includeDuplicates: boolean = true
-): Promise<CleanupDataResponse> => {
-  const apiUrl = getApiUrl();
-
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    include_duplicates: includeDuplicates.toString(),
+  includeDuplicates: boolean = true,
+): Promise<CleanupDataResponse> =>
+  apiClient.get<CleanupDataResponse>('/api/v1/cleanup/data', {
+    query: { limit, include_duplicates: includeDuplicates },
   });
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/data?${params}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get cleanup data' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
 
 /**
- * Get cleanup suggestions
- * @deprecated Use getCleanupData instead for better performance
+ * @deprecated Use getCleanupData instead for better performance.
  */
 export const getCleanupSuggestions = async (
   limit: number = 50,
-  includeDuplicates: boolean = true
-): Promise<CleanupSuggestionsResponse> => {
-  const apiUrl = getApiUrl();
-
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    include_duplicates: includeDuplicates.toString(),
+  includeDuplicates: boolean = true,
+): Promise<CleanupSuggestionsResponse> =>
+  apiClient.get<CleanupSuggestionsResponse>('/api/v1/cleanup/suggestions', {
+    query: { limit, include_duplicates: includeDuplicates },
   });
 
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/suggestions?${params}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
+export const getCleanupStats = async (): Promise<CleanupStats> =>
+  apiClient.get<CleanupStats>('/api/v1/cleanup/stats');
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get suggestions' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
+export const getStorageBreakdown = async (): Promise<StorageBreakdown> =>
+  apiClient.get<StorageBreakdown>('/api/v1/cleanup/storage');
 
-  return response.json();
-};
-
-/**
- * Get cleanup statistics
- */
-export const getCleanupStats = async (): Promise<CleanupStats> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/stats`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get stats' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Get storage breakdown
- */
-export const getStorageBreakdown = async (): Promise<StorageBreakdown> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/storage`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get storage info' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Take action on a cleanup suggestion
- */
 export const takeCleanupAction = async (
   mediaId: number,
-  action: CleanupActionType
-): Promise<CleanupActionResponse> => {
-  const apiUrl = getApiUrl();
+  action: CleanupActionType,
+): Promise<CleanupActionResponse> =>
+  apiClient.post<CleanupActionResponse>(
+    `/api/v1/cleanup/videos/${mediaId}/action`,
+    { action },
+  );
 
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/action`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ action }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to take action' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Batch cleanup action on multiple videos
- */
 export const batchCleanupAction = async (
   mediaIds: number[],
-  action: CleanupActionType
-): Promise<BatchCleanupResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/batch`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ media_ids: mediaIds, action }),
+  action: CleanupActionType,
+): Promise<BatchCleanupResponse> =>
+  apiClient.post<BatchCleanupResponse>('/api/v1/cleanup/batch', {
+    media_ids: mediaIds,
+    action,
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to perform batch action' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
+export const markKeepForever = async (
+  mediaId: number,
+): Promise<CleanupActionResponse> =>
+  apiClient.post<CleanupActionResponse>(
+    `/api/v1/cleanup/videos/${mediaId}/keep`,
+  );
 
-  return response.json();
-};
-
-/**
- * Mark a video to keep forever
- */
-export const markKeepForever = async (mediaId: number): Promise<CleanupActionResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/keep`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to mark keep forever' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Remove keep forever mark from a video
- */
-export const unmarkKeepForever = async (mediaId: number): Promise<CleanupActionResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/cleanup/videos/${mediaId}/keep`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to unmark keep forever' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
+export const unmarkKeepForever = async (
+  mediaId: number,
+): Promise<CleanupActionResponse> =>
+  apiClient.delete<CleanupActionResponse>(
+    `/api/v1/cleanup/videos/${mediaId}/keep`,
+  );
 
 // Utility functions
 export const formatBytes = (bytes: number): string => {

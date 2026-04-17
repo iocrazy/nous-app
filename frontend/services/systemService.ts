@@ -4,8 +4,7 @@
  * System status monitoring service
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 export interface QueueStatus {
   active: number;
@@ -40,17 +39,7 @@ export interface SystemStatus {
  * Fetch system status (queue, storage, network)
  */
 export async function getSystemStatus(): Promise<SystemStatus> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/system/status`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch system status: ${response.status}`);
-  }
-
-  return response.json();
+  return apiClient.get<SystemStatus>('/api/v1/system/status');
 }
 
 /**

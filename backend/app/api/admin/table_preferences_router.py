@@ -3,7 +3,9 @@
 from fastapi import APIRouter, HTTPException
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.table_preferences_repository import (
+    AdminTablePreferencesRepository,
+)
 from app.schemas.admin import (
     AdminTablePreferenceResponse,
     AdminTablePreferenceUpdate,
@@ -37,17 +39,10 @@ def _validate_table_key(table_key: str) -> None:
 async def get_table_preferences(table_key: str, auth: AdminAuthDep):
     """Retrieve saved table preferences for the current admin user."""
     _validate_table_key(table_key)
-    supabase = await get_async_supabase_admin()
-    result = (
-        await supabase.table("admin_table_preferences")
-        .select("table_key, filters, sorts, visible_columns, column_order")
-        .eq("user_id", str(auth.user_id))
-        .eq("table_key", table_key)
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        return AdminTablePreferenceResponse(**result.data[0])
+    repo = AdminTablePreferencesRepository()
+    row = await repo.get(str(auth.user_id), table_key)
+    if row:
+        return AdminTablePreferenceResponse(**row)
     return AdminTablePreferenceResponse(table_key=table_key)
 
 
@@ -59,22 +54,17 @@ async def upsert_table_preferences(
 ):
     """Create or update table preferences for the current admin user."""
     _validate_table_key(table_key)
-    supabase = await get_async_supabase_admin()
-    payload = {
-        "user_id": str(auth.user_id),
-        "table_key": table_key,
-        "filters": [f.model_dump() for f in body.filters],
-        "sorts": [s.model_dump() for s in body.sorts],
-        "visible_columns": body.visible_columns,
-        "column_order": body.column_order,
-    }
-    result = (
-        await supabase.table("admin_table_preferences")
-        .upsert(payload, on_conflict="user_id,table_key")
-        .execute()
+    repo = AdminTablePreferencesRepository()
+    row = await repo.upsert(
+        user_id=str(auth.user_id),
+        table_key=table_key,
+        filters=[f.model_dump() for f in body.filters],
+        sorts=[s.model_dump() for s in body.sorts],
+        visible_columns=body.visible_columns,
+        column_order=body.column_order,
     )
-    if result.data:
-        return AdminTablePreferenceResponse(**result.data[0])
+    if row:
+        return AdminTablePreferenceResponse(**row)
     raise HTTPException(status_code=500, detail="Failed to save preferences")
 
 
@@ -82,12 +72,6 @@ async def upsert_table_preferences(
 async def delete_table_preferences(table_key: str, auth: AdminAuthDep):
     """Delete saved table preferences for a specific table."""
     _validate_table_key(table_key)
-    supabase = await get_async_supabase_admin()
-    await (
-        supabase.table("admin_table_preferences")
-        .delete()
-        .eq("user_id", str(auth.user_id))
-        .eq("table_key", table_key)
-        .execute()
-    )
+    repo = AdminTablePreferencesRepository()
+    await repo.delete(str(auth.user_id), table_key)
     return {"ok": True}

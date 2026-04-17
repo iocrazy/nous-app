@@ -4,7 +4,9 @@ from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.system_settings_repository import (
+    SystemSettingsRepository,
+)
 from app.schemas.admin import SystemSettingResponse, SystemSettingUpdate
 from app.utils.admin_helpers import create_audit_log
 
@@ -12,25 +14,22 @@ from app.utils.admin_helpers import create_audit_log
 router = APIRouter()
 
 
+def _to_response(row: dict) -> SystemSettingResponse:
+    return SystemSettingResponse(
+        key=row["key"],
+        value=row["value"],
+        description=row.get("description"),
+        updated_at=row["updated_at"],
+        updated_by=row.get("updated_by"),
+    )
+
+
 @router.get("", response_model=list[SystemSettingResponse])
 async def list_settings(auth: AdminAuthDep):
-    """List all system settings."""
-    supabase = await get_async_supabase_admin()
-
-    result = await supabase.table("system_settings").select("*").order("key").execute()
-
-    # Exclude transcode_* keys — managed by dedicated Transcode Config page
-    return [
-        SystemSettingResponse(
-            key=s["key"],
-            value=s["value"],
-            description=s.get("description"),
-            updated_at=s["updated_at"],
-            updated_by=s.get("updated_by"),
-        )
-        for s in (result.data or [])
-        if not s["key"].startswith("transcode_")
-    ]
+    """List all system settings (excluding transcode_*, managed elsewhere)."""
+    repo = SystemSettingsRepository()
+    rows = await repo.list_non_transcode()
+    return [_to_response(r) for r in rows]
 
 
 @router.patch("/{key}", response_model=SystemSettingResponse)
@@ -41,31 +40,21 @@ async def update_setting(
     request: Request,
 ):
     """Update a system setting by key."""
-    supabase = await get_async_supabase_admin()
+    repo = SystemSettingsRepository()
 
-    # Check if setting exists
-    existing = await supabase.table("system_settings").select("key").eq("key", key).single().execute()
-    if not existing.data:
+    if not await repo.exists(key):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Setting '{key}' not found",
         )
 
-    # Update the setting
-    result = await (
-        supabase.table("system_settings")
-        .update({"value": update.value, "updated_by": auth.user_id})
-        .eq("key", key)
-        .execute()
-    )
-
-    if not result.data:
+    updated = await repo.update(key, update.value, auth.user_id)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update setting",
         )
 
-    # Audit log
     client_ip = request.client.host if request.client else None
     await create_audit_log(
         admin_id=auth.user_id,
@@ -77,12 +66,4 @@ async def update_setting(
     )
 
     logger.info(f"Setting '{key}' updated by admin {auth.user_id}")
-
-    s = result.data[0]
-    return SystemSettingResponse(
-        key=s["key"],
-        value=s["value"],
-        description=s.get("description"),
-        updated_at=s["updated_at"],
-        updated_by=s.get("updated_by"),
-    )
+    return _to_response(updated)
