@@ -1,7 +1,10 @@
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
-import { unwrapResponse } from '../utils/apiHelpers';
+import { apiClient } from './apiClient';
 import { Skill } from '../types';
+
+interface Envelope<T> {
+  success?: boolean;
+  data: T;
+}
 
 const CACHE_TTL_MS = 30_000;
 let _cache: { data: Skill[]; ts: number; projectId?: string } | null = null;
@@ -22,12 +25,10 @@ export async function fetchSkills(
 ): Promise<Skill[]> {
   if (!category && isCacheValid(projectId)) return _cache!.data;
 
-  const headers = await getAuthHeaders();
-  const params = new URLSearchParams();
-  if (projectId) params.set('project_id', projectId);
-  if (category) params.set('category', category);
-  const res = await fetch(`${getApiUrl()}/api/v1/skills?${params}`, { headers });
-  const data = await unwrapResponse<Skill[]>(res);
+  const result = await apiClient.get<Envelope<Skill[]>>('/api/v1/skills', {
+    query: { project_id: projectId, category },
+  });
+  const data = result.data;
 
   if (!category) {
     _cache = { data, ts: Date.now(), projectId };
@@ -36,9 +37,8 @@ export async function fetchSkills(
 }
 
 export async function fetchSkillDetail(id: string): Promise<Skill> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/skills/${id}`, { headers });
-  return unwrapResponse<Skill>(res);
+  const result = await apiClient.get<Envelope<Skill>>(`/api/v1/skills/${id}`);
+  return result.data;
 }
 
 export async function createSkill(data: {
@@ -52,35 +52,38 @@ export async function createSkill(data: {
   project_id?: string;
   is_public?: boolean;
 }): Promise<Skill> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/skills`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+  const result = await apiClient.post<Envelope<Skill>>('/api/v1/skills', data);
   invalidateSkillsCache();
-  return unwrapResponse<Skill>(res);
+  return result.data;
 }
 
 export async function updateSkill(
   id: string,
-  data: Partial<Pick<Skill, 'name' | 'description' | 'content_md' | 'category' | 'icon' | 'output_format' | 'trigger_keywords' | 'project_id' | 'is_public' | 'status'>>,
+  data: Partial<
+    Pick<
+      Skill,
+      | 'name'
+      | 'description'
+      | 'content_md'
+      | 'category'
+      | 'icon'
+      | 'output_format'
+      | 'trigger_keywords'
+      | 'project_id'
+      | 'is_public'
+      | 'status'
+    >
+  >,
 ): Promise<Skill> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${getApiUrl()}/api/v1/skills/${id}`, {
-    method: 'PATCH',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+  const result = await apiClient.patch<Envelope<Skill>>(
+    `/api/v1/skills/${id}`,
+    data,
+  );
   invalidateSkillsCache();
-  return unwrapResponse<Skill>(res);
+  return result.data;
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const headers = await getAuthHeaders();
-  await fetch(`${getApiUrl()}/api/v1/skills/${id}`, {
-    method: 'DELETE',
-    headers,
-  });
+  await apiClient.delete(`/api/v1/skills/${id}`);
   invalidateSkillsCache();
 }

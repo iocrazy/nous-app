@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
 from app.db import get_async_supabase_admin
+from app.repositories.admin.alert_rules_repository import AlertRulesRepository
 
 router = APIRouter()
 
@@ -92,58 +93,42 @@ class AlertCheckResult(BaseModel):
 @router.get("/rules", response_model=AlertRuleListResponse)
 async def list_alert_rules(auth: AdminAuthDep):
     """List all alert rules."""
-    supabase = await get_async_supabase_admin()
-    result = await (
-        supabase.table("alert_rules")
-        .select("*", count="exact")
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return AlertRuleListResponse(
-        data=result.data or [],
-        total=result.count or 0,
-    )
+    repo = AlertRulesRepository()
+    rows, total = await repo.list_rules()
+    return AlertRuleListResponse(data=rows, total=total)
 
 
 @router.post("/rules", response_model=AlertRuleItem)
 async def create_alert_rule(body: AlertRuleCreate, auth: AdminAuthDep):
     """Create a new alert rule."""
-    supabase = await get_async_supabase_admin()
-    result = await (
-        supabase.table("alert_rules")
-        .insert(
-            {
-                "name": body.name,
-                "metric_type": body.metric_type,
-                "condition": body.condition,
-                "threshold": body.threshold,
-                "window_minutes": body.window_minutes,
-                "notification_channel": body.notification_channel,
-                "created_by": auth.id,
-            }
-        )
-        .execute()
+    repo = AlertRulesRepository()
+    created = await repo.create_rule(
+        {
+            "name": body.name,
+            "metric_type": body.metric_type,
+            "condition": body.condition,
+            "threshold": body.threshold,
+            "window_minutes": body.window_minutes,
+            "notification_channel": body.notification_channel,
+            "created_by": auth.id,
+        }
     )
-    return result.data[0]
+    return created
 
 
 @router.patch("/rules/{rule_id}", response_model=AlertRuleItem)
 async def update_alert_rule(rule_id: str, body: AlertRuleUpdate, auth: AdminAuthDep):
     """Update an alert rule."""
-    supabase = await get_async_supabase_admin()
-    update_data = body.model_dump(exclude_none=True)
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    result = await (
-        supabase.table("alert_rules").update(update_data).eq("id", rule_id).execute()
-    )
-    return result.data[0]
+    repo = AlertRulesRepository()
+    updated = await repo.update_rule(rule_id, body.model_dump(exclude_none=True))
+    return updated
 
 
 @router.delete("/rules/{rule_id}")
 async def delete_alert_rule(rule_id: str, auth: AdminAuthDep):
     """Delete an alert rule."""
-    supabase = await get_async_supabase_admin()
-    await supabase.table("alert_rules").delete().eq("id", rule_id).execute()
+    repo = AlertRulesRepository()
+    await repo.delete_rule(rule_id)
     return {"ok": True}
 
 
@@ -159,19 +144,11 @@ async def mute_alert_rule(
     duration_minutes: int = Query(60, ge=1, le=10080),
 ):
     """Mute an alert rule for a specified duration."""
-    supabase = await get_async_supabase_admin()
     mute_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
-    await (
-        supabase.table("alert_rules")
-        .update(
-            {
-                "is_muted": True,
-                "mute_until": mute_until.isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        .eq("id", rule_id)
-        .execute()
+    repo = AlertRulesRepository()
+    await repo.update_rule(
+        rule_id,
+        {"is_muted": True, "mute_until": mute_until.isoformat()},
     )
     return {"ok": True, "mute_until": mute_until.isoformat()}
 
@@ -179,19 +156,8 @@ async def mute_alert_rule(
 @router.post("/rules/{rule_id}/unmute")
 async def unmute_alert_rule(rule_id: str, auth: AdminAuthDep):
     """Unmute an alert rule."""
-    supabase = await get_async_supabase_admin()
-    await (
-        supabase.table("alert_rules")
-        .update(
-            {
-                "is_muted": False,
-                "mute_until": None,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        .eq("id", rule_id)
-        .execute()
-    )
+    repo = AlertRulesRepository()
+    await repo.update_rule(rule_id, {"is_muted": False, "mute_until": None})
     return {"ok": True}
 
 
@@ -211,45 +177,23 @@ async def list_alert_history(
     end_date: Optional[datetime] = Query(None),
 ):
     """List alert history with pagination and filters."""
-    supabase = await get_async_supabase_admin()
-    query = supabase.table("alert_history").select("*", count="exact")
-
-    if rule_id:
-        query = query.eq("rule_id", rule_id)
-    if resolved is not None:
-        query = query.eq("resolved", resolved)
-    if start_date:
-        query = query.gte("created_at", start_date.isoformat())
-    if end_date:
-        query = query.lte("created_at", end_date.isoformat())
-
-    offset = (page - 1) * pageSize
-    result = await (
-        query.order("created_at", desc=True)
-        .range(offset, offset + pageSize - 1)
-        .execute()
+    repo = AlertRulesRepository()
+    rows, total = await repo.list_history(
+        page=page,
+        page_size=pageSize,
+        rule_id=rule_id,
+        resolved=resolved,
+        start_date=start_date,
+        end_date=end_date,
     )
-    return AlertHistoryListResponse(
-        data=result.data or [],
-        total=result.count or 0,
-    )
+    return AlertHistoryListResponse(data=rows, total=total)
 
 
 @router.post("/history/{alert_id}/resolve")
 async def resolve_alert(alert_id: str, auth: AdminAuthDep):
     """Mark an alert as resolved."""
-    supabase = await get_async_supabase_admin()
-    await (
-        supabase.table("alert_history")
-        .update(
-            {
-                "resolved": True,
-                "resolved_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        .eq("id", alert_id)
-        .execute()
-    )
+    repo = AlertRulesRepository()
+    await repo.resolve_history(alert_id)
     return {"ok": True}
 
 
@@ -270,18 +214,11 @@ CONDITION_OPS = {
 @router.post("/check", response_model=AlertCheckResult)
 async def check_alerts(auth: AdminAuthDep):
     """Manually check all active alert rules against current metrics."""
-    supabase = await get_async_supabase_admin()
+    supabase = await get_async_supabase_admin()  # still needed for metric queries
+    repo = AlertRulesRepository()
     now = datetime.now(timezone.utc)
 
-    # Fetch active, non-muted rules
-    rules_result = await (
-        supabase.table("alert_rules")
-        .select("*")
-        .eq("is_active", True)
-        .execute()
-    )
-    rules = rules_result.data or []
-
+    rules = await repo.list_active_rules()
     triggered = []
 
     for rule in rules:
@@ -298,12 +235,7 @@ async def check_alerts(auth: AdminAuthDep):
                 except (ValueError, AttributeError):
                     pass
             # Auto-unmute if past mute_until
-            await (
-                supabase.table("alert_rules")
-                .update({"is_muted": False, "mute_until": None})
-                .eq("id", rule["id"])
-                .execute()
-            )
+            await repo.auto_unmute_rule(rule["id"])
 
         window = timedelta(minutes=rule.get("window_minutes", 5))
         window_start = (now - window).isoformat()
@@ -369,22 +301,17 @@ async def check_alerts(auth: AdminAuthDep):
                 f"Alert: {rule['name']} - {metric_type} is {metric_value} "
                 f"({condition} {threshold}) in last {rule.get('window_minutes', 5)} min"
             )
-            # Record in history
-            await (
-                supabase.table("alert_history")
-                .insert(
-                    {
-                        "rule_id": rule["id"],
-                        "rule_name": rule["name"],
-                        "metric_type": metric_type,
-                        "metric_value": metric_value,
-                        "threshold": threshold,
-                        "condition": condition,
-                        "message": message,
-                        "notified": False,
-                    }
-                )
-                .execute()
+            await repo.insert_history(
+                {
+                    "rule_id": rule["id"],
+                    "rule_name": rule["name"],
+                    "metric_type": metric_type,
+                    "metric_value": metric_value,
+                    "threshold": threshold,
+                    "condition": condition,
+                    "message": message,
+                    "notified": False,
+                }
             )
             triggered.append(
                 {
