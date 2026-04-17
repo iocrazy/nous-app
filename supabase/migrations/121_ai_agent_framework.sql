@@ -1,4 +1,4 @@
--- 117_ai_agent_framework.sql
+-- 121_ai_agent_framework.sql
 -- AI Agent Framework: agents, sessions, messages, usage logs
 
 -- AI Agents
@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ai_messages_session ON ai_messages(session_id, created_at);
+
+-- Indexes for ai_sessions (list_sessions queries filter by user_id + sort by updated_at)
+CREATE INDEX IF NOT EXISTS idx_ai_sessions_user ON ai_sessions(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_sessions_project ON ai_sessions(project_id, updated_at DESC) WHERE project_id IS NOT NULL;
 
 -- AI Usage Logs
 CREATE TABLE IF NOT EXISTS ai_usage_logs (

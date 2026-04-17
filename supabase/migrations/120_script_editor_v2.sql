@@ -1,4 +1,4 @@
--- 116_script_editor_v2.sql
+-- 120_script_editor_v2.sql
 -- Script Editor v2: add content_json and genre fields
 
 ALTER TABLE script_chapters
