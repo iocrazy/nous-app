@@ -231,13 +231,13 @@ def download_unified_task(
         )
 
         # ── Update user resource download statuses based on actual results ──
+        status_updates: dict = {}
+        path_updates: dict = {}
         if resource_id:
             try:
                 from app.repositories.media_repository import MediaRepository as _MR2
                 from app.repositories.resources_repository import ResourcesRepository as _RR2
                 _res_repo2 = _RR2()
-                status_updates = {}
-                path_updates = {}
 
                 if download_video:
                     video_result = results.get("video")
@@ -325,23 +325,30 @@ def download_unified_task(
             except Exception as e:
                 logger.warning(f"[Download/DB] Failed to update resource status for {platform_id}: {e}")
 
-        # Generate thumbnail + preview sprite for hover scrub
-        if resource_id:
-            try:
-                from app.services.thumbnail_service import ThumbnailService
-                from app.repositories.resources_repository import ResourcesRepository as _RR3
-                _res3 = _RR3()
-                _resource = run_async(_res3.get_resource_by_id(resource_id))
-                if _resource and _resource.get("file_path") and _resource.get("mime_type", "").startswith("video/"):
-                    thumb_svc = ThumbnailService()
-                    run_async(thumb_svc.generate_thumbnail(
-                        resource_id=resource_id,
-                        file_path=_resource["file_path"],
-                        mime_type=_resource["mime_type"],
-                    ))
-                    logger.info(f"[Download/Post] Thumbnail + sprite generated for resource={resource_id}")
-            except Exception as e:
-                logger.warning(f"[Download/Post] Thumbnail generation failed for resource={resource_id}: {e}")
+        # Queue thumbnail + preview sprite generation out-of-band.
+        # Reuses already-known file_path (no extra DB fetch) and avoids blocking
+        # the download queue on a slow ffmpeg pass.
+        file_path_for_thumb = path_updates.get("file_path") if resource_id else None
+        if resource_id and file_path_for_thumb:
+            mime_type_for_thumb = "video/mp4"
+            if file_path_for_thumb.endswith(".webm"):
+                mime_type_for_thumb = "video/webm"
+            elif file_path_for_thumb.endswith(".mkv"):
+                mime_type_for_thumb = "video/x-matroska"
+            if mime_type_for_thumb.startswith("video/"):
+                try:
+                    from app.tasks.thumbnail_tasks import generate_thumbnail_task
+
+                    generate_thumbnail_task.delay(
+                        resource_id, file_path_for_thumb, mime_type_for_thumb
+                    )
+                    logger.info(
+                        f"[Download/Post] Thumbnail queued for resource={resource_id}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[Download/Post] Failed to queue thumbnail for resource={resource_id}: {e}"
+                    )
 
         # Chain HLS transcode for video files
         maybe_chain_transcode(platform_id, user_id)

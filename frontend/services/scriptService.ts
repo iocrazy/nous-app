@@ -106,15 +106,16 @@ export async function generateOutline(data: {
   script_id: string;
   premise: string;
   chapter_count: number;
+  genre?: string;
   style_guide?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/generate-outline`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string }>(res);
+  return unwrapResponse<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }>(res);
 }
 
 export async function expandChapter(data: {
@@ -122,6 +123,7 @@ export async function expandChapter(data: {
   chapter_id: string;
   title: string;
   summary: string;
+  expansion_request?: string;
   context?: string;
 }): Promise<{ content: string; chapter: Record<string, unknown> }> {
   const headers = await getAuthHeaders();
@@ -221,4 +223,38 @@ export async function deleteScriptAsset(assetId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
+}
+
+// ─── Import / Export ─────────────────────────────────────────────────────────
+
+export interface ImportedChapter {
+  title: string;
+  summary: string;
+  content: string;
+  content_html: string;
+}
+
+export async function importScript(
+  scriptId: string,
+  file: File,
+): Promise<{ chapters: ImportedChapter[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('script_id', scriptId);
+  const headers = await getAuthHeaders();
+  // Remove Content-Type — FormData sets it automatically with the multipart boundary
+  delete (headers as Record<string, string>)['Content-Type'];
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/import`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Import failed: ${res.status}`);
+  return res.json();
+}
+
+export function getExportUrl(scriptId: string, format: string, branchId?: string): string {
+  const params = new URLSearchParams({ format });
+  if (branchId) params.set('branch_id', branchId);
+  return `${getApiUrl()}/api/v1/scripts/${scriptId}/export?${params}`;
 }

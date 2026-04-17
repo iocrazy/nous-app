@@ -1,18 +1,28 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save } from 'lucide-react';
+import { Save, MessageSquare } from 'lucide-react';
 import { useScriptCanvasStore, type ScriptNode } from '../../stores/scriptCanvasStore';
+import { EditorTopBar } from '../../components/EditorTopBar';
+import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
 import { ScriptCanvas } from '../../features/script/ScriptCanvas';
 import { ScriptToolbar } from '../../features/script/ScriptToolbar';
 import { CreateStoryDialog } from '../../features/script/CreateStoryDialog';
 import { ExpandChapterDialog } from '../../features/script/ExpandChapterDialog';
 import { CreateBranchDialog } from '../../features/script/CreateBranchDialog';
 import { ScriptAssetsSidebar } from '../../features/script/ScriptAssetsSidebar';
+import WelcomeScreen from '../../features/script/components/WelcomeScreen';
+import { ImportScriptDialog } from '../../features/script/components/ImportScriptDialog';
+import { ExportDialog } from '../../features/script/components/ExportDialog';
+import { ViewControls } from '../../features/script/components/ViewControls';
+import { GridView } from '../../features/script/views/GridView';
+import { ListView } from '../../features/script/views/ListView';
+import { AIChatPanel } from '../../components/AIChatPanel';
 import {
   fetchScriptProject,
   updateScriptProject,
   syncScriptCanvas,
   updateScriptViewport,
+  type ImportedChapter,
 } from '../../services/scriptService';
 import type { ScriptChapter } from '../../types';
 
@@ -34,7 +44,9 @@ function mapChaptersToNodes(chapters: ScriptChapter[]): ScriptNode[] {
   }));
 }
 
-function mapChaptersToEdges(chapters: ScriptChapter[]): { id: string; source: string; target: string }[] {
+function mapChaptersToEdges(
+  chapters: ScriptChapter[]
+): { id: string; source: string; target: string }[] {
   return chapters
     .filter((ch) => ch.parent_chapter_id)
     .map((ch) => ({
@@ -59,6 +71,7 @@ export function ScriptEditorPage() {
   const closeExpandDialog = useScriptCanvasStore((s) => s.closeExpandDialog);
   const branchDialog = useScriptCanvasStore((s) => s.branchDialog);
   const closeBranchDialog = useScriptCanvasStore((s) => s.closeBranchDialog);
+  const viewMode = useScriptCanvasStore((s) => s.viewMode);
 
   const [scriptName, setScriptName] = useState('Untitled Script');
   const [editingName, setEditingName] = useState(false);
@@ -66,7 +79,17 @@ export function ScriptEditorPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateStory, setShowCreateStory] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+
+  // Derived: has branch nodes
+  const hasBranches = nodes.some((n) => n.data.branchType != null);
+
+  // Auto-save timer ref
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load script on mount
   useEffect(() => {
@@ -94,7 +117,9 @@ export function ScriptEditorPage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [scriptId, setCanvasData]);
 
   // Save handler
@@ -129,6 +154,27 @@ export function ScriptEditorPage() {
     }
   }, [scriptId, nodes, viewport, saving]);
 
+  // Debounced auto-save (500ms after node changes settle)
+  useEffect(() => {
+    if (nodes.length === 0 || loading) return;
+
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+    }
+
+    autoSaveTimer.current = setTimeout(() => {
+      void handleSave();
+    }, 500);
+
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    };
+    // handleSave is intentionally excluded to avoid re-triggering on its own change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, loading]);
+
   // Name editing
   const handleNameBlur = useCallback(async () => {
     setEditingName(false);
@@ -139,83 +185,157 @@ export function ScriptEditorPage() {
     }
   }, [nameInput, scriptName, scriptId]);
 
+  // Called after successful import — reload data
+  const handleImportComplete = useCallback(
+    (_chapters: ImportedChapter[]) => {
+      if (!scriptId) return;
+      void (async () => {
+        try {
+          const project = await fetchScriptProject(scriptId);
+          const chapterNodes = mapChaptersToNodes(project.chapters);
+          const chapterEdges = mapChaptersToEdges(project.chapters);
+          setCanvasData(chapterNodes, chapterEdges);
+        } catch (err) {
+          console.error('[ScriptEditorPage] Reload after import failed:', err);
+        }
+      })();
+    },
+    [scriptId, setCanvasData]
+  );
+
+  // Navigate to a chapter node in canvas view
+  const handleNavigateToChapter = useCallback((_nodeId: string) => {
+    useScriptCanvasStore.getState().setViewMode('canvas');
+    // ReactFlow fitView to node is handled by ScriptCanvas when viewMode changes
+  }, []);
+
   const handleBack = () => {
     navigate(`/team/${teamId}/projects/${projectId}?tab=scripts`);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-zinc-950">
-        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 gap-3">
-        <p className="text-sm text-red-400">Failed to load script: {loadError}</p>
-        <button onClick={handleBack} className="text-sm text-indigo-400 hover:underline">
-          Back to project
-        </button>
-      </div>
-    );
-  }
+  const hasChapters = nodes.length > 0;
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
-        <button onClick={handleBack} className="text-zinc-500 hover:text-zinc-300 p-1">
-          <ArrowLeft size={18} />
-        </button>
-        {editingName ? (
-          <input
-            className="text-sm font-semibold text-white bg-transparent outline-none border-b border-indigo-500"
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            onBlur={handleNameBlur}
-            onKeyDown={(e) => e.key === 'Enter' && handleNameBlur()}
-            autoFocus
-          />
-        ) : (
-          <button
-            className="text-sm font-semibold text-zinc-100 hover:text-white"
-            onDoubleClick={() => {
-              setNameInput(scriptName);
-              setEditingName(true);
-            }}
-          >
-            {scriptName}
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950">
+      {/* Fullscreen loading overlay */}
+      <EditorLoadingScreen visible={loading} />
+
+      {/* Error state (shown after loading completes with an error) */}
+      {!loading && loadError && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-3">
+          <p className="text-sm text-red-400">Failed to load script: {loadError}</p>
+          <button onClick={handleBack} className="text-sm text-indigo-400 hover:underline">
+            Back to project
           </button>
-        )}
-        <div className="flex-1" />
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
-        >
-          <Save size={14} />
-          {saving ? 'Saving...' : 'Save'}
-        </button>
-      </div>
-
-      {/* Toolbar */}
-      <ScriptToolbar onCreateStory={() => setShowCreateStory(true)} />
-
-      {/* Sidebar + Canvas */}
-      <div className="flex-1 flex overflow-hidden">
-        <ScriptAssetsSidebar />
-        <div className="flex-1 relative">
-          <ScriptCanvas />
         </div>
-      </div>
+      )}
+
+      {/* Editor UI — hidden while loading or on error */}
+      {!loadError && (
+        <>
+          <EditorTopBar
+            projectName={scriptName}
+            onBack={handleBack}
+            onExport={() => setShowExport(true)}
+            onImport={() => setShowImport(true)}
+            onSave={handleSave}
+            onRename={async (newName) => {
+              if (newName !== scriptName && scriptId) {
+                setScriptName(newName);
+                await updateScriptProject(scriptId, { name: newName }).catch(console.error);
+              }
+            }}
+            saving={saving}
+          >
+            <button
+              type="button"
+              onClick={() => setShowChat((v) => !v)}
+              className={`p-1.5 rounded hover:bg-zinc-800 transition-colors ${
+                showChat ? 'text-indigo-400' : 'text-zinc-500'
+              }`}
+              title="AI Chat"
+            >
+              <MessageSquare size={16} />
+            </button>
+          </EditorTopBar>
+
+
+          {/* Sidebar + main content */}
+          <div className="flex flex-1 overflow-hidden">
+            <ScriptAssetsSidebar
+              collapsed={sidebarCollapsed}
+              onToggle={() => setSidebarCollapsed((c) => !c)}
+            />
+
+            {/* Main content area */}
+            <div className="flex-1 relative overflow-hidden">
+              {!hasChapters ? (
+                <WelcomeScreen
+                  onImport={() => setShowImport(true)}
+                  onCreateStory={() => setShowCreateStory(true)}
+                  onBack={handleBack}
+                />
+              ) : viewMode === 'grid' ? (
+                <>
+                  <GridView onNavigateToChapter={handleNavigateToChapter} />
+                  <ViewControls />
+                </>
+              ) : viewMode === 'list' ? (
+                <>
+                  <ListView onNavigateToChapter={handleNavigateToChapter} />
+                  <ViewControls />
+                </>
+              ) : (
+                /* Canvas mode: ScriptCanvas renders ViewControls internally (with zoom) */
+                <ScriptCanvas />
+              )}
+            </div>
+
+            {/* AI Chat Panel — slides in from right */}
+            {showChat && (
+              <AIChatPanel
+                projectId={projectId ?? ''}
+                contextType="script"
+                contextId={scriptId}
+                onApplyContent={(content) => {
+                  const editingId = useScriptCanvasStore.getState().editingNodeId;
+                  if (editingId) {
+                    useScriptCanvasStore.getState().updateNodeData(editingId, { content });
+                  }
+                }}
+                onClose={() => setShowChat(false)}
+              />
+            )}
+          </div>
+        </>
+      )}
+
 
       {/* Create Story Dialog */}
       <CreateStoryDialog
         isOpen={showCreateStory}
         onClose={() => setShowCreateStory(false)}
       />
+
+      {/* Import Dialog */}
+      {scriptId && (
+        <ImportScriptDialog
+          open={showImport}
+          onClose={() => setShowImport(false)}
+          scriptId={scriptId}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+
+      {/* Export Dialog */}
+      {scriptId && (
+        <ExportDialog
+          open={showExport}
+          onClose={() => setShowExport(false)}
+          scriptId={scriptId}
+          hasBranches={hasBranches}
+        />
+      )}
 
       {/* AI Expand Dialog */}
       {expandDialog && (

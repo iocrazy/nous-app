@@ -62,8 +62,6 @@ export const createTeam = async (name: string): Promise<Team> => {
   }
   if (!user) throw new Error('Not authenticated - please log in again');
 
-  console.log('Creating team for user:', user.id);
-
   const { data, error } = await supabase
     .from('teams')
     .insert({ name, owner_id: user.id })
@@ -75,7 +73,6 @@ export const createTeam = async (name: string): Promise<Team> => {
     throw new Error(error.message || 'Failed to create team');
   }
 
-  console.log('Team created:', data);
   return normalizeTeam(data);
 };
 

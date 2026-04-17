@@ -118,9 +118,18 @@ export const router = createBrowserRouter([
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
-          { path: 'projects/:projectId/storyboard/:storyboardId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><StoryboardWorkbench /></ModuleGuard></SuspenseWrap> },
-          { path: 'projects/:projectId/scripts/:scriptId', element: <SuspenseWrap><ScriptEditor /></SuspenseWrap> },
+          // Script & Storyboard editors handled by fullscreen routes below
         ],
+      },
+
+      // ── Fullscreen editor routes (outside AppLayout, still auth-guarded) ──
+      {
+        path: 'team/:teamId/projects/:projectId/storyboard/:storyboardId',
+        element: <SuspenseWrap><ModuleGuard moduleKey="projects"><StoryboardWorkbench /></ModuleGuard></SuspenseWrap>,
+      },
+      {
+        path: 'team/:teamId/projects/:projectId/scripts/:scriptId',
+        element: <SuspenseWrap><ScriptEditor /></SuspenseWrap>,
       },
 
       // Catch-all → redirect to default team
