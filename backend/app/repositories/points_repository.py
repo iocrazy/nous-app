@@ -232,6 +232,49 @@ class PointsRepository:
             )
             return None
 
+    async def refund_points_atomic(
+        self,
+        team_id: str,
+        user_id: Optional[str],
+        amount: int,
+        reference_type: str,
+        reference_id: Optional[str],
+        description: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Atomic, idempotent refund via rpc_refund_team_points_idempotent
+        (migration 123). A refund for the same (team, reference_type,
+        reference_id) is inserted at most once — Celery retries are safe.
+
+        Returns:
+            {success, already_refunded, new_balance} or None on RPC failure.
+        """
+        try:
+            client = await self._get_client()
+            result = await client.rpc(
+                "rpc_refund_team_points_idempotent",
+                {
+                    "p_team_id": team_id,
+                    "p_user_id": user_id,
+                    "p_amount": amount,
+                    "p_reference_type": reference_type,
+                    "p_reference_id": reference_id,
+                    "p_description": description,
+                },
+            ).execute()
+            data = result.data
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict):
+                return data
+            return None
+        except Exception as e:
+            logger.error(
+                f"Atomic refund RPC failed for team {team_id}, "
+                f"ref={reference_type}:{reference_id}: {e}"
+            )
+            return None
+
     async def update_points_balance(
         self, team_id: str, new_balance: int
     ) -> Dict[str, Any]:

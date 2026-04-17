@@ -384,35 +384,55 @@ class PointsService:
         reason: str = "Operation failed",
     ) -> Dict[str, Any]:
         """
-        Refund points back to a team's balance. Convenience wrapper around
-        add_points with type='refund'.
-
-        Args:
-            team_id: UUID of the team.
-            user_id: UUID of the user who initiated the refund.
-            amount: Points to refund (positive value).
-            reference_type: What kind of entity is being refunded.
-            reference_id: ID of the entity being refunded.
-            reason: Human-readable reason for the refund.
+        Atomically + idempotently refund points. Safe to call from Celery
+        retry paths: the RPC enforces at-most-one refund per
+        (team_id, reference_type, reference_id) via a partial unique index.
 
         Returns:
-            Dict with keys: success, new_balance.
+            Dict with keys: success, new_balance, already_refunded.
         """
         description = f"Refund: {reason} ({reference_type})"
-        result = await self.add_points(
+
+        rpc_result = await self.repo.refund_points_atomic(
             team_id=team_id,
-            amount=amount,
-            type="refund",
-            description=description,
             user_id=user_id,
+            amount=amount,
+            reference_type=reference_type,
             reference_id=reference_id,
+            description=description,
         )
-        if result["success"]:
+
+        if rpc_result is None:
+            logger.error(
+                f"Refund RPC unavailable for team {team_id}, "
+                f"ref={reference_type}:{reference_id}"
+            )
+            return {
+                "success": False,
+                "new_balance": None,
+                "already_refunded": False,
+            }
+
+        success = bool(rpc_result.get("success"))
+        already_refunded = bool(rpc_result.get("already_refunded"))
+        new_balance = rpc_result.get("new_balance")
+
+        if success and not already_refunded:
             logger.info(
                 f"Refunded {amount} points to team {team_id} "
                 f"for {reference_type} (ref={reference_id}): {reason}"
             )
-        return result
+        elif already_refunded:
+            logger.info(
+                f"Refund for {reference_type}:{reference_id} already "
+                f"applied — no-op"
+            )
+
+        return {
+            "success": success,
+            "new_balance": new_balance,
+            "already_refunded": already_refunded,
+        }
 
     # ------------------------------------------------------------------ #
     # Reclaim daily gift (debit flow)

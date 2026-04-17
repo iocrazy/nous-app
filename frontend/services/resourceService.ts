@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import { getAuthHeaders } from './parserService';
+import { apiClient } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
 import { buildMediaUrl } from '../utils/mediaUrl';
 
@@ -84,21 +85,15 @@ export async function updateResource(
 }
 
 export async function trashFolder(id: string): Promise<void> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/trash`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to trash folder');
+  await apiClient.post(`/api/v1/resources/folders/${id}/trash`);
 }
 
-export async function getFolderContentCount(id: string): Promise<{ resource_count: number; subfolder_count: number }> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/content-count`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to get folder content count');
-  const json = await response.json();
+export async function getFolderContentCount(
+  id: string,
+): Promise<{ resource_count: number; subfolder_count: number }> {
+  const json = await apiClient.get<{
+    data: { resource_count: number; subfolder_count: number };
+  }>(`/api/v1/resources/folders/${id}/content-count`);
   return json.data;
 }
 
@@ -136,12 +131,7 @@ export async function fetchTrashedFolders(
 }
 
 export async function restoreFolder(id: string): Promise<void> {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/resources/folders/${id}/restore`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to restore folder');
+  await apiClient.post(`/api/v1/resources/folders/${id}/restore`);
 }
 
 // Build folder tree from flat list

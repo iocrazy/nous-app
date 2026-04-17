@@ -16,6 +16,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.cache import frontend_config_cache
 from app.core.config import settings
 
 router = APIRouter(prefix="/config", tags=["前端配置"])
@@ -67,8 +68,7 @@ def get_default_download_path() -> str:
     return settings.DOWNLOAD_PATH
 
 
-def load_config() -> dict:
-    """加载配置文件"""
+def _load_config_from_disk() -> dict:
     if not CONFIG_FILE.exists():
         return {
             "supabase": {"url": "", "anon_key": ""},
@@ -81,6 +81,23 @@ def load_config() -> dict:
     except Exception as e:
         logger.error(f"加载前端配置失败: {e}")
         return {}
+
+
+def load_config() -> dict:
+    """Load frontend config (fresh copy so callers can mutate safely)."""
+    return _load_config_from_disk()
+
+
+async def load_config_cached() -> dict:
+    """Return a cached view of frontend config (60s TTL).
+
+    Used by the GET endpoint, which hits Supabase on every page load
+    otherwise. Writes invalidate via save_config().
+    """
+    async def _loader() -> dict:
+        return _load_config_from_disk()
+
+    return await frontend_config_cache.get_or_load("__disk__", _loader)
 
 
 def save_config(config: dict) -> bool:
@@ -136,6 +153,9 @@ transcode:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             f.write(content)
 
+        # Invalidate cached disk read so the next GET sees the write.
+        frontend_config_cache.invalidate("__disk__")
+
         logger.info("前端配置已保存")
         return True
     except Exception as e:
@@ -157,7 +177,7 @@ async def get_frontend_config():
     如果 YAML 文件中的值为空，前端应使用 .env 中的默认值。
     """
     try:
-        config = load_config()
+        config = await load_config_cached()
 
         # Transcode settings come from in-memory (loaded from DB at startup)
         return FrontendConfig(

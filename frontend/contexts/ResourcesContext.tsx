@@ -25,7 +25,7 @@ import {
   fetchFolderContents,
 } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
-import { fetchTags } from '../services/tagsService';
+import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
 import { useTaskManager } from './TaskManagerContext';
 import { usePermission } from '../hooks/usePermission';

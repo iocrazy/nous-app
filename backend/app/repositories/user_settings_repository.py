@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+from app.core.cache import user_settings_cache
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -29,16 +30,7 @@ class UserSettingsRepository:
         client = await self._get_client()
         return client.table("user_settings")
 
-    async def get_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取用户设置
-
-        Args:
-            user_id: 用户 ID
-
-        Returns:
-            设置数据，如果不存在则返回 None
-        """
+    async def _load_user_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
         try:
             table = await self._get_table()
             result = await table.select("*").eq("user_id", user_id).execute()
@@ -48,6 +40,13 @@ class UserSettingsRepository:
         except Exception as e:
             logger.error(f"获取用户设置失败: {e}")
             return None
+
+    async def get_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Return cached user settings (30s TTL) or load from DB on miss."""
+        return await user_settings_cache.get_or_load(
+            user_id,
+            lambda: self._load_user_settings(user_id),
+        )
 
     async def upsert(
         self, user_id: str, settings: Dict[str, Any]
@@ -67,6 +66,9 @@ class UserSettingsRepository:
 
             table = await self._get_table()
             result = await table.upsert(data, on_conflict="user_id").execute()
+
+            # Invalidate the cached copy so subsequent reads see the write.
+            user_settings_cache.invalidate(user_id)
 
             if result.data and len(result.data) > 0:
                 logger.info(f"用户设置已保存: user_id={user_id}")
@@ -89,6 +91,7 @@ class UserSettingsRepository:
         try:
             table = await self._get_table()
             await table.delete().eq("user_id", user_id).execute()
+            user_settings_cache.invalidate(user_id)
             logger.info(f"用户设置已删除: user_id={user_id}")
             return True
         except Exception as e:

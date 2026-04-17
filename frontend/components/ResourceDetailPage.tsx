@@ -53,7 +53,7 @@ import {
   retryTranscode,
   updateResource,
 } from '../services/resourceService';
-import { fetchTags } from '../services/tagsService';
+import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
 import { EagleTagPicker } from './EagleTagPicker';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';

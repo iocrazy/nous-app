@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Video, Tag } from '../types';
-import { fetchTags, createTag } from '../services/tagsService';
+import { fetchAllTags as fetchTags, createTag } from '../services/unifiedTagService';
 import { MediaCard } from '../components/MediaCard';
 import { CompactMediaCard } from '../components/CompactMediaCard';
 import { EagleTagPicker } from '../components/EagleTagPicker';
