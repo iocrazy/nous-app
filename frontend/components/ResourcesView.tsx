@@ -68,6 +68,12 @@ import {
   MAX_FILE_SIZE,
   validateFile,
 } from '../utils/uploadValidation';
+import {
+  buildFilterOptions,
+  buildSortOptions,
+  toggleFilterIn,
+  type ResourceFilterType as FilterType,
+} from './resources/resourceFilters';
 
 // ─── Props ─────────────────────────────────────────────
 
@@ -135,8 +141,7 @@ const ResourcesViewInner: React.FC = () => {
   const dragCounterRef = useRef(0);
 
 
-  // Sort / filter UI
-  type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+  // Sort / filter UI (FilterType imported from ./resources/resourceFilters)
   const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
 
   // AI search state
@@ -1496,31 +1501,11 @@ const ResourcesViewInner: React.FC = () => {
   });
 
   const toggleFilter = useCallback((type: FilterType) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
+    setActiveFilters((prev) => toggleFilterIn(prev, type));
   }, []);
 
-  const filterOptions: { value: FilterType; label: string }[] = [
-    { value: 'video', label: t('smartFolder.fileTypes.video') },
-    { value: 'image', label: t('smartFolder.fileTypes.image') },
-    { value: 'audio', label: t('smartFolder.fileTypes.audio') },
-    { value: 'document', label: t('smartFolder.fileTypes.document') },
-    { value: 'other', label: t('smartFolder.fileTypes.other') },
-  ];
-
-  // Sort options
-  const sortOptions: { value: SortBy; label: string }[] = [
-    { value: 'newest', label: t('resources.sortNewest') },
-    { value: 'oldest', label: t('resources.sortOldest') },
-    { value: 'name-az', label: t('resources.sortNameAZ') },
-    { value: 'name-za', label: t('resources.sortNameZA') },
-    { value: 'largest', label: t('resources.sortLargest') },
-    { value: 'smallest', label: t('resources.sortSmallest') },
-  ];
+  const filterOptions = useMemo(() => buildFilterOptions(t), [t]);
+  const sortOptions = useMemo(() => buildSortOptions(t), [t]);
 
   const currentSortLabel = sortOptions.find((o) => o.value === sortBy)?.label ?? '';
 
@@ -1607,8 +1592,8 @@ const ResourcesViewInner: React.FC = () => {
               recycleSubFolders={recycleSubFolders}
               trashedFolderPreviews={trashedFolderPreviews}
               allSelectableIds={allSelectableIds}
-              filterOptions={filterOptions}
-              sortOptions={sortOptions}
+              filterOptions={[...filterOptions]}
+              sortOptions={[...sortOptions]}
               activeFilters={activeFilters}
               toggleFilter={toggleFilter}
               clearFilters={() => setActiveFilters(new Set())}
