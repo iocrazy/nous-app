@@ -7,8 +7,7 @@
  * on review-type shares.
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 export interface ReviewComment {
   id: string;
@@ -19,20 +18,19 @@ export interface ReviewComment {
   created_at: string;
 }
 
+interface Envelope<T> {
+  data?: T;
+}
+
 /**
  * Fetch comments for a share by share code.
  */
-export const fetchShareComments = async (shareCode: string): Promise<ReviewComment[]> => {
-  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}/comments`;
-
-  const response = await fetch(url, { method: 'GET' });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to fetch comments' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
+export const fetchShareComments = async (
+  shareCode: string,
+): Promise<ReviewComment[]> => {
+  const result = await apiClient.get<Envelope<ReviewComment[]>>(
+    `/api/v1/shares/code/${shareCode}/comments`,
+  );
   return result.data || [];
 };
 
@@ -47,27 +45,14 @@ export const createShareComment = async (
     visibility?: string;
   },
 ): Promise<ReviewComment> => {
-  const headers = await getAuthHeaders();
-  const url = `${getApiUrl()}/api/v1/shares/code/${shareCode}/comments`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const result = await apiClient.post<Envelope<ReviewComment>>(
+    `/api/v1/shares/code/${shareCode}/comments`,
+    {
       content: data.content,
       timecode: data.timecode ?? null,
       visibility: data.visibility ?? 'all',
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to create comment' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const result = await response.json();
+    },
+  );
+  if (!result.data) throw new Error('Empty response from createShareComment');
   return result.data;
 };

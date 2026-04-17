@@ -1,5 +1,4 @@
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // Project task interface (matches project_tasks DB table)
 export interface ProjectTask {
@@ -32,67 +31,53 @@ export type UpdateProjectTaskData = Partial<
   Pick<ProjectTask, 'title' | 'description' | 'task_type' | 'assignee_id' | 'due_date' | 'status' | 'sort_order'>
 >;
 
+interface Envelope<T> {
+  data?: T;
+}
+
 // ============================================
 // CRUD operations
 // ============================================
 
-export const fetchProjectTasks = async (projectId: string): Promise<ProjectTask[]> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/tasks`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch project tasks');
-  const json = await response.json();
-  return json.data || [];
+export const fetchProjectTasks = async (
+  projectId: string,
+): Promise<ProjectTask[]> => {
+  const response = await apiClient.get<Envelope<ProjectTask[]>>(
+    `/api/v1/projects/${projectId}/tasks`,
+  );
+  return response.data || [];
 };
 
 export const createProjectTask = async (
   projectId: string,
-  data: CreateProjectTaskData
+  data: CreateProjectTaskData,
 ): Promise<ProjectTask> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/tasks`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to create project task');
-  }
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<ProjectTask>>(
+    `/api/v1/projects/${projectId}/tasks`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from createProjectTask');
+  return response.data;
 };
 
 export const updateProjectTask = async (
   projectId: string,
   taskId: string,
-  data: UpdateProjectTaskData
+  data: UpdateProjectTaskData,
 ): Promise<ProjectTask> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/tasks/${taskId}`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to update project task');
-  }
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.put<Envelope<ProjectTask>>(
+    `/api/v1/projects/${projectId}/tasks/${taskId}`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from updateProjectTask');
+  return response.data;
 };
 
 export const deleteProjectTask = async (
   projectId: string,
-  taskId: string
+  taskId: string,
 ): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/tasks/${taskId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete project task');
+  await apiClient.delete(`/api/v1/projects/${projectId}/tasks/${taskId}`);
 };
 
 // ============================================
@@ -103,10 +88,9 @@ export const reorderTask = async (
   projectId: string,
   taskId: string,
   newStatus: ProjectTask['status'],
-  newSortOrder: number
-): Promise<ProjectTask> => {
-  return updateProjectTask(projectId, taskId, {
+  newSortOrder: number,
+): Promise<ProjectTask> =>
+  updateProjectTask(projectId, taskId, {
     status: newStatus,
     sort_order: newSortOrder,
   });
-};

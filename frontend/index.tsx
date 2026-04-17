@@ -30,6 +30,11 @@ import { router } from './router';
 import { AuthProvider } from './contexts/AuthContext';
 import { TeamProvider } from './contexts/TeamContext';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { installErrorReporter } from './services/errorReporter';
+
+// Capture window.onerror + unhandledrejection into frontend_error_logs.
+installErrorReporter();
 
 // Loading component for i18n lazy loading
 const LoadingFallback = () => (
@@ -49,13 +54,15 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <Suspense fallback={<LoadingFallback />}>
-      <AuthProvider>
-        <TeamProvider>
-          <RouterProvider router={router} />
-        </TeamProvider>
-      </AuthProvider>
-      <PWAUpdatePrompt />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <AuthProvider>
+          <TeamProvider>
+            <RouterProvider router={router} />
+          </TeamProvider>
+        </AuthProvider>
+        <PWAUpdatePrompt />
+      </Suspense>
+    </ErrorBoundary>
   </React.StrictMode>
 );
