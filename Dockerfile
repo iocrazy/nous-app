@@ -76,6 +76,13 @@ RUN uv sync
 # Create downloads directory
 RUN mkdir -p /app/downloads
 
+# Create non-root user and give it ownership of the app directory.
+# Chromium still runs (with --no-sandbox) as this user rather than root.
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home /app --shell /usr/sbin/nologin app \
+    && chown -R app:app /app
+USER app
+
 # Expose port
 EXPOSE 8080
 

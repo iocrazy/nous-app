@@ -369,7 +369,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           ctx.library_id,
         );
         if (!cancelled) setSiblingFiles(items);
-      } catch {
+      } catch (err) {
+        console.error('Failed to load sibling files:', err);
         if (!cancelled) setSiblingFiles([]);
       }
     };
@@ -517,7 +518,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           );
           setOriginalFileUrl(null);
         }
-      } catch {
+      } catch (err) {
+        console.error('Failed to resolve file URL:', err);
         if (cancelled) return;
         setOriginalFileUrl(null);
         // Fallback: use /media/{id} URL
@@ -652,8 +654,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setTranscriptError(null);
       const data = await getTranscriptByResource(resourceId);
       setTranscript(data);
-    } catch {
+    } catch (err) {
       // 404 = no transcript yet, not an error to display
+      console.debug('No transcript yet:', err);
     } finally {
       setTranscriptLoading(false);
     }
@@ -665,8 +668,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setSummaryError(null);
       const data = await getSummaryByResource(resourceId);
       setSummary(data);
-    } catch {
+    } catch (err) {
       // 404 = no summary yet
+      console.debug('No summary yet:', err);
     } finally {
       setSummaryLoading(false);
     }
@@ -923,8 +927,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                           : v,
                       ),
                     );
-                  } catch {
-                    // silently fail — user sees it stays as "failed"
+                  } catch (err) {
+                    console.error('Retry transcode failed:', err);
+                    // user sees the badge stay as "failed"
                   }
                 }}
                 className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 rounded-md transition-colors cursor-pointer"

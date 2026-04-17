@@ -14,6 +14,7 @@ from app.api.frontend_config_router import load_config as load_frontend_config
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
+from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.services.drissionpage_parser import DrissionPageParser
@@ -231,16 +232,30 @@ app.openapi = custom_openapi
 # 添加CORS中间件
 # allow_origin_regex 匹配所有 localhost 端口，无需逐个配置
 # allow_origins 保留生产域名列表
+# Security: wildcard origins + credentials is forbidden by browsers and dangerous.
+# Auto-disable credentials and warn if misconfigured, rather than silently shipping.
+_cors_origins = settings.CORS_ORIGINS
+_cors_credentials = settings.CORS_CREDENTIALS
+if _cors_credentials and ("*" in _cors_origins or _cors_origins == ["*"]):
+    logger.warning(
+        "[CORS] allow_origins=['*'] is incompatible with credentials=True; "
+        "disabling credentials. Set CORS_ORIGINS explicitly in production."
+    )
+    _cors_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=_cors_origins,
     allow_origin_regex=r"^http://localhost:\d+$",
-    allow_credentials=settings.CORS_CREDENTIALS,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+
+# Global exception handlers — unified ErrorResponse envelope for all errors.
+register_exception_handlers(app)
 
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(ws_router)

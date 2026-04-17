@@ -425,12 +425,18 @@ async def batch_transcode(auth: AuthDep):
 
 @router.get("/{resource_id}")
 async def get_resource(resource_id: str, auth: AuthDep):
-    """Get a single resource by ID."""
+    """Get a single resource by ID (creator or team member only)."""
+    from app.api.media_permissions import check_media_access
+
     try:
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
+
+        if not await check_media_access(resource_id, auth.user_id, None):
+            raise HTTPException(status_code=403, detail="Access denied")
+
         return {"success": True, "data": resource}
     except HTTPException:
         raise
@@ -446,6 +452,7 @@ async def serve_resource_file(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     token: Optional[str] = Query(None),
+    share_token: Optional[str] = Query(None),
 ):
     """Serve the actual file for preview/download.
 
@@ -453,7 +460,9 @@ async def serve_resource_file(
     - Authorization header (Bearer token)
     - X-API-Key header
     - ?token= query parameter (for <video>, <img>, <iframe> src)
+    - ?share_token= for share links
     """
+    from app.api.media_permissions import check_media_access
     from app.core.deps import get_auth
 
     try:
@@ -462,7 +471,17 @@ async def serve_resource_file(
         if not effective_auth and not x_api_key and token:
             effective_auth = f"Bearer {token}"
 
-        auth = await get_auth(request, effective_auth, x_api_key)
+        user_id: Optional[str] = None
+        if effective_auth or x_api_key:
+            try:
+                auth = await get_auth(request, effective_auth, x_api_key)
+                user_id = auth.user_id
+            except HTTPException:
+                if not share_token:
+                    raise
+
+        if not await check_media_access(resource_id, user_id, share_token):
+            raise HTTPException(status_code=403, detail="Access denied")
 
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
@@ -472,6 +491,11 @@ async def serve_resource_file(
         file_path = resource.get("file_path")
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
+
+        # When served with ?token= in URL, prevent intermediate caching
+        cache_headers = (
+            {"Cache-Control": "private, no-store"} if token else {}
+        )
 
         # Resolve full path from DOWNLOAD_PATH base
         from app.core.config import settings
@@ -485,6 +509,7 @@ async def serve_resource_file(
             path=str(full_path),
             media_type=resource.get("mime_type", "application/octet-stream"),
             content_disposition_type="inline",
+            headers=cache_headers,
         )
     except HTTPException:
         raise
@@ -494,13 +519,39 @@ async def serve_resource_file(
 
 
 @router.get("/{resource_id}/cover")
-async def serve_resource_cover(resource_id: str):
-    """Serve cover/thumbnail image for a resource (no auth required).
+async def serve_resource_cover(
+    resource_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Query(None),
+    share_token: Optional[str] = Query(None),
+):
+    """Serve cover/thumbnail image for a resource.
 
+    Access requires creator/team membership or a valid share_token.
     Priority: thumbnail_path > cover_image_path.
-    Both are relative paths resolved against DOWNLOAD_PATH.
     """
+    from app.api.media_permissions import check_media_access
+    from app.core.deps import get_auth
+
     try:
+        effective_auth = authorization
+        if not effective_auth and not x_api_key and token:
+            effective_auth = f"Bearer {token}"
+
+        user_id: Optional[str] = None
+        if effective_auth or x_api_key:
+            try:
+                auth = await get_auth(request, effective_auth, x_api_key)
+                user_id = auth.user_id
+            except HTTPException:
+                if not share_token:
+                    raise
+
+        if not await check_media_access(resource_id, user_id, share_token):
+            raise HTTPException(status_code=403, detail="Access denied")
+
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
         if not resource:

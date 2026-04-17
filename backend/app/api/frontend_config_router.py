@@ -4,7 +4,7 @@
 前端配置路由
 
 管理前端应用配置的 API 端点。
-这些端点不需要认证，因为配置信息在登录前就需要使用。
+GET 端点不需要认证（登录前即读）；写入端点需管理员权限。
 """
 
 from pathlib import Path
@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
+from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
 
 router = APIRouter(prefix="/config", tags=["前端配置"])
@@ -176,11 +177,14 @@ async def get_frontend_config():
 
 
 @router.put("", response_model=FrontendConfig)
-async def update_frontend_config(request: UpdateConfigRequest):
+async def update_frontend_config(
+    request: UpdateConfigRequest,
+    auth: AdminAuthDep,
+):
     """
     更新前端配置
 
-    更新前端应用的配置信息。此端点不需要认证。
+    更新前端应用的配置信息，需要管理员权限。
     只更新请求中提供的字段，其他字段保持不变。
     """
     try:

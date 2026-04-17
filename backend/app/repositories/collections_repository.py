@@ -203,12 +203,12 @@ class CollectionsRepository:
         ]
 
         table = await self._get_table()
-        created = []
-        for preset in presets:
-            data = {"user_id": user_id, **preset, "cached_count": 0}
-            result = await table.insert(data).execute()
-            if result.data:
-                created.append(result.data[0])
+        rows = [
+            {"user_id": user_id, **preset, "cached_count": 0}
+            for preset in presets
+        ]
+        result = await table.insert(rows).execute()
+        created = result.data or []
 
         logger.info(f"Created {len(created)} preset collections for user {user_id}")
         return created

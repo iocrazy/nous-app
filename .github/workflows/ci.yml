@@ -31,6 +31,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Non-blocking: surfaces pre-existing type errors in PR output without
+      # breaking CI. Flip to a required step once the backlog is cleared.
+      - name: TypeScript check
+        run: npm run typecheck
+        continue-on-error: true
+
       - name: Build (includes TypeScript check)
         run: npm run build
 

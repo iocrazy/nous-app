@@ -191,6 +191,47 @@ class PointsRepository:
             logger.error(f"Failed to create team quota for {team_id}: {e}")
             raise
 
+    async def consume_points_atomic(
+        self,
+        team_id: str,
+        user_id: str,
+        points_cost: int,
+        check_monthly_limit: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Atomically check balance, decrement points, and increment member usage.
+
+        Uses the rpc_consume_team_points Postgres function (migration 120) to
+        avoid the read-then-write race that enabled double-spending.
+
+        Returns:
+            A dict with keys: success, points_cost, balance_after, reason.
+            None if the RPC is unavailable (caller should fall back safely).
+        """
+        try:
+            client = await self._get_client()
+            result = await client.rpc(
+                "rpc_consume_team_points",
+                {
+                    "p_team_id": team_id,
+                    "p_user_id": user_id,
+                    "p_points_cost": points_cost,
+                    "p_monthly_limit_check": check_monthly_limit,
+                },
+            ).execute()
+            data = result.data
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict):
+                return data
+            return None
+        except Exception as e:
+            logger.error(
+                f"Atomic consume failed for team {team_id}, user {user_id}, "
+                f"cost {points_cost}: {e}"
+            )
+            return None
+
     async def update_points_balance(
         self, team_id: str, new_balance: int
     ) -> Dict[str, Any]:

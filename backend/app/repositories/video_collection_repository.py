@@ -32,38 +32,73 @@ class VideoCollectionRepository:
             collections = await client.table("collections").select("*, video_collections(count)").eq("owner_id", user_id).order("created_at", desc=True).execute()
             filtered = collections.data or []
 
-        # Get thumbnails for each collection
+        # Batch-fetch thumbnails for all collections in 2 queries (vs 2N).
+        thumbnails = await self._get_collection_thumbnails_bulk(
+            [c["id"] for c in filtered]
+        )
+
         result = []
         for c in filtered:
-            thumbnail_url = await self._get_collection_thumbnail(c["id"])
             result.append({
                 **c,
                 "video_count": c.get("video_collections", [{}])[0].get("count", 0) if c.get("video_collections") else 0,
                 "is_shared": bool(c.get("team_id")),
-                "thumbnail_url": thumbnail_url
+                "thumbnail_url": thumbnails.get(c["id"]),
             })
 
         return result
 
-    async def _get_collection_thumbnail(self, collection_id: int) -> Optional[str]:
-        """Get thumbnail URL for a collection (first video's cover)."""
+    async def _get_collection_thumbnails_bulk(
+        self, collection_ids: List[Any]
+    ) -> Dict[Any, Optional[str]]:
+        """Resolve thumbnail URLs for many collections in two bulk queries.
+
+        Returns a map of collection_id -> thumbnail_url (or None).
+        """
+        if not collection_ids:
+            return {}
+
         client = await get_async_supabase_admin()
 
-        # Get first video in collection
-        first_video = await client.table("video_collections").select("video_id").eq("collection_id", collection_id).order("added_at", desc=True).limit(1).execute()
+        # Fetch all (collection_id, video_id) pairs, sorted so we can pick
+        # the most recent per collection.
+        links = (
+            await client.table("video_collections")
+            .select("collection_id, video_id, added_at")
+            .in_("collection_id", collection_ids)
+            .order("added_at", desc=True)
+            .execute()
+        )
+        first_video_by_collection: Dict[Any, Any] = {}
+        for row in links.data or []:
+            cid = row["collection_id"]
+            if cid not in first_video_by_collection:
+                first_video_by_collection[cid] = row["video_id"]
 
-        if not first_video.data:
-            return None
+        if not first_video_by_collection:
+            return {cid: None for cid in collection_ids}
 
-        video_id = first_video.data[0]["video_id"]
+        video_ids = list(set(first_video_by_collection.values()))
+        videos = (
+            await client.table("parsed_media")
+            .select("id, cover_download_path, dynamic_cover_url")
+            .in_("id", video_ids)
+            .execute()
+        )
+        cover_by_video = {
+            v["id"]: v.get("cover_download_path") or v.get("dynamic_cover_url")
+            for v in videos.data or []
+        }
 
-        # Get video's cover URL
-        video = await client.table("parsed_media").select("cover_download_path, dynamic_cover_url").eq("id", video_id).execute()
+        return {
+            cid: cover_by_video.get(vid)
+            for cid, vid in first_video_by_collection.items()
+        } | {cid: None for cid in collection_ids if cid not in first_video_by_collection}
 
-        if not video.data:
-            return None
-
-        return video.data[0].get("cover_download_path") or video.data[0].get("dynamic_cover_url")
+    async def _get_collection_thumbnail(self, collection_id: int) -> Optional[str]:
+        """Get thumbnail URL for a single collection (kept for compatibility)."""
+        thumbnails = await self._get_collection_thumbnails_bulk([collection_id])
+        return thumbnails.get(collection_id)
 
     async def create_collection(
         self,
@@ -267,17 +302,44 @@ class VideoCollectionRepository:
         if not collection_ids:
             return []
 
-        # Filter to only accessible collections
-        accessible_ids = []
-        for cid in collection_ids:
-            collection = await self.get_collection_by_id(cid, user_id)
-            if collection:
-                accessible_ids.append(int(cid))
+        # Batch-check access in a single round-trip instead of N queries.
+        client = await get_async_supabase_admin()
+        int_ids = [int(cid) for cid in collection_ids]
+
+        collections_res = (
+            await client.table("collections")
+            .select("id, owner_id, team_id")
+            .in_("id", int_ids)
+            .execute()
+        )
+        collections = collections_res.data or []
+
+        # Owner-owned collections are directly accessible
+        accessible_ids: List[int] = [
+            c["id"] for c in collections if c.get("owner_id") == user_id
+        ]
+        team_scoped = [
+            c for c in collections
+            if c.get("owner_id") != user_id and c.get("team_id")
+        ]
+
+        if team_scoped:
+            team_ids = list({c["team_id"] for c in team_scoped})
+            memberships = (
+                await client.table("team_members")
+                .select("team_id")
+                .eq("user_id", user_id)
+                .in_("team_id", team_ids)
+                .execute()
+            )
+            member_team_ids = {m["team_id"] for m in (memberships.data or [])}
+            accessible_ids.extend(
+                c["id"] for c in team_scoped
+                if c.get("team_id") in member_team_ids
+            )
 
         if not accessible_ids:
             return []
-
-        client = await get_async_supabase_admin()
 
         # Get video IDs in these collections
         video_collections = await client.table("video_collections").select("video_id").in_("collection_id", accessible_ids).execute()

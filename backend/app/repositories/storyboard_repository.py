@@ -558,13 +558,26 @@ class StoryboardFrameRepository:
             return
         try:
             client = await self._get_client()
-            for index, frame_id in enumerate(frame_ids):
-                await (
-                    client.table(self.TABLE_NAME)
-                    .update({"sort_order": index})
-                    .eq("id", frame_id)
-                    .execute()
+            # Single-round-trip batch reorder via Postgres RPC (migration 122).
+            # Fallback to per-row updates if the RPC is unavailable (e.g. prior
+            # to migration rollout) so behavior stays correct, just slower.
+            try:
+                await client.rpc(
+                    "rpc_reorder_storyboard_frames",
+                    {"p_frame_ids": list(frame_ids)},
+                ).execute()
+            except Exception as rpc_err:
+                logger.warning(
+                    f"Batch reorder RPC unavailable, falling back to per-row "
+                    f"updates ({len(frame_ids)} frames): {rpc_err}"
                 )
+                for index, frame_id in enumerate(frame_ids):
+                    await (
+                        client.table(self.TABLE_NAME)
+                        .update({"sort_order": index})
+                        .eq("id", frame_id)
+                        .execute()
+                    )
             logger.info(f"Reordered {len(frame_ids)} storyboard frames")
         except Exception as e:
             logger.error(f"Failed to reorder storyboard frames: {e}")

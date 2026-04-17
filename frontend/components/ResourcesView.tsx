@@ -244,7 +244,8 @@ const ResourcesViewInner: React.FC = () => {
       setNewFolderName('');
       setCreatingFolder(false);
       await Promise.all([loadFolders(), loadChildFolders()]);
-    } catch {
+    } catch (err) {
+      console.error('Failed to create folder:', err);
       // Keep input open on error
     } finally {
       setSavingFolder(false);
@@ -415,7 +416,8 @@ const ResourcesViewInner: React.FC = () => {
         upload.setItems((prev) =>
           prev.map((p) => p.id === entryId ? { ...p, percent: 100, status: 'complete', bytesUploaded: fileSz, speed: 0 } : p)
         );
-      } catch {
+      } catch (err) {
+        console.error('Upload failed:', err);
         upload.setItems((prev) =>
           prev.map((p) => p.id === entryId
             ? { ...p, status: 'error', error: t('resources.uploadFailed') }
@@ -586,8 +588,8 @@ const ResourcesViewInner: React.FC = () => {
         }
         addToast(t('resources.copySuccess', { count: operationTargetItems.length }), 'success');
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('Folder operation failed:', err);
     }
     setFolderPickerMode(null);
     setOperationTargetItems([]);
@@ -784,7 +786,8 @@ const ResourcesViewInner: React.FC = () => {
     try {
       await uploadNewVersion(versionTargetId, file);
       addToast(t('resources.versionUploadSuccess'), 'success');
-    } catch {
+    } catch (err) {
+      console.error('Version upload failed:', err);
       addToast(t('resources.versionUploadFailed'), 'error');
     }
     setVersionTargetId(null);

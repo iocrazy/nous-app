@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
+from app.core.admin_deps import AdminAuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
 from app.services.points_service import PointsService
@@ -434,14 +435,15 @@ async def sign_in_phone(request: PhoneSignInRequest, background_tasks: Backgroun
 
 @router.get("/admin/users")
 async def list_users(
-    page: int = 1, per_page: int = 50, authorization: str = Header(...)
+    auth: AdminAuthDep,
+    page: int = 1,
+    per_page: int = 50,
 ):
     """
     获取用户列表（管理员）
 
     需要管理员权限
     """
-    # TODO: 验证管理员权限
     admin_service = SupabaseAdminAuthService()
     result = await admin_service.list_users(page=page, per_page=per_page)
 
@@ -453,7 +455,8 @@ async def list_users(
 
 @router.put("/admin/role")
 async def update_user_role(
-    request: UpdateRoleRequest, authorization: str = Header(...)
+    request: UpdateRoleRequest,
+    auth: AdminAuthDep,
 ):
     """
     更新用户角色（管理员）
@@ -461,7 +464,6 @@ async def update_user_role(
     - **user_id**: 用户ID
     - **role**: 新角色（admin, user, test）
     """
-    # TODO: 验证管理员权限
     admin_service = SupabaseAdminAuthService()
     result = await admin_service.update_user_role(
         user_id=request.user_id, role=request.role
@@ -474,13 +476,12 @@ async def update_user_role(
 
 
 @router.delete("/admin/users/{user_id}")
-async def delete_user(user_id: str, authorization: str = Header(...)):
+async def delete_user(user_id: str, auth: AdminAuthDep):
     """
     删除用户（管理员）
 
     - **user_id**: 用户ID
     """
-    # TODO: 验证管理员权限
     admin_service = SupabaseAdminAuthService()
     result = await admin_service.delete_user(user_id)
 

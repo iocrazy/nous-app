@@ -87,88 +87,76 @@ class PointsService:
                 "reason": None,
             }
 
-        # 2. Check team balance
-        team_quota = await self.repo.get_team_quota(team_id)
-        if team_quota is None:
-            logger.warning(f"No team quota found for team {team_id}; denying action")
-            return {
-                "success": False,
-                "points_cost": points_cost,
-                "balance_after": None,
-                "reason": "Team quota not found. Please contact support.",
-            }
-
-        current_balance = team_quota.get("points_balance", 0)
-        if current_balance < points_cost:
-            logger.info(
-                f"Insufficient balance for team {team_id}: "
-                f"need {points_cost}, have {current_balance}"
+        # 2. Atomic check-and-consume via Postgres RPC.
+        # The RPC decrements balance + increments member usage in a single
+        # transaction, preventing the double-spend race that existed when
+        # we read balance then wrote it back from Python.
+        rpc_result = await self.repo.consume_points_atomic(
+            team_id=team_id,
+            user_id=user_id,
+            points_cost=points_cost,
+        )
+        if rpc_result is None:
+            logger.error(
+                f"Atomic consume RPC unavailable for team {team_id}; denying "
+                f"action {action_type} to avoid unsafe fallback"
             )
             return {
                 "success": False,
                 "points_cost": points_cost,
-                "balance_after": current_balance,
-                "reason": (
-                    f"Insufficient points balance. "
-                    f"Required: {points_cost}, available: {current_balance}."
-                ),
+                "balance_after": None,
+                "reason": "Points service temporarily unavailable.",
             }
 
-        # 3. Check member monthly quota
-        member_quota = await self.repo.get_member_quota(team_id, user_id)
-        if member_quota is not None:
-            monthly_limit = member_quota.get("monthly_points_limit")
-            if monthly_limit is not None:
-                used_this_month = member_quota.get("points_used_this_month", 0)
-                if used_this_month + points_cost > monthly_limit:
-                    logger.info(
-                        f"Member {user_id} monthly limit exceeded in team "
-                        f"{team_id}: limit={monthly_limit}, "
-                        f"used={used_this_month}, cost={points_cost}"
-                    )
-                    return {
-                        "success": False,
-                        "points_cost": points_cost,
-                        "balance_after": current_balance,
-                        "reason": (
-                            f"Monthly points limit exceeded. "
-                            f"Limit: {monthly_limit}, "
-                            f"used: {used_this_month}, "
-                            f"required: {points_cost}."
-                        ),
-                    }
+        success = bool(rpc_result.get("success"))
+        balance_after = rpc_result.get("balance_after")
+        reason = rpc_result.get("reason")
 
-        # 4. Deduct points
-        new_balance = current_balance - points_cost
-        await self.repo.update_points_balance(team_id, new_balance)
-
-        # 5. Record transaction (debit is stored as negative amount)
-        await self.repo.create_transaction(
-            {
-                "team_id": team_id,
-                "user_id": user_id,
-                "amount": -points_cost,
-                "balance_after": new_balance,
-                "type": "consume",
-                "reference_type": action_type,
-                "reference_id": reference_id,
-                "description": description or f"Consumed {points_cost} points for {action_type}",
+        if not success:
+            logger.info(
+                f"Consume denied for team {team_id}, user {user_id}, "
+                f"action {action_type}: {reason}"
+            )
+            return {
+                "success": False,
+                "points_cost": points_cost,
+                "balance_after": balance_after,
+                "reason": reason,
             }
-        )
 
-        # 6. Update member usage counter
-        await self.repo.increment_member_usage(team_id, user_id, points_cost)
+        # 3. Record transaction (debit is stored as negative amount).
+        # This is outside the atomic block but failure here doesn't
+        # re-credit points; log + continue so the consumption is durable.
+        try:
+            await self.repo.create_transaction(
+                {
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "amount": -points_cost,
+                    "balance_after": balance_after,
+                    "type": "consume",
+                    "reference_type": action_type,
+                    "reference_id": reference_id,
+                    "description": description
+                    or f"Consumed {points_cost} points for {action_type}",
+                }
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to record consume transaction for team={team_id} "
+                f"action={action_type}: {e}"
+            )
 
         logger.info(
             f"Consumed {points_cost} points for team {team_id}, "
             f"user {user_id}, action {action_type}. "
-            f"Balance: {current_balance} -> {new_balance}"
+            f"Balance after: {balance_after}"
         )
 
         return {
             "success": True,
             "points_cost": points_cost,
-            "balance_after": new_balance,
+            "balance_after": balance_after,
             "reason": None,
         }
 

@@ -196,11 +196,13 @@ class DownloaderService:
 
         # Douyin CDN returns 403 for httpx requests. If DrissionPage cached browser
         # cookies during parse, merge them into the Cookie header.
+        # Use the async Redis client here — a blocking sync call stalls the event
+        # loop for every concurrent download on this worker.
         if platform_id and "douyin" in url.lower():
             try:
-                from app.core.redis import get_sync_redis
-                r = get_sync_redis()
-                cached = r.get(f"douyin_browser_cookies:{platform_id}")
+                from app.core.redis import get_async_redis
+                r = await get_async_redis()
+                cached = await r.get(f"douyin_browser_cookies:{platform_id}")
                 if cached:
                     cookie_value = cached.decode() if isinstance(cached, bytes) else cached
                     existing = headers.get("Cookie", "")

@@ -29,8 +29,9 @@ EXCLUDED_PREFIXES = (
     "/assets/",
 )
 
-# Fields whose values should be sanitized in request bodies
+# Fields whose values should be sanitized in request bodies and query strings
 SENSITIVE_FIELDS = {"password", "token", "secret", "key", "authorization", "access_token", "refresh_token"}
+SENSITIVE_QUERY_KEYS = {"token", "share_token", "access_token", "refresh_token", "api_key", "apikey"}
 
 # Max body size to log (10KB)
 MAX_BODY_SIZE = 10 * 1024
@@ -54,6 +55,13 @@ def _sanitize_body(body: dict) -> dict:
         else:
             sanitized[k] = v
     return sanitized
+
+
+def _sanitize_query_params(params: dict) -> dict:
+    return {
+        k: ("***" if k.lower() in SENSITIVE_QUERY_KEYS else v)
+        for k, v in params.items()
+    }
 
 
 def _extract_user_id_from_jwt(authorization: Optional[str]) -> tuple[Optional[str], str]:
@@ -156,8 +164,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Add X-Request-ID header
         response.headers["X-Request-ID"] = request_id
 
-        # Parse query params
-        query_params = dict(request.query_params) if request.query_params else None
+        # Parse query params (redact sensitive keys like token/share_token)
+        query_params = (
+            _sanitize_query_params(dict(request.query_params))
+            if request.query_params
+            else None
+        )
 
         # Fire-and-forget: write log to DB
         asyncio.create_task(

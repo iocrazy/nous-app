@@ -191,8 +191,8 @@ const StatusControls: React.FC<{
       });
       setShowDropdown(false);
       onStatusChange();
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Review status change failed:', err);
     }
   };
 

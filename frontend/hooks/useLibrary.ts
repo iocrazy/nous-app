@@ -247,73 +247,80 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   // --- Realtime Subscriptions ---
 
-  // Videos realtime — deferred until after initial load to reduce NAS connection contention
+  // Videos realtime — deferred until after initial load to reduce NAS connection contention.
+  // parsed_media is a shared/global table with no creator_id column, so the Supabase
+  // server filter can't narrow it. We mitigate by ignoring any event whose record
+  // isn't already in the local library (or an owned resource for INSERTs).
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!initialLoadComplete || !isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
-    const channel = supabase
-      .channel('parsed_media_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'parsed_media' },
-        async (payload) => {
-          console.log('Realtime update:', payload.eventType, payload);
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session?.user) return;
-          const user = session.user;
+    let cancelled = false;
+    let ownedUserId: string | null = null;
 
-          const newRecord = payload.new as Video;
-          const oldRecord = payload.old as Video;
+    const buildSubscriptions = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user || cancelled) return null;
+      ownedUserId = session.user.id;
 
-          if (payload.eventType === 'INSERT') {
-            // parsed_media is global — verify ownership via resources table
-            const mediaId = newRecord.id;
-            if (!mediaId) return;
-            const { data: resource } = await supabase
-              .from('resources')
-              .select('id')
-              .eq('media_id', mediaId)
-              .eq('creator_id', user.id)
-              .maybeSingle();
-            if (!resource) return; // Not our media
-            setLibrary(prev => {
-              if (prev.find(item => item.platform_id === newRecord.platform_id)) return prev;
-              return [newRecord, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            // Update if in library, or try to add if not (covers late-arriving items on page 2+)
-            setLibrary(prev => {
-              const idx = prev.findIndex(item => item.platform_id === newRecord.platform_id);
-              if (idx >= 0) {
-                // Update existing
+      const channel = supabase
+        .channel('parsed_media_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'parsed_media' },
+          async (payload) => {
+            if (!ownedUserId) return;
+
+            const newRecord = payload.new as Video;
+            const oldRecord = payload.old as Video;
+
+            if (payload.eventType === 'INSERT') {
+              // parsed_media is global — verify ownership via resources table.
+              // Fast early-out: only query when the record is plausibly ours.
+              const mediaId = newRecord.id;
+              if (!mediaId) return;
+              const { data: resource } = await supabase
+                .from('resources')
+                .select('id')
+                .eq('media_id', mediaId)
+                .eq('creator_id', ownedUserId)
+                .maybeSingle();
+              if (!resource) return;
+              setLibrary(prev => {
+                if (prev.find(item => item.platform_id === newRecord.platform_id)) return prev;
+                return [newRecord, ...prev];
+              });
+            } else if (payload.eventType === 'UPDATE') {
+              // Fast client-side filter: ignore events for media not in our library.
+              setLibrary(prev => {
+                const idx = prev.findIndex(item => item.platform_id === newRecord.platform_id);
+                if (idx < 0) return prev;
                 return prev.map((item, i) => i === idx ? newRecord : item);
-              }
-              // Not in library yet — check ownership and prepend
-              // (covers items parsed while user was on a later page)
-              return prev;
-            });
-            setSelectedLibraryItem(prev =>
-              prev?.platform_id === newRecord.platform_id ? newRecord : prev
-            );
-            onVideoRealtimeUpdate?.(newRecord);
-          } else if (payload.eventType === 'DELETE') {
-            // Remove from library if present (regardless of ownership)
-            setLibrary(prev => prev.filter(item => item.platform_id !== oldRecord?.platform_id));
+              });
+              setSelectedLibraryItem(prev =>
+                prev?.platform_id === newRecord.platform_id ? newRecord : prev
+              );
+              onVideoRealtimeUpdate?.(newRecord);
+            } else if (payload.eventType === 'DELETE') {
+              setLibrary(prev => prev.filter(item => item.platform_id !== oldRecord?.platform_id));
+            }
           }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
+        )
+        .subscribe();
 
-    // Resources realtime — tracks download status changes (video_download_status, etc.)
-    const resourceChannel = supabase
-      .channel('resources_download_realtime')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'resources', filter: `source_type=eq.web` },
-        async (payload) => {
+      // Resources realtime — tracks download status changes. Server-filter by
+      // creator_id so events for other users never hit this client.
+      const resourceChannel = supabase
+        .channel('resources_download_realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'resources',
+            filter: `creator_id=eq.${ownedUserId}`,
+          },
+          async (payload) => {
           const updatedResource = payload.new as any;
           const mediaId = updatedResource?.media_id;
           if (!mediaId) return;
@@ -335,9 +342,21 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       )
       .subscribe();
 
+      return { channel, resourceChannel };
+    };
+
+    let channels: { channel: any; resourceChannel: any } | null = null;
+    buildSubscriptions().then(result => {
+      if (cancelled || !result) return;
+      channels = result;
+    });
+
     return () => {
-      supabase.removeChannel(channel);
-      supabase.removeChannel(resourceChannel);
+      cancelled = true;
+      if (channels) {
+        supabase.removeChannel(channels.channel);
+        supabase.removeChannel(channels.resourceChannel);
+      }
     };
   }, [initialLoadComplete, isAuthenticated]);
 
@@ -349,22 +368,25 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     const supabase = getSupabaseClient();
     if (!initialLoadComplete || !isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
+    // resource_tags is a junction table with no user_id; server-side filtering
+    // requires a schema change. We server-filter by library member resources in
+    // memory: only query parsed_media when the resource_id is one we own.
     const tagsChannel = supabase
       .channel('resource_tags_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'resource_tags' },
         async (payload) => {
-          console.log('Resource tags realtime update:', payload.eventType, payload);
           const newRecord = payload.new as { resource_id: string; tag_id: string };
           const oldRecord = payload.old as { resource_id: string; tag_id: string };
           const resourceId = newRecord?.resource_id || oldRecord?.resource_id;
           if (!resourceId) return;
 
-          // Look up the parsed_media record via resources table
+          // Look up the parsed_media record via resources table; RLS will
+          // ensure we only see our own resources, so foreign events no-op.
           const { data: resource } = await supabase
             .from('resources')
-            .select('media_id')
+            .select('media_id, creator_id')
             .eq('id', resourceId)
             .maybeSingle();
 
@@ -390,9 +412,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           );
         }
       )
-      .subscribe((status) => {
-        console.log('Resource tags realtime subscription status:', status);
-      });
+      .subscribe();
 
     return () => {
       console.log('Unsubscribing from video tags realtime channel');

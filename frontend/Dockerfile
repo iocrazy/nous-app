@@ -20,16 +20,15 @@ ARG VITE_SUPABASE_ANON_KEY=""
 # Build the app
 RUN npm run build
 
-# Production stage
-FROM nginx:alpine
+# Production stage — unprivileged nginx image runs as uid 101 by default
+FROM nginxinc/nginx-unprivileged:alpine
 
 # Copy built files
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --chown=nginx:nginx --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx config
+# Copy nginx config (server must listen on 8080 — unprivileged can't bind 80)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port
-EXPOSE 80
+EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]

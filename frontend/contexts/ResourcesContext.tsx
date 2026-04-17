@@ -240,7 +240,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     try {
       const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
       setFolders(allFolders);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load folders:', err);
       setFolders([]);
     }
   }, [scopeType, scopeId, selectedLibraryId]);
@@ -290,7 +291,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         childFolders.map(async (f) => {
           try {
             previews[f.id] = await getFolderPreview(f.id);
-          } catch {
+          } catch (err) {
+            console.debug('Folder preview fetch failed:', err);
             previews[f.id] = [];
           }
         })
@@ -342,8 +344,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           currentId = data.parent_id;
         }
         if (!cancelled) setFolderChain(result);
-      } catch {
-        // ignore
+      } catch (err) {
+        console.debug('Folder chain fetch failed:', err);
       }
     };
     fetchChain();
@@ -439,7 +441,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       ]);
       setTrashedResources(items);
       setTrashedFolders(flds);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load trashed items:', err);
       setTrashedResources([]);
       setTrashedFolders([]);
     }
@@ -492,7 +495,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     try {
       const items = await fetchDownloadedResources(scopeType, scopeId);
       setDownloadedResources(items);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load downloaded resources:', err);
       setDownloadedResources([]);
     }
   }, [scopeType, scopeId]);
@@ -594,7 +598,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       }
       setSelectedIds(new Set());
       addToast(t('resources.permanentDeleteSuccess'), 'success');
-    } catch {
+    } catch (err) {
+      console.error('Permanent delete failed:', err);
       addToast(t('resources.permanentDeleteFailed'), 'error');
     }
     setPendingPermanentDelete(null);
@@ -624,7 +629,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       const tag = await createTag({ name, color, type: 'user' });
       setAllTags(prev => [...prev, tag]);
       return tag;
-    } catch {
+    } catch (err) {
+      console.error('Failed to create tag:', err);
       return null;
     }
   }, []);

@@ -71,6 +71,23 @@ function dominantType(commits: CommitEntry[]): string {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
 
+/** Escape HTML to prevent XSS before applying markdown replacements. */
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Apply minimal markdown (bold/code) on an already-escaped string. */
+function renderInline(escaped: string): string {
+  return escaped
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code class="text-indigo-300 bg-zinc-800 px-1 rounded text-[11px]">$1</code>');
+}
+
 /** Simple markdown-ish renderer for release_notes */
 function ReleaseNotes({ text }: { text: string }) {
   const lines = text.split('\n');
@@ -84,7 +101,7 @@ function ReleaseNotes({ text }: { text: string }) {
           return (
             <div key={i} className="bg-indigo-950/60 border-l-3 border-indigo-500 pl-3 py-2 rounded-r-lg mb-2">
               <p className="text-[13px] text-indigo-200 leading-relaxed" dangerouslySetInnerHTML={{
-                __html: trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                __html: renderInline(escapeHtml(trimmed))
               }} />
             </div>
           );
@@ -94,7 +111,7 @@ function ReleaseNotes({ text }: { text: string }) {
           return (
             <div key={i} className="bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mt-2">
               <p className="text-[12px] text-amber-300" dangerouslySetInnerHTML={{
-                __html: trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                __html: renderInline(escapeHtml(trimmed))
               }} />
             </div>
           );
@@ -121,8 +138,7 @@ function ReleaseNotes({ text }: { text: string }) {
             <div key={i} className="text-[12px] text-zinc-400 pl-4 relative leading-relaxed">
               <span className="absolute left-1 text-zinc-600">•</span>
               <span dangerouslySetInnerHTML={{
-                __html: trimmed.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong class="text-zinc-200">$1</strong>')
-                  .replace(/`([^`]+)`/g, '<code class="text-indigo-300 bg-zinc-800 px-1 rounded text-[11px]">$1</code>')
+                __html: renderInline(escapeHtml(trimmed.slice(2)))
               }} />
             </div>
           );
@@ -130,8 +146,7 @@ function ReleaseNotes({ text }: { text: string }) {
         // Regular text
         return (
           <p key={i} className="text-[12px] text-zinc-400 leading-relaxed" dangerouslySetInnerHTML={{
-            __html: trimmed.replace(/\*\*(.*?)\*\*/g, '<strong class="text-zinc-200">$1</strong>')
-              .replace(/`([^`]+)`/g, '<code class="text-indigo-300 bg-zinc-800 px-1 rounded text-[11px]">$1</code>')
+            __html: renderInline(escapeHtml(trimmed))
           }} />
         );
       })}
