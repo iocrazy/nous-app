@@ -15,12 +15,11 @@ from loguru import logger
 from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 
-# Token budget for context window (leave headroom for response)
-MAX_CONTEXT_TOKENS = 28000
-# Maximum history messages to load before applying token budget
-MAX_HISTORY_MESSAGES = 50
-# Agent cache TTL in seconds
-CACHE_TTL = 300
+# Backward-compatible module-level aliases.  All values are sourced from settings
+# so operators can tune behaviour via env vars without code edits.
+MAX_CONTEXT_TOKENS = settings.LLM_MAX_CONTEXT_TOKENS
+MAX_HISTORY_MESSAGES = settings.LLM_MAX_HISTORY_MESSAGES
+CACHE_TTL = settings.LLM_AGENT_CACHE_TTL_SECONDS
 
 
 class AgentService:
