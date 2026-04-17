@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus } from 'lucide-react';
 import {
   fetchAgents,
@@ -39,6 +40,7 @@ export function AIChatPanel({
   onApplyContent,
   onClose,
 }: AIChatPanelProps): React.ReactElement {
+  const { t } = useTranslation();
   const [agents, setAgents] = useState<AIAgent[]>([]);
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function AIChatPanel({
               projectId,
               contextType,
               contextId,
-              title: 'New conversation',
+              title: t('chat.newConversation'),
             });
             if (cancelled) return;
             if (newSession?.id) {
@@ -138,7 +140,7 @@ export function AIChatPanel({
         projectId,
         contextType,
         contextId,
-        title: 'New conversation',
+        title: t('chat.newConversation'),
       });
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
@@ -244,7 +246,7 @@ export function AIChatPanel({
 
   const sessionItems: SessionItem[] = (sessions || []).filter(Boolean).map((s) => ({
     id: s.id,
-    title: s.title ?? 'Untitled',
+    title: s.title ?? t('chat.untitled'),
     updated_at: s.updated_at ?? '',
   }));
 
@@ -345,7 +347,7 @@ export function AIChatPanel({
       <ChatInput
         onSend={handleSend}
         disabled={streaming || !activeSessionId}
-        placeholder={activeSessionId ? 'Type a message...' : 'Create a session first'}
+        placeholder={activeSessionId ? t('chat.typeMessage') : t('chat.createSessionFirst')}
       />
     </div>
   );

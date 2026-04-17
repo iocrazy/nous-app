@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import DOMPurify from 'dompurify';
 import { Copy, Check } from 'lucide-react';
 
@@ -21,6 +22,7 @@ export function MessageBubble({
   onCopy,
   timestamp,
 }: MessageBubbleProps): React.ReactElement {
+  const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
 
   const handleCopy = useCallback(() => {
@@ -94,7 +96,7 @@ export function MessageBubble({
               ) : (
                 <Copy size={10} />
               )}
-              {copied ? 'Copied' : 'Copy'}
+              {copied ? t('chat.copied') : t('chat.copy')}
             </button>
           </div>
         </div>

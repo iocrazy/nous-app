@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, Paperclip } from 'lucide-react';
 
 export interface ChatInputProps {
@@ -15,8 +16,10 @@ export function ChatInput({
   onSend,
   onAttach,
   disabled = false,
-  placeholder = 'Type a message...',
+  placeholder,
 }: ChatInputProps): React.ReactElement {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t('chat.typeMessage');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const adjustHeight = useCallback(() => {
@@ -71,7 +74,7 @@ export function ChatInput({
         ref={textareaRef}
         rows={1}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         onInput={adjustHeight}
         onKeyDown={handleKeyDown}
         className="

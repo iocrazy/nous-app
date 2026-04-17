@@ -1,11 +1,12 @@
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles } from 'lucide-react';
 
-const SUGGESTIONS = [
-  'Help me outline a story',
-  'Review my chapter',
-  'Improve dialogue',
-  'Suggest plot ideas',
+const SUGGESTION_KEYS = [
+  'chat.suggestions.outlineStory',
+  'chat.suggestions.reviewChapter',
+  'chat.suggestions.improveDialogue',
+  'chat.suggestions.suggestPlot',
 ] as const;
 
 export interface EmptyStateProps {
@@ -13,6 +14,8 @@ export interface EmptyStateProps {
 }
 
 export function EmptyState({ onSuggest }: EmptyStateProps): React.ReactElement {
+  const { t } = useTranslation();
+
   const handleClick = useCallback(
     (suggestion: string) => {
       onSuggest?.(suggestion);
@@ -25,28 +28,31 @@ export function EmptyState({ onSuggest }: EmptyStateProps): React.ReactElement {
       <Sparkles size={32} className="text-indigo-400" />
 
       <div>
-        <h3 className="text-base font-medium text-zinc-200">Start a conversation</h3>
+        <h3 className="text-base font-medium text-zinc-200">{t('chat.emptyTitle')}</h3>
         <p className="mt-1 text-sm text-zinc-500">
-          Ask your AI assistant anything about your project.
+          {t('chat.emptySubtitle')}
         </p>
       </div>
 
       <div className="flex flex-col gap-2 w-full max-w-xs">
-        {SUGGESTIONS.map((suggestion) => (
-          <button
-            key={suggestion}
-            type="button"
-            onClick={() => handleClick(suggestion)}
-            className="
-              border border-zinc-700 hover:bg-zinc-800
-              rounded-lg px-3 py-2
-              text-sm text-zinc-400 hover:text-zinc-200
-              transition-colors text-left
-            "
-          >
-            {suggestion}
-          </button>
-        ))}
+        {SUGGESTION_KEYS.map((key) => {
+          const label = t(key);
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleClick(label)}
+              className="
+                border border-zinc-700 hover:bg-zinc-800
+                rounded-lg px-3 py-2
+                text-sm text-zinc-400 hover:text-zinc-200
+                transition-colors text-left
+              "
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
