@@ -21,6 +21,7 @@ import { TranscodeList } from './pages/transcode'
 import { TranscodeConfig } from './pages/transcode-config'
 import { TaskCenter } from './pages/tasks'
 import { AIModelsPage } from './pages/ai'
+import { DeploymentLogsPage } from './pages/deployment-logs'
 
 export default function App() {
   return (
@@ -49,6 +50,7 @@ export default function App() {
               <Route path="/api-keys" element={<PlaceholderPage title="API Keys" />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/transcode-config" element={<TranscodeConfig />} />
+              <Route path="/deployment-logs" element={<DeploymentLogsPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
