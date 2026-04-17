@@ -227,7 +227,8 @@ export interface PaginatedResult<T> {
  */
 export const fetchLibraryPaginated = async (
   page: number = 0,
-  pageSize: number = PAGE_SIZE
+  pageSize: number = PAGE_SIZE,
+  signal?: AbortSignal
 ): Promise<PaginatedResult<ParsedMedia>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
@@ -245,14 +246,16 @@ export const fetchLibraryPaginated = async (
     const from = page * pageSize;
 
     // Fetch pageSize + 1 to detect if more data exists (avoids slow count: 'exact')
-    const { data, error } = await supabase
+    let query = supabase
       .from('resources')
       .select(RESOURCE_LIST_SELECT)
       .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
-      .range(from, from + pageSize);  // fetch one extra to check hasMore
+      .range(from, from + pageSize);
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
 
     if (error) throw error;
 

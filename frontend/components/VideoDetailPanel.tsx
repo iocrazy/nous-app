@@ -1,18 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
-  Clock, Tag, ChevronRight, Brain, AlertCircle,
+  Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
 import {
-  triggerTranscription, getTranscript,
-  triggerSummary, getSummary,
+  triggerTranscription, triggerTranscriptionByResource,
+  getTranscript, getTranscriptByResource,
+  triggerSummary, triggerSummaryByResource,
+  getSummary, getSummaryByResource,
   triggerVisualAnalysis,
+  pollForResult,
 } from '../services/aiService';
 
 interface VideoDetailPanelProps {
   video: Video;
+  resourceId?: string;
   onClose: () => void;
   onUpdate?: (id: string, updates: Partial<Video>) => void;
   onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
@@ -70,6 +74,7 @@ const downloadTextFile = (content: string, filename: string, mimeType: string) =
 
 export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   video,
+  resourceId,
   onClose,
   onUpdate,
   onDelete,
@@ -95,53 +100,98 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<'segments' | 'fulltext'>('segments');
+  const [exportOpen, setExportOpen] = useState(false);
 
-  // Load existing transcript/summary when tab changes
+  // Load existing transcript/summary when tab changes — always try to load
   useEffect(() => {
-    if (activeTab === 'transcript' && video.transcript_status === 'completed' && !transcript) {
+    if (activeTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (activeTab === 'analysis' && video.summary_status === 'completed' && !summary) {
+    if (activeTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
     }
-  }, [activeTab, video.transcript_status, video.summary_status]);
+  }, [activeTab]);
 
   const loadTranscript = useCallback(async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
-      const data = await getTranscript(video.platform_id);
+      const data = resourceId
+        ? await getTranscriptByResource(resourceId)
+        : await getTranscript(video.platform_id);
       setTranscript(data);
-    } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript');
+    } catch {
+      // 404 = no transcript yet — check if transcription is in progress
+      if (resourceId) {
+        try {
+          const { getSupabaseClient } = await import('../supabaseClient');
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            const { data: tasks } = await supabase
+              .from('unified_tasks')
+              .select('status')
+              .eq('resource_id', resourceId)
+              .eq('task_type', 'ai_transcription')
+              .in('status', ['pending', 'processing', 'running'])
+              .limit(1);
+            if (tasks && tasks.length > 0) {
+              // Active transcription task found — show processing and poll
+              setTranscribeStatus('processing');
+              const result = await pollForResult(
+                () => getTranscriptByResource(resourceId!), 3000, 120
+              );
+              setTranscript(result);
+              setTranscribeStatus('completed');
+            }
+          }
+        } catch {
+          // ignore — just stay on empty state
+        }
+      }
     } finally {
       setTranscriptLoading(false);
     }
-  }, [video.platform_id]);
+  }, [video.platform_id, resourceId]);
 
   const loadSummary = useCallback(async () => {
     try {
       setSummaryLoading(true);
       setSummaryError(null);
-      const data = await getSummary(video.platform_id);
+      const data = resourceId
+        ? await getSummaryByResource(resourceId)
+        : await getSummary(video.platform_id);
       setSummary(data);
-    } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to load summary');
+    } catch {
+      // 404 = no summary yet
     } finally {
       setSummaryLoading(false);
     }
-  }, [video.platform_id]);
+  }, [video.platform_id, resourceId]);
+
+  const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
 
   const handleTranscribe = async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
-      await triggerTranscription(video.platform_id);
+      setTranscribeStatus('processing');
+      if (resourceId) {
+        await triggerTranscriptionByResource(resourceId);
+        const data = await pollForResult(() => getTranscriptByResource(resourceId), 3000, 60);
+        setTranscript(data);
+      } else {
+        await triggerTranscription(video.platform_id);
+        const data = await pollForResult(() => getTranscript(video.platform_id), 3000, 60);
+        setTranscript(data);
+      }
+      setTranscribeStatus('completed');
       if (onUpdate) {
-        onUpdate(video.platform_id, { transcript_status: 'processing' });
+        onUpdate(video.platform_id, { transcript_status: 'completed' });
       }
     } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to start transcription');
+      setTranscriptError(err instanceof Error ? err.message : 'Failed to transcribe');
+      setTranscribeStatus('failed');
     } finally {
       setTranscriptLoading(false);
     }
@@ -151,12 +201,20 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setSummaryLoading(true);
       setSummaryError(null);
-      await triggerSummary(video.platform_id);
+      if (resourceId) {
+        await triggerSummaryByResource(resourceId);
+        const data = await pollForResult(() => getSummaryByResource(resourceId), 3000, 60);
+        setSummary(data);
+      } else {
+        await triggerSummary(video.platform_id);
+        const data = await pollForResult(() => getSummary(video.platform_id), 3000, 60);
+        setSummary(data);
+      }
       if (onUpdate) {
-        onUpdate(video.platform_id, { summary_status: 'processing' });
+        onUpdate(video.platform_id, { summary_status: 'completed' });
       }
     } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to start summarization');
+      setSummaryError(err instanceof Error ? err.message : 'Failed to summarize');
     } finally {
       setSummaryLoading(false);
     }
@@ -271,19 +329,37 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         {/* Transcript Tab */}
         {activeTab === 'transcript' && (
           <div className="space-y-4 animate-in fade-in duration-300">
-            {/* Processing state */}
-            {video.transcript_status === 'processing' && (
+            {/* Processing state — active transcription in progress */}
+            {transcribeStatus === 'processing' && !transcript && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
-                <h3 className="text-lg font-medium text-zinc-200">Transcribing...</h3>
-                <p className="text-sm text-zinc-500 mt-1">
-                  This may take a few minutes depending on video length.
+                <div className="relative mb-6">
+                  <div className="w-16 h-16 rounded-full border-2 border-indigo-500/20" />
+                  <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Brain size={24} className="text-indigo-400" />
+                  </div>
+                </div>
+                <h3 className="text-base font-medium text-zinc-200">Transcribing Audio...</h3>
+                <p className="text-sm text-zinc-500 mt-2 max-w-[280px]">
+                  AI is processing the audio. This may take a few minutes depending on the length.
                 </p>
+                <div className="mt-4 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                  <span className="text-xs text-indigo-400/70">Processing</span>
+                </div>
               </div>
             )}
 
-            {/* Not started / pending */}
-            {(!video.transcript_status || video.transcript_status === 'pending') && !transcript && !transcriptLoading && (
+            {/* Loading existing transcript from server */}
+            {transcriptLoading && transcribeStatus !== 'processing' && !transcript && (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 size={24} className="animate-spin text-indigo-400 mb-3" />
+                <p className="text-xs text-zinc-500">Loading transcript...</p>
+              </div>
+            )}
+
+            {/* Not started — no transcript and not loading/processing */}
+            {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
                   <FileText size={32} className="text-zinc-500" />
@@ -297,11 +373,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   disabled={transcriptLoading}
                   className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
-                  {transcriptLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Brain size={18} />
-                  )}
+                  <Brain size={18} />
                   Transcribe
                 </button>
                 {transcriptError && (
@@ -310,38 +382,6 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     {transcriptError}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Failed state */}
-            {video.transcript_status === 'failed' && !transcript && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="p-4 bg-red-500/10 rounded-full mb-4">
-                  <AlertCircle size={32} className="text-red-400" />
-                </div>
-                <h3 className="text-lg font-medium text-zinc-200">Transcription Failed</h3>
-                <p className="text-sm text-zinc-500 mt-1 mb-6">
-                  Something went wrong. Please try again.
-                </p>
-                <button
-                  onClick={handleTranscribe}
-                  disabled={transcriptLoading}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                >
-                  {transcriptLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Brain size={18} />
-                  )}
-                  Retry Transcription
-                </button>
-              </div>
-            )}
-
-            {/* Loading existing transcript */}
-            {transcriptLoading && video.transcript_status === 'completed' && (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 size={24} className="animate-spin text-indigo-400" />
               </div>
             )}
 
@@ -361,49 +401,100 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <span>{transcript.segments.length} segments</span>
                 </div>
 
-                {/* Segments */}
+                {/* Content area */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar divide-y divide-zinc-800/50">
-                    {transcript.segments.map((seg, i) => (
-                      <div
-                        key={i}
-                        className="flex gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
-                      >
-                        <button
-                          className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
-                          title="Click to seek (coming soon)"
-                        >
-                          [{formatTimestamp(seg.start)}]
-                        </button>
-                        <p className="text-sm text-zinc-300 leading-relaxed">{seg.text}</p>
+                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                    {transcriptView === 'segments' ? (
+                      <div className="divide-y divide-zinc-800/50">
+                        {transcript.segments.map((seg, i) => (
+                          <div
+                            key={i}
+                            className="flex gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
+                          >
+                            <button
+                              className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                              title="Click to seek (coming soon)"
+                            >
+                              [{formatTimestamp(seg.start)}]
+                            </button>
+                            <p className="text-sm text-zinc-300 leading-relaxed">{seg.text}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : (
+                      <div className="p-4">
+                        <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                          {transcript.text}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Export footer */}
-                <div className="flex flex-wrap gap-2">
+                {/* Toolbar */}
+                <div className="flex items-center gap-2">
+                  {/* View toggle */}
+                  <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => setTranscriptView('segments')}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                        transcriptView === 'segments'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <List size={12} />
+                      Segments
+                    </button>
+                    <button
+                      onClick={() => setTranscriptView('fulltext')}
+                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                        transcriptView === 'fulltext'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      <AlignLeft size={12} />
+                      Full Text
+                    </button>
+                  </div>
+
+                  {/* Copy */}
                   <button
                     onClick={handleCopyTranscript}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
+                    className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
                   >
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? 'Copied!' : 'Copy All'}
+                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    {copied ? 'Copied!' : 'Copy'}
                   </button>
-                  <button
-                    onClick={handleExportSRT}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
-                  >
-                    <Download size={14} />
-                    Export SRT
-                  </button>
-                  <button
-                    onClick={handleExportTXT}
-                    className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-2 border border-zinc-700"
-                  >
-                    <Download size={14} />
-                    Export TXT
-                  </button>
+
+                  {/* Export dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setExportOpen(!exportOpen)}
+                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    >
+                      <Download size={12} />
+                      Export
+                      <ChevronDown size={10} />
+                    </button>
+                    {exportOpen && (
+                      <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]">
+                        <button
+                          onClick={() => { handleExportSRT(); setExportOpen(false); }}
+                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                        >
+                          Export SRT
+                        </button>
+                        <button
+                          onClick={() => { handleExportTXT(); setExportOpen(false); }}
+                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                        >
+                          Export TXT
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

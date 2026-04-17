@@ -64,7 +64,7 @@ class OpenAIProvider(AIProvider):
         self, api_key: str = "", base_url: str = "", model: str = "gpt-4o", **kwargs
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
-        client_kwargs = {"api_key": api_key}
+        client_kwargs = {"api_key": api_key, "timeout": 120.0, "max_retries": 2}
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)
@@ -250,6 +250,7 @@ class AIProviderFactory:
         "openai": OpenAIProvider,
         "deepseek": DeepSeekProvider,
         "doubao": DoubaoProvider,
+        "volcengine": DoubaoProvider,  # 火山引擎 = doubao LLM (alias)
         "minimax": MiniMaxProvider,
         "kimi": KimiProvider,
         "qwen": QwenProvider,
@@ -291,12 +292,73 @@ class AIProviderFactory:
         Returns:
             Dict with keys: success (bool), models (list[str] | None), error (str | None).
         """
+        # Special handling for Volcengine ASR (not a chat provider)
+        if provider_key == "volcengine":
+            return await cls._test_volcengine(config)
+
         try:
             provider = cls.get_provider(provider_key, config)
             models = await provider.list_models()
             return {"success": True, "models": models, "error": None}
         except Exception as e:
             logger.warning(f"Connection test failed for {provider_key}: {e}")
+            return {"success": False, "models": None, "error": str(e)}
+
+    @classmethod
+    async def _test_volcengine(cls, config: dict) -> dict:
+        """Test Volcengine ASR connectivity.
+
+        Supports both old console (app_id + api_key) and new console (api_key only).
+        Tests both model versions (1.0 bigasr / 2.0 seedasr) and returns available ones.
+        """
+        import httpx
+
+        app_id = config.get("app_id", "")
+        api_key = config.get("api_key", "")
+        if not api_key:
+            return {"success": False, "models": None, "error": "API Key is required"}
+
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Api-Request-Id": "test-connection",
+                "X-Api-Sequence": "-1",
+            }
+            if app_id:
+                headers["X-Api-App-Key"] = app_id
+                headers["X-Api-Access-Key"] = api_key
+            else:
+                headers["X-Api-Key"] = api_key
+
+            models_available = []
+            last_error = ""
+            async with httpx.AsyncClient(timeout=10) as client:
+                for resource_id, model_name in [
+                    ("volc.seedasr.auc", "seed-asr"),
+                    ("volc.bigasr.auc", "bigasr"),
+                ]:
+                    test_headers = {**headers, "X-Api-Resource-Id": resource_id}
+                    resp = await client.post(
+                        "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
+                        headers=test_headers,
+                        json={
+                            "user": {"uid": "test"},
+                            "audio": {"format": "mp3", "url": "https://example.com/test.mp3"},
+                            "request": {"model_name": "bigmodel"},
+                        },
+                    )
+                    status_code = resp.headers.get("X-Api-Status-Code", "")
+                    # 20xxxxxx = success, 40xxxxxx = client error (auth passed, bad input)
+                    # 45xxxxxx = resource not granted (permission denied) — must reject
+                    if status_code.startswith("20") or status_code.startswith("40"):
+                        models_available.append(model_name)
+                    else:
+                        last_error = resp.headers.get("X-Api-Message", f"Status: {status_code}")
+
+                if models_available:
+                    return {"success": True, "models": models_available, "error": None}
+                return {"success": False, "models": None, "error": last_error or "No model access granted"}
+        except Exception as e:
             return {"success": False, "models": None, "error": str(e)}
 
     @classmethod

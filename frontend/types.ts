@@ -489,6 +489,7 @@ export type VideoAnalysis = MediaAnalysis;
 export interface AIProviderConfig {
   enabled: boolean;
   api_key?: string;
+  app_id?: string;
   base_url?: string;
   models?: string[];
   selected_model?: string;
@@ -505,6 +506,7 @@ export interface AISettings {
     openai?: AIProviderConfig;
     deepseek?: AIProviderConfig;
     doubao?: AIProviderConfig;
+    volcengine?: AIProviderConfig;
     ollama?: AIProviderConfig;
     lmstudio?: AIProviderConfig;
   };
@@ -515,6 +517,15 @@ export interface AISettings {
     image_generation?: string;  // storyboard image provider
     script_generation?: string;  // storyboard script/prompt LLM
   };
+}
+
+// Nous Platform Model (admin-configured, pay with points)
+export interface NousModelPublic {
+  name: string;
+  display_name: string;
+  category: 'transcription' | 'summarization' | 'analysis';
+  pricing_type: 'per_hour' | 'per_request' | 'per_token';
+  pricing_value: number;
 }
 
 // Points System Types

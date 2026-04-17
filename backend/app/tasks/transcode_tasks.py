@@ -288,14 +288,12 @@ def maybe_trigger_transcode(
             min_size = settings.TRANSCODE_MIN_SIZE_MB
 
             if file_size_mb < min_size:
-                duration_sec = _probe_duration_sync(str(file_path))
-                if (duration_sec or 0) < MIN_DURATION_SEC:
-                    logger.info(
-                        f"[Transcode] Skip: {video_codec} too small "
-                        f"({file_size_mb:.0f}MB < {min_size}MB, {duration_sec or '?'}s) "
-                        f"for version {version_id}"
-                    )
-                    return
+                logger.info(
+                    f"[Transcode] Skip: {video_codec} too small "
+                    f"({file_size_mb:.0f}MB < {min_size}MB) "
+                    f"for version {version_id}"
+                )
+                return
 
             if is_h264:
                 logger.info(

@@ -19,7 +19,7 @@ let allTags = [];
 let currentTabUrl = '';
 
 // Init: check if configured, show appropriate view
-chrome.storage.sync.get(['apiUrl', 'apiKey'], (config) => {
+chrome.storage.local.get(['apiUrl', 'apiKey'], (config) => {
   if (config.apiUrl && config.apiKey) {
     showPushView(config);
   } else {
@@ -31,8 +31,8 @@ chrome.storage.sync.get(['apiUrl', 'apiKey'], (config) => {
 function showSettingsView() {
   settingsView.style.display = 'block';
   pushView.style.display = 'none';
-  chrome.storage.sync.get(['apiUrl', 'apiKey'], (result) => {
-    if (result.apiUrl) apiUrlInput.value = result.apiUrl;
+  chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
+    apiUrlInput.value = result.apiUrl || 'https://mediahubserver.heygo.cn:88';
     if (result.apiKey) apiKeyInput.value = result.apiKey;
   });
 }
@@ -44,7 +44,7 @@ saveBtn.addEventListener('click', () => {
   if (!apiUrl) { showMessage('API URL is required', 'error'); return; }
   if (!apiKey) { showMessage('API Key is required', 'error'); return; }
 
-  chrome.storage.sync.set({ apiUrl, apiKey }, () => {
+  chrome.storage.local.set({ apiUrl, apiKey }, () => {
     showMessage('Saved!', 'success');
     setTimeout(() => showPushView({ apiUrl, apiKey }), 800);
   });
@@ -62,10 +62,10 @@ async function showPushView(config) {
   settingsView.style.display = 'none';
   pushView.style.display = 'block';
 
-  // Get current tab URL
+  // Pre-fill with current tab URL, but input is editable so user can paste anything
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   currentTabUrl = tab?.url || '';
-  currentUrlEl.textContent = currentTabUrl || 'No URL';
+  currentUrlEl.value = currentTabUrl;
   currentUrlEl.title = currentTabUrl;
 
   // Load tags
@@ -172,7 +172,8 @@ function updatePushBtn() {
 
 // --- Push Action ---
 pushBtn.addEventListener('click', async () => {
-  if (!currentTabUrl) {
+  const urlToPush = (currentUrlEl.value || '').trim();
+  if (!urlToPush) {
     pushStatus.textContent = 'No URL to push';
     pushStatus.className = 'status error';
     return;
@@ -182,41 +183,31 @@ pushBtn.addEventListener('click', async () => {
   pushBtn.textContent = 'Pushing...';
   pushStatus.textContent = '';
 
-  const config = await chrome.storage.sync.get(['apiUrl', 'apiKey']);
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
 
   try {
-    // 1. Push URL
+    // Push URL with tags in a single request
+    const fetchBody = {
+      url: urlToPush,
+      video_bool: true,
+      cover_bool: true,
+    };
+    if (selectedTags.size > 0) {
+      fetchBody.tag_ids = Array.from(selectedTags);
+    }
+
     const res = await fetch(`${config.apiUrl}/api/v1/media/fetch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': config.apiKey,
       },
-      body: JSON.stringify({
-        url: currentTabUrl,
-        video_bool: true,
-        cover_bool: true,
-      }),
+      body: JSON.stringify(fetchBody),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
       throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
-    }
-
-    const data = await res.json();
-
-    // 2. If tags selected and we got a media ID, add tags
-    if (selectedTags.size > 0 && data.media_id) {
-      const tagIds = Array.from(selectedTags);
-      await fetch(`${config.apiUrl}/api/v1/tags/media/${data.media_id}/tags`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': config.apiKey,
-        },
-        body: JSON.stringify({ tag_ids: tagIds }),
-      });
     }
 
     pushStatus.textContent = 'Pushed!';
@@ -243,4 +234,159 @@ pushBtn.addEventListener('click', async () => {
 
   pushBtn.disabled = false;
   updatePushBtn();
+});
+
+// --- Create Tag ---
+const createTagToggle = document.getElementById('createTagToggle');
+const createTagForm = document.getElementById('createTagForm');
+const newTagInput = document.getElementById('newTagInput');
+const translatePreview = document.getElementById('translatePreview');
+const newTagGroup = document.getElementById('newTagGroup');
+const newTagGroupTrigger = document.getElementById('newTagGroupTrigger');
+const newTagGroupOptions = document.getElementById('newTagGroupOptions');
+const createTagBtn = document.getElementById('createTagBtn');
+const createTagStatus = document.getElementById('createTagStatus');
+
+let translateTimer = null;
+
+createTagToggle.addEventListener('click', () => {
+  const visible = createTagForm.style.display !== 'none';
+  createTagForm.style.display = visible ? 'none' : 'flex';
+  createTagToggle.textContent = visible ? '+' : '×';
+  if (!visible) {
+    newTagInput.focus();
+    populateGroupDropdown();
+  }
+});
+
+// Custom select toggle
+newTagGroupTrigger.addEventListener('click', () => {
+  const open = newTagGroupOptions.style.display !== 'none';
+  newTagGroupOptions.style.display = open ? 'none' : 'block';
+});
+
+// Close on outside click
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('newTagGroupWrapper').contains(e.target)) {
+    newTagGroupOptions.style.display = 'none';
+  }
+});
+
+function selectGroup(value, label) {
+  newTagGroup.value = value;
+  newTagGroupTrigger.textContent = label;
+  newTagGroupTrigger.classList.toggle('has-value', !!value);
+  newTagGroupOptions.style.display = 'none';
+}
+
+function populateGroupDropdown() {
+  const seen = new Set();
+  newTagGroupOptions.innerHTML = '';
+
+  // Default option
+  const defaultOpt = document.createElement('div');
+  defaultOpt.className = 'custom-select-option' + (!newTagGroup.value ? ' selected' : '');
+  defaultOpt.textContent = 'Select group (optional)';
+  defaultOpt.addEventListener('click', () => selectGroup('', 'Select group (optional)'));
+  newTagGroupOptions.appendChild(defaultOpt);
+
+  for (const tag of allTags) {
+    if (tag.group_name && tag.group_id && !seen.has(tag.group_id)) {
+      seen.add(tag.group_id);
+      const opt = document.createElement('div');
+      opt.className = 'custom-select-option';
+      opt.textContent = tag.group_name;
+      opt.addEventListener('click', () => selectGroup(tag.group_id, tag.group_name));
+      newTagGroupOptions.appendChild(opt);
+    }
+  }
+}
+
+const isChinese = (text) => /[\u4e00-\u9fff]/.test(text);
+
+newTagInput.addEventListener('input', () => {
+  const value = newTagInput.value.trim();
+  if (translateTimer) clearTimeout(translateTimer);
+  if (!value) {
+    translatePreview.style.display = 'none';
+    return;
+  }
+  translateTimer = setTimeout(async () => {
+    try {
+      const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
+      const res = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value)}&langpair=${langPair}&de=8512939@qq.com`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const translated = data?.responseData?.translatedText;
+      if (translated && translated !== value) {
+        translatePreview.textContent = `${isChinese(value) ? 'EN' : 'ZH'}: ${translated}`;
+        translatePreview.style.display = 'block';
+        translatePreview.dataset.translated = translated;
+      }
+    } catch {}
+  }, 600);
+});
+
+createTagBtn.addEventListener('click', async () => {
+  const input = newTagInput.value.trim();
+  if (!input) return;
+
+  const inputIsChinese = isChinese(input);
+  const translated = translatePreview.dataset.translated || '';
+  const name = inputIsChinese ? (translated || input) : input;
+  const name_zh = inputIsChinese ? input : (translated || null);
+
+  createTagBtn.disabled = true;
+  createTagBtn.textContent = 'Creating...';
+  createTagStatus.textContent = '';
+
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/tags`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': config.apiKey,
+      },
+      body: JSON.stringify({ name, name_zh }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+    }
+
+    // Set group_id if selected (PUT /tags/:id)
+    const created = await res.json();
+    const groupId = newTagGroup.value;
+    if (groupId && created.id) {
+      await fetch(`${config.apiUrl}/api/v1/tags/${created.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': config.apiKey,
+        },
+        body: JSON.stringify({ group_id: groupId }),
+      }).catch(() => {});
+    }
+
+    // Reload tags
+    await loadTags(config);
+    newTagInput.value = '';
+    translatePreview.style.display = 'none';
+    translatePreview.dataset.translated = '';
+    selectGroup('', 'Select group (optional)');
+    createTagStatus.textContent = 'Created!';
+    createTagStatus.className = 'status success';
+    setTimeout(() => { createTagStatus.textContent = ''; }, 2000);
+  } catch (err) {
+    createTagStatus.textContent = err.message;
+    createTagStatus.className = 'status error';
+  }
+
+  createTagBtn.disabled = false;
+  createTagBtn.textContent = 'Create';
 });

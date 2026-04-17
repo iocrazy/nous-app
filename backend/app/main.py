@@ -59,6 +59,49 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
+    # Record deployment log — read build-info.json baked in by CI
+    try:
+        import json
+        from pathlib import Path
+
+        build_info_path = Path("/app/build-info.json")
+        if build_info_path.exists():
+            info = json.loads(build_info_path.read_text(encoding="utf-8"))
+            sha = info.get("commit_sha")
+            if sha:
+                from app.db import get_async_supabase_admin
+                sb = await get_async_supabase_admin()
+                exists = await (
+                    sb.table("deployment_logs")
+                    .select("id")
+                    .eq("service", "backend")
+                    .eq("commit_sha", sha)
+                    .limit(1)
+                    .execute()
+                )
+                if exists.data:
+                    logger.info(f"Deployment {sha} already logged, skip")
+                else:
+                    row = {
+                        "service": info.get("service", "backend"),
+                        "version": info.get("version") or "latest",
+                        "commit_sha": sha,
+                        "commit_count": int(info.get("commit_count") or 0),
+                        "commits": info.get("commits") or [],
+                        "summary": info.get("summary") or "",
+                        "deployed_by": info.get("deployed_by") or "ci",
+                        "status": "success",
+                        "metadata": {"run_id": info.get("run_id")},
+                    }
+                    await sb.table("deployment_logs").insert(row).execute()
+                    logger.success(
+                        f"Deployment logged: {sha} ({row['commit_count']} commits)"
+                    )
+        else:
+            logger.debug("build-info.json not found, skip deployment log")
+    except Exception as e:
+        logger.warning(f"Failed to record deployment log: {e}")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     try:
@@ -323,7 +366,7 @@ try:
                 if file_type == "file" and res.data.get("file_path"):
                     result = res.data["file_path"]
                 elif file_type == "cover":
-                    result = res.data.get("cover_image_path") or res.data.get("thumbnail_path")
+                    result = res.data.get("thumbnail_path") or res.data.get("cover_image_path")
                 if result:
                     creator_id = res.data.get("creator_id")
                     resource_id = res.data["id"]
@@ -367,8 +410,12 @@ try:
             logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
         return ()
 
-    def _serve_file(file_path: str) -> FileResponse:
-        """Resolve a relative file path and return a FileResponse."""
+    def _serve_file(file_path: str, cache_immutable: bool = False) -> FileResponse:
+        """Resolve a relative file path and return a FileResponse.
+
+        cache_immutable=True sets long-lived caching (7 days, immutable) for
+        content-addressed files like thumbnails and covers that never change.
+        """
         import mimetypes
 
         full_path = (_media_base_path / file_path).resolve()
@@ -378,13 +425,16 @@ try:
             raise HTTPException(status_code=404, detail="File not found")
 
         mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        headers = {
+            "Referrer-Policy": "no-referrer",
+            "Content-Disposition": "inline",
+        }
+        if cache_immutable:
+            headers["Cache-Control"] = "public, max-age=604800, immutable"
         return FileResponse(
             str(full_path),
             media_type=mime_type,
-            headers={
-                "Referrer-Policy": "no-referrer",
-                "Content-Disposition": "inline",
-            },
+            headers=headers,
         )
 
     async def _check_permissions(
@@ -479,7 +529,7 @@ try:
         user_id = await _authenticate_media_request(request, token, share_token, review_token)
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "cover")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
-        return _serve_file(file_path)
+        return _serve_file(file_path, cache_immutable=True)
 
     @app.get("/media/{file_path:path}")
     async def serve_media_by_path(

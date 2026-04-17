@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -59,6 +61,62 @@ jobs:
             echo "version=latest" >> $GITHUB_OUTPUT
             echo "is_release=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Generate build-info.json (commits since last tag/20 commits)
+        run: |
+          set -e
+          git fetch --unshallow 2>/dev/null || true
+          # Find last release tag (fall back to 20 commits if none)
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+          else
+            RANGE="HEAD~20..HEAD"
+          fi
+          HEAD_SHA=$(git rev-parse --short HEAD)
+          export HEAD_SHA
+          git log "$RANGE" --pretty=format:'{"sha":"%h","subject":"%s","author":"%an","date":"%aI"}' > /tmp/commits.raw
+          python3 <<'PYEOF' > backend/build-info.json
+          import json, re, os
+          items = []
+          with open('/tmp/commits.raw') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line: continue
+                  try:
+                      o = json.loads(line)
+                      m = re.match(r'^(\w+)(\([^)]+\))?!?:', o['subject'])
+                      o['type'] = m.group(1) if m else 'other'
+                      items.append(o)
+                  except Exception:
+                      pass
+          groups = {}
+          for it in items:
+              groups.setdefault(it['type'], []).append(it['subject'])
+          order = ['feat', 'fix', 'perf', 'refactor', 'docs', 'chore', 'other']
+          label = {'feat': '✨ Features', 'fix': '🐛 Fixes', 'perf': '⚡ Performance',
+                   'refactor': '♻️ Refactor', 'docs': '📝 Docs', 'chore': '🔧 Chore', 'other': '📦 Other'}
+          parts = []
+          for t in order:
+              if t in groups:
+                  parts.append(f"{label[t]} ({len(groups[t])}): " + '; '.join(groups[t][:5]))
+          info = {
+              'service': 'backend',
+              'version': os.environ.get('VERSION', 'latest'),
+              'commit_sha': os.environ.get('HEAD_SHA', ''),
+              'commit_count': len(items),
+              'commits': items,
+              'summary': (' | '.join(parts))[:500] if parts else 'No changes',
+              'deployed_by': os.environ.get('ACTOR', ''),
+              'run_id': os.environ.get('RUN_ID', ''),
+          }
+          print(json.dumps(info, ensure_ascii=False, indent=2))
+          PYEOF
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          HEAD_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5

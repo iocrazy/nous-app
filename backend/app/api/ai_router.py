@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
+from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import AIRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -33,8 +34,8 @@ async def _get_media_or_404(platform_id: str) -> dict:
     return media
 
 
-async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]:
-    """Resolve resource_id -> resource dict + platform_id, or raise 404."""
+async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str, dict]:
+    """Resolve resource_id -> (resource dict, platform_id, media dict), or raise 404."""
     repo = ResourcesRepository()
     resource = await repo.get_resource_by_id(resource_id)
     if not resource or not resource.get("media_id"):
@@ -48,7 +49,17 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
     if not media:
         raise HTTPException(status_code=404, detail="Linked media not found")
 
-    return resource, media["platform_id"]
+    return resource, media["platform_id"], media
+
+
+def _format_duration_short(seconds: float) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
 
 # ------------------------------------------------------------------
@@ -59,23 +70,78 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str]
 @router.post("/transcribe/resource/{resource_id}")
 async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI transcription by resource_id."""
-    resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
-    # === Points check ===
+    # === Dedup: reject if already processing ===
+    _admin = await _get_admin()
+    _active = (
+        await _admin.table("unified_tasks")
+        .select("id")
+        .eq("resource_id", resource_id)
+        .eq("task_type", "ai_transcription")
+        .in_("status", ["pending", "processing", "running"])
+        .limit(1)
+        .execute()
+    )
+    if _active.data:
+        return {"message": "Transcription already in progress", "resource_id": resource_id}
+    # === End dedup ===
+
+    # === Nous billing — only charge if user selected a nous-* model ===
+    from app.repositories.user_settings_repository import UserSettingsRepository
+    from app.repositories.nous_repository import NousRepository
+    import math
+
+    settings_repo = UserSettingsRepository()
+    user_settings = await settings_repo.get_by_user_id(auth.user_id)
+    ai_settings = (user_settings or {}).get("settings_json", {}).get("ai_settings", {})
+    selected_model = ai_settings.get("task_assignment", {}).get("transcription", "")
+
     points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
+    resource_owner = resource.get("creator_id") or auth.user_id
+    _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
-    if _team_id:
+    _is_nous = selected_model.startswith("nous-")
+
+    if _is_nous and _team_id:
+        # Look up Nous model pricing
+        nous_repo = NousRepository()
+        nous_model = await nous_repo.get_by_name(selected_model)
+        if not nous_model or not nous_model.get("is_enabled"):
+            raise HTTPException(status_code=400, detail=f"Nous model '{selected_model}' not available")
+
+        # Compute cost by media duration (reuse media from resolver)
+        duration_seconds = float(media.get("duration", 0)) if media else 0
+        if duration_seconds <= 0:
+            duration_seconds = 60  # fallback: charge 1 minute minimum
+
+        pricing_value = float(nous_model["pricing_value"])
+        if nous_model["pricing_type"] == "per_hour":
+            _points_cost = max(1, math.ceil(duration_seconds / 3600 * pricing_value))
+        else:
+            _points_cost = max(1, int(pricing_value))
+
+        # Build detailed description for transaction record
+        video_title = (media.get("title") or platform_id)[:50]
+        dur_str = _format_duration_short(duration_seconds) if duration_seconds > 0 else ""
+        _description = f"AI Transcription: {video_title} ({selected_model}"
+        if dur_str:
+            _description += f", {dur_str}"
+        _description += ")"
+
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
             user_id=auth.user_id,
             action_type="ai_transcription",
+            reference_id=resource_id,
+            override_cost=_points_cost,
+            description=_description,
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
         _points_cost = points_result.get("points_cost", 0)
-    # === End points check ===
+    # === End billing ===
 
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
@@ -111,42 +177,77 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         "message": "Transcription queued",
         "resource_id": resource_id,
         "platform_id": platform_id,
+        "points_charged": _points_cost,
     }
 
 
 @router.post("/summarize/resource/{resource_id}")
 async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     """Trigger AI summary by resource_id."""
-    resource, platform_id = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
-    # === Points check ===
+    # === Dedup: reject if already processing ===
+    _admin = await _get_admin()
+    _active = (
+        await _admin.table("unified_tasks")
+        .select("id")
+        .eq("resource_id", resource_id)
+        .eq("task_type", "ai_summary")
+        .in_("status", ["pending", "processing", "running"])
+        .limit(1)
+        .execute()
+    )
+    if _active.data:
+        return {"message": "Summary already in progress", "resource_id": resource_id}
+    # === End dedup ===
+
+    # === Points check — charge the resource owner's personal team ===
     points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
+    resource_owner = resource.get("creator_id") or auth.user_id
+    _team_id = await get_team_id_for_user(resource_owner)
     _points_cost = 0
     if _team_id:
+        # Build detailed description for transaction record
+        video_title = (media.get("title") or platform_id)[:50]
+        _description = f"AI Summary: {video_title}"
+
         await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
         points_result = await points_service.check_and_consume(
             team_id=_team_id,
             user_id=auth.user_id,
             action_type="ai_summary",
+            reference_id=resource_id,
+            description=_description,
         )
         if not points_result["success"]:
             raise HTTPException(status_code=402, detail=points_result["reason"])
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    media = await _get_media_or_404(platform_id)
-    media_id = media["id"]
-
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(media_id)
+    transcript = await ai_repo.get_transcript(resource_id)
 
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
+            from app.services.unified_task_manager import get_task_manager
 
-            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id, resource_id)
+            # Create unified task for Task Center visibility
+            tracker = get_task_manager()
+            task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_summary",
+                title=f"Summarize: {platform_id}",
+                media_id=platform_id,
+                resource_id=resource_id,
+            )
+            await tracker.start(task_id)
+
+            await asyncio.to_thread(
+                generate_summary_task.delay,
+                platform_id, auth.user_id, resource_id, task_id,
+            )
             return {
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
@@ -187,6 +288,17 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
         raise HTTPException(
             status_code=500, detail=f"Failed to queue summary: {str(e)}"
         )
+
+
+@router.post("/analyze/resource/{resource_id}")
+async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
+    """Trigger visual analysis by resource_id (not yet implemented)."""
+    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+
+    raise HTTPException(
+        status_code=501,
+        detail="Visual analysis is not yet implemented",
+    )
 
 
 # ------------------------------------------------------------------
@@ -277,15 +389,34 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     media = await _get_media_or_404(platform_id)
     media_id = media["id"]
 
+    # Resolve resource_id for per-resource transcript lookup (user-specific)
+    res_repo = ResourcesRepository()
+    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    _resource_id = str(resource["id"]) if resource else None
+
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(media_id)
+    transcript = await ai_repo.get_transcript(_resource_id) if _resource_id else None
 
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
             from app.tasks.ai_tasks import generate_summary_task
+            from app.services.unified_task_manager import get_task_manager
 
-            await asyncio.to_thread(generate_summary_task.delay, platform_id, auth.user_id)
+            tracker = get_task_manager()
+            task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_summary",
+                title=f"Summarize: {platform_id}",
+                media_id=platform_id,
+                resource_id=_resource_id,
+            )
+            await tracker.start(task_id)
+
+            await asyncio.to_thread(
+                generate_summary_task.delay,
+                platform_id, auth.user_id, _resource_id, task_id,
+            )
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
             # No transcript, run full pipeline
@@ -294,7 +425,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             await asyncio.to_thread(chain_ai_pipeline,
                 platform_id=platform_id,
                 user_id=auth.user_id,
-                resource_id=None,
+                resource_id=_resource_id,
                 transcript_bool=True,
                 summary_bool=True,
             )
@@ -373,20 +504,25 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 # ------------------------------------------------------------------
 
 
-@router.get("/transcript/{platform_id}", response_model=TranscriptResponse)
-async def get_transcript(platform_id: str, auth: AuthDep):
-    """Get transcript for a media item."""
-    media = await _get_media_or_404(platform_id)
-    media_id = media["id"]
+@router.get("/transcript/resource/{resource_id}", response_model=TranscriptResponse)
+async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
+    """Get transcript for a resource."""
+    # Ownership check
+    res_repo = ResourcesRepository()
+    resource = await res_repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if resource.get("creator_id") != auth.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(media_id)
+    transcript = await ai_repo.get_transcript(resource_id)
 
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     return TranscriptResponse(
-        video_id=media_id,
+        media_id=resource_id,
         language=transcript.get("language"),
         full_text=transcript.get("full_text"),
         segments=transcript.get("segments"),
@@ -396,20 +532,84 @@ async def get_transcript(platform_id: str, auth: AuthDep):
     )
 
 
-@router.get("/summary/{platform_id}", response_model=SummaryResponse)
-async def get_summary(platform_id: str, auth: AuthDep):
-    """Get summary for a media item."""
+@router.get("/transcript/{platform_id}", response_model=TranscriptResponse)
+async def get_transcript(platform_id: str, auth: AuthDep):
+    """Get transcript for a media item (legacy, resolves resource from media)."""
     media = await _get_media_or_404(platform_id)
     media_id = media["id"]
 
+    # Resolve resource_id from media (user-specific)
+    res_repo = ResourcesRepository()
+    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="No resource linked to this media")
+
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(media_id)
+    transcript = await ai_repo.get_transcript(str(resource["id"]))
+
+    if not transcript:
+        raise HTTPException(status_code=404, detail="Transcript not found")
+
+    return TranscriptResponse(
+        media_id=media_id,
+        language=transcript.get("language"),
+        full_text=transcript.get("full_text"),
+        segments=transcript.get("segments"),
+        whisper_model=transcript.get("whisper_model"),
+        duration_seconds=transcript.get("duration_seconds"),
+        created_at=transcript.get("created_at"),
+    )
+
+
+@router.get("/summary/resource/{resource_id}", response_model=SummaryResponse)
+async def get_summary_by_resource(resource_id: str, auth: AuthDep):
+    """Get summary for a resource."""
+    # Ownership check
+    res_repo = ResourcesRepository()
+    resource = await res_repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if resource.get("creator_id") != auth.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    ai_repo = AIRepository()
+    summary = await ai_repo.get_summary(resource_id)
 
     if not summary:
         raise HTTPException(status_code=404, detail="Summary not found")
 
     return SummaryResponse(
-        video_id=media_id,
+        media_id=resource_id,
+        summary_type=summary.get("summary_type"),
+        summary_text=summary.get("summary_text"),
+        key_points=summary.get("key_points"),
+        topics=summary.get("topics"),
+        llm_model=summary.get("llm_model"),
+        llm_provider=summary.get("llm_provider"),
+        created_at=summary.get("created_at"),
+    )
+
+
+@router.get("/summary/{platform_id}", response_model=SummaryResponse)
+async def get_summary(platform_id: str, auth: AuthDep):
+    """Get summary for a media item (legacy, resolves resource from media)."""
+    media = await _get_media_or_404(platform_id)
+    media_id = media["id"]
+
+    # Resolve resource_id from media (user-specific)
+    res_repo = ResourcesRepository()
+    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="No resource linked to this media")
+
+    ai_repo = AIRepository()
+    summary = await ai_repo.get_summary(str(resource["id"]))
+
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+
+    return SummaryResponse(
+        media_id=media_id,
         summary_type=summary.get("summary_type"),
         summary_text=summary.get("summary_text"),
         key_points=summary.get("key_points"),

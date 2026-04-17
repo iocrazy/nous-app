@@ -197,6 +197,13 @@ export function AuthProvider({
             }
           })
           .catch((err) => console.error('Failed to load user settings:', err));
+
+        // Load AI settings
+        import('../services/aiService').then(({ getAISettings }) => {
+          getAISettings()
+            .then((ai) => { if (ai) setAISettings(ai); })
+            .catch((err) => console.debug('Failed to load AI settings:', err));
+        });
       } else {
         setIsAuthenticated(false);
         setCurrentUserId(null);

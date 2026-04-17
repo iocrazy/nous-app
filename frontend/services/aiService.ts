@@ -1,5 +1,5 @@
 
-import { AISettings, TranscriptData, SummaryData } from '../types';
+import { AISettings, TranscriptData, SummaryData, NousModelPublic } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 // unwrapResponse removed — AI APIs return data directly, not {success, data} wrapper
@@ -555,7 +555,23 @@ export const getAISettings = async (): Promise<AISettings> => {
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+
+  // Map backend field names to frontend AISettings shape
+  return {
+    ai_enabled: data.ai_enabled ?? true,
+    auto_transcribe: data.auto_transcribe ?? false,
+    auto_summarize: data.auto_summarize ?? false,
+    preferred_language: data.preferred_language ?? 'auto',
+    providers: data.ai_providers ?? {},
+    task_assignment: {
+      transcription: data.task_assignment?.transcription ?? '',
+      summarization: data.task_assignment?.summarization ?? '',
+      visual_analysis: data.task_assignment?.visual_analysis ?? '',
+      image_generation: data.task_assignment?.image_generation ?? '',
+      script_generation: data.task_assignment?.script_generation ?? '',
+    },
+  } as AISettings;
 };
 
 export const saveAISettings = async (
@@ -566,7 +582,8 @@ export const saveAISettings = async (
   // Map frontend AISettings shape to backend AISettingsUpdate schema
   const backendPayload = {
     ai_providers: settings.providers,
-    whisper_provider: settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
+    whisper_provider: settings.task_assignment?.transcription?.startsWith('volcengine') ? 'volcengine'
+      : settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
     default_summary_model: settings.task_assignment?.summarization || 'gpt-4o-mini',
     default_analysis_model: settings.task_assignment?.visual_analysis || 'gpt-4o',
     // Include frontend-specific fields as extra data for persistence
@@ -589,9 +606,22 @@ export const saveAISettings = async (
   }
 };
 
+// --- Nous Models ---
+
+export const getNousModels = async (category?: string): Promise<NousModelPublic[]> => {
+  const apiUrl = getApiUrl();
+  const params = category ? `?category=${category}` : '';
+  const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return data.models || [];
+};
+
 export const testAIConnection = async (
   provider: string,
-  config: { base_url?: string; api_key?: string }
+  config: { base_url?: string; api_key?: string; app_id?: string }
 ): Promise<{ success: boolean; models?: string[]; error?: string }> => {
   const apiUrl = getApiUrl();
 

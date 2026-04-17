@@ -241,6 +241,9 @@ async def get_transactions(
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     type: Optional[str] = Query(None, description="Filter by transaction type"),
+    reference_type: Optional[str] = Query(None, description="Filter by reference_type (action type)"),
+    search: Optional[str] = Query(None, description="Search in description text"),
+    days: Optional[int] = Query(None, ge=1, le=365, description="Filter to last N days"),
 ):
     """
     Get points transaction history.
@@ -252,6 +255,9 @@ async def get_transactions(
     - **limit**: Page size (1-200, default 50).
     - **offset**: Number of rows to skip (default 0).
     - **type**: Optional transaction type filter (purchase, consume, refund, gift, admin_adjust).
+    - **reference_type**: Optional action type filter (e.g. ai_transcription, ai_summary, video_parse).
+    - **search**: Optional text search in the description field.
+    - **days**: Optional filter to last N days (e.g. 7, 30).
 
     Authentication: Bearer Token or API Key
     """
@@ -263,6 +269,9 @@ async def get_transactions(
             limit=limit,
             offset=offset,
             type_filter=type,
+            reference_type_filter=reference_type,
+            search=search,
+            days=days,
         )
         return {
             "success": True,

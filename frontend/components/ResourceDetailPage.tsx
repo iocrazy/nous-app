@@ -32,6 +32,8 @@ import {
   Pencil,
   Star,
   FolderOpen,
+  List,
+  AlignLeft,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -345,6 +347,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<'segments' | 'fulltext'>('segments');
+  const [exportOpen, setExportOpen] = useState(false);
   const [videoCurrentTime, setVideoCurrentTime] = useState(0);
   const [annotationActive, setAnnotationActive] = useState(false);
   const [pendingAnnotations, setPendingAnnotations] = useState<NormalizedAnnotation[]>([]);
@@ -632,14 +636,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   }, [resource?.mime_type, refreshCommentMarkers]);
 
   // ─── AI: load existing transcript/summary on tab switch ───
+  // Always try to load when switching to transcript tab (don't rely solely on transcript_status)
   useEffect(() => {
-    if (rightTab === 'transcript' && resource?.transcript_status === 'completed' && !transcript) {
+    if (rightTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (rightTab === 'analysis' && resource?.summary_status === 'completed' && !summary) {
+    if (rightTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
     }
-  }, [rightTab, resource?.transcript_status, resource?.summary_status]);
+  }, [rightTab]);
 
   const loadTranscript = useCallback(async () => {
     try {
@@ -647,8 +652,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setTranscriptError(null);
       const data = await getTranscriptByResource(resourceId);
       setTranscript(data);
-    } catch (err) {
-      setTranscriptError(err instanceof Error ? err.message : 'Failed to load transcript');
+    } catch {
+      // 404 = no transcript yet, not an error to display
     } finally {
       setTranscriptLoading(false);
     }
@@ -660,23 +665,29 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       setSummaryError(null);
       const data = await getSummaryByResource(resourceId);
       setSummary(data);
-    } catch (err) {
-      setSummaryError(err instanceof Error ? err.message : 'Failed to load summary');
+    } catch {
+      // 404 = no summary yet
     } finally {
       setSummaryLoading(false);
     }
   }, [resourceId]);
 
+  // Track transcription status for loading animation
+  const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
+
   const handleTranscribe = async () => {
     try {
       setTranscriptLoading(true);
       setTranscriptError(null);
+      setTranscribeStatus('processing');
       await triggerTranscriptionByResource(resourceId);
       // Poll for completion
       const data = await pollForResult(() => getTranscriptByResource(resourceId), 3000, 60);
       setTranscript(data);
+      setTranscribeStatus('completed');
     } catch (err) {
       setTranscriptError(err instanceof Error ? err.message : 'Failed to transcribe');
+      setTranscribeStatus('failed');
     } finally {
       setTranscriptLoading(false);
     }
@@ -1414,8 +1425,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             />
           ) : rightTab === 'transcript' ? (
             <div className="overflow-y-auto flex-1 p-4 space-y-4 animate-in fade-in duration-300">
-              {/* Processing state */}
-              {resource.transcript_status === 'processing' && (
+              {/* Processing state (from DB status or active transcription) */}
+              {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
                   <h3 className="text-sm font-medium text-zinc-200">Transcribing...</h3>
@@ -1423,8 +1434,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
               )}
 
-              {/* Not started */}
-              {(!resource.transcript_status || resource.transcript_status === 'pending' || resource.transcript_status === 'none') && !transcript && !transcriptLoading && (
+              {/* Not started — no transcript loaded and not processing */}
+              {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && resource.transcript_status !== 'processing' && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
                     <FileText size={28} className="text-zinc-500" />
@@ -1450,27 +1461,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
               )}
 
-              {/* Failed */}
-              {resource.transcript_status === 'failed' && !transcript && (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="p-4 bg-red-500/10 rounded-full mb-4">
-                    <AlertCircle size={28} className="text-red-400" />
-                  </div>
-                  <h3 className="text-sm font-medium text-zinc-200">Transcription Failed</h3>
-                  <p className="text-xs text-zinc-500 mt-1 mb-4">Something went wrong. Please try again.</p>
-                  <button
-                    onClick={handleTranscribe}
-                    disabled={transcriptLoading}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {transcriptLoading ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {/* Loading existing */}
-              {transcriptLoading && resource.transcript_status === 'completed' && (
+              {/* Loading existing transcript */}
+              {transcriptLoading && transcribeStatus !== 'processing' && (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 size={20} className="animate-spin text-indigo-400" />
                 </div>
@@ -1492,46 +1484,98 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   </div>
 
                   <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar divide-y divide-zinc-800/50">
-                      {transcript.segments.map((seg, i) => (
-                        <div
-                          key={i}
-                          className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
-                        >
-                          <button
-                            className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
-                            onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
-                          >
-                            [{formatTimestamp(seg.start)}]
-                          </button>
-                          <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                      {transcriptView === 'segments' ? (
+                        <div className="divide-y divide-zinc-800/50">
+                          {transcript.segments.map((seg, i) => (
+                            <div
+                              key={i}
+                              className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
+                            >
+                              <button
+                                className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                                onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
+                              >
+                                [{formatTimestamp(seg.start)}]
+                              </button>
+                              <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      ) : (
+                        <div className="p-3">
+                          <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                            {transcript.text}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-1.5">
+                  {/* Toolbar */}
+                  <div className="flex items-center gap-1.5">
+                    {/* View toggle */}
+                    <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setTranscriptView('segments')}
+                        className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
+                          transcriptView === 'segments'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <List size={10} />
+                        Segments
+                      </button>
+                      <button
+                        onClick={() => setTranscriptView('fulltext')}
+                        className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
+                          transcriptView === 'fulltext'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        <AlignLeft size={10} />
+                        Full Text
+                      </button>
+                    </div>
+
+                    {/* Copy */}
                     <button
                       onClick={handleCopyTranscript}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                      className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
                     >
-                      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                       {copied ? 'Copied!' : 'Copy'}
                     </button>
-                    <button
-                      onClick={handleExportSRT}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
-                    >
-                      <Download size={12} />
-                      SRT
-                    </button>
-                    <button
-                      onClick={handleExportTXT}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
-                    >
-                      <Download size={12} />
-                      TXT
-                    </button>
+
+                    {/* Export dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setExportOpen(!exportOpen)}
+                        className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
+                      >
+                        <Download size={10} />
+                        Export
+                        <ChevronDown size={8} />
+                      </button>
+                      {exportOpen && (
+                        <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]">
+                          <button
+                            onClick={() => { handleExportSRT(); setExportOpen(false); }}
+                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          >
+                            Export SRT
+                          </button>
+                          <button
+                            onClick={() => { handleExportTXT(); setExportOpen(false); }}
+                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          >
+                            Export TXT
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

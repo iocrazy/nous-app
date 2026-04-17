@@ -81,7 +81,7 @@ async def create_temp_token(
     Requires API Key or JWT auth. Returns a short-lived token
     that can be safely passed in URLs.
     """
-    scopes = (request.scopes if request and request.scopes else ["tags:read"])
+    scopes = (request.scopes if request and request.scopes else ["tags:read", "tags:write"])
     token = secrets.token_hex(TOKEN_LENGTH)
 
     data = {
@@ -145,6 +145,59 @@ async def save_selection(token: str, request: SelectionRequest):
         )
 
     return {"success": True}
+
+
+class CreateTagRequest(BaseModel):
+    name: str
+    name_zh: str | None = None
+    group_id: str | None = None
+    color: str | None = "#6366f1"
+
+
+@router.post("/{token}/tags")
+async def create_tag_by_token(token: str, request: CreateTagRequest):
+    """Create a new tag using a temporary token. No auth header needed."""
+    data = await _get_token_data(token)
+
+    scopes = data.get("scopes", [])
+    if "tags:write" not in scopes and "tags:*" not in scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token does not have tags:write scope",
+        )
+
+    repo = TagsRepository()
+
+    # Check duplicate
+    existing = await repo.get_tag_by_name(request.name, data["user_id"])
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Tag '{request.name}' already exists",
+        )
+
+    created = await repo.create_tag(
+        name=request.name,
+        user_id=data["user_id"],
+        color=request.color,
+        name_zh=request.name_zh,
+    )
+
+    # Set group_id: use provided value, or default to "Uncategorized" group
+    if created:
+        from app.db.supabase_client import get_async_supabase_admin
+        client = await get_async_supabase_admin()
+        group_id = request.group_id
+        if not group_id:
+            # Find the Uncategorized group
+            result = await client.table("tag_groups").select("id").eq("name", "Uncategorized").limit(1).execute()
+            if result.data:
+                group_id = str(result.data[0]["id"])
+        if group_id:
+            await client.table("tags").update({"group_id": group_id}).eq("id", created["id"]).execute()
+            created["group_id"] = group_id
+
+    return {"success": True, "data": created}
 
 
 @router.get("/{token}/selection")

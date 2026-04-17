@@ -148,8 +148,8 @@ function AppLayoutInner() {
   // mobile uses natural scroll (no h-screen) so infinite scroll works
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'resources'
-      ? 'pt-14 pb-20 sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden'
-      : 'px-4 pt-14 pb-20 sm:px-8 sm:pt-20 sm:pb-8'
+      ? `${isDetailPage ? 'pt-0 pb-0' : 'pt-12 pb-28'} sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden`
+      : `${isDetailPage ? 'pt-0 pb-0' : 'px-4 pt-12 pb-28'} sm:px-8 sm:pt-20 sm:pb-8`
   }`;
 
   // Helper: build team-scoped path
@@ -430,6 +430,7 @@ function AppLayoutInner() {
         permissions={userPermissions}
         isViewEnabled={isViewEnabled}
         userName={userProfile?.name}
+        userRole={userProfile?.role}
         activeProject={selectedProject}
         isLibraryOpen={isLibraryOpen}
         isSettingsOpen={isSettingsOpen}
@@ -475,7 +476,7 @@ function AppLayoutInner() {
 
       {/* Mobile workspace avatar — hidden on detail pages */}
       <button
-        className={`sm:hidden fixed top-2.5 right-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
+        className={`sm:hidden fixed top-2.5 left-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
         onClick={() => setIsMobileProfileOpen(true)}
       >
         <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-zinc-950 ${

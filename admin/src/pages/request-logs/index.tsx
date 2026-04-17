@@ -1,29 +1,30 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react'
 import {
   Tag,
-  Modal,
   Descriptions,
   Typography,
   Button,
   Card,
   Space,
   Tabs,
-  Switch,
 } from '@arco-design/web-react'
 import {
-  IconEye,
   IconCopy,
-  IconExport,
-  IconPause,
-  IconPlayArrow,
 } from '@arco-design/web-react/icon'
-import { NotionTable } from '../../components/notion-table'
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  type ColumnDef,
+} from '@tanstack/react-table'
+import { NotionTable, NotionTableToolbar } from '../../components/notion-table'
 import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
 import type { RequestLog, FrontendError, AppLog } from '../../api/endpoints/request-logs'
-import { exportToCsv } from '../../utils/csv-export'
 import { formatDateTime } from '../../utils/format'
+import { LogsToolbarExtra } from './LogsToolbarExtra'
+import { useLogsToolbar } from './useLogsToolbar'
 import { supabase } from '../../auth/supabase'
 import '../../components/notion-table/notion-table.css'
 
@@ -118,8 +119,6 @@ function buildDateParams(
 // ============================================
 
 function RequestLogsTab() {
-  const [detailModal, setDetailModal] = useState<RequestLog | null>(null)
-
   const columns = useMemo<NotionColumnDef<RequestLog>[]>(() => [
     {
       key: 'timestamp',
@@ -160,9 +159,9 @@ function RequestLogsTab() {
       required: true,
       minSize: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 13, display: 'block' }}>
           {row.path}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -226,24 +225,87 @@ function RequestLogsTab() {
         </Typography.Text>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      type: 'text',
-      required: true,
-      size: 48,
-      cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
-      ),
-    },
   ], [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<RequestLog>({
+  const expandedRowRender = useCallback((row: RequestLog) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Time', value: formatDateTime(row.timestamp) },
+          {
+            label: 'Request ID',
+            value: (
+              <Space size={4}>
+                <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  {row.request_id}
+                </Typography.Text>
+                <Button
+                  type="text"
+                  size="mini"
+                  icon={<IconCopy />}
+                  onClick={(e) => { e.stopPropagation(); copyToClipboard(row.request_id) }}
+                />
+              </Space>
+            ),
+          },
+          {
+            label: 'Method & Path',
+            value: (
+              <Space size={4}>
+                <Tag color={getMethodColor(row.method)} size="small">{row.method}</Tag>
+                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.path}</span>
+              </Space>
+            ),
+          },
+          {
+            label: 'Status',
+            value: <Tag color={getStatusColor(row.status_code)}>{row.status_code ?? '-'}</Tag>,
+          },
+          { label: 'Response Time', value: formatResponseTime(row.response_time_ms) },
+          { label: 'User', value: row.user_email || '-' },
+          { label: 'Auth Type', value: row.auth_type },
+          { label: 'IP Address', value: row.ip_address || '-' },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+
+      {row.query_params && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Query Parameters
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.query_params, null, 2)}</pre>
+        </div>
+      )}
+
+      {row.request_body && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Request Body
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.request_body, null, 2)}</pre>
+        </div>
+      )}
+
+      {row.error_detail && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block', color: 'var(--color-danger-6)' }}>
+            Error Detail
+          </Typography.Text>
+          <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)' }}>
+            {row.error_detail}
+          </pre>
+        </div>
+      )}
+    </div>
+  ), [])
+
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<RequestLog>({
     tableKey: 'request-logs',
     columns,
     defaultSorts: [{ field: 'timestamp', direction: 'desc' }],
@@ -267,134 +329,52 @@ function RequestLogsTab() {
     },
   })
 
-  const exportButton = (
-    <Button
-      icon={<IconExport />}
-      size="small"
-      onClick={() => exportToCsv(
-        `request-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
-        [
-          { key: 'timestamp', label: 'Time' },
-          { key: 'method', label: 'Method' },
-          { key: 'path', label: 'Path' },
-          { key: 'status_code', label: 'Status' },
-          { key: 'response_time_ms', label: 'Response Time (ms)' },
-          { key: 'user_email', label: 'User' },
-          { key: 'ip_address', label: 'IP Address' },
-          { key: 'request_id', label: 'Request ID' },
-        ],
-      )}
-    >
-      Export
-    </Button>
+  const csvColumns = useMemo(() => [
+    { key: 'timestamp', label: 'Time' },
+    { key: 'method', label: 'Method' },
+    { key: 'path', label: 'Path' },
+    { key: 'status_code', label: 'Status' },
+    { key: 'response_time_ms', label: 'Response Time (ms)' },
+    { key: 'user_email', label: 'User' },
+    { key: 'ip_address', label: 'IP Address' },
+    { key: 'request_id', label: 'Request ID' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'timestamp',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+    csvColumns,
+    filePrefix: 'request-logs',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+    />
   )
 
   return (
-    <>
-      <NotionTable<RequestLog>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={exportButton}
-        emptyText="No request logs found"
-        scrollX={1100}
-      />
-
-      <Modal
-        title="Request Log Details"
-        visible={!!detailModal}
-        onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-        style={{ width: 720 }}
-      >
-        {detailModal && (
-          <>
-            <Descriptions
-              column={2}
-              data={[
-                { label: 'Time', value: formatDateTime(detailModal.timestamp) },
-                {
-                  label: 'Request ID',
-                  value: (
-                    <Space size={4}>
-                      <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {detailModal.request_id}
-                      </Typography.Text>
-                      <Button
-                        type="text"
-                        size="mini"
-                        icon={<IconCopy />}
-                        onClick={() => copyToClipboard(detailModal.request_id)}
-                      />
-                    </Space>
-                  ),
-                },
-                {
-                  label: 'Method & Path',
-                  value: (
-                    <Space size={4}>
-                      <Tag color={getMethodColor(detailModal.method)} size="small">
-                        {detailModal.method}
-                      </Tag>
-                      <span style={{ fontFamily: 'monospace' }}>{detailModal.path}</span>
-                    </Space>
-                  ),
-                },
-                {
-                  label: 'Status',
-                  value: (
-                    <Tag color={getStatusColor(detailModal.status_code)}>
-                      {detailModal.status_code ?? '-'}
-                    </Tag>
-                  ),
-                },
-                { label: 'Response Time', value: formatResponseTime(detailModal.response_time_ms) },
-                { label: 'User', value: detailModal.user_email || '-' },
-                { label: 'Auth Type', value: detailModal.auth_type },
-                { label: 'IP Address', value: detailModal.ip_address || '-' },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
-
-            {detailModal.query_params && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Query Parameters
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.query_params, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.request_body && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Request Body
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.request_body, null, 2)}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.error_detail && (
-              <div>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block', color: 'var(--color-danger-6)' }}>
-                  Error Detail
-                </Typography.Text>
-                <pre style={{ ...preStyle, borderLeft: '3px solid var(--color-danger-6)' }}>
-                  {detailModal.error_detail}
-                </pre>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
-    </>
+    <NotionTable<RequestLog>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={toolbarExtra}
+      emptyText="No request logs found"
+      scrollX={1100}
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 
@@ -403,8 +383,6 @@ function RequestLogsTab() {
 // ============================================
 
 function FrontendErrorsTab() {
-  const [detailModal, setDetailModal] = useState<FrontendError | null>(null)
-
   const columns = useMemo<NotionColumnDef<FrontendError>[]>(() => [
     {
       key: 'created_at',
@@ -447,9 +425,9 @@ function FrontendErrorsTab() {
       filterable: true,
       required: true,
       cell: (row) => (
-        <Typography.Text style={{ fontSize: 13 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontSize: 13, display: 'block' }}>
           {row.message || '-'}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -458,11 +436,11 @@ function FrontendErrorsTab() {
       type: 'text',
       size: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {row.url
             ? (() => { try { return new URL(row.url).pathname } catch { return row.url } })()
             : '-'}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -472,24 +450,66 @@ function FrontendErrorsTab() {
       size: 160,
       cell: (row) => row.user_email || '-',
     },
-    {
-      key: 'actions',
-      header: '',
-      type: 'text',
-      required: true,
-      size: 48,
-      cell: (row) => (
-        <Button
-          type="text"
-          size="mini"
-          icon={<IconEye />}
-          onClick={(e) => { e.stopPropagation(); setDetailModal(row) }}
-        />
-      ),
-    },
   ], [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<FrontendError>({
+  const expandedRowRender = useCallback((row: FrontendError) => (
+    <div style={{ padding: '12px 16px' }}>
+      <Descriptions
+        column={3}
+        size="small"
+        data={[
+          { label: 'Time', value: formatDateTime(row.created_at) },
+          {
+            label: 'Type',
+            value: (
+              <Tag
+                color={row.error_type === 'runtime' ? 'red' : row.error_type === 'network' ? 'orange' : 'purple'}
+              >
+                {row.error_type}
+              </Tag>
+            ),
+          },
+          { label: 'User', value: row.user_email || '-' },
+          { label: 'Session', value: row.session_id || '-' },
+          { label: 'Page URL', value: row.url || '-' },
+          { label: 'Component', value: row.component || '-' },
+        ]}
+        style={{ marginBottom: 12 }}
+      />
+
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+          Message
+        </Typography.Text>
+        <pre style={preStyle}>{row.message || 'No message'}</pre>
+      </div>
+
+      {row.stack && (
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Stack Trace
+          </Typography.Text>
+          <pre style={{ ...preStyle, maxHeight: 300, overflow: 'auto' }}>
+            {row.stack}
+          </pre>
+        </div>
+      )}
+
+      {row.metadata && (
+        <div>
+          <Typography.Text bold style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
+            Metadata
+          </Typography.Text>
+          <pre style={preStyle}>{JSON.stringify(row.metadata, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  ), [])
+
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<FrontendError>({
     tableKey: 'frontend-errors',
     columns,
     defaultSorts: [{ field: 'created_at', direction: 'desc' }],
@@ -510,102 +530,49 @@ function FrontendErrorsTab() {
     },
   })
 
-  const exportButton = (
-    <Button
-      icon={<IconExport />}
-      size="small"
-      onClick={() => exportToCsv(
-        `frontend-errors-${new Date().toISOString().slice(0, 10)}.csv`,
-        table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
-        [
-          { key: 'created_at', label: 'Time' },
-          { key: 'error_type', label: 'Type' },
-          { key: 'message', label: 'Message' },
-          { key: 'url', label: 'URL' },
-          { key: 'user_email', label: 'User' },
-          { key: 'stack', label: 'Stack Trace' },
-        ],
-      )}
-    >
-      Export
-    </Button>
+  const csvColumns = useMemo(() => [
+    { key: 'created_at', label: 'Time' },
+    { key: 'error_type', label: 'Type' },
+    { key: 'message', label: 'Message' },
+    { key: 'url', label: 'URL' },
+    { key: 'user_email', label: 'User' },
+    { key: 'stack', label: 'Stack Trace' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'created_at',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
+    csvColumns,
+    filePrefix: 'frontend-errors',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+    />
   )
 
   return (
-    <>
-      <NotionTable<FrontendError>
-        table={table}
-        toolbarProps={toolbarProps}
-        pagination={pagination}
-        onPageChange={setPage}
-        isLoading={isLoading}
-        toolbarExtra={exportButton}
-        emptyText="No frontend errors found"
-      />
-
-      <Modal
-        title="Frontend Error Details"
-        visible={!!detailModal}
-        onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>Close</Button>}
-        style={{ width: 720 }}
-      >
-        {detailModal && (
-          <>
-            <Descriptions
-              column={2}
-              data={[
-                { label: 'Time', value: formatDateTime(detailModal.created_at) },
-                {
-                  label: 'Type',
-                  value: (
-                    <Tag
-                      color={detailModal.error_type === 'runtime' ? 'red' : detailModal.error_type === 'network' ? 'orange' : 'purple'}
-                    >
-                      {detailModal.error_type}
-                    </Tag>
-                  ),
-                },
-                { label: 'User', value: detailModal.user_email || '-' },
-                { label: 'Session', value: detailModal.session_id || '-' },
-                { label: 'Page URL', value: detailModal.url || '-' },
-                { label: 'Component', value: detailModal.component || '-' },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
-
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                Message
-              </Typography.Text>
-              <pre style={preStyle}>{detailModal.message || 'No message'}</pre>
-            </div>
-
-            {detailModal.stack && (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Stack Trace
-                </Typography.Text>
-                <pre style={{ ...preStyle, maxHeight: 300, overflow: 'auto' }}>
-                  {detailModal.stack}
-                </pre>
-              </div>
-            )}
-
-            {detailModal.metadata && (
-              <div>
-                <Typography.Text bold style={{ marginBottom: 8, display: 'block' }}>
-                  Metadata
-                </Typography.Text>
-                <pre style={preStyle}>
-                  {JSON.stringify(detailModal.metadata, null, 2)}
-                </pre>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
-    </>
+    <NotionTable<FrontendError>
+      table={table}
+      toolbarProps={toolbarProps}
+      pagination={pagination}
+      onPageChange={setPage}
+      isLoading={isLoading}
+      toolbarExtra={toolbarExtra}
+      emptyText="No frontend errors found"
+      expandedRowRender={expandedRowRender}
+    />
   )
 }
 
@@ -673,9 +640,9 @@ function ApplicationLogsTab() {
                 {shortModule}
               </Tag>
             )}
-            <Typography.Text style={{ fontSize: 13, wordBreak: 'break-all' }} ellipsis={{ rows: 2 }}>
+            <span className="cell-ellipsis-2" style={{ fontSize: 13 }}>
               {row.message}
-            </Typography.Text>
+            </span>
           </Space>
         )
       },
@@ -687,9 +654,9 @@ function ApplicationLogsTab() {
       filterable: true,
       size: 200,
       cell: (row) => (
-        <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
+        <span className="cell-ellipsis" style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {[row.module, row.function, row.line].filter(Boolean).join(':')}
-        </Typography.Text>
+        </span>
       ),
     },
   ], [])
@@ -728,7 +695,10 @@ function ApplicationLogsTab() {
     </div>
   ), [])
 
-  const { table, toolbarProps, pagination, isLoading, setPage } = useNotionTable<AppLog>({
+  const {
+    table, toolbarProps, filters, pagination, isLoading, setPage,
+    addFilter, updateFilter: updateTableFilter, queryResult,
+  } = useNotionTable<AppLog>({
     tableKey: 'app-logs',
     columns,
     defaultSorts: [{ field: 'logged_at', direction: 'desc' }],
@@ -765,6 +735,9 @@ function ApplicationLogsTab() {
         { event: 'INSERT', schema: 'public', table: 'application_logs' },
         (payload) => {
           const row = payload.new as AppLog
+          const NOISE_MODULES = ['httpx', 'uvicorn.access', 'uvicorn.error', 'celery.beat', 'celery.app.trace']
+          if (NOISE_MODULES.includes(row.module || '')) return
+          if (paused) return
           setRealtimeLogs((prev) => [row, ...prev].slice(0, LIVE_TAIL_MAX))
           setNewIds((prev) => {
             const next = new Set(prev)
@@ -785,7 +758,7 @@ function ApplicationLogsTab() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [liveTail])
+  }, [liveTail, paused])
 
   // Auto-scroll when not paused
   useEffect(() => {
@@ -794,134 +767,188 @@ function ApplicationLogsTab() {
     }
   }, [realtimeLogs, liveTail, paused])
 
-  const handleToggleLiveTail = useCallback((checked: boolean) => {
-    setLiveTail(checked)
-    if (!checked) {
-      setPaused(false)
-      setRealtimeLogs([])
-      setNewIds(new Set())
-    }
+  const handleLiveStart = useCallback(() => {
+    setLiveTail(true)
+    setPaused(false)
+    setRealtimeLogs([])
+    setNewIds(new Set())
   }, [])
 
-  // Build toolbar extra: Live tail toggle + export button (when not in live tail)
-  const liveTailControls = (
-    <Space size={8}>
-      <Switch
-        checked={liveTail}
-        onChange={handleToggleLiveTail}
-        checkedText="Live"
-        uncheckedText="Live"
-      />
-      {liveTail && (
-        <>
-          <Tag color="green" size="small">{realtimeLogs.length} entries</Tag>
-          <Button
-            type="text"
-            size="mini"
-            icon={paused ? <IconPlayArrow /> : <IconPause />}
-            onClick={() => setPaused((p) => !p)}
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
-        </>
-      )}
-      {!liveTail && (
-        <Button
-          icon={<IconExport />}
-          size="small"
-          onClick={() => exportToCsv(
-            `app-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-            table.getRowModel().rows.map((r) => r.original) as unknown as Record<string, unknown>[],
-            [
-              { key: 'logged_at', label: 'Time' },
-              { key: 'level', label: 'Level' },
-              { key: 'module', label: 'Module' },
-              { key: 'function', label: 'Function' },
-              { key: 'message', label: 'Message' },
-              { key: 'exception', label: 'Exception' },
-            ],
-          )}
-        >
-          Export
-        </Button>
-      )}
-    </Space>
+  const handleLiveStop = useCallback(() => {
+    setLiveTail(false)
+    setPaused(false)
+    setRealtimeLogs([])
+    setNewIds(new Set())
+  }, [])
+
+  const handleLivePause = useCallback(() => {
+    setPaused((p) => !p)
+  }, [])
+
+  const csvColumns = useMemo(() => [
+    { key: 'logged_at', label: 'Time' },
+    { key: 'level', label: 'Level' },
+    { key: 'module', label: 'Module' },
+    { key: 'function', label: 'Function' },
+    { key: 'message', label: 'Message' },
+    { key: 'exception', label: 'Exception' },
+  ], [])
+
+  const logsToolbar = useLogsToolbar({
+    dateField: 'logged_at',
+    filters,
+    addFilter,
+
+    updateFilter: updateTableFilter,
+    getData: () => {
+      const data = liveTail ? realtimeLogs : table.getRowModel().rows.map((r) => r.original)
+      return data as unknown as Record<string, unknown>[]
+    },
+    csvColumns,
+    filePrefix: 'app-logs',
+    onRefresh: () => queryResult.refetch(),
+  })
+
+  const toolbarExtra = (
+    <LogsToolbarExtra
+      selectedRange={logsToolbar.selectedRange}
+      onRangeChange={logsToolbar.handleRangeChange}
+      onCustomRange={logsToolbar.handleCustomRange}
+      onRefresh={logsToolbar.handleRefresh}
+      onExportCsv={logsToolbar.handleExportCsv}
+      onExportJson={logsToolbar.handleExportJson}
+      showLive
+      liveTail={liveTail}
+      livePaused={paused}
+      liveCount={realtimeLogs.length}
+      onLiveStart={handleLiveStart}
+      onLiveStop={handleLiveStop}
+      onLivePause={handleLivePause}
+    />
   )
 
+  // Live tail table: reuse same columns + expandedRowRender
+  const liveColumns = useMemo<ColumnDef<AppLog, unknown>[]>(
+    () =>
+      columns.map((col) => ({
+        id: col.key,
+        header: col.header,
+        size: col.size,
+        minSize: col.minSize,
+        accessorFn: (row: AppLog) => (row as unknown as Record<string, unknown>)[col.key],
+        cell: col.cell
+          ? ({ row }: { row: { original: AppLog } }) => col.cell!(row.original)
+          : ({ getValue }: { getValue: () => unknown }) => {
+              const val = getValue()
+              return val == null ? '-' : String(val)
+            },
+      })),
+    [columns],
+  )
 
-  // When liveTail is on, render a simple live tail view instead of NotionTable
+  const liveTable = useReactTable({
+    data: realtimeLogs,
+    columns: liveColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id,
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+  })
+
+  const [liveExpandedIds, setLiveExpandedIds] = useState<Set<string>>(new Set())
+  const toggleLiveExpand = useCallback((id: string) => {
+    setLiveExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   if (liveTail) {
+    const liveRows = liveTable.getRowModel().rows
     return (
-      <>
-        <Card>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
-            {liveTailControls}
-          </div>
-          <div ref={scrollRef}>
-            <style>{`
-              @keyframes liveTailHighlight {
-                from { background-color: var(--color-primary-1); }
-                to { background-color: transparent; }
-              }
-              .live-tail-new-row td {
-                animation: liveTailHighlight 2s ease-out;
-              }
-            `}</style>
-            <div className="notion-table-wrapper">
-              <table className="notion-table" style={{ width: '100%' }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 180 }}>Time</th>
-                    <th style={{ width: 100 }}>Level</th>
-                    <th style={{ width: 280 }}>Location</th>
-                    <th>Message</th>
-                    <th style={{ width: 48 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {realtimeLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-3)' }}>
-                        Waiting for new logs...
-                      </td>
+      <Card>
+        <NotionTableToolbar {...toolbarProps} extra={toolbarExtra} />
+        <style>{`
+          @keyframes liveTailHighlight {
+            from { background-color: var(--color-primary-1); }
+            to { background-color: transparent; }
+          }
+          .live-tail-new-row td {
+            animation: liveTailHighlight 2s ease-out;
+          }
+        `}</style>
+        <div className="notion-table-wrapper" ref={scrollRef} style={{ overflowX: 'auto' }}>
+          <table className="notion-table">
+            <thead>
+              {liveTable.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th
+                      key={header.id}
+                      style={{
+                        width: header.getSize(),
+                        minWidth: header.column.columnDef.minSize,
+                      }}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                      {header.column.getCanResize() && (
+                        <div
+                          onMouseDown={header.getResizeHandler()}
+                          onTouchStart={header.getResizeHandler()}
+                          className={`notion-table-resize-handle ${
+                            header.column.getIsResizing() ? 'is-resizing' : ''
+                          }`}
+                        />
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {liveRows.length === 0 ? (
+                <tr>
+                  <td colSpan={liveTable.getVisibleFlatColumns().length} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-3)' }}>
+                    Waiting for new logs...
+                  </td>
+                </tr>
+              ) : (
+                liveRows.map((row) => (
+                  <Fragment key={row.id}>
+                    <tr
+                      className={newIds.has(row.id) ? 'live-tail-new-row' : ''}
+                      onClick={() => toggleLiveExpand(row.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
                     </tr>
-                  ) : (
-                    realtimeLogs.map((log) => (
-                      <tr key={log.id} className={newIds.has(log.id) ? 'live-tail-new-row' : ''}>
-                        <td>
-                          <Typography.Text style={{ fontSize: 13 }}>
-                            {formatDateTime(log.logged_at)}
-                          </Typography.Text>
-                        </td>
-                        <td>
-                          <Tag color={getLogLevelColor(log.level)} size="small">{log.level}</Tag>
-                        </td>
-                        <td>
-                          <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }} ellipsis>
-                            {[log.module, log.function, log.line].filter(Boolean).join(':')}
-                          </Typography.Text>
-                        </td>
-                        <td>
-                          <Space size={4}>
-                            {log.module && (
-                              <Tag size="small" color="arcoblue" style={{ fontSize: 11 }}>
-                                {log.module.split('.').pop()}
-                              </Tag>
-                            )}
-                            <Typography.Text style={{ fontSize: 13 }} ellipsis>
-                              {log.message}
-                            </Typography.Text>
-                          </Space>
+                    {liveExpandedIds.has(row.id) && (
+                      <tr className="notion-table-expanded-row">
+                        <td colSpan={row.getVisibleCells().length} style={{ padding: 0 }}>
+                          {expandedRowRender(row.original)}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Card>
-      </>
+                    )}
+                  </Fragment>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            Live: {realtimeLogs.length} entries (max {LIVE_TAIL_MAX})
+          </Typography.Text>
+        </div>
+      </Card>
     )
   }
 
@@ -932,7 +959,7 @@ function ApplicationLogsTab() {
       pagination={pagination}
       onPageChange={setPage}
       isLoading={isLoading}
-      toolbarExtra={liveTailControls}
+      toolbarExtra={toolbarExtra}
       emptyText="No application logs found"
       expandedRowRender={expandedRowRender}
     />

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
-import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, FileText, Sparkles, Eye } from 'lucide-react';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,15 +30,16 @@ interface CompactMediaCardProps {
   onToggleSelect?: (e: React.MouseEvent) => void;
   forceShowCheckbox?: boolean;
   resourceId?: string;
+  aiStatus?: { transcript_status?: string; summary_status?: string; visual_analysis_status?: string };
 }
 
 // Helper to get AI status icon styling
-const getAIStatusClass = (status?: string): string => {
+const getAIStatusClass = (status?: string, completedColor: string = 'text-emerald-400'): string => {
   switch (status) {
     case 'processing':
       return 'animate-spin text-indigo-400';
     case 'completed':
-      return 'text-emerald-400';
+      return completedColor;
     case 'failed':
       return 'text-red-400';
     default:
@@ -62,7 +63,7 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId, aiStatus }) => {
   const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
@@ -241,6 +242,8 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             alt={data.title}
             className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 block ${showingAnyScrub ? 'invisible' : ''}`}
             referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
             onError={() => setImageError(true)}
           />
         )}
@@ -250,7 +253,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           <video
             ref={videoScrubRef}
             src={videoUrl}
-            preload="auto"
+            preload="metadata"
             muted
             playsInline
             className="absolute inset-0 w-full h-full object-contain bg-black z-[5]"
@@ -371,16 +374,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
            <div className="h-0" />
         )}
 
-        {/* AI Status Icons */}
+        {/* AI Status Icons — prefer resource status over parsed_media status */}
         <div className="flex items-center gap-1.5">
-          <div title={`Transcript: ${data.transcript_status || 'pending'}`}>
-            <FileText size={11} className={getAIStatusClass(data.transcript_status)} />
+          <div title={data.extract_audio_path || data.music_download_path ? 'Audio extracted' : 'No audio'}>
+            <AudioLines size={11} className={data.extract_audio_path || data.music_download_path ? 'text-emerald-400' : 'text-zinc-700'} />
           </div>
-          <div title={`Summary: ${data.summary_status || 'pending'}`}>
-            <Sparkles size={11} className={getAIStatusClass(data.summary_status)} />
+          <div title={`Transcript: ${aiStatus?.transcript_status || data.transcript_status || 'none'}`}>
+            <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status, 'text-indigo-400')} />
           </div>
-          <div title={`Visual Analysis: ${data.visual_analysis_status || 'pending'}`}>
-            <Eye size={11} className={getAIStatusClass(data.visual_analysis_status)} />
+          <div title={`Summary: ${aiStatus?.summary_status || data.summary_status || 'none'}`}>
+            <Sparkles size={11} className={getAIStatusClass(aiStatus?.summary_status || data.summary_status, 'text-amber-400')} />
+          </div>
+          <div title={`Analysis: ${aiStatus?.visual_analysis_status || data.visual_analysis_status || 'none'}`}>
+            <Eye size={11} className={getAIStatusClass(aiStatus?.visual_analysis_status || data.visual_analysis_status, 'text-violet-400')} />
           </div>
         </div>
 

@@ -164,7 +164,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal — wider, fixed height */}
-      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-full md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-dvh md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
         {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
@@ -269,7 +269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0 relative">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
           {/* Desktop Header */}
           <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-zinc-800">
             <h2 className="text-lg font-semibold text-white">
@@ -284,7 +284,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y p-4 md:p-6" style={{ WebkitOverflowScrolling: 'touch' }}>
             {activeTab === 'personal' && (
               <div className="max-w-xl mx-auto md:mx-0">
                 <PersonalSettings user={user} onUserUpdated={onUserUpdated} />

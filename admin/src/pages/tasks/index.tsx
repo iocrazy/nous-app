@@ -95,62 +95,48 @@ function formatRuntime(startedAt: string | null, completedAt: string | null): st
 
 // --- Sub-components ---
 
-function StatsCards() {
+interface StatsCardsProps {
+  activeStatus: string | null
+  onStatusClick: (status: string | null) => void
+}
+
+function StatsCards({ activeStatus, onStatusClick }: StatsCardsProps) {
   const { data: stats } = useAdminTaskStats()
   if (!stats) return null
 
+  const cards: { title: string; value: number; status: string | null; color?: string }[] = [
+    { title: 'Total', value: stats.total, status: null },
+    { title: 'Processing', value: stats.processing, status: 'processing', color: 'rgb(var(--blue-6))' },
+    { title: 'Pending', value: stats.pending, status: 'pending', color: 'rgb(var(--orange-6))' },
+    { title: 'Completed', value: stats.completed, status: 'completed', color: 'rgb(var(--green-6))' },
+    { title: 'Failed', value: stats.failed, status: 'failed', color: 'rgb(var(--red-6))' },
+    { title: 'Cancelled', value: stats.cancelled, status: 'cancelled', color: 'var(--color-text-3)' },
+  ]
+
   return (
     <Grid.Row gutter={16} style={{ marginBottom: 16 }}>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic title="Total" value={stats.total} />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Processing"
-            value={stats.processing}
-            styleValue={{ color: 'rgb(var(--blue-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Pending"
-            value={stats.pending}
-            styleValue={{ color: 'rgb(var(--orange-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Completed"
-            value={stats.completed}
-            styleValue={{ color: 'rgb(var(--green-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Failed"
-            value={stats.failed}
-            styleValue={{ color: 'rgb(var(--red-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Cancelled"
-            value={stats.cancelled}
-            styleValue={{ color: 'var(--color-text-3)' }}
-          />
-        </Card>
-      </Grid.Col>
+      {cards.map((card) => {
+        const isActive = activeStatus === card.status
+        return (
+          <Grid.Col span={4} key={card.title}>
+            <Card
+              hoverable
+              onClick={() => onStatusClick(isActive ? null : card.status)}
+              style={{
+                cursor: 'pointer',
+                borderColor: isActive ? 'rgb(var(--primary-6))' : undefined,
+                boxShadow: isActive ? '0 0 0 1px rgb(var(--primary-6))' : undefined,
+              }}
+            >
+              <Statistic
+                title={card.title}
+                value={card.value}
+                styleValue={card.color ? { color: card.color } : undefined}
+              />
+            </Card>
+          </Grid.Col>
+        )
+      })}
     </Grid.Row>
   )
 }
@@ -318,9 +304,9 @@ export function TaskCenter() {
         filterable: true,
         size: 160,
         cell: (row) => (
-          <Typography.Text ellipsis style={{ maxWidth: 140 }}>
+          <span className="cell-ellipsis" style={{ maxWidth: 140, display: 'block' }}>
             {row.user_email || '-'}
-          </Typography.Text>
+          </span>
         ),
       },
       {
@@ -406,9 +392,13 @@ export function TaskCenter() {
   const {
     table,
     toolbarProps,
+    filters,
     pagination,
     isLoading,
     setPage,
+    addFilter,
+    removeFilter,
+    updateFilter: updateTableFilter,
   } = useNotionTable<AdminTaskData>({
     tableKey: 'tasks',
     columns,
@@ -433,6 +423,27 @@ export function TaskCenter() {
       return { items: data.items, total: data.total }
     },
   })
+
+  // Derive active status from current filters
+  const activeStatusFilter = filters.find((f) => f.field === 'status')
+  const activeStatus = (activeStatusFilter?.value as string) || null
+
+  const handleStatusClick = useCallback(
+    (status: string | null) => {
+      const existingIndex = filters.findIndex((f) => f.field === 'status')
+      if (!status) {
+        // Clear status filter
+        if (existingIndex >= 0) removeFilter(existingIndex)
+      } else if (existingIndex >= 0) {
+        // Update existing status filter
+        updateTableFilter(existingIndex, { field: 'status', operator: 'eq', value: status })
+      } else {
+        // Add new status filter
+        addFilter({ field: 'status', operator: 'eq', value: status })
+      }
+    },
+    [filters, addFilter, removeFilter, updateTableFilter],
+  )
 
   const expandedRowRender = (row: AdminTaskData) => {
     const statusConfig = STATUS_TAG_CONFIG[row.status] || { color: 'gray', icon: null }
@@ -496,7 +507,7 @@ export function TaskCenter() {
       onPageChange={setPage}
       isLoading={isLoading}
       title="Tasks"
-      headerContent={<StatsCards />}
+      headerContent={<StatsCards activeStatus={activeStatus} onStatusClick={handleStatusClick} />}
       emptyText="No tasks found"
       scrollX={1100}
       expandedRowRender={expandedRowRender}

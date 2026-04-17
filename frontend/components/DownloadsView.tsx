@@ -77,6 +77,43 @@ export const DownloadsView: React.FC = () => {
   const [searchQueryText, setSearchQueryText] = useState('');
   const [isAISearching, setIsAISearching] = useState(false);
 
+  // ─── Pull-to-refresh (mobile) ───
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const pullStartY = useRef(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+
+  const handlePullStart = useCallback((e: React.TouchEvent) => {
+    if (window.innerWidth >= 768) return;
+    const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
+    if (scrollTop <= 0) {
+      pullStartY.current = e.touches[0].clientY;
+    }
+  }, []);
+
+  const handlePullMove = useCallback((e: React.TouchEvent) => {
+    if (window.innerWidth >= 768 || pullRefreshing) return;
+    const scrollTop = contentScrollRef.current?.scrollTop ?? 0;
+    if (scrollTop > 0) { setPullDistance(0); return; }
+    const delta = e.touches[0].clientY - pullStartY.current;
+    if (delta > 0) {
+      setPullDistance(Math.min(delta * 0.4, 80));
+    }
+  }, [pullRefreshing]);
+
+  const handlePullEnd = useCallback(() => {
+    if (pullDistance >= 50 && !pullRefreshing) {
+      setPullRefreshing(true);
+      setPullDistance(50);
+      loadLibraryData().finally(() => {
+        setPullRefreshing(false);
+        setPullDistance(0);
+      });
+    } else {
+      setPullDistance(0);
+    }
+  }, [pullDistance, pullRefreshing, loadLibraryData]);
+
   // ─── Filtered library ─────────────────────────────────
   const filteredLibrary = useMemo(() => {
     if (isSearchActive) {
@@ -553,8 +590,12 @@ export const DownloadsView: React.FC = () => {
 
       {/* Content */}
       <div
+        ref={contentScrollRef}
         className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0 h-full min-h-0' : 'px-3 pt-3 pb-5'}`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
+        onTouchStart={handlePullStart}
+        onTouchMove={handlePullMove}
+        onTouchEnd={handlePullEnd}
         onClick={(e) => {
           const target = e.target as HTMLElement;
           if (!target.closest('[data-context-item]')) {
@@ -566,24 +607,19 @@ export const DownloadsView: React.FC = () => {
           }
         }}
       >
-        {/* Mobile header */}
-        <div className={`md:hidden flex items-center justify-between mb-3 ${libraryViewMode === 'feed' ? 'hidden' : ''}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-zinc-200 font-medium">{t('resources.downloads')}</span>
-            {!isLoadingLibrary && (
-              <span className="text-[11px] text-zinc-600 tabular-nums">
-                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={loadLibraryData}
-            disabled={isLoadingLibrary}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
+        {/* Pull-to-refresh indicator (mobile only) */}
+        {pullDistance > 0 && (
+          <div
+            className="md:hidden flex items-center justify-center transition-all"
+            style={{ height: pullDistance, opacity: Math.min(pullDistance / 60, 1) }}
           >
-            <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
-          </button>
-        </div>
+            <RefreshCw
+              size={18}
+              className={`text-zinc-400 transition-transform ${pullRefreshing ? 'animate-spin' : ''}`}
+              style={{ transform: `rotate(${Math.min(pullDistance * 3, 360)}deg)` }}
+            />
+          </div>
+        )}
 
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
@@ -724,10 +760,10 @@ export const DownloadsView: React.FC = () => {
 
       {/* Mobile Search Overlay */}
       {libraryViewMode !== 'feed' && createPortal(
-        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
-          <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
+        <div className="md:hidden fixed top-2.5 right-3 z-40 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end">
             {isMobileSearchOpen ? (
-              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
                 <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
                 <input
                   autoFocus
@@ -753,9 +789,9 @@ export const DownloadsView: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsMobileSearchOpen(true)}
-                className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
               >
-                <Search size={22} className="drop-shadow-md" />
+                <Search size={20} className="drop-shadow-md" />
               </button>
             )}
           </div>

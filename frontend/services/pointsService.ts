@@ -39,19 +39,25 @@ export const fetchPointsBalance = async (teamId?: string): Promise<TeamQuota> =>
 };
 
 /**
- * Fetch points transaction history.
+ * Fetch points transaction history with optional filters.
  */
 export const fetchPointsTransactions = async (
   teamId?: string,
   limit: number = 20,
   offset: number = 0,
-  type?: string
+  type?: string,
+  referenceType?: string,
+  search?: string,
+  days?: number,
 ): Promise<PointTransaction[]> => {
   const params = new URLSearchParams();
   if (teamId) params.set('team_id', teamId);
   params.set('limit', String(limit));
   params.set('offset', String(offset));
   if (type) params.set('type', type);
+  if (referenceType) params.set('reference_type', referenceType);
+  if (search) params.set('search', search);
+  if (days !== undefined) params.set('days', String(days));
 
   const url = `${getApiUrl()}/api/v1/points/transactions?${params.toString()}`;
 

@@ -411,10 +411,9 @@ def extract_audio_from_video(platform_id: str) -> bool:
         # Calculate relative path for DB
         audio_rel_path = os.path.relpath(audio_full_path, base_path)
 
-        # Update DB
+        # Update DB — extract_audio_path for AI transcription (distinct from music_download_path)
         run_async(repo.update(platform_id, {
-            "music_download_status": DownloadStatus.COMPLETED.value,
-            "music_download_path": audio_rel_path,
+            "extract_audio_path": audio_rel_path,
         }))
 
         return True

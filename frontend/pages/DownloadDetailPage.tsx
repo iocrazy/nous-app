@@ -147,9 +147,19 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-      <div className="flex flex-col h-full p-2 sm:p-4 md:p-0">
-        <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-zinc-800 mb-2 shrink-0">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col pt-[env(safe-area-inset-top)] sm:pt-0">
+      {/* Mobile: floating back button overlaying content */}
+      <button
+        onClick={handleBack}
+        className="sm:hidden fixed left-3 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+        style={{ top: 'calc(env(safe-area-inset-top) + 0.625rem)' }}
+      >
+        <ArrowLeft size={20} className="drop-shadow-md" />
+      </button>
+
+      <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
+        {/* Desktop header only */}
+        <div className="hidden sm:flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 mb-2 shrink-0">
           {/* Left: back + title */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
             <button
@@ -252,7 +262,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         </div>
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
-          <div className="w-full h-[60vh] sm:h-[50vh] md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink">
+          <div className="w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink bg-black">
             {video.media_type && isAlbumType(video.media_type) ? (
               <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
@@ -319,6 +329,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           >
               <VideoDetailPanel
                 video={video}
+                resourceId={resourceId || undefined}
                 onClose={handleBack}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}

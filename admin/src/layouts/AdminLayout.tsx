@@ -27,6 +27,7 @@ import {
   IconNotification,
   IconThunderbolt,
   IconList,
+  IconRobot,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../auth/AuthProvider'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -37,9 +38,9 @@ const MenuItem = Menu.Item
 const MenuItemGroup = Menu.ItemGroup
 
 const allMenuKeys = [
-  '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits',
+  '/', '/users', '/teams', '/media', '/transcode', '/tasks', '/tags', '/credits', '/ai',
   '/monitoring', '/search', '/audit-logs', '/logs', '/alerts',
-  '/api-keys', '/settings', '/transcode-config',
+  '/api-keys', '/settings', '/transcode-config', '/deployment-logs',
 ]
 
 export function AdminLayout() {
@@ -104,6 +105,7 @@ export function AdminLayout() {
             <MenuItem key="/tasks"><IconList />Tasks</MenuItem>
             <MenuItem key="/tags"><IconTags />Tags</MenuItem>
             <MenuItem key="/credits"><IconStar />Credits</MenuItem>
+            <MenuItem key="/ai"><IconRobot />AI Models</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="logs" title="Logs & Monitoring">
             <MenuItem key="/monitoring"><IconCompass />Monitoring</MenuItem>
@@ -111,6 +113,7 @@ export function AdminLayout() {
             <MenuItem key="/audit-logs"><IconFile />Audit Logs</MenuItem>
             <MenuItem key="/logs"><IconCode />Logs</MenuItem>
             <MenuItem key="/alerts"><IconNotification />Alerts</MenuItem>
+            <MenuItem key="/deployment-logs"><IconThunderbolt />Deployments</MenuItem>
           </MenuItemGroup>
           <MenuItemGroup key="system" title="System">
             <MenuItem key="/api-keys"><IconLock />API Keys</MenuItem>

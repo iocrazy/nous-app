@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Brain,
   Zap,
@@ -24,9 +24,10 @@ import {
   MessageSquare,
   Cloud,
   ImageIcon,
+  Mic,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig } from '../types';
-import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi } from '../services/aiService';
+import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic } from '../types';
+import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { useSettingsStore } from '../stores/settingsStore';
 
@@ -73,10 +74,13 @@ const PROVIDER_META: Record<
   },
   doubao: {
     name: 'Doubao',
-    description: 'ByteDance cloud AI',
+    description: 'ByteDance Ark — 豆包大模型',
     icon: <Globe size={18} />,
     color: 'violet',
-    models: ['doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
+    defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
+    summaryModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite'],
+    analysisModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215'],
   },
   minimax: {
     name: 'MiniMax',
@@ -108,6 +112,16 @@ const PROVIDER_META: Record<
     ],
     summaryModels: ['qwen3.5-plus', 'qwen3-max', 'qwen-plus', 'qwen-turbo'],
     analysisModels: ['qwen3.5-plus', 'qwen3-vl-plus', 'qwen-vl-max'],
+  },
+  volcengine: {
+    name: 'Volcengine',
+    description: 'ByteDance — 火山引擎语音识别',
+    icon: <Mic size={18} />,
+    color: 'cyan',
+    whisperModels: ['bigasr', 'seed-asr'],
+    models: [],
+    apiKeyLabel: 'Access Token / API Key',
+    appIdField: true,
   },
   ollama: {
     name: 'Ollama',
@@ -217,6 +231,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
+
+  useEffect(() => {
+    getNousModels().then(setNousModels).catch(() => {});
+  }, []);
 
   // Toggle AI globally
   const toggleAIEnabled = () => {
@@ -339,6 +358,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         const result = await testAIConnectionApi(providerKey, {
           base_url: provider.base_url,
           api_key: provider.api_key,
+          app_id: provider.app_id,
         });
 
         if (result.success) {
@@ -404,23 +424,51 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       const meta = PROVIDER_META[key];
       const config = getProviderConfig(key);
 
-      if (taskType === 'transcription' && meta?.whisperModels) {
-        for (const model of meta.whisperModels) {
+      // Use detected models from server if available, otherwise hardcoded list
+      const detectedModels: string[] = config.models || [];
+
+      if (taskType === 'transcription') {
+        const models = meta?.whisperModels || [];
+        for (const model of models) {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-      } else if (taskType === 'summarization' && meta?.summaryModels) {
-        for (const model of meta.summaryModels) {
+      } else if (taskType === 'summarization') {
+        const models = detectedModels.length > 0
+          ? detectedModels
+          : (meta?.summaryModels || meta?.models || []);
+        for (const model of models) {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-      } else if (taskType === 'visual_analysis' && meta?.analysisModels) {
-        for (const model of meta.analysisModels) {
+      } else if (taskType === 'visual_analysis') {
+        const models = detectedModels.length > 0
+          ? detectedModels
+          : (meta?.analysisModels || meta?.models || []);
+        for (const model of models) {
           options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
         }
-      } else {
-        // Fallback: use selected model or provider name
-        const model = config.selected_model || meta?.models[0] || '';
-        options.push({ value: key, label: model ? `${name} ${model}` : name });
       }
+    }
+
+    // Append Nous platform models for the matching category
+    const categoryMap: Record<string, string> = {
+      transcription: 'transcription',
+      summarization: 'summarization',
+      visual_analysis: 'analysis',
+    };
+    const nousCategory = categoryMap[taskType];
+    const matchingNousModels = nousModels.filter((m) => m.category === nousCategory);
+
+    for (const model of matchingNousModels) {
+      const pricingLabel =
+        model.pricing_type === 'per_hour'
+          ? `${model.pricing_value} pts/hr`
+          : model.pricing_type === 'per_request'
+            ? `${model.pricing_value} pts`
+            : `${model.pricing_value} pts/1k tokens`;
+      options.push({
+        value: model.name,
+        label: `${model.display_name} (${pricingLabel})`,
+      });
     }
 
     if (options.length === 0) {
@@ -812,6 +860,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                             {showApiKeys[providerKey] ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* App ID (for volcengine) */}
+                    {(meta as Record<string, unknown>).appIdField && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                          <Key size={12} />
+                          App ID
+                        </label>
+                        <input
+                          type="text"
+                          value={config.app_id || ''}
+                          onChange={(e) => updateProviderField(providerKey, 'app_id' as keyof AIProviderConfig, e.target.value)}
+                          placeholder="Enter App ID"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                        />
                       </div>
                     )}
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MediaHub Push",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "description": "One-click push video URLs to MediaHub for parsing and download.",
   "permissions": [
     "storage",

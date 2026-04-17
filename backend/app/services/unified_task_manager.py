@@ -318,11 +318,19 @@ class UnifiedTaskManager:
 
     # ── Lifecycle: fail ───────────────────────────────────────────────
 
-    async def fail(self, task_id: str, error_msg: str, *, error_code: Optional[str] = None) -> None:
+    async def fail(
+        self,
+        task_id: str,
+        error_msg: str,
+        *,
+        error_code: Optional[str] = None,
+        metadata_patch: Optional[dict] = None,
+    ) -> None:
         """Transition to FAILED phase.
 
         Idempotent: already-terminal tasks log a debug message and return.
         error_code is optional — can be produced by classify_error().
+        metadata_patch merges into existing metadata (same as complete()).
         """
         current = await self._get_phase(task_id)
         if current in _TERMINAL_PHASES:
@@ -338,6 +346,11 @@ class UnifiedTaskManager:
         }
         if error_code:
             updates["error_code"] = error_code
+        if metadata_patch:
+            client = await self._get_client()
+            existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
+            merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
+            updates["metadata"] = merged
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)

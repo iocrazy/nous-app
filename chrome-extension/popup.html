@@ -12,7 +12,7 @@
     <div id="settingsView">
       <div class="field">
         <label for="apiUrl">API URL</label>
-        <input type="url" id="apiUrl" placeholder="https://mediahub.heygo.cn">
+        <input type="url" id="apiUrl" placeholder="https://mediahubserver.heygo.cn:88">
       </div>
       <div class="field">
         <label for="apiKey">API Key</label>
@@ -24,9 +24,26 @@
 
     <!-- Push view (shown when configured) -->
     <div id="pushView" style="display:none;">
-      <div class="current-url" id="currentUrl"></div>
+      <input type="url" class="current-url" id="currentUrl" placeholder="https://..." spellcheck="false" />
 
-      <div class="section-label">Select Tags</div>
+      <div class="section-label-row">
+        <span class="section-label">Select Tags</span>
+        <button id="createTagToggle" class="icon-btn" title="Create tag">+</button>
+      </div>
+
+      <!-- Create tag form (hidden by default) -->
+      <div id="createTagForm" class="create-tag-form" style="display:none;">
+        <input type="text" id="newTagInput" placeholder="Tag name (auto-translate)">
+        <div id="translatePreview" class="translate-preview" style="display:none;"></div>
+        <div class="custom-select" id="newTagGroupWrapper">
+          <div class="custom-select-trigger" id="newTagGroupTrigger">Select group (optional)</div>
+          <div class="custom-select-options" id="newTagGroupOptions" style="display:none;"></div>
+          <input type="hidden" id="newTagGroup" value="">
+        </div>
+        <button id="createTagBtn">Create</button>
+        <div id="createTagStatus" class="status"></div>
+      </div>
+
       <div id="tagsLoading" class="tags-loading">Loading tags...</div>
       <div id="tagsContainer" class="tags-container"></div>
 

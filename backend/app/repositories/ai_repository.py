@@ -29,89 +29,89 @@ class AIRepository:
     # ------------------------------------------------------------------
 
     async def save_transcript(
-        self, media_id: str, data: Dict[str, Any]
+        self, resource_id: str, data: Dict[str, Any]
     ) -> Optional[Dict]:
-        """Save a transcript record for a video.
+        """Save a transcript record for a resource.
 
         Args:
-            media_id: UUID of the video.
+            resource_id: ID of the resource (resources table).
             data: Dict with keys: language, full_text, segments (JSONB),
                   whisper_model, duration_seconds.
         """
         try:
             client = await self._get_client()
-            row = {"resource_id": media_id, **data}
+            row = {"resource_id": resource_id, **data}
             result = (
                 await client.table("resource_transcripts")
                 .upsert(row, on_conflict="resource_id")
                 .execute()
             )
             if result.data:
-                logger.info(f"Saved transcript for video {media_id}")
+                logger.info(f"Saved transcript for resource {resource_id}")
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save transcript for video {media_id}: {e}")
+            logger.error(f"Failed to save transcript for resource {resource_id}: {e}")
             return None
 
-    async def get_transcript(self, media_id: str) -> Optional[Dict]:
-        """Get transcript for a video."""
+    async def get_transcript(self, resource_id: str) -> Optional[Dict]:
+        """Get transcript for a resource."""
         try:
             client = await self._get_client()
             result = (
                 await client.table("resource_transcripts")
                 .select("*")
-                .eq("resource_id", media_id)
+                .eq("resource_id", resource_id)
                 .maybe_single()
                 .execute()
             )
-            return result.data
+            return result.data if result else None
         except Exception as e:
-            logger.error(f"Failed to get transcript for video {media_id}: {e}")
+            logger.error(f"Failed to get transcript for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
     # Summaries
     # ------------------------------------------------------------------
 
-    async def save_summary(self, media_id: str, data: Dict[str, Any]) -> Optional[Dict]:
-        """Save a summary record for a video.
+    async def save_summary(self, resource_id: str, data: Dict[str, Any]) -> Optional[Dict]:
+        """Save a summary record for a resource.
 
         Args:
-            media_id: UUID of the video.
+            resource_id: ID of the resource (resources table).
             data: Dict with keys: summary_type, summary_text, key_points (JSONB),
                   topics (JSONB), llm_model, llm_provider.
         """
         try:
             client = await self._get_client()
-            row = {"resource_id": media_id, **data}
+            row = {"resource_id": resource_id, **data}
             result = (
                 await client.table("resource_summaries")
                 .upsert(row, on_conflict="resource_id")
                 .execute()
             )
             if result.data:
-                logger.info(f"Saved summary for video {media_id}")
+                logger.info(f"Saved summary for resource {resource_id}")
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save summary for video {media_id}: {e}")
+            logger.error(f"Failed to save summary for resource {resource_id}: {e}")
             return None
 
-    async def get_summary(self, media_id: str) -> Optional[Dict]:
-        """Get summary for a video."""
+    async def get_summary(self, resource_id: str) -> Optional[Dict]:
+        """Get summary for a resource."""
         try:
             client = await self._get_client()
             result = (
                 await client.table("resource_summaries")
                 .select("*")
-                .eq("resource_id", media_id)
+                .eq("resource_id", resource_id)
                 .maybe_single()
                 .execute()
             )
-            return result.data
+            return result.data if result else None
         except Exception as e:
-            logger.error(f"Failed to get summary for video {media_id}: {e}")
+            logger.error(f"Failed to get summary for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------

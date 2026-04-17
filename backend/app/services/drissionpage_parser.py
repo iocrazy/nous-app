@@ -283,25 +283,51 @@ class DrissionPageParser(metaclass=SingletonMeta):
                         instance.page.get(url, timeout=5)
                         logger.debug("浏览器重新初始化并访问URL成功")
 
-                # Detect captcha / verification page using precise DOM selectors
+                # Detect captcha / verification page (including async-loaded slider captchas).
                 # Reference: Notion doc "抖音验证码检测脚本"
-                # Key selectors: #captcha_container, iframe[src*="verifycenter"]
                 try:
                     captcha_detected = False
                     detection_method = ""
 
-                    # Primary: #captcha_container (most reliable)
-                    if instance.page.ele('#captcha_container', timeout=0):
-                        captcha_detected = True
-                        detection_method = "#captcha_container"
-                    # Secondary: iframe with verifycenter
-                    elif instance.page.ele('xpath://iframe[contains(@src,"verifycenter")]', timeout=0):
-                        captcha_detected = True
-                        detection_method = "iframe[verifycenter]"
-                    # Tertiary: iframe with captcha
-                    elif instance.page.ele('xpath://iframe[contains(@src,"captcha")]', timeout=0):
-                        captcha_detected = True
-                        detection_method = "iframe[captcha]"
+                    # Wait briefly for async-loaded captchas (slider often injects ~500ms after page ready)
+                    selectors = [
+                        ("#captcha_container", "id"),
+                        (".captcha-verify-container", "css"),
+                        (".captcha_verify_container", "css"),
+                        (".secsdk-captcha-wrapper", "css"),
+                        (".captcha_wrapper", "css"),
+                        ("xpath://iframe[contains(@src,\"verifycenter\")]", "xpath"),
+                        ("xpath://iframe[contains(@src,\"captcha\")]", "xpath"),
+                    ]
+                    # First pass: wait up to 1.5s for ANY captcha indicator
+                    for sel, _ in selectors:
+                        if instance.page.ele(sel, timeout=1.5):
+                            captcha_detected = True
+                            detection_method = sel
+                            break
+
+                    # HTML-text fallback: slider-specific keywords
+                    if not captcha_detected:
+                        page_html = instance.page.html or ""
+                        captcha_html_markers = [
+                            "captcha-verify-container",
+                            "secsdk-captcha",
+                            "请完成下列验证",
+                            "拖动下方滑块",
+                            "verify-bar-wrapper",
+                        ]
+                        for marker in captcha_html_markers:
+                            if marker in page_html:
+                                captcha_detected = True
+                                detection_method = f"html:{marker}"
+                                break
+
+                    # URL-based detection (redirected to captcha/verify page)
+                    if not captcha_detected:
+                        cur_url = (instance.page.url or "").lower()
+                        if any(k in cur_url for k in ("/captcha/", "verifycenter", "verify.snssdk")):
+                            captcha_detected = True
+                            detection_method = f"url:{cur_url[:80]}"
 
                     if captcha_detected:
                         logger.warning(
@@ -320,6 +346,15 @@ class DrissionPageParser(metaclass=SingletonMeta):
                             )
                 except Exception as det_err:
                     logger.warning(f"[DrissionPage] Captcha detection check failed: {det_err}")
+                    captcha_detected = False
+
+                # If captcha present we can't extract the aweme API — bail early
+                # so the fallback loop doesn't waste 15-30s on listener.wait() timeouts.
+                if captcha_detected:
+                    logger.warning(
+                        "[DrissionPage] Aborting parse: captcha blocking API calls"
+                    )
+                    return None
 
                 # 获取所有网络请求
                 aweme_response = None
@@ -386,6 +421,31 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                     continue  # 继续while循环，等待下一个响应
 
                             logger.debug(f"成功获取抖音视频 {target_aweme_id}数据")
+                            # Cache browser cookies in Redis so downloader can reuse the authenticated
+                            # session. Douyin video CDN returns 403 without these cookies.
+                            try:
+                                cookie_parts = []
+                                for c in instance.page.cookies():
+                                    domain = (c.get("domain") or "").lower()
+                                    if "douyin" in domain:
+                                        cookie_parts.append(f"{c['name']}={c.get('value', '')}")
+                                if cookie_parts:
+                                    cookie_header = "; ".join(cookie_parts)
+                                    try:
+                                        from app.core.redis import get_sync_redis
+                                        r = get_sync_redis()
+                                        redis_key = f"douyin_browser_cookies:{target_aweme_id}"
+                                        r.setex(redis_key, 600, cookie_header)  # 10 min TTL
+                                        logger.info(
+                                            f"[DrissionPage] Cached {len(cookie_parts)} cookies to Redis "
+                                            f"(key={redis_key})"
+                                        )
+                                    except Exception as redis_err:
+                                        logger.warning(
+                                            f"[DrissionPage] Failed to cache cookies to Redis: {redis_err}"
+                                        )
+                            except Exception as cookie_err:
+                                logger.warning(f"[DrissionPage] Failed to export cookies: {cookie_err}")
                             return aweme_response
 
                         else:

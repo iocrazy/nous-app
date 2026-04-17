@@ -135,8 +135,10 @@ class TranscodeService:
         Returns the relative hls_path (e.g. "teams/.../v1/hls/master.m3u8")
         or None on failure.
         """
-        # Master toggle check
-        if not settings.TRANSCODE_ENABLED:
+        # Master toggle check (read from DB for Celery worker compatibility)
+        db_enabled = self._get_db_setting("transcode_enabled")
+        is_enabled = db_enabled.lower() in ("true", "1", "yes") if db_enabled else settings.TRANSCODE_ENABLED
+        if not is_enabled:
             logger.info("[Transcode] Transcoding is disabled via settings")
             return None
 
@@ -527,10 +529,15 @@ class TranscodeService:
     # ------------------------------------------------------------------ #
 
     def _select_tiers(self, width: int, height: int) -> List[TranscodeTier]:
-        """Select tiers at or below the source resolution, filtered by config."""
+        """Select tiers at or below the source resolution, filtered by admin config.
+
+        Reads from system_settings DB table (not in-memory settings) so Celery
+        workers pick up admin changes without restart.
+        """
+        tiers_csv = self._get_db_setting("transcode_tiers") or settings.TRANSCODE_TIERS
         enabled_names = {
             t.strip().lower()
-            for t in settings.TRANSCODE_TIERS.split(",")
+            for t in tiers_csv.split(",")
             if t.strip()
         }
         applicable = []
@@ -538,6 +545,27 @@ class TranscodeService:
             if tier.height <= height and tier.name.lower() in enabled_names:
                 applicable.append(tier)
         return applicable
+
+    @staticmethod
+    def _get_db_setting(key: str) -> Optional[str]:
+        """Read a single value from system_settings table (sync-safe for Celery)."""
+        try:
+            from app.tasks.utils import run_async
+            from app.db import get_async_supabase_admin
+
+            supabase = run_async(get_async_supabase_admin())
+            result = run_async(
+                supabase.table("system_settings")
+                .select("value")
+                .eq("key", key)
+                .maybe_single()
+                .execute()
+            )
+            if result.data:
+                return result.data.get("value")
+        except Exception as e:
+            logger.warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
+        return None
 
     # ------------------------------------------------------------------ #
     # ffmpeg transcoding
