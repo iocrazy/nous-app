@@ -1,175 +1,189 @@
-import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileVersion, ReviewComment, ReviewStatus } from '../types';
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import {
+  Project,
+  ProjectFile,
+  ProjectFolder,
+  ProjectMember,
+  ProjectShare,
+  FileVersion,
+  ReviewComment,
+  ReviewStatus,
+} from '../types';
+import { apiClient, apiFetch } from './apiClient';
 
-export const fetchProjects = async (params?: { type?: string; starred?: boolean; teamId?: string }): Promise<Project[]> => {
-  const apiUrl = getApiUrl();
-  const searchParams = new URLSearchParams();
-  if (params?.type) searchParams.set('project_type', params.type);
-  if (params?.starred !== undefined) searchParams.set('starred', String(params.starred));
-  if (params?.teamId !== undefined) searchParams.set('team_id', params.teamId);
-  const qs = searchParams.toString();
-  const url = `${apiUrl}/api/v1/projects${qs ? '?' + qs : ''}`;
+interface Envelope<T> {
+  data?: T;
+}
 
-  const response = await fetch(url, { headers: await getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch projects');
-  const json = await response.json();
-  return json.data || [];
+// ============================================
+// Projects
+// ============================================
+
+export const fetchProjects = async (params?: {
+  type?: string;
+  starred?: boolean;
+  teamId?: string;
+}): Promise<Project[]> => {
+  const response = await apiClient.get<Envelope<Project[]>>('/api/v1/projects', {
+    query: {
+      project_type: params?.type,
+      starred: params?.starred,
+      team_id: params?.teamId,
+    },
+  });
+  return response.data || [];
 };
 
-export const createProject = async (data: { name: string; description?: string; team_id?: string; project_type?: string; project_group?: string; announcement?: string }): Promise<Project> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to create project');
-  }
-  const json = await response.json();
-  return json.data;
+export const createProject = async (data: {
+  name: string;
+  description?: string;
+  team_id?: string;
+  project_type?: string;
+  project_group?: string;
+  announcement?: string;
+}): Promise<Project> => {
+  const response = await apiClient.post<Envelope<Project>>(
+    '/api/v1/projects',
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from createProject');
+  return response.data;
 };
 
-export const updateProject = async (id: string, data: Partial<Project>): Promise<Project> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${id}`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to update project');
-  const json = await response.json();
-  return json.data;
+export const updateProject = async (
+  id: string,
+  data: Partial<Project>,
+): Promise<Project> => {
+  const response = await apiClient.put<Envelope<Project>>(
+    `/api/v1/projects/${id}`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from updateProject');
+  return response.data;
 };
 
 export const deleteProject = async (id: string): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${id}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete project');
+  await apiClient.delete(`/api/v1/projects/${id}`);
 };
+
+// ============================================
+// Project files
+// ============================================
 
 export const fetchProjectFiles = async (
   projectId: string,
   includeTrashed?: boolean,
   folderId?: string | null,
 ): Promise<ProjectFile[]> => {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams();
-  if (includeTrashed) params.set('include_trashed', 'true');
-  if (folderId) params.set('folder_id', folderId);
-  const qs = params.toString();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files${qs ? '?' + qs : ''}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch files');
-  const json = await response.json();
-  return json.data || [];
+  const response = await apiClient.get<Envelope<ProjectFile[]>>(
+    `/api/v1/projects/${projectId}/files`,
+    {
+      query: {
+        include_trashed: includeTrashed ? 'true' : undefined,
+        folder_id: folderId ?? undefined,
+      },
+    },
+  );
+  return response.data || [];
 };
 
-export const uploadFile = async (projectId: string, file: File, notes?: string): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
+export const uploadFile = async (
+  projectId: string,
+  file: File,
+  notes?: string,
+): Promise<ProjectFile> => {
+  // FormData upload: use apiFetch directly so we can pass `raw` body.
   const formData = new FormData();
   formData.append('file', file);
 
-  // Build headers without Content-Type (let browser set multipart boundary)
-  const headers: Record<string, string> = {};
-  const authHeaders = await getAuthHeaders();
-  Object.entries(authHeaders).forEach(([k, v]) => {
-    if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
-  });
-
-  const qs = notes ? `?notes=${encodeURIComponent(notes)}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/upload${qs}`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
-  if (!response.ok) throw new Error('Failed to upload file');
-  const json = await response.json();
+  const response = await apiFetch(
+    `/api/v1/projects/${projectId}/files/upload`,
+    {
+      method: 'POST',
+      raw: formData,
+      query: { notes: notes ?? undefined },
+    },
+  );
+  const json: Envelope<ProjectFile> = await response.json();
+  if (!json.data) throw new Error('Empty response from uploadFile');
   return json.data;
 };
 
-export const linkVideoToProject = async (projectId: string, mediaId: string): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/link-media`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ media_id: mediaId }),
-  });
-  if (!response.ok) throw new Error('Failed to link video');
-  const json = await response.json();
-  return json.data;
+export const linkVideoToProject = async (
+  projectId: string,
+  mediaId: string,
+): Promise<ProjectFile> => {
+  const response = await apiClient.post<Envelope<ProjectFile>>(
+    `/api/v1/projects/${projectId}/files/link-media`,
+    { media_id: mediaId },
+  );
+  if (!response.data) throw new Error('Empty response from linkVideoToProject');
+  return response.data;
 };
 
-export const getFileInfo = async (projectId: string, fileId: string): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to get file info');
-  const json = await response.json();
-  return json.data;
+export const getFileInfo = async (
+  projectId: string,
+  fileId: string,
+): Promise<ProjectFile> => {
+  const response = await apiClient.get<Envelope<ProjectFile>>(
+    `/api/v1/projects/${projectId}/files/${fileId}`,
+  );
+  if (!response.data) throw new Error('Empty response from getFileInfo');
+  return response.data;
 };
 
-export const updateFile = async (projectId: string, fileId: string, data: Partial<ProjectFile>): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to update file');
-  const json = await response.json();
-  return json.data;
+export const updateFile = async (
+  projectId: string,
+  fileId: string,
+  data: Partial<ProjectFile>,
+): Promise<ProjectFile> => {
+  const response = await apiClient.put<Envelope<ProjectFile>>(
+    `/api/v1/projects/${projectId}/files/${fileId}`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from updateFile');
+  return response.data;
 };
 
-export const deleteFile = async (projectId: string, fileId: string): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete file');
+export const deleteFile = async (
+  projectId: string,
+  fileId: string,
+): Promise<void> => {
+  await apiClient.delete(`/api/v1/projects/${projectId}/files/${fileId}`);
 };
 
 // ============================================
 // File versions
 // ============================================
 
-export const fetchFileVersions = async (projectId: string, fileId: string): Promise<FileVersion[]> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/versions`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch versions');
-  const json = await response.json();
-  return json.data || [];
+export const fetchFileVersions = async (
+  projectId: string,
+  fileId: string,
+): Promise<FileVersion[]> => {
+  const response = await apiClient.get<Envelope<FileVersion[]>>(
+    `/api/v1/projects/${projectId}/files/${fileId}/versions`,
+  );
+  return response.data || [];
 };
 
-export const uploadNewVersion = async (projectId: string, fileId: string, file: File, notes?: string): Promise<FileVersion> => {
-  const apiUrl = getApiUrl();
+export const uploadNewVersion = async (
+  projectId: string,
+  fileId: string,
+  file: File,
+  notes?: string,
+): Promise<FileVersion> => {
   const formData = new FormData();
   formData.append('file', file);
 
-  const headers: Record<string, string> = {};
-  const authHeaders = await getAuthHeaders();
-  Object.entries(authHeaders).forEach(([k, v]) => {
-    if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
-  });
-
-  const qs = notes ? `?notes=${encodeURIComponent(notes)}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/versions${qs}`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
-  if (!response.ok) throw new Error('Failed to upload version');
-  const json = await response.json();
+  const response = await apiFetch(
+    `/api/v1/projects/${projectId}/files/${fileId}/versions`,
+    {
+      method: 'POST',
+      raw: formData,
+      query: { notes: notes ?? undefined },
+    },
+  );
+  const json: Envelope<FileVersion> = await response.json();
+  if (!json.data) throw new Error('Empty response from uploadNewVersion');
   return json.data;
 };
 
@@ -177,56 +191,61 @@ export const uploadNewVersion = async (projectId: string, fileId: string, file: 
 // Review comments
 // ============================================
 
-export const fetchComments = async (projectId: string, fileId: string, versionId?: string): Promise<ReviewComment[]> => {
-  const apiUrl = getApiUrl();
-  const qs = versionId ? `?version_id=${versionId}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments${qs}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch comments');
-  const json = await response.json();
-  return json.data || [];
+export const fetchComments = async (
+  projectId: string,
+  fileId: string,
+  versionId?: string,
+): Promise<ReviewComment[]> => {
+  const response = await apiClient.get<Envelope<ReviewComment[]>>(
+    `/api/v1/projects/${projectId}/files/${fileId}/comments`,
+    { query: { version_id: versionId } },
+  );
+  return response.data || [];
 };
 
 export const addComment = async (
   projectId: string,
   fileId: string,
-  data: { content: string; timestamp_seconds?: number | null; version_id?: string | null; drawing_data?: any | null }
+  data: {
+    content: string;
+    timestamp_seconds?: number | null;
+    version_id?: string | null;
+    drawing_data?: any | null;
+  },
 ): Promise<ReviewComment> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to add comment');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<ReviewComment>>(
+    `/api/v1/projects/${projectId}/files/${fileId}/comments`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from addComment');
+  return response.data;
 };
 
-export const deleteComment = async (projectId: string, fileId: string, commentId: string): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/comments/${commentId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete comment');
+export const deleteComment = async (
+  projectId: string,
+  fileId: string,
+  commentId: string,
+): Promise<void> => {
+  await apiClient.delete(
+    `/api/v1/projects/${projectId}/files/${fileId}/comments/${commentId}`,
+  );
 };
 
 // ============================================
 // Review status
 // ============================================
 
-export const updateReviewStatus = async (projectId: string, fileId: string, status: ReviewStatus | null): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/review-status`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ review_status: status }),
-  });
-  if (!response.ok) throw new Error('Failed to update review status');
-  const json = await response.json();
-  return json.data;
+export const updateReviewStatus = async (
+  projectId: string,
+  fileId: string,
+  status: ReviewStatus | null,
+): Promise<ProjectFile> => {
+  const response = await apiClient.put<Envelope<ProjectFile>>(
+    `/api/v1/projects/${projectId}/files/${fileId}/review-status`,
+    { review_status: status },
+  );
+  if (!response.data) throw new Error('Empty response from updateReviewStatus');
+  return response.data;
 };
 
 // ============================================
@@ -237,16 +256,11 @@ export const fetchProjectFolders = async (
   projectId: string,
   parentId?: string | null,
 ): Promise<ProjectFolder[]> => {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams();
-  if (parentId) params.set('parent_id', parentId);
-  const qs = params.toString();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders${qs ? '?' + qs : ''}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch folders');
-  const json = await response.json();
-  return json.data || [];
+  const response = await apiClient.get<Envelope<ProjectFolder[]>>(
+    `/api/v1/projects/${projectId}/folders`,
+    { query: { parent_id: parentId ?? undefined } },
+  );
+  return response.data || [];
 };
 
 export const createProjectFolder = async (
@@ -254,17 +268,14 @@ export const createProjectFolder = async (
   name: string,
   parentId?: string | null,
 ): Promise<ProjectFolder> => {
-  const apiUrl = getApiUrl();
   const body: Record<string, string> = { name };
   if (parentId) body.parent_id = parentId;
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error('Failed to create folder');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<ProjectFolder>>(
+    `/api/v1/projects/${projectId}/folders`,
+    body,
+  );
+  if (!response.data) throw new Error('Empty response from createProjectFolder');
+  return response.data;
 };
 
 export const renameProjectFolder = async (
@@ -272,27 +283,19 @@ export const renameProjectFolder = async (
   folderId: string,
   name: string,
 ): Promise<ProjectFolder> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders/${folderId}`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ name }),
-  });
-  if (!response.ok) throw new Error('Failed to rename folder');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.put<Envelope<ProjectFolder>>(
+    `/api/v1/projects/${projectId}/folders/${folderId}`,
+    { name },
+  );
+  if (!response.data) throw new Error('Empty response from renameProjectFolder');
+  return response.data;
 };
 
 export const deleteProjectFolder = async (
   projectId: string,
   folderId: string,
 ): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/folders/${folderId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete folder');
+  await apiClient.delete(`/api/v1/projects/${projectId}/folders/${folderId}`);
 };
 
 export const moveFileToFolder = async (
@@ -300,29 +303,25 @@ export const moveFileToFolder = async (
   fileId: string,
   folderId: string | null,
 ): Promise<ProjectFile> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/files/${fileId}/move`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ folder_id: folderId }),
-  });
-  if (!response.ok) throw new Error('Failed to move file');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.put<Envelope<ProjectFile>>(
+    `/api/v1/projects/${projectId}/files/${fileId}/move`,
+    { folder_id: folderId },
+  );
+  if (!response.data) throw new Error('Empty response from moveFileToFolder');
+  return response.data;
 };
 
 // ============================================
 // Project members
 // ============================================
 
-export const fetchProjectMembers = async (projectId: string): Promise<ProjectMember[]> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch members');
-  const json = await response.json();
-  return json.data || [];
+export const fetchProjectMembers = async (
+  projectId: string,
+): Promise<ProjectMember[]> => {
+  const response = await apiClient.get<Envelope<ProjectMember[]>>(
+    `/api/v1/projects/${projectId}/members`,
+  );
+  return response.data || [];
 };
 
 export const addProjectMember = async (
@@ -330,18 +329,12 @@ export const addProjectMember = async (
   userId: string,
   role: string = 'viewer',
 ): Promise<ProjectMember> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ user_id: userId, role }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to add member');
-  }
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<ProjectMember>>(
+    `/api/v1/projects/${projectId}/members`,
+    { user_id: userId, role },
+  );
+  if (!response.data) throw new Error('Empty response from addProjectMember');
+  return response.data;
 };
 
 export const updateMemberRole = async (
@@ -349,41 +342,32 @@ export const updateMemberRole = async (
   memberId: string,
   role: string,
 ): Promise<ProjectMember> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members/${memberId}`, {
-    method: 'PUT',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({ role }),
-  });
-  if (!response.ok) throw new Error('Failed to update member role');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.put<Envelope<ProjectMember>>(
+    `/api/v1/projects/${projectId}/members/${memberId}`,
+    { role },
+  );
+  if (!response.data) throw new Error('Empty response from updateMemberRole');
+  return response.data;
 };
 
 export const removeProjectMember = async (
   projectId: string,
   memberId: string,
 ): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/members/${memberId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to remove member');
+  await apiClient.delete(`/api/v1/projects/${projectId}/members/${memberId}`);
 };
 
 // ============================================
 // Project shares
 // ============================================
 
-export const fetchProjectShares = async (projectId: string): Promise<ProjectShare[]> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/shares`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch shares');
-  const json = await response.json();
-  return json.data || [];
+export const fetchProjectShares = async (
+  projectId: string,
+): Promise<ProjectShare[]> => {
+  const response = await apiClient.get<Envelope<ProjectShare[]>>(
+    `/api/v1/projects/${projectId}/shares`,
+  );
+  return response.data || [];
 };
 
 export const createProjectShare = async (
@@ -397,29 +381,24 @@ export const createProjectShare = async (
     expires_hours?: number;
   },
 ): Promise<any> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/shares`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to create share');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<any>>(
+    `/api/v1/projects/${projectId}/shares`,
+    data,
+  );
+  return response.data;
 };
 
 // ============================================
 // Project collections
 // ============================================
 
-export const fetchProjectCollections = async (projectId: string): Promise<any[]> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to fetch collections');
-  const json = await response.json();
-  return json.data || [];
+export const fetchProjectCollections = async (
+  projectId: string,
+): Promise<any[]> => {
+  const response = await apiClient.get<Envelope<any[]>>(
+    `/api/v1/projects/${projectId}/collections`,
+  );
+  return response.data || [];
 };
 
 export const createProjectCollection = async (
@@ -431,25 +410,18 @@ export const createProjectCollection = async (
     deadline?: string;
   },
 ): Promise<any> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Failed to create collection');
-  const json = await response.json();
-  return json.data;
+  const response = await apiClient.post<Envelope<any>>(
+    `/api/v1/projects/${projectId}/collections`,
+    data,
+  );
+  return response.data;
 };
 
 export const deleteProjectCollection = async (
   projectId: string,
   collectionId: string,
 ): Promise<void> => {
-  const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/v1/projects/${projectId}/collections/${collectionId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-  if (!response.ok) throw new Error('Failed to delete collection');
+  await apiClient.delete(
+    `/api/v1/projects/${projectId}/collections/${collectionId}`,
+  );
 };

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.users_repository import AdminUsersRepository
 from app.schemas.admin import (
     AdminUserResponse,
     AdminUserListResponse,
@@ -48,30 +48,18 @@ async def list_users(
     - **search**: Search by username
     - **role**: Filter by role (admin, user, test)
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminUsersRepository()
+    rows, total = await repo.list_with_filters(
+        page=page,
+        page_size=page_size,
+        search=search,
+        role=role,
+    )
 
-    # Build query
-    query = supabase.table("user_profiles").select("*", count="exact")
-
-    # Apply filters
-    if search:
-        query = query.ilike("username", f"%{search}%")
-
-    if role:
-        query = query.eq("role", role)
-
-    # Apply pagination
-    offset = (page - 1) * page_size
-    query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
-
-    # Execute query
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return AdminUserListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Get additional data for all users concurrently (avoiding N+1 queries)
-    user_ids = [u["id"] for u in result.data]
+    user_ids = [u["id"] for u in rows]
 
     # Batch fetch: counts and auth info in parallel
     user_counts, auth_info = await asyncio.gather(
@@ -81,7 +69,7 @@ async def list_users(
 
     # Build response
     items = []
-    for u in result.data:
+    for u in rows:
         uid = u["id"]
         video_count, team_count = user_counts.get(uid, (0, 0))
         email, last_sign_in_at = auth_info.get(uid, (None, None))
@@ -101,7 +89,7 @@ async def list_users(
 
     return AdminUserListResponse(
         items=items,
-        total=result.count or len(items),
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -113,18 +101,14 @@ async def get_user(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific user."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminUsersRepository()
+    u = await repo.get_by_id(user_id)
 
-    # Get user profile
-    result = await supabase.table("user_profiles").select("*").eq("id", user_id).single().execute()
-
-    if not result.data:
+    if not u:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-
-    u = result.data
 
     # Get counts and auth info concurrently
     (video_count, team_count), (email, last_sign_in_at) = await asyncio.gather(
@@ -160,11 +144,9 @@ async def update_user(
     - **role**: New role (admin, user, test)
     - **is_banned**: Whether user is banned
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminUsersRepository()
 
-    # Check if user exists
-    existing = await supabase.table("user_profiles").select("id").eq("id", user_id).single().execute()
-    if not existing.data:
+    if not await repo.exists(user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
@@ -196,10 +178,8 @@ async def update_user(
             detail="No update data provided",
         )
 
-    # Update user
-    result = await supabase.table("user_profiles").update(update_data).eq("id", user_id).execute()
-
-    if not result.data:
+    updated = await repo.update(user_id, update_data)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update user",
@@ -235,11 +215,9 @@ async def ban_user(
     - **is_banned**: True to ban, False to unban
     - **reason**: Optional reason for the ban
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminUsersRepository()
 
-    # Check if user exists
-    existing = await supabase.table("user_profiles").select("id").eq("id", user_id).single().execute()
-    if not existing.data:
+    if not await repo.exists(user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
@@ -252,12 +230,8 @@ async def ban_user(
             detail="Cannot ban yourself",
         )
 
-    # Update ban status
-    result = await supabase.table("user_profiles").update({
-        "is_banned": ban_request.is_banned,
-    }).eq("id", user_id).execute()
-
-    if not result.data:
+    updated = await repo.set_banned(user_id, ban_request.is_banned)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update ban status",
@@ -295,29 +269,22 @@ async def delete_user(
     Note: This does not actually delete the user, but bans them instead.
     For full deletion, use Supabase Admin Console.
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminUsersRepository()
 
-    # Check if user exists
-    existing = await supabase.table("user_profiles").select("id").eq("id", user_id).single().execute()
-    if not existing.data:
+    if not await repo.exists(user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
 
-    # Prevent self-deletion
     if user_id == auth.user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete yourself",
         )
 
-    # Soft delete by banning
-    result = await supabase.table("user_profiles").update({
-        "is_banned": True,
-    }).eq("id", user_id).execute()
-
-    if not result.data:
+    updated = await repo.set_banned(user_id, True)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user",
