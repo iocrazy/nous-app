@@ -6,8 +6,7 @@
  * 提供任务状态查询、轮询等功能
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // 任务状态类型
 export type TaskStatus = 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED';
@@ -48,58 +47,37 @@ export interface QueueStats {
 /**
  * 获取任务状态
  */
-export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取任务状态失败: ${response.status}`);
-  }
-
-  return response.json();
-};
+export const getTaskStatus = async (
+  taskId: string,
+): Promise<TaskStatusResponse> =>
+  apiClient.get<TaskStatusResponse>(`/api/v1/tasks/${taskId}`);
 
 /**
  * 取消任务
  */
-export const cancelTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`取消任务失败: ${response.status}`);
-  }
-
-  return response.json();
-};
+export const cancelTask = async (
+  taskId: string,
+): Promise<{ success: boolean; message: string }> =>
+  apiClient.delete<{ success: boolean; message: string }>(
+    `/api/v1/tasks/${taskId}`,
+  );
 
 /**
  * 获取活跃任务列表
  */
-export const getActiveTasks = async (queue?: string, limit: number = 100): Promise<{
+export const getActiveTasks = async (
+  queue?: string,
+  limit: number = 100,
+): Promise<{
   success: boolean;
   count: number;
   tasks: ActiveTask[];
-}> => {
-  const params = new URLSearchParams();
-  if (queue) params.append('queue', queue);
-  params.append('limit', limit.toString());
-
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/?${params}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取活跃任务失败: ${response.status}`);
-  }
-
-  return response.json();
-};
+}> =>
+  apiClient.get<{
+    success: boolean;
+    count: number;
+    tasks: ActiveTask[];
+  }>('/api/v1/tasks/', { query: { queue, limit } });
 
 /**
  * 获取 Worker 统计
@@ -108,18 +86,12 @@ export const getWorkerStats = async (): Promise<{
   success: boolean;
   worker_count: number;
   workers: WorkerStats[];
-}> => {
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/stats/workers`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取 Worker 统计失败: ${response.status}`);
-  }
-
-  return response.json();
-};
+}> =>
+  apiClient.get<{
+    success: boolean;
+    worker_count: number;
+    workers: WorkerStats[];
+  }>('/api/v1/tasks/stats/workers');
 
 /**
  * 获取队列统计
@@ -128,18 +100,12 @@ export const getQueueStats = async (): Promise<{
   success: boolean;
   queues: QueueStats;
   total: number;
-}> => {
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/stats/queues`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取队列统计失败: ${response.status}`);
-  }
-
-  return response.json();
-};
+}> =>
+  apiClient.get<{
+    success: boolean;
+    queues: QueueStats;
+    total: number;
+  }>('/api/v1/tasks/stats/queues');
 
 /**
  * 任务轮询回调类型
@@ -288,18 +254,12 @@ export interface DownloadProgressResponse {
 /**
  * Get download progress for a task
  */
-export const getDownloadProgress = async (taskId: string): Promise<DownloadProgressResponse> => {
-  const response = await fetch(`${getApiUrl()}/api/v1/tasks/${taskId}/progress`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to get download progress: ${response.status}`);
-  }
-
-  return response.json();
-};
+export const getDownloadProgress = async (
+  taskId: string,
+): Promise<DownloadProgressResponse> =>
+  apiClient.get<DownloadProgressResponse>(
+    `/api/v1/tasks/${taskId}/progress`,
+  );
 
 /**
  * Poll download progress

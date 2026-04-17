@@ -1,5 +1,4 @@
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient, ApiError } from './apiClient';
 
 export interface PickerSettings {
   layout: 'list' | 'grid';
@@ -39,22 +38,22 @@ let _cachedPrefs: TagPreferences | null = null;
 let _fetchPromise: Promise<TagPreferences> | null = null;
 
 export async function fetchTagPreferences(): Promise<TagPreferences> {
-  // Return cached result if available
   if (_cachedPrefs) return { ..._cachedPrefs };
-  // Deduplicate concurrent requests
   if (_fetchPromise) return _fetchPromise;
 
   _fetchPromise = (async () => {
     try {
-      const res = await fetch(`${getApiUrl()}/api/v1/tags/preferences`, {
-        headers: await getAuthHeaders(),
-      });
-      if (!res.ok) return { ...DEFAULTS };
-      const data = await res.json();
+      const data = await apiClient.get<TagPreferences>(
+        '/api/v1/tags/preferences',
+      );
       _cachedPrefs = data;
       return data;
     } catch (err) {
-      console.error('Failed to fetch tag preferences:', err);
+      // Any failure (404, 5xx, network) falls back to defaults so the
+      // picker UI never breaks just because preferences are missing.
+      if (!(err instanceof ApiError)) {
+        console.error('Failed to fetch tag preferences:', err);
+      }
       return { ...DEFAULTS };
     } finally {
       _fetchPromise = null;
@@ -71,16 +70,10 @@ export function invalidatePreferencesCache() {
 export async function updateTagPreferences(
   updates: Partial<TagPreferences>,
 ): Promise<TagPreferences> {
-  const res = await fetch(`${getApiUrl()}/api/v1/tags/preferences`, {
-    method: 'PATCH',
-    headers: {
-      ...(await getAuthHeaders()),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok) throw new Error(`Failed to update preferences: ${res.status}`);
-  const data = await res.json();
-  _cachedPrefs = data; // Update cache with latest
+  const data = await apiClient.patch<TagPreferences>(
+    '/api/v1/tags/preferences',
+    updates,
+  );
+  _cachedPrefs = data;
   return data;
 }

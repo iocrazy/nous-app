@@ -1,5 +1,6 @@
 """Admin API routes for system monitoring statistics."""
 
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.monitoring_repository import MonitoringRepository
 
 router = APIRouter()
 
@@ -130,44 +131,16 @@ async def get_monitoring_stats(
     end_date: Optional[datetime] = Query(None),
 ):
     """Get aggregated monitoring statistics for the admin dashboard."""
-    supabase = await get_async_supabase_admin()
+    repo = MonitoringRepository()
     start, end, bucket_minutes = get_time_range(period, start_date, end_date)
-    start_iso = start.isoformat()
-    end_iso = end.isoformat()
 
-    # ---- Fetch request logs ----
-    req_result = await (
-        supabase.table("api_request_logs")
-        .select("path,method,status_code,response_time_ms,timestamp")
-        .gte("timestamp", start_iso)
-        .lte("timestamp", end_iso)
-        .order("timestamp", desc=False)
-        .limit(10000)
-        .execute()
+    # Run the three log queries concurrently; latency-bound, so gather() saves
+    # ~2× round-trips vs the sequential version.
+    req_logs, app_logs, fe_error_count = await asyncio.gather(
+        repo.request_logs_between(start, end),
+        repo.app_logs_between(start, end),
+        repo.frontend_error_count(start, end),
     )
-    req_logs = req_result.data or []
-
-    # ---- Fetch app logs (level counts + recent errors) ----
-    app_result = await (
-        supabase.table("application_logs")
-        .select("level,module,message,logged_at")
-        .gte("logged_at", start_iso)
-        .lte("logged_at", end_iso)
-        .order("logged_at", desc=True)
-        .limit(5000)
-        .execute()
-    )
-    app_logs = app_result.data or []
-
-    # ---- Fetch frontend error count ----
-    fe_result = await (
-        supabase.table("frontend_error_logs")
-        .select("id", count="exact")
-        .gte("created_at", start_iso)
-        .lte("created_at", end_iso)
-        .execute()
-    )
-    fe_error_count = fe_result.count or 0
 
     # ---- Compute overview ----
     total_requests = len(req_logs)

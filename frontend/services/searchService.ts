@@ -2,8 +2,7 @@
  * Search Service - Semantic and hybrid search functionality
  */
 
-import { getAuthHeaders } from './parserService';
-import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // Types
 export interface SearchResultItem {
@@ -51,27 +50,13 @@ export interface QuickSearchSuggestion {
 export const semanticSearch = async (
   query: string,
   limit: number = 20,
-  threshold: number = 0.5
-): Promise<SearchResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/search/semantic`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({
-      query,
-      limit,
-      threshold,
-    }),
+  threshold: number = 0.5,
+): Promise<SearchResponse> =>
+  apiClient.post<SearchResponse>('/api/v1/search/semantic', {
+    query,
+    limit,
+    threshold,
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
 
 /**
  * Hybrid search combining semantic search with filters
@@ -80,28 +65,14 @@ export const hybridSearch = async (
   query: string,
   filters: HybridSearchFilters = {},
   limit: number = 20,
-  threshold: number = 0.3
-): Promise<SearchResponse> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/search/hybrid`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-    body: JSON.stringify({
-      query,
-      limit,
-      threshold,
-      ...filters,
-    }),
+  threshold: number = 0.3,
+): Promise<SearchResponse> =>
+  apiClient.post<SearchResponse>('/api/v1/search/hybrid', {
+    query,
+    limit,
+    threshold,
+    ...filters,
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
 
 /**
  * Find similar videos based on a source video
@@ -109,60 +80,26 @@ export const hybridSearch = async (
 export const findSimilarVideos = async (
   mediaId: number,
   limit: number = 10,
-  threshold: number = 0.7
-): Promise<SearchResponse> => {
-  const apiUrl = getApiUrl();
-
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    threshold: threshold.toString(),
+  threshold: number = 0.7,
+): Promise<SearchResponse> =>
+  apiClient.get<SearchResponse>(`/api/v1/search/similar/${mediaId}`, {
+    query: { limit, threshold },
   });
-
-  const response = await fetch(
-    `${apiUrl}/api/v1/search/similar/${mediaId}?${params}`,
-    {
-      method: 'GET',
-      headers: await getAuthHeaders(),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
 
 /**
  * Quick search for search bar autocomplete
  */
 export const quickSearch = async (
   query: string,
-  limit: number = 5
+  limit: number = 5,
 ): Promise<{
   results: SearchResultItem[];
   suggestions: QuickSearchSuggestion[];
-}> => {
-  const apiUrl = getApiUrl();
-
-  const params = new URLSearchParams({
-    q: query,
-    limit: limit.toString(),
-  });
-
-  const response = await fetch(`${apiUrl}/api/v1/search/quick?${params}`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
+}> =>
+  apiClient.get<{
+    results: SearchResultItem[];
+    suggestions: QuickSearchSuggestion[];
+  }>('/api/v1/search/quick', { query: { q: query, limit } });
 
 /**
  * Local search - searches through already loaded library data (instant, no network)
