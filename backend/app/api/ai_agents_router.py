@@ -11,6 +11,7 @@ Route groups:
   /ai/usage               — Token usage statistics
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -123,42 +124,37 @@ async def list_agents(
     """
     supabase = await get_async_supabase_admin()
 
-    # 1. Preset (global) agents
-    preset_resp = (
-        await supabase.table("ai_agents")
+    # Fire preset + user-owned queries in parallel (plus project-scoped when provided).
+    # Previously these ran sequentially, so every panel open paid 2-3× RTT.
+    queries = [
+        supabase.table("ai_agents")
         .select("*")
         .is_("created_by", "null")
         .eq("enabled", True)
-        .execute()
-    )
-    agents: list[dict] = list(preset_resp.data or [])
-    seen_ids: set[str] = {str(a["id"]) for a in agents}
-
-    # 2. Project-scoped agents (if requested)
+        .execute(),
+        supabase.table("ai_agents")
+        .select("*")
+        .eq("created_by", user.user_id)
+        .execute(),
+    ]
     if project_id:
-        proj_resp = (
-            await supabase.table("ai_agents")
+        queries.append(
+            supabase.table("ai_agents")
             .select("*")
             .eq("project_id", project_id)
             .eq("enabled", True)
             .execute()
         )
-        for row in proj_resp.data or []:
+
+    responses = await asyncio.gather(*queries)
+
+    agents: list[dict] = []
+    seen_ids: set[str] = set()
+    for resp in responses:
+        for row in resp.data or []:
             if str(row["id"]) not in seen_ids:
                 agents.append(row)
                 seen_ids.add(str(row["id"]))
-
-    # 3. User's own agents (regardless of enabled state)
-    user_resp = (
-        await supabase.table("ai_agents")
-        .select("*")
-        .eq("created_by", user.user_id)
-        .execute()
-    )
-    for row in user_resp.data or []:
-        if str(row["id"]) not in seen_ids:
-            agents.append(row)
-            seen_ids.add(str(row["id"]))
 
     return [_agent_row_to_out(a) for a in agents]
 
