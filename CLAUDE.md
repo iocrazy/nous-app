@@ -25,6 +25,62 @@
 ./scripts/worktree-manager.sh init              # 为当前目录初始化端口配置
 ```
 
+## 分支与合并工作流
+
+为了避免长寿分支演化成"几十个 commit 互不知情"导致的语义冲突大爆炸（参考 2026-04 的 dev/master 大分叉事件），下面这套规则是强制约定。
+
+### 分支生命周期
+
+| 分支类型 | 寿命 | 何时 PR | 备注 |
+|---------|------|---------|------|
+| `feature/*` | ≤3 天 | 完成后立即 | 长于 3 天必须每日 rebase 到 master |
+| **纯 refactor PR** | **≤24 小时** | **第一时间** | 不允许夹带逻辑改动；24h 内必须 merge 入 master |
+| `master` | 长期 | — | 唯一长寿分支，集成主线 |
+
+`dev` 分支 **正在弃用**。新工作直接 `feature/* → master`，集成验证靠 Vercel per-PR preview，不靠共用 dev 环境。
+
+### 每日同步纪律
+
+每个活跃 feature 分支每天开工前先同步：
+
+```bash
+bash scripts/sync-worktree.sh           # fetch + rebase origin/master + 启用 rerere
+bash scripts/branch-health.sh           # 列出所有 worktree 落后 master 多少 commits
+```
+
+`sync-worktree.sh` 第一次运行会自动启用 `git config rerere.enabled true`，之后冲突解过一次就会自动重放。
+
+落后 ≥30 commits 的 PR 会被 CI 拒绝（`.github/workflows/pr-behind-check.yml`），≥15 commits 会发警告评论。
+
+### Refactor 与 Feature 必须分开
+
+把"拆大文件"和"加新功能"混进同一个分支是大冲突的根源。
+
+- 准备做大重构（拆文件、改模块边界、重命名）→ 单独开 `refactor/*` 分支，**只**改结构，不引入逻辑改动
+- 重构 PR 24 小时内必须 merge（如果触碰多人在写的代码，直接 ping owner 加速 review）
+- feature 分支必须基于已经 merge 完所有相关 refactor 的 master，不允许"在自己 feature 分支里顺便重构"
+
+### 提交、审查、发布
+
+直接复用 gstack 已有的 skill，不要再造轮子：
+
+| 场景 | 用 | 替代什么手工操作 |
+|------|------|------------------|
+| 想 push 代码并开 PR | `/ship` | `git add/commit/push + gh pr create`（自动跑 tests / review / VERSION / CHANGELOG / merge base） |
+| PR 提交后做代码审查 | `/review` | 手工 diff 检查（自动跑 scope drift + 多维度评审） |
+| 大功能想跑全套审查 | `/autoplan` | 手工调度 CEO/design/eng/DX 多 agent 评审 |
+| 想知道整体代码健康度 | `/health` | 手工跑 lint/test/typecheck 然后汇总 |
+| 已合并 PR 后想确认部署 | `/land-and-deploy` + `/canary` | 手工等 GitHub Actions / 手工跑 smoke test |
+
+`/ship` 的 Step 2 会自动 `git merge origin/<base>` 再跑测试，所以基本不用担心忘记 sync。
+
+### 当冲突真的发生时
+
+按这个顺序处理（不要直接强解）：
+1. 检查冲突文件是否在最近几天有 refactor PR 处理过 — 如果是，先把那个 refactor PR 合掉再回来 rebase
+2. 简单文本冲突直接解 + `git add` + `git rebase --continue`
+3. 语义冲突（一边重构、另一边在旧结构上改逻辑）→ 写 cherry-pick 或重新 port，参考 PR #15 的 7 个 port commit 范式
+
 ## 开发规范
 
 ### UI 语言规范
