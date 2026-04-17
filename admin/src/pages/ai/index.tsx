@@ -46,7 +46,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 export function AIModelsPage() {
-  const { token } = useAuth()
+  const { session } = useAuth()
+  const token = session?.access_token
   const [models, setModels] = useState<NousModel[]>([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
