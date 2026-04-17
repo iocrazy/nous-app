@@ -1,12 +1,13 @@
 """Admin API routes for Video management."""
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.videos_repository import AdminVideosRepository
 from app.schemas.admin import (
     AdminVideoResponse,
     AdminVideoListResponse,
@@ -27,29 +28,16 @@ router = APIRouter()
 @router.get("/stats", response_model=AdminVideoStatsResponse)
 async def get_video_stats(auth: AdminAuthDep):
     """Get video status distribution statistics."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminVideosRepository()
 
-    # Get total count
-    total_result = await supabase.table("parsed_media").select("id", count="exact").execute()
-    total = total_result.count or 0
-
-    # Get counts by status
-    statuses = ["completed", "pending", "failed", "downloading", "skipped"]
-    counts = {}
-    for s in statuses:
-        result = await supabase.table("parsed_media").select(
-            "id", count="exact"
-        ).eq("video_download_status", s).execute()
-        counts[s] = result.count or 0
-
-    # Get total storage bytes (use SUM via count query to avoid fetching all rows)
-    storage_result = await supabase.table("parsed_media").select(
-        "datasize_bytes"
-    ).gt("datasize_bytes", 0).execute()
-
-    total_storage = sum(
-        (row.get("datasize_bytes") or 0)
-        for row in (storage_result.data or [])
+    # Fetch total + per-status counts + storage sum concurrently; on the
+    # stats page this is the entire payload, so the latency win is visible.
+    total, counts, total_storage = await asyncio.gather(
+        repo.count_total(),
+        repo.counts_by_statuses(
+            ["completed", "pending", "failed", "downloading", "skipped"]
+        ),
+        repo.sum_storage_bytes(),
     )
 
     return AdminVideoStatsResponse(
@@ -138,44 +126,24 @@ async def list_videos(
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
 ):
     """List all videos with pagination and filters."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminVideosRepository()
+    rows, total = await repo.list_with_filters(
+        page=page,
+        page_size=page_size,
+        search=search,
+        video_download_status=video_download_status,
+        source_platform=source_platform,
+        sort_by=sort_by,
+        sort_desc=(sort_order.lower() != "asc"),
+    )
 
-    # Build query
-    query = supabase.table("parsed_media").select("*", count="exact")
-
-    # Apply filters
-    if search:
-        query = query.or_(f"title.ilike.%{search}%,platform_id.ilike.%{search}%")
-
-    if video_download_status:
-        query = query.eq("video_download_status", video_download_status)
-
-    if source_platform:
-        query = query.eq("source_platform", source_platform)
-
-    # Apply sorting
-    allowed_sort_fields = {"created_at", "datasize_bytes", "video_download_status"}
-    if sort_by not in allowed_sort_fields:
-        sort_by = "created_at"
-    desc = sort_order.lower() != "asc"
-    query = query.order(sort_by, desc=desc)
-
-    # Apply pagination
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    # Execute query
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return AdminVideoListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Build response
-    items = [_map_video_response(v) for v in result.data]
-
+    items = [_map_video_response(v) for v in rows]
     return AdminVideoListResponse(
         items=items,
-        total=result.count or len(items),
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -187,17 +155,14 @@ async def get_video(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific video."""
-    supabase = await get_async_supabase_admin()
-
-    result = await supabase.table("parsed_media").select("*").eq("id", video_id).single().execute()
-
-    if not result.data:
+    repo = AdminVideosRepository()
+    row = await repo.get_by_id(video_id)
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Video not found",
         )
-
-    return _map_video_detail_response(result.data)
+    return _map_video_detail_response(row)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -207,22 +172,17 @@ async def delete_video(
     request: Request,
 ):
     """Delete a video by its database ID."""
-    supabase = await get_async_supabase_admin()
-
-    # Check if video exists
-    existing = await supabase.table("parsed_media").select("id, platform_id").eq("id", video_id).single().execute()
-    if not existing.data:
+    repo = AdminVideosRepository()
+    existing = await repo.get_by_id(video_id)
+    if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Video not found",
         )
 
-    platform_id = existing.data.get("platform_id", "")
+    platform_id = existing.get("platform_id", "")
 
-    # Delete video
-    result = await supabase.table("parsed_media").delete().eq("id", video_id).execute()
-
-    if not result.data:
+    if not await repo.delete(video_id):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete video",
@@ -249,23 +209,15 @@ async def retry_video(
     request: Request,
 ):
     """Retry a failed video download by resetting its status to pending."""
-    supabase = await get_async_supabase_admin()
-
-    # Check if video exists
-    existing = await supabase.table("parsed_media").select("*").eq("id", video_id).single().execute()
-    if not existing.data:
+    repo = AdminVideosRepository()
+    existing = await repo.get_by_id(video_id)
+    if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Video not found",
         )
 
-    # Reset download status
-    result = await supabase.table("parsed_media").update({
-        "video_download_status": "pending",
-        "error_message": None,
-    }).eq("id", video_id).execute()
-
-    if not result.data:
+    if not await repo.reset_for_retry(video_id):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retry video",
@@ -278,7 +230,7 @@ async def retry_video(
         action="retry_video",
         target_type="video",
         target_id=str(video_id),
-        details={"platform_id": existing.data.get("platform_id", "")},
+        details={"platform_id": existing.get("platform_id", "")},
         ip_address=client_ip,
     )
 

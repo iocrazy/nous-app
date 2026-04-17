@@ -1,5 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { ParsedMedia } from '../types';
+import { apiClient } from './apiClient';
 
 const TABLE_NAME = 'parsed_media';
 const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
@@ -30,12 +31,7 @@ export interface FrontendConfig {
  */
 export const fetchFrontendConfig = async (): Promise<FrontendConfig | null> => {
   try {
-    const response = await fetch(`${getApiUrl()}/api/v1/config`);
-    if (!response.ok) {
-      console.error('Failed to fetch frontend config:', response.status);
-      return null;
-    }
-    return await response.json();
+    return await apiClient.get<FrontendConfig>('/api/v1/config');
   } catch (error) {
     console.error('Error fetching frontend config:', error);
     return null;
@@ -43,7 +39,7 @@ export const fetchFrontendConfig = async (): Promise<FrontendConfig | null> => {
 };
 
 /**
- * Save frontend config to backend YAML
+ * Save frontend config to backend YAML (admin only; requires auth)
  */
 export const saveFrontendConfig = async (config: {
   supabase_url?: string;
@@ -54,27 +50,8 @@ export const saveFrontendConfig = async (config: {
   ffmpeg_encoder?: string;
   ffmpeg_preset?: string;
   transcode_parallel_tiers?: boolean;
-}): Promise<FrontendConfig | null> => {
-  try {
-    const response = await fetch(`${getApiUrl()}/api/v1/config`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(config)
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Failed to save config' }));
-      throw new Error(error.detail || 'Failed to save config');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error saving frontend config:', error);
-    throw error;
-  }
-};
+}): Promise<FrontendConfig | null> =>
+  apiClient.put<FrontendConfig>('/api/v1/config', config);
 
 /**
  * Get video download URL via backend API
@@ -103,20 +80,11 @@ export const getMusicDownloadUrl = (platformId: string): string => {
  */
 export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promise<number> => {
   try {
-    const supabase = getSupabaseClient();
-    if (!supabase) return 0;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return 0;
-
-    const response = await fetch(
-      `${getApiUrl()}/api/v1/media/cleanup-stale-downloads?timeout_minutes=${timeoutMinutes}`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      }
+    const result = await apiClient.post<{ cleaned?: number }>(
+      '/api/v1/media/cleanup-stale-downloads',
+      undefined,
+      { query: { timeout_minutes: timeoutMinutes } },
     );
-    if (!response.ok) return 0;
-    const result = await response.json();
     return result.cleaned || 0;
   } catch {
     return 0;
