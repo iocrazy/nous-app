@@ -363,30 +363,49 @@ class AgentService:
         if not insert_resp.data:
             logger.error(f"Failed to insert messages for session {session_id}")
 
-        # Update session aggregate counters
+        # Update session aggregate counters atomically.
+        # The previous read-then-update pattern lost increments when two chat
+        # calls on the same session ran concurrently (both read the same baseline,
+        # each wrote baseline+2).  increment_ai_session_counters is a single-
+        # statement Postgres function (see migration 122).
         total_tokens = prompt_tokens + completion_tokens
-        # Use rpc or manual fetch+update (Supabase doesn't support increment natively)
-        session_resp = (
-            await supabase.table("ai_sessions")
-            .select("total_tokens, message_count")
-            .eq("id", session_id)
-            .single()
-            .execute()
-        )
-        if session_resp.data:
-            current = session_resp.data
-            await (
-                supabase.table("ai_sessions")
-                .update(
-                    {
-                        "total_tokens": current.get("total_tokens", 0) + total_tokens,
-                        "message_count": current.get("message_count", 0) + 2,
-                        "updated_at": "now()",
-                    }
-                )
+        try:
+            await supabase.rpc(
+                "increment_ai_session_counters",
+                {
+                    "p_session_id": session_id,
+                    "p_tokens": total_tokens,
+                    "p_messages": 2,
+                },
+            ).execute()
+        except Exception as rpc_err:
+            # Migration 122 not yet applied?  Fall back to the legacy path with a
+            # warning so that behaviour degrades gracefully in older environments.
+            logger.warning(
+                f"increment_ai_session_counters RPC failed ({rpc_err}); "
+                "falling back to non-atomic update"
+            )
+            session_resp = (
+                await supabase.table("ai_sessions")
+                .select("total_tokens, message_count")
                 .eq("id", session_id)
+                .single()
                 .execute()
             )
+            if session_resp.data:
+                current = session_resp.data
+                await (
+                    supabase.table("ai_sessions")
+                    .update(
+                        {
+                            "total_tokens": current.get("total_tokens", 0) + total_tokens,
+                            "message_count": current.get("message_count", 0) + 2,
+                            "updated_at": "now()",
+                        }
+                    )
+                    .eq("id", session_id)
+                    .execute()
+                )
 
     async def _log_usage(
         self,
