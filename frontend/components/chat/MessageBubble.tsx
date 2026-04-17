@@ -63,6 +63,9 @@ export function MessageBubble({
               ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'p', 'strong', 'em', 'code', 'pre',
                              'hr', 'br', 'ul', 'ol', 'li', 'blockquote', 'a', 'span'],
               ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+              // Only permit http(s) and mailto: URLs. Blocks javascript:, data:, vbscript:,
+              // etc. in href/src attributes to prevent XSS from LLM-generated links.
+              ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
             }),
           }}
         />

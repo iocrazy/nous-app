@@ -47,7 +47,25 @@ _INJECTION_KEYWORDS: List[str] = [
 ]
 
 router = APIRouter(prefix="/ai", tags=["AI Agents"])
-limiter = Limiter(key_func=get_remote_address)
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Rate-limit per authenticated user when possible, else fall back to remote IP.
+
+    slowapi runs before FastAPI dependencies resolve (so AuthDep has not populated
+    user_id yet). We hash the raw Bearer token instead — each user's JWT is distinct,
+    so the hash behaves like a user-level bucket without needing to decode the JWT.
+    Falls back to remote IP for unauthenticated routes.
+    """
+    import hashlib
+
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        return "u:" + hashlib.sha256(auth[7:].encode()).hexdigest()[:24]
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key)
 
 # Warn-only patterns for user messages (do not block, just log)
 _MESSAGE_INJECTION_PATTERNS: List[str] = [
@@ -138,6 +156,28 @@ async def list_agents(
         .execute(),
     ]
     if project_id:
+        # Authorization: user must own the project OR be a member of its team.
+        # Without this check, any authenticated user could enumerate agents in
+        # arbitrary projects by guessing IDs.
+        from app.repositories.projects_repository import ProjectsRepository
+        from app.repositories.team_repository import TeamRepository
+
+        project = await ProjectsRepository().get_project_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        is_owner = str(project.get("created_by") or "") == str(user.user_id)
+        is_team_member = False
+        if not is_owner and project.get("team_id"):
+            team = await TeamRepository().get_team_by_id(
+                team_id=str(project["team_id"]), user_id=str(user.user_id)
+            )
+            is_team_member = team is not None  # returns None when user is not a member
+        if not is_owner and not is_team_member:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have access to agents in this project",
+            )
+
         queries.append(
             supabase.table("ai_agents")
             .select("*")
