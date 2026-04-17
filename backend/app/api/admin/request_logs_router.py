@@ -1,13 +1,17 @@
 """Admin API routes for Request Logs and Frontend Error Logs."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.request_logs_repository import (
+    AppLogsRepository,
+    FrontendErrorLogsRepository,
+    RequestLogsRepository,
+)
 from app.utils.admin_helpers import batch_get_user_info
 
 router = APIRouter()
@@ -128,51 +132,29 @@ async def list_request_logs(
     end_date: Optional[datetime] = Query(None),
 ):
     """List API request logs with filtering and pagination."""
-    supabase = await get_async_supabase_admin()
+    repo = RequestLogsRepository()
+    rows, total = await repo.list_with_filters(
+        page=page,
+        page_size=page_size,
+        method=method,
+        path=path,
+        status_group=status_group,
+        user_id=user_id,
+        min_response_time=min_response_time,
+        request_id=request_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    query = supabase.table("api_request_logs").select("*", count="exact")
-
-    if method:
-        query = query.eq("method", method.upper())
-    if path:
-        query = query.ilike("path", f"%{path}%")
-    if status_group:
-        if status_group == "2xx":
-            query = query.gte("status_code", 200).lt("status_code", 300)
-        elif status_group == "4xx":
-            query = query.gte("status_code", 400).lt("status_code", 500)
-        elif status_group == "5xx":
-            query = query.gte("status_code", 500).lt("status_code", 600)
-    if user_id:
-        query = query.eq("user_id", user_id)
-    if min_response_time:
-        query = query.gte("response_time_ms", min_response_time)
-    if request_id:
-        query = query.eq("request_id", request_id)
-    if start_date:
-        query = query.gte("timestamp", start_date.isoformat())
-    if end_date:
-        query = query.lte("timestamp", end_date.isoformat())
-
-    query = query.order("timestamp", desc=True)
-
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return RequestLogListResponse(data=[], total=0)
 
     # Batch fetch user emails
-    user_ids = list(set(
-        log["user_id"] for log in result.data
-        if log.get("user_id")
-    ))
+    user_ids = list({log["user_id"] for log in rows if log.get("user_id")})
     user_info = await batch_get_user_info(user_ids)
 
     data = []
-    for log in result.data:
+    for log in rows:
         uid = log.get("user_id")
         email = None
         if uid and uid in user_info:
@@ -196,7 +178,7 @@ async def list_request_logs(
             timestamp=log["timestamp"],
         ))
 
-    return RequestLogListResponse(data=data, total=result.count or len(data))
+    return RequestLogListResponse(data=data, total=total)
 
 
 @router.get("/stats", response_model=RequestLogStats)
@@ -205,19 +187,13 @@ async def get_request_log_stats(
     hours: int = Query(24, ge=1, le=168, description="Number of hours to include"),
 ):
     """Get aggregated request log statistics."""
-    supabase = await get_async_supabase_admin()
-
-    from datetime import timedelta
+    repo = RequestLogsRepository()
     start_time = datetime.utcnow() - timedelta(hours=hours)
+    logs = await repo.stats_since(start_time)
 
-    result = await supabase.table("api_request_logs").select(
-        "method, status_code, path, response_time_ms, timestamp"
-    ).gte("timestamp", start_time.isoformat()).execute()
-
-    if not result.data:
+    if not logs:
         return RequestLogStats(by_method=[], by_status=[], top_paths=[], by_hour=[], total=0)
 
-    logs = result.data
     total = len(logs)
 
     # By method
@@ -282,36 +258,24 @@ async def list_frontend_errors(
     end_date: Optional[datetime] = Query(None),
 ):
     """List frontend error reports."""
-    supabase = await get_async_supabase_admin()
+    repo = FrontendErrorLogsRepository()
+    rows, total = await repo.list_with_filters(
+        page=page,
+        page_size=page_size,
+        error_type=error_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    query = supabase.table("frontend_error_logs").select("*", count="exact")
-
-    if error_type:
-        query = query.eq("error_type", error_type)
-    if start_date:
-        query = query.gte("created_at", start_date.isoformat())
-    if end_date:
-        query = query.lte("created_at", end_date.isoformat())
-
-    query = query.order("created_at", desc=True)
-
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return FrontendErrorListResponse(data=[], total=0)
 
     # Batch fetch user emails
-    user_ids = list(set(
-        log["user_id"] for log in result.data
-        if log.get("user_id")
-    ))
+    user_ids = list({log["user_id"] for log in rows if log.get("user_id")})
     user_info = await batch_get_user_info(user_ids)
 
     data = []
-    for log in result.data:
+    for log in rows:
         uid = log.get("user_id")
         email = None
         if uid and uid in user_info:
@@ -332,7 +296,7 @@ async def list_frontend_errors(
             created_at=log["created_at"],
         ))
 
-    return FrontendErrorListResponse(data=data, total=result.count or len(data))
+    return FrontendErrorListResponse(data=data, total=total)
 
 
 @router.get("/app-logs", response_model=AppLogListResponse)
@@ -352,41 +316,19 @@ async def list_app_logs(
     Excludes infrastructure noise (httpx, uvicorn.access, celery.beat)
     by default to show only business logic logs.
     """
-    supabase = await get_async_supabase_admin()
+    repo = AppLogsRepository()
+    rows, total = await repo.list_with_filters(
+        page=page,
+        page_size=page_size,
+        level=level,
+        module=module,
+        message=message,
+        has_exception=has_exception,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    # Noise modules to exclude from Application Logs view
-    NOISE_MODULES = ("httpx", "uvicorn.access", "uvicorn.error", "celery.beat")
-
-    query = supabase.table("application_logs").select("*", count="exact")
-
-    # Exclude noise unless user explicitly filters by module
-    if not module:
-        for noise in NOISE_MODULES:
-            query = query.neq("module", noise)
-
-    if level:
-        query = query.eq("level", level.upper())
-    if module:
-        query = query.ilike("module", f"%{module}%")
-    if message:
-        query = query.ilike("message", f"%{message}%")
-    if has_exception is True:
-        query = query.neq("exception", None)
-    elif has_exception is False:
-        query = query.is_("exception", "null")
-    if start_date:
-        query = query.gte("logged_at", start_date.isoformat())
-    if end_date:
-        query = query.lte("logged_at", end_date.isoformat())
-
-    query = query.order("logged_at", desc=True)
-
-    offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return AppLogListResponse(data=[], total=0)
 
     data = [
@@ -402,7 +344,7 @@ async def list_app_logs(
             extra=log.get("extra"),
             logged_at=log["logged_at"],
         )
-        for log in result.data
+        for log in rows
     ]
 
-    return AppLogListResponse(data=data, total=result.count or len(data))
+    return AppLogListResponse(data=data, total=total)
