@@ -760,10 +760,10 @@ export const DownloadsView: React.FC = () => {
 
       {/* Mobile Search Overlay */}
       {libraryViewMode !== 'feed' && createPortal(
-        <div className="md:hidden fixed top-14 left-0 right-0 z-40 p-3 flex justify-end items-start pointer-events-none">
-          <div className="pointer-events-auto flex items-center justify-end w-full max-w-[calc(100%-16px)]">
+        <div className="md:hidden fixed top-2.5 right-3 z-40 flex justify-end items-start pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-end">
             {isMobileSearchOpen ? (
-              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-full animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
+              <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
                 <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
                 <input
                   autoFocus
@@ -789,9 +789,9 @@ export const DownloadsView: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsMobileSearchOpen(true)}
-                className="p-3 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+                className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
               >
-                <Search size={22} className="drop-shadow-md" />
+                <Search size={20} className="drop-shadow-md" />
               </button>
             )}
           </div>
