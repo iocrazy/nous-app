@@ -294,3 +294,4 @@ toolkit/
 # uv lock file (if not needed)
 # uv.lock
 .gstack/
+*.png
