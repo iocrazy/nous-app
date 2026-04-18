@@ -9,6 +9,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.db import get_async_supabase_admin
+from app.repositories.admin.credits_repository import AdminCreditsRepository
 from app.schemas.admin import (
     AdminCreditsStatsResponse,
     AdminRevenueChartItem,
@@ -568,14 +569,8 @@ async def refund_order(
 @router.get("/packages")
 async def list_packages(auth: AdminAuthDep):
     """List all point packages (active and inactive)."""
-    supabase = await get_async_supabase_admin()
-    result = (
-        await supabase.table("point_packages")
-        .select("*")
-        .order("sort_order", desc=False)
-        .execute()
-    )
-    return result.data or []
+    repo = AdminCreditsRepository()
+    return await repo.list_packages()
 
 
 @router.post("/packages")
@@ -585,7 +580,7 @@ async def create_package(
     request: Request,
 ):
     """Create a new point package."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
     payload = {
         "name": body.name,
@@ -595,13 +590,7 @@ async def create_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    result = (
-        await supabase.table("point_packages")
-        .insert(payload)
-        .execute()
-    )
-
-    created = (result.data or [None])[0]
+    created = await repo.create_package(payload)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -623,7 +612,7 @@ async def update_package(
     request: Request,
 ):
     """Update an existing point package."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
     payload = {
         "name": body.name,
@@ -633,14 +622,9 @@ async def update_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    result = (
-        await supabase.table("point_packages")
-        .update(payload)
-        .eq("id", package_id)
-        .execute()
-    )
+    updated = await repo.update_package(package_id, payload)
 
-    if not result.data:
+    if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
 
     await create_audit_log(
@@ -652,7 +636,7 @@ async def update_package(
         ip_address=request.client.host if request.client else None,
     )
 
-    return result.data[0]
+    return updated
 
 
 @router.delete("/packages/{package_id}")
@@ -662,14 +646,8 @@ async def delete_package(
     request: Request,
 ):
     """Delete a point package."""
-    supabase = await get_async_supabase_admin()
-
-    await (
-        supabase.table("point_packages")
-        .delete()
-        .eq("id", package_id)
-        .execute()
-    )
+    repo = AdminCreditsRepository()
+    await repo.delete_package(package_id)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -690,14 +668,8 @@ async def delete_package(
 @router.get("/pricing")
 async def list_pricing(auth: AdminAuthDep):
     """List all action pricing rules."""
-    supabase = await get_async_supabase_admin()
-    result = (
-        await supabase.table("point_pricing")
-        .select("*")
-        .order("action_type", desc=False)
-        .execute()
-    )
-    return result.data or []
+    repo = AdminCreditsRepository()
+    return await repo.list_pricing()
 
 
 @router.put("/pricing/{action_type}")
@@ -708,20 +680,15 @@ async def update_pricing(
     request: Request,
 ):
     """Update pricing for a specific action type."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
     payload: dict = {"points_cost": body.points_cost}
     if body.description is not None:
         payload["description"] = body.description
 
-    result = (
-        await supabase.table("point_pricing")
-        .update(payload)
-        .eq("action_type", action_type)
-        .execute()
-    )
+    updated = await repo.update_pricing(action_type, payload)
 
-    if not result.data:
+    if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action type not found")
 
     await create_audit_log(
@@ -733,7 +700,7 @@ async def update_pricing(
         ip_address=request.client.host if request.client else None,
     )
 
-    return result.data[0]
+    return updated
 
 
 # ============================================
