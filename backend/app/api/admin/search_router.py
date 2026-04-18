@@ -1,7 +1,6 @@
 """Admin API routes for cross-log search and request tracing."""
 
 import json
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +8,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
+from app.repositories.admin.search_repository import AdminSearchRepository
 
 router = APIRouter()
 
@@ -153,7 +152,7 @@ async def search_logs(
     page_size: int = Query(50, ge=1, le=200),
 ):
     """Search across all log tables with unified results."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminSearchRepository()
 
     # Compute time range
     now = datetime.now(timezone.utc)
@@ -183,16 +182,8 @@ async def search_logs(
 
     # ---- Search request logs ----
     if "request" in source_list:
-        result = await (
-            supabase.table("api_request_logs")
-            .select("id,request_id,method,path,status_code,response_time_ms,timestamp,error_detail")
-            .gte("timestamp", start_iso)
-            .lte("timestamp", end_iso)
-            .order("timestamp", desc=True)
-            .limit(2000)
-            .execute()
-        )
-        for r in result.data or []:
+        rows = await repo.request_logs(start_iso, end_iso)
+        for r in rows:
             entry = {
                 "source": "request",
                 "method": r.get("method"),
@@ -232,16 +223,8 @@ async def search_logs(
 
     # ---- Search app logs ----
     if "app" in source_list:
-        result = await (
-            supabase.table("application_logs")
-            .select("id,level,module,message,logged_at,extra")
-            .gte("logged_at", start_iso)
-            .lte("logged_at", end_iso)
-            .order("logged_at", desc=True)
-            .limit(2000)
-            .execute()
-        )
-        for r in result.data or []:
+        rows = await repo.app_logs(start_iso, end_iso)
+        for r in rows:
             extra = r.get("extra") or {}
             entry = {
                 "source": "app",
@@ -280,16 +263,8 @@ async def search_logs(
 
     # ---- Search frontend error logs ----
     if "frontend" in source_list:
-        result = await (
-            supabase.table("frontend_error_logs")
-            .select("id,error_type,message,stack_trace,url,created_at")
-            .gte("created_at", start_iso)
-            .lte("created_at", end_iso)
-            .order("created_at", desc=True)
-            .limit(2000)
-            .execute()
-        )
-        for r in result.data or []:
+        rows = await repo.frontend_logs(start_iso, end_iso)
+        for r in rows:
             entry = {
                 "source": "frontend",
                 "level": "ERROR",
@@ -322,16 +297,8 @@ async def search_logs(
 
     # ---- Search audit logs ----
     if "audit" in source_list:
-        result = await (
-            supabase.table("admin_audit_logs")
-            .select("id,action,target_type,target_id,admin_email,details,created_at")
-            .gte("created_at", start_iso)
-            .lte("created_at", end_iso)
-            .order("created_at", desc=True)
-            .limit(2000)
-            .execute()
-        )
-        for r in result.data or []:
+        rows = await repo.audit_logs(start_iso, end_iso)
+        for r in rows:
             entry = {
                 "source": "audit",
                 "action": r.get("action"),
@@ -380,17 +347,9 @@ async def get_request_trace(
     request_id: str,
 ):
     """Get all logs correlated with a specific request_id."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminSearchRepository()
 
-    # Fetch the request log
-    req_result = await (
-        supabase.table("api_request_logs")
-        .select("*")
-        .eq("request_id", request_id)
-        .limit(1)
-        .execute()
-    )
-    req_log = (req_result.data or [None])[0]
+    req_log = await repo.get_request_log(request_id)
 
     method = req_log.get("method") if req_log else None
     path = req_log.get("path") if req_log else None
@@ -415,16 +374,9 @@ async def get_request_trace(
         )
 
     # Fetch correlated app logs (where extra->>'request_id' matches)
-    app_result = await (
-        supabase.table("application_logs")
-        .select("level,module,message,logged_at,extra")
-        .filter("extra->>request_id", "eq", request_id)
-        .order("logged_at", desc=False)
-        .limit(100)
-        .execute()
-    )
+    app_rows = await repo.app_logs_by_request_id(request_id)
 
-    for a in app_result.data or []:
+    for a in app_rows:
         ts = a.get("logged_at", "")
         dt = _parse_ts(ts)
         offset = 0
