@@ -13,6 +13,7 @@ class _FakeQuery:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self._data: Any = []
+        self._count: int | None = None
 
     def __getattr__(self, name: str):
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
@@ -23,6 +24,7 @@ class _FakeQuery:
     async def execute(self) -> Any:
         class _R:
             data = self._data
+            count = self._count
         return _R()
 
 
@@ -166,3 +168,134 @@ async def test_update_pricing_none_on_empty(
     assert (
         await repo.update_pricing("transcribe", {"points_cost": 5})
     ) is None
+
+
+# ─── Transactions ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_applies_team_and_type_filters(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    fake_query._count = 0
+    await repo.list_transactions(
+        team_id="t1",
+        type="consume",
+        sort_by="created_at",
+        sort_desc=True,
+        offset=0,
+        limit=10,
+    )
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("team_id", "t1") in eq_values
+    assert ("type", "consume") in eq_values
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_skips_filters_when_none(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    fake_query._count = 0
+    await repo.list_transactions(
+        team_id=None,
+        type=None,
+        sort_by="amount",
+        sort_desc=False,
+        offset=0,
+        limit=50,
+    )
+
+    eq_calls = [c for c in fake_query.calls if c[0] == "eq"]
+    assert eq_calls == []
+
+    order = next(c for c in fake_query.calls if c[0] == "order")
+    assert order[1] == ("amount",)
+    assert order[2] == {"desc": False}
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_pagination_range(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    fake_query._count = 0
+    await repo.list_transactions(
+        team_id=None,
+        type=None,
+        sort_by="created_at",
+        sort_desc=True,
+        offset=20,
+        limit=10,
+    )
+
+    rng = next(c for c in fake_query.calls if c[0] == "range")
+    assert rng[1] == (20, 29)
+
+
+# ─── Orders ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_orders_threads_all_filters(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    fake_query._count = 0
+    await repo.list_orders(
+        payment_status="paid",
+        payment_method="alipay",
+        team_id="t1",
+        sort_by="amount_cents",
+        sort_desc=True,
+        offset=0,
+        limit=10,
+    )
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("payment_status", "paid") in eq_values
+    assert ("payment_method", "alipay") in eq_values
+    assert ("team_id", "t1") in eq_values
+
+
+# ─── Enrichment helpers ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_teams_by_ids_empty_short_circuits(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    assert await repo.get_teams_by_ids([]) == []
+
+
+@pytest.mark.asyncio
+async def test_get_teams_by_ids_uses_in_filter(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"id": "t1", "name": "A"}]
+    rows = await repo.get_teams_by_ids(["t1", "t2"])
+    assert len(rows) == 1
+
+    in_call = next(c for c in fake_query.calls if c[0] == "in_")
+    assert in_call[1] == ("id", ["t1", "t2"])
+
+
+@pytest.mark.asyncio
+async def test_get_package_names_empty_short_circuits(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    assert await repo.get_package_names([]) == {}
+
+
+@pytest.mark.asyncio
+async def test_get_package_names_returns_id_to_name_map(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [
+        {"id": "p1", "name": "Basic"},
+        {"id": "p2", "name": "Pro"},
+    ]
+    names = await repo.get_package_names(["p1", "p2"])
+    assert names == {"p1": "Basic", "p2": "Pro"}

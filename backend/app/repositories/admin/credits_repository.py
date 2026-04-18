@@ -15,6 +15,9 @@ from app.db import get_async_supabase_admin
 class AdminCreditsRepository:
     PACKAGES_TABLE = "point_packages"
     PRICING_TABLE = "point_pricing"
+    TRANSACTIONS_TABLE = "point_transactions"
+    ORDERS_TABLE = "orders"
+    TEAMS_TABLE = "teams"
 
     async def _client(self):
         return await get_async_supabase_admin()
@@ -86,3 +89,84 @@ class AdminCreditsRepository:
             .execute()
         )
         return (result.data or [None])[0]
+
+    # ─── Transactions ──────────────────────────────────────────────
+
+    async def list_transactions(
+        self,
+        *,
+        team_id: Optional[str],
+        type: Optional[str],
+        sort_by: str,
+        sort_desc: bool,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        client = await self._client()
+        query = client.table(self.TRANSACTIONS_TABLE).select("*", count="exact")
+        if team_id:
+            query = query.eq("team_id", team_id)
+        if type:
+            query = query.eq("type", type)
+        query = query.order(sort_by, desc=sort_desc).range(
+            offset, offset + limit - 1
+        )
+        result = await query.execute()
+        return result.data or [], result.count or 0
+
+    # ─── Orders ────────────────────────────────────────────────────
+
+    async def list_orders(
+        self,
+        *,
+        payment_status: Optional[str],
+        payment_method: Optional[str],
+        team_id: Optional[str],
+        sort_by: str,
+        sort_desc: bool,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        client = await self._client()
+        query = client.table(self.ORDERS_TABLE).select("*", count="exact")
+        if payment_status:
+            query = query.eq("payment_status", payment_status)
+        if payment_method:
+            query = query.eq("payment_method", payment_method)
+        if team_id:
+            query = query.eq("team_id", team_id)
+        query = query.order(sort_by, desc=sort_desc).range(
+            offset, offset + limit - 1
+        )
+        result = await query.execute()
+        return result.data or [], result.count or 0
+
+    # ─── Enrichment helpers ────────────────────────────────────────
+
+    async def get_teams_by_ids(
+        self, team_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        if not team_ids:
+            return []
+        client = await self._client()
+        result = (
+            await client.table(self.TEAMS_TABLE)
+            .select("id, name, is_personal, owner_id")
+            .in_("id", team_ids)
+            .execute()
+        )
+        return result.data or []
+
+    async def get_package_names(
+        self, package_ids: list[str]
+    ) -> dict[str, str]:
+        if not package_ids:
+            return {}
+        client = await self._client()
+        result = (
+            await client.table(self.PACKAGES_TABLE)
+            .select("id, name")
+            .in_("id", package_ids)
+            .execute()
+        )
+        return {str(p["id"]): p["name"] for p in (result.data or [])}

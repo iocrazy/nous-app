@@ -54,17 +54,12 @@ async def _get_team_display_name(team: dict, supabase=None) -> str:
     return f"{owner_name[0].upper()}{owner_name[1:]}'s Workspace"
 
 
-async def _get_team_name_map(supabase, team_ids: list[str]) -> dict[str, str]:
+async def _get_team_name_map(team_ids: list[str]) -> dict[str, str]:
     """Fetch display names for a list of team_ids."""
     if not team_ids:
         return {}
-    result = (
-        await supabase.table("teams")
-        .select("id, name, is_personal, owner_id")
-        .in_("id", team_ids)
-        .execute()
-    )
-    teams = result.data or []
+    repo = AdminCreditsRepository()
+    teams = await repo.get_teams_by_ids(team_ids)
     entries = await asyncio.gather(
         *[_get_team_display_name(t) for t in teams]
     )
@@ -262,7 +257,7 @@ async def get_top_teams(
 
     # Sort and limit
     top_ids = sorted(team_totals, key=lambda t: -team_totals[t])[:limit]
-    name_map = await _get_team_name_map(supabase, top_ids)
+    name_map = await _get_team_name_map(top_ids)
 
     return [
         AdminTopTeamItem(
@@ -290,36 +285,26 @@ async def list_transactions(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List credit transactions with filtering and pagination."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    query = (
-        supabase.table("point_transactions")
-        .select("*", count="exact")
-    )
-
-    if team_id:
-        query = query.eq("team_id", team_id)
-    if type:
-        query = query.eq("type", type)
-
-    # Sorting
     valid_sort_fields = {"created_at", "amount", "type"}
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
-    query = query.order(sort_by, desc=(sort_order != "asc"))
 
-    # Pagination
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-    rows = result.data or []
-    total = result.count or 0
+    rows, total = await repo.list_transactions(
+        team_id=team_id,
+        type=type,
+        sort_by=sort_by,
+        sort_desc=(sort_order != "asc"),
+        offset=offset,
+        limit=page_size,
+    )
 
     # Enrich with team names and user emails
     team_ids = list({str(r["team_id"]) for r in rows if r.get("team_id")})
     user_ids = list({str(r["user_id"]) for r in rows if r.get("user_id")})
-    name_map = await _get_team_name_map(supabase, team_ids)
+    name_map = await _get_team_name_map(team_ids)
     email_map = await batch_get_user_auth_info(user_ids) if user_ids else {}
 
     items = [
@@ -360,50 +345,31 @@ async def list_orders(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List orders with filtering and pagination."""
-    supabase = await get_async_supabase_admin()
-
-    query = (
-        supabase.table("orders")
-        .select("*", count="exact")
-    )
-
-    if payment_status:
-        query = query.eq("payment_status", payment_status)
-    if payment_method:
-        query = query.eq("payment_method", payment_method)
-    if team_id:
-        query = query.eq("team_id", team_id)
+    repo = AdminCreditsRepository()
 
     valid_sort_fields = {"created_at", "amount_cents", "points_amount", "payment_status"}
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
-    query = query.order(sort_by, desc=(sort_order != "asc"))
 
     offset = (page - 1) * page_size
-    query = query.range(offset, offset + page_size - 1)
-
-    result = await query.execute()
-    rows = result.data or []
-    total = result.count or 0
+    rows, total = await repo.list_orders(
+        payment_status=payment_status,
+        payment_method=payment_method,
+        team_id=team_id,
+        sort_by=sort_by,
+        sort_desc=(sort_order != "asc"),
+        offset=offset,
+        limit=page_size,
+    )
 
     # Enrich
     team_ids = list({str(r["team_id"]) for r in rows if r.get("team_id")})
     user_ids = list({str(r["user_id"]) for r in rows if r.get("user_id")})
     package_ids = list({str(r["package_id"]) for r in rows if r.get("package_id")})
 
-    name_map = await _get_team_name_map(supabase, team_ids)
+    name_map = await _get_team_name_map(team_ids)
     email_map = await batch_get_user_auth_info(user_ids) if user_ids else {}
-
-    # Package names
-    pkg_name_map: dict[str, str] = {}
-    if package_ids:
-        pkg_result = (
-            await supabase.table("point_packages")
-            .select("id, name")
-            .in_("id", package_ids)
-            .execute()
-        )
-        pkg_name_map = {str(p["id"]): p["name"] for p in (pkg_result.data or [])}
+    pkg_name_map = await repo.get_package_names(package_ids)
 
     items = [
         AdminOrderResponse(
