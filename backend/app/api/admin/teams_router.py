@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
 from app.core.team_permissions import ASSIGNABLE_ROLES, get_role_info
+from app.repositories.admin.teams_repository import AdminTeamsRepository
 from app.schemas.admin import (
     AdminTeamResponse,
     AdminTeamListResponse,
@@ -57,45 +57,24 @@ async def list_teams(
     - **page_size**: Number of items per page (max 100)
     - **search**: Search by team name
     """
-    supabase = await get_async_supabase_admin()
-
-    # Build query
-    query = supabase.table("teams").select("*", count="exact")
-
-    # Apply filters
-    if search:
-        query = query.ilike("name", f"%{search}%")
-
-    # Apply pagination
+    repo = AdminTeamsRepository()
     offset = (page - 1) * page_size
-    query = query.order("created_at", desc=True).range(offset, offset + page_size - 1)
+    rows, total = await repo.list_teams(search=search, offset=offset, limit=page_size)
 
-    # Execute query
-    result = await query.execute()
-
-    if not result.data:
+    if not rows:
         return AdminTeamListResponse(items=[], total=0, page=page, page_size=page_size)
 
-    # Batch fetch: member counts, owner info, and points balances in parallel
-    team_ids = [t["id"] for t in result.data]
-    owner_ids = list(set(t["owner_id"] for t in result.data))
-
-    async def batch_get_points_balances(tids: list) -> dict:
-        """Get points_balance for multiple teams from team_quotas."""
-        if not tids:
-            return {}
-        resp = await supabase.table("team_quotas").select("team_id, points_balance").in_("team_id", tids).execute()
-        return {str(r["team_id"]): r.get("points_balance", 0) for r in (resp.data or [])}
+    team_ids = [t["id"] for t in rows]
+    owner_ids = list(set(t["owner_id"] for t in rows))
 
     member_counts, owner_info, points_balances = await asyncio.gather(
         batch_get_team_member_counts(team_ids),
         batch_get_user_info(owner_ids),
-        batch_get_points_balances(team_ids),
+        repo.batch_points_balances(team_ids),
     )
 
-    # Build response
     items = []
-    for team in result.data:
+    for team in rows:
         tid = team["id"]
         oid = team["owner_id"]
         owner_email, owner_username = owner_info.get(oid, (None, None))
@@ -116,7 +95,7 @@ async def list_teams(
 
     return AdminTeamListResponse(
         items=items,
-        total=result.count or len(items),
+        total=total or len(items),
         page=page,
         page_size=page_size,
     )
@@ -128,28 +107,18 @@ async def get_team(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific team."""
-    supabase = await get_async_supabase_admin()
-
-    # Get team
-    result = await supabase.table("teams").select("*").eq("id", team_id).single().execute()
-
-    if not result.data:
+    repo = AdminTeamsRepository()
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team not found",
         )
 
-    team = result.data
-
-    # Get member count, owner info, and points balance concurrently
-    async def get_points_balance(tid: str) -> int:
-        resp = await supabase.table("team_quotas").select("points_balance").eq("team_id", tid).maybe_single().execute()
-        return resp.data.get("points_balance", 0) if resp.data else 0
-
     member_count, (owner_email, owner_username), points_balance = await asyncio.gather(
         get_team_member_count(team_id),
         get_user_info(team["owner_id"]),
-        get_points_balance(team_id),
+        repo.get_points_balance(team_id),
     )
 
     return AdminTeamResponse(
@@ -174,29 +143,23 @@ async def get_team_members(
     auth: AdminAuthDep,
 ):
     """Get all members of a specific team."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check if team exists
-    team_result = await supabase.table("teams").select("id").eq("id", team_id).single().execute()
-    if not team_result.data:
+    if not await repo.get(team_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team not found",
         )
 
-    # Get team members
-    result = await supabase.table("team_members").select("*").eq("team_id", team_id).order("joined_at", desc=False).execute()
-
-    if not result.data:
+    members_rows = await repo.list_members(team_id)
+    if not members_rows:
         return []
 
-    # Batch fetch user info for all members (avoiding N+1 queries)
-    user_ids = [m["user_id"] for m in result.data]
+    user_ids = [m["user_id"] for m in members_rows]
     user_info = await batch_get_user_info(user_ids)
 
-    # Build response
     members = []
-    for member in result.data:
+    for member in members_rows:
         uid = member["user_id"]
         email, username = user_info.get(uid, (None, None))
         members.append(AdminTeamMemberResponse(
@@ -222,52 +185,34 @@ async def transfer_team_ownership(
 
     - **new_owner_id**: User ID of the new owner (must be an existing team member)
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check if team exists
-    team_result = await supabase.table("teams").select("*").eq("id", team_id).single().execute()
-    if not team_result.data:
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team not found",
         )
 
-    team = team_result.data
     old_owner_id = team["owner_id"]
 
-    # Check if new owner is same as current owner
     if new_owner_id == old_owner_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New owner is the same as current owner",
         )
 
-    # Check if new owner is a team member
-    member_result = await supabase.table("team_members").select("*").eq("team_id", team_id).eq("user_id", new_owner_id).single().execute()
-    if not member_result.data:
+    if not await repo.get_member(team_id, new_owner_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New owner must be an existing team member",
         )
 
-    # Update team owner
-    await supabase.table("teams").update({
-        "owner_id": new_owner_id,
-    }).eq("id", team_id).execute()
+    await repo.update(team_id, {"owner_id": new_owner_id})
+    await repo.update_member_role(team_id, new_owner_id, "owner")
+    await repo.update_member_role(team_id, old_owner_id, "admin")
 
-    # Update team_members roles: new owner becomes 'owner', old owner becomes 'member'
-    await supabase.table("team_members").update({
-        "role": "owner",
-    }).eq("team_id", team_id).eq("user_id", new_owner_id).execute()
-
-    await supabase.table("team_members").update({
-        "role": "admin",
-    }).eq("team_id", team_id).eq("user_id", old_owner_id).execute()
-
-    # Get client IP for audit log
     client_ip = request.client.host if request.client else None
-
-    # Create audit log
     await create_audit_log(
         admin_id=auth.user_id,
         action="transfer_team_ownership",
@@ -280,9 +225,10 @@ async def transfer_team_ownership(
         ip_address=client_ip,
     )
 
-    logger.info(f"Team {team_id} ownership transferred from {old_owner_id} to {new_owner_id} by admin {auth.user_id}")
+    logger.info(
+        f"Team {team_id} ownership transferred from {old_owner_id} to {new_owner_id} by admin {auth.user_id}"
+    )
 
-    # Return updated team
     return await get_team(team_id, auth)
 
 
@@ -300,33 +246,23 @@ async def delete_team(
     - Unlink collections (set team_id to null)
     - Delete the team
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check if team exists
-    team_result = await supabase.table("teams").select("*").eq("id", team_id).single().execute()
-    if not team_result.data:
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team not found",
         )
 
-    team = team_result.data
-
-    # Unlink collections (set team_id to null)
     try:
-        await supabase.table("collections").update({
-            "team_id": None,
-        }).eq("team_id", team_id).execute()
+        await repo.unlink_collections(team_id)
     except Exception as e:
         logger.warning(f"Failed to unlink collections from team {team_id}: {e}")
 
-    # Delete team (this will cascade delete team_members and notifications)
-    await supabase.table("teams").delete().eq("id", team_id).execute()
+    await repo.delete(team_id)
 
-    # Get client IP for audit log
     client_ip = request.client.host if request.client else None
-
-    # Create audit log
     await create_audit_log(
         admin_id=auth.user_id,
         action="delete_team",
@@ -362,30 +298,25 @@ async def update_member_role(
             detail=f"Role must be one of: {', '.join(ASSIGNABLE_ROLES)}",
         )
 
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check team exists and get owner
-    team_result = await supabase.table("teams").select("owner_id").eq("id", team_id).single().execute()
-    if not team_result.data:
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    if user_id == team_result.data["owner_id"]:
+    if user_id == team["owner_id"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot change the team owner's role. Use transfer-ownership instead.",
         )
 
-    # Check member exists
-    member_result = await supabase.table("team_members").select("*").eq("team_id", team_id).eq("user_id", user_id).single().execute()
-    if not member_result.data:
+    member = await repo.get_member(team_id, user_id)
+    if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
 
-    old_role = member_result.data["role"]
+    old_role = member["role"]
+    await repo.update_member_role(team_id, user_id, body.role)
 
-    # Update role
-    await supabase.table("team_members").update({"role": body.role}).eq("team_id", team_id).eq("user_id", user_id).execute()
-
-    # Audit log
     client_ip = request.client.host if request.client else None
     await create_audit_log(
         admin_id=auth.user_id,
@@ -396,16 +327,17 @@ async def update_member_role(
         ip_address=client_ip,
     )
 
-    logger.info(f"Team {team_id} member {user_id} role changed from {old_role} to {body.role} by admin {auth.user_id}")
+    logger.info(
+        f"Team {team_id} member {user_id} role changed from {old_role} to {body.role} by admin {auth.user_id}"
+    )
 
-    # Return updated member
     email, username = await get_user_info(user_id)
     return AdminTeamMemberResponse(
         user_id=str(user_id),
         email=email,
         username=username,
         role=body.role,
-        joined_at=member_result.data["joined_at"],
+        joined_at=member["joined_at"],
     )
 
 
@@ -421,30 +353,25 @@ async def remove_member(
 
     - Cannot remove the team owner
     """
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check team exists and get owner
-    team_result = await supabase.table("teams").select("owner_id").eq("id", team_id).single().execute()
-    if not team_result.data:
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    if user_id == team_result.data["owner_id"]:
+    if user_id == team["owner_id"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot remove the team owner. Transfer ownership first.",
         )
 
-    # Check member exists
-    member_result = await supabase.table("team_members").select("role").eq("team_id", team_id).eq("user_id", user_id).single().execute()
-    if not member_result.data:
+    member = await repo.get_member(team_id, user_id)
+    if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
 
-    old_role = member_result.data["role"]
+    old_role = member["role"]
+    await repo.delete_member(team_id, user_id)
 
-    # Delete member
-    await supabase.table("team_members").delete().eq("team_id", team_id).eq("user_id", user_id).execute()
-
-    # Audit log
     client_ip = request.client.host if request.client else None
     await create_audit_log(
         admin_id=auth.user_id,
@@ -469,13 +396,12 @@ async def get_team_modules(
     auth: AdminAuthDep,
 ):
     """Get current module settings for a team."""
-    supabase = await get_async_supabase_admin()
-
-    result = await supabase.table("teams").select("id, enabled_modules").eq("id", team_id).single().execute()
-    if not result.data:
+    repo = AdminTeamsRepository()
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    enabled = result.data.get("enabled_modules") or ALL_MODULE_KEYS
+    enabled = team.get("enabled_modules") or ALL_MODULE_KEYS
 
     modules = [
         AdminModuleDefinition(
@@ -487,7 +413,7 @@ async def get_team_modules(
         for m in MODULE_DEFINITIONS
     ]
 
-    return AdminTeamModulesResponse(team_id=str(result.data["id"]), modules=modules)
+    return AdminTeamModulesResponse(team_id=str(team["id"]), modules=modules)
 
 
 @router.patch("/{team_id}/modules", response_model=AdminTeamModulesResponse)
@@ -498,7 +424,6 @@ async def update_team_modules(
     request: Request,
 ):
     """Update module permissions for a team."""
-    # Validate module keys
     invalid_keys = validate_module_keys(body.enabled_modules)
     if invalid_keys:
         raise HTTPException(
@@ -506,21 +431,16 @@ async def update_team_modules(
             detail=f"Invalid module keys: {', '.join(invalid_keys)}. Valid keys: {', '.join(ALL_MODULE_KEYS)}",
         )
 
-    supabase = await get_async_supabase_admin()
+    repo = AdminTeamsRepository()
 
-    # Check team exists and get current state
-    result = await supabase.table("teams").select("id, enabled_modules").eq("id", team_id).single().execute()
-    if not result.data:
+    team = await repo.get(team_id)
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    old_modules = result.data.get("enabled_modules") or ALL_MODULE_KEYS
+    old_modules = team.get("enabled_modules") or ALL_MODULE_KEYS
 
-    # Update
-    await supabase.table("teams").update({
-        "enabled_modules": body.enabled_modules,
-    }).eq("id", team_id).execute()
+    await repo.update(team_id, {"enabled_modules": body.enabled_modules})
 
-    # Audit log
     client_ip = request.client.host if request.client else None
     await create_audit_log(
         admin_id=auth.user_id,
@@ -536,5 +456,4 @@ async def update_team_modules(
 
     logger.info(f"Team {team_id} modules updated by admin {auth.user_id}: {body.enabled_modules}")
 
-    # Return updated state
     return await get_team_modules(team_id, auth)
