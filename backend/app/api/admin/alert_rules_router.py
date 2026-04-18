@@ -7,7 +7,6 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
 from app.repositories.admin.alert_rules_repository import AlertRulesRepository
 
 router = APIRouter()
@@ -214,7 +213,6 @@ CONDITION_OPS = {
 @router.post("/check", response_model=AlertCheckResult)
 async def check_alerts(auth: AdminAuthDep):
     """Manually check all active alert rules against current metrics."""
-    supabase = await get_async_supabase_admin()  # still needed for metric queries
     repo = AlertRulesRepository()
     now = datetime.now(timezone.utc)
 
@@ -243,25 +241,13 @@ async def check_alerts(auth: AdminAuthDep):
         metric_value = None
 
         if metric_type == "error_rate":
-            req_result = await (
-                supabase.table("api_request_logs")
-                .select("status_code")
-                .gte("timestamp", window_start)
-                .execute()
-            )
-            rows = req_result.data or []
+            rows = await repo.request_status_codes(window_start)
             total = len(rows)
             errors = sum(1 for r in rows if (r.get("status_code") or 0) >= 400)
             metric_value = round((errors / total * 100) if total > 0 else 0, 2)
 
         elif metric_type == "avg_response_time":
-            req_result = await (
-                supabase.table("api_request_logs")
-                .select("response_time_ms")
-                .gte("timestamp", window_start)
-                .execute()
-            )
-            rows = req_result.data or []
+            rows = await repo.request_response_times(window_start)
             if rows:
                 metric_value = round(
                     sum(r.get("response_time_ms") or 0 for r in rows) / len(rows), 1
@@ -270,24 +256,14 @@ async def check_alerts(auth: AdminAuthDep):
                 metric_value = 0
 
         elif metric_type == "error_count":
-            app_result = await (
-                supabase.table("application_logs")
-                .select("id", count="exact")
-                .in_("level", ["ERROR", "CRITICAL"])
-                .gte("logged_at", window_start)
-                .execute()
+            metric_value = await repo.app_log_count_by_levels(
+                ["ERROR", "CRITICAL"], window_start
             )
-            metric_value = app_result.count or 0
 
         elif metric_type == "log_level_count":
-            app_result = await (
-                supabase.table("application_logs")
-                .select("id", count="exact")
-                .eq("level", "CRITICAL")
-                .gte("logged_at", window_start)
-                .execute()
+            metric_value = await repo.app_log_count_by_level(
+                "CRITICAL", window_start
             )
-            metric_value = app_result.count or 0
 
         if metric_value is None:
             continue

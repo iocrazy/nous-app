@@ -191,3 +191,58 @@ async def test_resolve_history_stamps_resolved_at(
     payload = update[1][0]
     assert payload["resolved"] is True
     assert "resolved_at" in payload
+
+
+# ─── Metric queries (for alert evaluation) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_request_status_codes_filters_since(
+    repo: AlertRulesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"status_code": 200}, {"status_code": 500}]
+    rows = await repo.request_status_codes("2026-04-17")
+    assert len(rows) == 2
+
+    gte = next(c for c in fake_query.calls if c[0] == "gte")
+    assert gte[1] == ("timestamp", "2026-04-17")
+
+    tables = [c for c in fake_query.calls if c[0] == "table"]
+    assert tables[0][1] == ("api_request_logs",)
+
+
+@pytest.mark.asyncio
+async def test_request_response_times_selects_column(
+    repo: AlertRulesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"response_time_ms": 42}]
+    await repo.request_response_times("2026-04-17")
+
+    select = next(c for c in fake_query.calls if c[0] == "select")
+    assert select[1] == ("response_time_ms",)
+
+
+@pytest.mark.asyncio
+async def test_app_log_count_by_levels_uses_in_filter(
+    repo: AlertRulesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._count = 7
+    count = await repo.app_log_count_by_levels(
+        ["ERROR", "CRITICAL"], "2026-04-17"
+    )
+    assert count == 7
+
+    in_call = next(c for c in fake_query.calls if c[0] == "in_")
+    assert in_call[1] == ("level", ["ERROR", "CRITICAL"])
+
+
+@pytest.mark.asyncio
+async def test_app_log_count_by_level_uses_eq_filter(
+    repo: AlertRulesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._count = 3
+    count = await repo.app_log_count_by_level("CRITICAL", "2026-04-17")
+    assert count == 3
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("level", "CRITICAL") in eq_values

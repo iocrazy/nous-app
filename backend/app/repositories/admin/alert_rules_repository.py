@@ -122,3 +122,55 @@ class AlertRulesRepository:
             .eq("id", alert_id)
             .execute()
         )
+
+    # ─── Metric queries (for alert evaluation) ─────────────────────────
+
+    async def request_status_codes(
+        self, since_iso: str
+    ) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = await (
+            client.table("api_request_logs")
+            .select("status_code")
+            .gte("timestamp", since_iso)
+            .execute()
+        )
+        return result.data or []
+
+    async def request_response_times(
+        self, since_iso: str
+    ) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = await (
+            client.table("api_request_logs")
+            .select("response_time_ms")
+            .gte("timestamp", since_iso)
+            .execute()
+        )
+        return result.data or []
+
+    async def app_log_count_by_levels(
+        self, levels: list[str], since_iso: str
+    ) -> int:
+        client = await self._client()
+        result = await (
+            client.table("application_logs")
+            .select("id", count="exact")
+            .in_("level", levels)
+            .gte("logged_at", since_iso)
+            .execute()
+        )
+        return result.count or 0
+
+    async def app_log_count_by_level(
+        self, level: str, since_iso: str
+    ) -> int:
+        client = await self._client()
+        result = await (
+            client.table("application_logs")
+            .select("id", count="exact")
+            .eq("level", level)
+            .gte("logged_at", since_iso)
+            .execute()
+        )
+        return result.count or 0
