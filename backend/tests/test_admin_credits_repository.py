@@ -384,3 +384,65 @@ async def test_revenue_chart_rows_filters_paid_since(
 
     order = next(c for c in fake_query.calls if c[0] == "order")
     assert order[2] == {"desc": False}
+
+
+# ─── Order detail / update ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_order_returns_row(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = {"id": "o1", "payment_status": "pending"}
+    row = await repo.get_order("o1")
+    assert row is not None
+    assert row["payment_status"] == "pending"
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("id", "o1") in eq_values
+
+
+@pytest.mark.asyncio
+async def test_update_order_filters_by_id(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    await repo.update_order("o1", {"payment_status": "paid"})
+
+    upd = next(c for c in fake_query.calls if c[0] == "update")
+    assert upd[1] == ({"payment_status": "paid"},)
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("id", "o1") in eq_values
+
+
+# ─── Team detail queries ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_team_returns_minimal_cols(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = {"id": "t1", "name": "A", "is_personal": False}
+    team = await repo.get_team("t1")
+    assert team is not None
+    assert team["name"] == "A"
+
+
+@pytest.mark.asyncio
+async def test_get_team_quota_empty_dict_on_missing(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = None
+    assert await repo.get_team_quota("t1") == {}
+
+
+@pytest.mark.asyncio
+async def test_recent_transactions_orders_desc_with_limit(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.recent_transactions("t1", limit=5)
+
+    order = next(c for c in fake_query.calls if c[0] == "order")
+    assert order[2] == {"desc": True}
+    lim = next(c for c in fake_query.calls if c[0] == "limit")
+    assert lim[1] == (5,)

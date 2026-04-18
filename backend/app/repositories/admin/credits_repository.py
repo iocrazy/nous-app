@@ -141,6 +141,30 @@ class AdminCreditsRepository:
         result = await query.execute()
         return result.data or [], result.count or 0
 
+    async def get_order(self, order_id: str) -> Optional[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table(self.ORDERS_TABLE)
+            .select("*")
+            .eq("id", order_id)
+            .maybe_single()
+            .execute()
+        )
+        if result is None:
+            return None
+        return result.data
+
+    async def update_order(
+        self, order_id: str, payload: dict[str, Any]
+    ) -> None:
+        client = await self._client()
+        await (
+            client.table(self.ORDERS_TABLE)
+            .update(payload)
+            .eq("id", order_id)
+            .execute()
+        )
+
     # ─── Enrichment helpers ────────────────────────────────────────
 
     async def get_teams_by_ids(
@@ -228,6 +252,46 @@ class AdminCreditsRepository:
             .execute()
         )
         return result.count or 0
+
+    async def get_team(self, team_id: str) -> Optional[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table(self.TEAMS_TABLE)
+            .select("id, name, is_personal, owner_id")
+            .eq("id", team_id)
+            .maybe_single()
+            .execute()
+        )
+        if result is None:
+            return None
+        return result.data
+
+    async def get_team_quota(self, team_id: str) -> dict[str, Any]:
+        client = await self._client()
+        result = (
+            await client.table("team_quotas")
+            .select("points_balance, storage_limit_bytes, storage_used_bytes")
+            .eq("team_id", team_id)
+            .maybe_single()
+            .execute()
+        )
+        if result is None or not result.data:
+            return {}
+        return result.data
+
+    async def recent_transactions(
+        self, team_id: str, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table(self.TRANSACTIONS_TABLE)
+            .select("*")
+            .eq("team_id", team_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
 
     async def revenue_chart_rows(self, since_iso: str) -> list[dict[str, Any]]:
         client = await self._client()

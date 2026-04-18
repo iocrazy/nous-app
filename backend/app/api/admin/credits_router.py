@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import get_async_supabase_admin
 from app.repositories.admin.credits_repository import AdminCreditsRepository
 from app.schemas.admin import (
     AdminCreditsStatsResponse,
@@ -337,20 +336,12 @@ async def confirm_order(
     request: Request,
 ):
     """Manually confirm payment for a pending order."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    # Fetch order
-    order_result = (
-        await supabase.table("orders")
-        .select("*")
-        .eq("id", order_id)
-        .maybe_single()
-        .execute()
-    )
-    if not order_result.data:
+    order = await repo.get_order(order_id)
+    if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
-    order = order_result.data
     if order["payment_status"] != "pending":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -358,13 +349,9 @@ async def confirm_order(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-
-    # Update order status
-    await (
-        supabase.table("orders")
-        .update({"payment_status": "paid", "paid_at": now, "updated_at": now})
-        .eq("id", order_id)
-        .execute()
+    await repo.update_order(
+        order_id,
+        {"payment_status": "paid", "paid_at": now, "updated_at": now},
     )
 
     # Add points to team
@@ -404,19 +391,12 @@ async def refund_order(
     request: Request,
 ):
     """Refund a paid order (deduct points, mark as refunded)."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    order_result = (
-        await supabase.table("orders")
-        .select("*")
-        .eq("id", order_id)
-        .maybe_single()
-        .execute()
-    )
-    if not order_result.data:
+    order = await repo.get_order(order_id)
+    if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
-    order = order_result.data
     if order["payment_status"] != "paid":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -424,13 +404,8 @@ async def refund_order(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-
-    # Update order status
-    await (
-        supabase.table("orders")
-        .update({"payment_status": "refunded", "updated_at": now})
-        .eq("id", order_id)
-        .execute()
+    await repo.update_order(
+        order_id, {"payment_status": "refunded", "updated_at": now}
     )
 
     # Deduct points from team (negative amount)
@@ -687,46 +662,19 @@ async def get_team_detail(
     auth: AdminAuthDep,
 ):
     """Get detailed credits info for a single team."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    # Team info
-    team_result = (
-        await supabase.table("teams")
-        .select("id, name, is_personal, owner_id")
-        .eq("id", team_id)
-        .maybe_single()
-        .execute()
-    )
-    if not team_result.data:
+    team = await repo.get_team(team_id)
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    team = team_result.data
     team_display_name = await _get_team_display_name(team)
+    quota = await repo.get_team_quota(team_id)
 
-    # Quota
-    quota_result = (
-        await supabase.table("team_quotas")
-        .select("points_balance, storage_limit_bytes, storage_used_bytes")
-        .eq("team_id", team_id)
-        .maybe_single()
-        .execute()
-    )
-    quota = quota_result.data or {}
-
-    # Member count
     member_counts = await batch_get_team_member_counts([team_id])
     member_count = member_counts.get(team_id, 0)
 
-    # Recent transactions
-    tx_result = (
-        await supabase.table("point_transactions")
-        .select("*")
-        .eq("team_id", team_id)
-        .order("created_at", desc=True)
-        .limit(10)
-        .execute()
-    )
-    tx_rows = tx_result.data or []
+    tx_rows = await repo.recent_transactions(team_id, limit=10)
 
     # Enrich transactions with user emails
     tx_user_ids = list({str(r["user_id"]) for r in tx_rows if r.get("user_id")})
