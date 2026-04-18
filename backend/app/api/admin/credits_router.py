@@ -74,80 +74,32 @@ async def _get_team_name_map(team_ids: list[str]) -> dict[str, str]:
 @router.get("/stats", response_model=AdminCreditsStatsResponse)
 async def get_credits_stats(auth: AdminAuthDep):
     """System-wide credits statistics."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    # Total points in system (sum of all team balances)
-    quotas_result = (
-        await supabase.table("team_quotas")
-        .select("points_balance")
-        .execute()
-    )
-    total_points = sum(
-        (r.get("points_balance") or 0) for r in (quotas_result.data or [])
-    )
+    quotas = await repo.all_quotas_balances()
+    total_points = sum((r.get("points_balance") or 0) for r in quotas)
 
-    # Total consumed (sum of negative transactions)
-    consume_result = (
-        await supabase.table("point_transactions")
-        .select("amount")
-        .eq("type", "consume")
-        .execute()
-    )
-    total_consumed = sum(
-        abs(r.get("amount") or 0) for r in (consume_result.data or [])
-    )
+    consume_rows = await repo.transactions_by_type("consume")
+    total_consumed = sum(abs(r.get("amount") or 0) for r in consume_rows)
 
-    # Total purchased
-    purchase_result = (
-        await supabase.table("point_transactions")
-        .select("amount")
-        .eq("type", "purchase")
-        .execute()
-    )
-    total_purchased = sum(
-        (r.get("amount") or 0) for r in (purchase_result.data or [])
-    )
+    purchase_rows = await repo.transactions_by_type("purchase")
+    total_purchased = sum((r.get("amount") or 0) for r in purchase_rows)
 
-    # Total revenue (sum of paid orders amount_cents)
-    revenue_result = (
-        await supabase.table("orders")
-        .select("amount_cents")
-        .eq("payment_status", "paid")
-        .execute()
-    )
+    revenue_rows = await repo.orders_by_status(payment_status="paid")
     total_revenue_cents = sum(
-        (r.get("amount_cents") or 0) for r in (revenue_result.data or [])
+        (r.get("amount_cents") or 0) for r in revenue_rows
     )
 
-    # Active teams count
-    teams_result = (
-        await supabase.table("teams")
-        .select("id", count="exact")
-        .execute()
-    )
-    active_teams_count = teams_result.count or 0
+    active_teams_count = await repo.teams_count()
+    pending_orders_count = await repo.orders_count_by_status("pending")
 
-    # Pending orders count
-    pending_result = (
-        await supabase.table("orders")
-        .select("id", count="exact")
-        .eq("payment_status", "pending")
-        .execute()
-    )
-    pending_orders_count = pending_result.count or 0
-
-    # Monthly revenue (current month)
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    monthly_result = (
-        await supabase.table("orders")
-        .select("amount_cents")
-        .eq("payment_status", "paid")
-        .gte("paid_at", month_start.isoformat())
-        .execute()
+    monthly_rows = await repo.orders_by_status(
+        payment_status="paid", since_iso=month_start.isoformat()
     )
     monthly_revenue_cents = sum(
-        (r.get("amount_cents") or 0) for r in (monthly_result.data or [])
+        (r.get("amount_cents") or 0) for r in monthly_rows
     )
 
     return AdminCreditsStatsResponse(
@@ -168,21 +120,14 @@ async def get_revenue_chart(
     days: int = Query(30, ge=7, le=365),
 ):
     """Revenue trend data grouped by period."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    result = (
-        await supabase.table("orders")
-        .select("paid_at, amount_cents, points_amount")
-        .eq("payment_status", "paid")
-        .gte("paid_at", since.isoformat())
-        .order("paid_at", desc=False)
-        .execute()
-    )
+    rows = await repo.revenue_chart_rows(since.isoformat())
 
     # Group by period
     buckets: dict[str, dict] = {}
-    for row in (result.data or []):
+    for row in rows:
         paid_at = row.get("paid_at")
         if not paid_at:
             continue
@@ -210,18 +155,13 @@ async def get_revenue_chart(
 @router.get("/consumption-chart", response_model=list[AdminConsumptionChartItem])
 async def get_consumption_chart(auth: AdminAuthDep):
     """Consumption distribution by action type."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    result = (
-        await supabase.table("point_transactions")
-        .select("description, amount")
-        .eq("type", "consume")
-        .execute()
-    )
+    rows = await repo.transactions_by_type("consume", columns="description, amount")
 
     # Extract action_type from description (e.g. "video_parse: ..." → "video_parse")
     buckets: dict[str, int] = {}
-    for row in (result.data or []):
+    for row in rows:
         desc = row.get("description") or "unknown"
         action_type = desc.split(":")[0].split(" ")[0].strip()
         buckets[action_type] = buckets.get(action_type, 0) + abs(row.get("amount") or 0)
@@ -238,18 +178,13 @@ async def get_top_teams(
     limit: int = Query(10, ge=1, le=50),
 ):
     """Top consuming teams."""
-    supabase = await get_async_supabase_admin()
+    repo = AdminCreditsRepository()
 
-    result = (
-        await supabase.table("point_transactions")
-        .select("team_id, amount")
-        .eq("type", "consume")
-        .execute()
-    )
+    rows = await repo.transactions_by_type("consume", columns="team_id, amount")
 
     # Aggregate by team_id
     team_totals: dict[str, int] = {}
-    for row in (result.data or []):
+    for row in rows:
         tid = str(row.get("team_id", ""))
         if not tid:
             continue

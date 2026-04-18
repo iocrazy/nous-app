@@ -299,3 +299,88 @@ async def test_get_package_names_returns_id_to_name_map(
     ]
     names = await repo.get_package_names(["p1", "p2"])
     assert names == {"p1": "Basic", "p2": "Pro"}
+
+
+# ─── Stats aggregates ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_all_quotas_balances_returns_rows(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"points_balance": 100}, {"points_balance": 200}]
+    rows = await repo.all_quotas_balances()
+    assert rows == [{"points_balance": 100}, {"points_balance": 200}]
+
+
+@pytest.mark.asyncio
+async def test_transactions_by_type_filters_on_type(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"amount": -5}]
+    await repo.transactions_by_type("consume")
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("type", "consume") in eq_values
+
+
+@pytest.mark.asyncio
+async def test_orders_by_status_without_since(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"amount_cents": 999}]
+    await repo.orders_by_status(payment_status="paid")
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("payment_status", "paid") in eq_values
+    assert not any(c[0] == "gte" for c in fake_query.calls)
+
+
+@pytest.mark.asyncio
+async def test_orders_by_status_with_since_applies_gte(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.orders_by_status(
+        payment_status="paid", since_iso="2026-04-01"
+    )
+
+    gte = next(c for c in fake_query.calls if c[0] == "gte")
+    assert gte[1] == ("paid_at", "2026-04-01")
+
+
+@pytest.mark.asyncio
+async def test_teams_count_returns_count(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._count = 42
+    assert await repo.teams_count() == 42
+
+
+@pytest.mark.asyncio
+async def test_orders_count_by_status_filters(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._count = 5
+    count = await repo.orders_count_by_status("pending")
+    assert count == 5
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("payment_status", "pending") in eq_values
+
+
+@pytest.mark.asyncio
+async def test_revenue_chart_rows_filters_paid_since(
+    repo: AdminCreditsRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = [{"paid_at": "2026-04-17", "amount_cents": 100}]
+    await repo.revenue_chart_rows("2026-04-01")
+
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+    assert ("payment_status", "paid") in eq_values
+
+    gte = next(c for c in fake_query.calls if c[0] == "gte")
+    assert gte[1] == ("paid_at", "2026-04-01")
+
+    order = next(c for c in fake_query.calls if c[0] == "order")
+    assert order[2] == {"desc": False}

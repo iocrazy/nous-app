@@ -170,3 +170,73 @@ class AdminCreditsRepository:
             .execute()
         )
         return {str(p["id"]): p["name"] for p in (result.data or [])}
+
+    # ─── Stats aggregates ──────────────────────────────────────────
+
+    async def all_quotas_balances(self) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table("team_quotas").select("points_balance").execute()
+        )
+        return result.data or []
+
+    async def transactions_by_type(
+        self, type_val: str, columns: str = "amount"
+    ) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table(self.TRANSACTIONS_TABLE)
+            .select(columns)
+            .eq("type", type_val)
+            .execute()
+        )
+        return result.data or []
+
+    async def orders_by_status(
+        self,
+        *,
+        payment_status: str,
+        columns: str = "amount_cents",
+        since_iso: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        client = await self._client()
+        query = (
+            client.table(self.ORDERS_TABLE)
+            .select(columns)
+            .eq("payment_status", payment_status)
+        )
+        if since_iso:
+            query = query.gte("paid_at", since_iso)
+        result = await query.execute()
+        return result.data or []
+
+    async def teams_count(self) -> int:
+        client = await self._client()
+        result = (
+            await client.table(self.TEAMS_TABLE)
+            .select("id", count="exact")
+            .execute()
+        )
+        return result.count or 0
+
+    async def orders_count_by_status(self, payment_status: str) -> int:
+        client = await self._client()
+        result = (
+            await client.table(self.ORDERS_TABLE)
+            .select("id", count="exact")
+            .eq("payment_status", payment_status)
+            .execute()
+        )
+        return result.count or 0
+
+    async def revenue_chart_rows(self, since_iso: str) -> list[dict[str, Any]]:
+        client = await self._client()
+        result = (
+            await client.table(self.ORDERS_TABLE)
+            .select("paid_at, amount_cents, points_amount")
+            .eq("payment_status", "paid")
+            .gte("paid_at", since_iso)
+            .order("paid_at", desc=False)
+            .execute()
+        )
+        return result.data or []
