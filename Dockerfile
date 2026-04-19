@@ -76,16 +76,17 @@ RUN uv sync
 # Create downloads directory
 RUN mkdir -p /app/downloads
 
-# Non-root user is set up but NOT activated.
-# Reason: the NAS host mounts /app/downloads with Synology ACLs that
-# don't grant UID 10001 read access, causing every /media/{id}/cover
-# request to 500 with PermissionError. Until we coordinate the volume
-# ACLs with the host, keep the container running as root. Re-enable
-# USER app once the NAS side gives UID 10001 read+exec on downloads.
-RUN groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --home /app --shell /usr/sbin/nologin app \
-    && chown -R app:app /app
-# USER app  # intentionally disabled — see comment above
+# Non-root service user.
+# UID 1031 / GID 100 matches the 'mediahub' service account created on
+# the Synology NAS (`synouser --add mediahub`). The shared UID+GID is
+# what lets the container read/write the bind-mounted MediaHub.library
+# directory — Docker permissions are purely numeric, so the names
+# ('mediahub' on host, 'app' in container) don't matter, only the
+# numbers 1031/100 do.
+RUN groupadd --gid 100 users 2>/dev/null || true \
+    && useradd --uid 1031 --gid 100 --home /app --shell /usr/sbin/nologin app \
+    && chown -R 1031:100 /app
+USER app
 
 # Expose port
 EXPOSE 8080
