@@ -55,6 +55,13 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
     task_soft_time_limit=settings.CELERY_TASK_TIME_LIMIT - 30,
+    # Ack after the task finishes, not when the worker picks it up. Without
+    # this, a worker restart mid-task (deploys, OOM) silently drops the
+    # message — the reaper then marks the unified_task "Stale task timeout"
+    # minutes later. Our tasks are idempotent (they re-check DB state before
+    # writing), so re-delivery on crash is safe.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     # Worker 配置
     worker_prefetch_multiplier=1,  # 公平调度，每次只取一个任务
     worker_concurrency=settings.CELERY_WORKER_CONCURRENCY,

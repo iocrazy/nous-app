@@ -227,6 +227,12 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     ai_repo = AIRepository()
     transcript = await ai_repo.get_transcript(resource_id)
 
+    # Track unified_task so we can mark it failed if the Celery dispatch
+    # itself throws — otherwise the row is orphaned in "processing" until
+    # the reaper catches it (which logs "Stale task timeout", masking the
+    # real error).
+    _orphan_task_id: str | None = None
+
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
@@ -243,6 +249,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
                 resource_id=resource_id,
             )
             await tracker.start(task_id)
+            _orphan_task_id = task_id
 
             celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
@@ -253,6 +260,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
                 await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
             except Exception as _e:
                 logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
+            # Dispatch succeeded — worker now owns the unified_task.
+            _orphan_task_id = None
             return {
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
@@ -275,6 +284,16 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
                 "platform_id": platform_id,
             }
     except Exception as e:
+        if _orphan_task_id:
+            try:
+                from app.services.unified_task_manager import get_task_manager
+                await get_task_manager().fail(
+                    _orphan_task_id,
+                    f"Dispatch failed: {str(e)[:180]}",
+                    error_code="DISPATCH_ERROR",
+                )
+            except Exception as fail_err:
+                logger.error(f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}")
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(
@@ -402,6 +421,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     ai_repo = AIRepository()
     transcript = await ai_repo.get_transcript(_resource_id) if _resource_id else None
 
+    _orphan_task_id: str | None = None
+
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
@@ -417,6 +438,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
                 resource_id=_resource_id,
             )
             await tracker.start(task_id)
+            _orphan_task_id = task_id
 
             celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
@@ -426,6 +448,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
                 await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
             except Exception as _e:
                 logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
+            _orphan_task_id = None
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
             # No transcript, run full pipeline
@@ -443,6 +466,16 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
                 "platform_id": platform_id,
             }
     except Exception as e:
+        if _orphan_task_id:
+            try:
+                from app.services.unified_task_manager import get_task_manager
+                await get_task_manager().fail(
+                    _orphan_task_id,
+                    f"Dispatch failed: {str(e)[:180]}",
+                    error_code="DISPATCH_ERROR",
+                )
+            except Exception as fail_err:
+                logger.error(f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}")
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(
