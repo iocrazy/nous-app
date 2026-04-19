@@ -98,6 +98,10 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.cleanup_old_unified_tasks",
             "schedule": 86400.0,  # 每天执行一次
         },
+        "reap-stuck-pending-tasks-15min": {
+            "task": "app.tasks.scheduled_tasks.reap_stuck_pending_tasks",
+            "schedule": 900.0,  # 每 15 分钟：把 worker 丢的 pending 标记 failed
+        },
         "recover-stale-orchestrator-locks-hourly": {
             "task": "app.tasks.scheduled_tasks.recover_stale_orchestrator_locks",
             "schedule": 3600.0,  # Every hour

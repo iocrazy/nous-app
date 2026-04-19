@@ -97,9 +97,60 @@ async def retry_task(task_id: str, auth: AuthDep):
             else:
                 logger.warning(f"[TaskRetry] No version found for resource={resource_id}, skipping dispatch")
 
-        elif task_type == "download" and resource_id:
-            # Re-dispatch download if needed (future)
-            pass
+        elif task_type == "download":
+            # Re-dispatch the download. The reaper marks zombie pending
+            # tasks as failed (status=failed, error_code=WORKER_LOST),
+            # and this path rehydrates the Celery job from the media row.
+            from app.repositories.media_repository import MediaRepository
+            from app.tasks.download_tasks import download_unified_task
+
+            media_id = task.get("media_id")
+            if not media_id:
+                logger.warning(f"[TaskRetry] Download task {task_id} has no media_id")
+                return {"success": True, "data": task}
+
+            mrepo = MediaRepository()
+            media = await mrepo.get_by_platform_id(media_id)
+            if not media:
+                logger.warning(f"[TaskRetry] Media not found for retry of {task_id}: {media_id}")
+                return {"success": True, "data": task}
+
+            meta = task.get("metadata") or {}
+            subtitle = task.get("subtitle") or ""
+            want_video = "Image" in subtitle or "Video" in subtitle or int(media.get("media_type") or 0) in (0, 2, 4, 61, 68)
+            want_cover = "Cover" in subtitle
+
+            celery_task = await asyncio.to_thread(
+                download_unified_task.delay,
+                platform_id=media_id,
+                user_id=user_id,
+                url=None,  # Douyin path — strategies refresh expired URLs via ensure_download_urls
+                download_video=want_video,
+                download_cover=want_cover or True,  # default include cover
+                media_type=int(media.get("media_type") or 0),
+                video_title=media.get("title") or media_id,
+                resource_id=resource_id,
+                user_agent=meta.get("user_agent"),
+                _unified_task_id=str(task_id),
+            )
+            try:
+                await tracker._atomic_update(str(task_id), {"celery_task_id": celery_task.id})
+            except Exception as _e:
+                logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
+            logger.info(f"[TaskRetry] Re-dispatched download for task={task_id}, media={media_id}")
+
+        elif task_type == "ai_summary" and resource_id:
+            from app.tasks.ai_tasks import generate_summary_task
+            media_id = task.get("media_id")
+            celery_task = await asyncio.to_thread(
+                generate_summary_task.delay,
+                media_id, user_id, resource_id, str(task_id),
+            )
+            try:
+                await tracker._atomic_update(str(task_id), {"celery_task_id": celery_task.id})
+            except Exception as _e:
+                logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
+            logger.info(f"[TaskRetry] Re-dispatched summary for task={task_id}")
 
     except Exception as e:
         logger.error(f"[TaskRetry] Failed to dispatch {task_type} for task {task_id}: {e}")

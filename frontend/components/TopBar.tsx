@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   XCircle,
   X,
+  RotateCcw,
   Upload as UploadIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -144,7 +145,7 @@ function progressBarColor(status: TaskStatus): string {
 
 const TaskCenterPanel: React.FC = () => {
   const { t } = useTranslation();
-  const { tasks, activeTasks, totalActive, cancelTask, clearCompleted, isLoading } = useTaskManager();
+  const { tasks, activeTasks, totalActive, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
   const upload = useUpload();
   const completedCount = tasks.filter(
     (tk) => tk.status === 'completed' || tk.status === 'failed' || tk.status === 'cancelled',
@@ -251,11 +252,21 @@ const TaskCenterPanel: React.FC = () => {
                         {task.status === 'completed' && (
                           <CheckCircle2 size={14} className="text-emerald-400" />
                         )}
-                        {task.status === 'failed' && (
-                          <XCircle size={14} className="text-red-400" />
-                        )}
-                        {task.status === 'cancelled' && (
-                          <X size={14} className="text-zinc-500" />
+                        {(task.status === 'failed' || task.status === 'cancelled') && (
+                          <>
+                            <button
+                              onClick={() => retryTask(task.id)}
+                              className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
+                              title="Retry"
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                            {task.status === 'failed' ? (
+                              <XCircle size={14} className="text-red-400" />
+                            ) : (
+                              <X size={14} className="text-zinc-500" />
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

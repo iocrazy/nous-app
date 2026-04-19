@@ -296,6 +296,69 @@ def reset_monthly_quotas():
 
 
 @shared_task
+def reap_stuck_pending_tasks():
+    """
+    Mark zombie pending tasks as failed.
+
+    A task is a 'zombie' when:
+      - status = 'pending'
+      - phase  = 'queued'
+      - started_at IS NULL
+      - created_at < NOW() - 1 hour
+
+    These are tasks whose Celery message was lost — the worker crashed
+    before claiming, Redis memory pressure evicted the job, or the
+    broker was restarted while the row already existed. Without this
+    reaper they sit forever in pending state and never surface a retry
+    button to the user.
+
+    We mark them failed with a clear error_msg so the user's Retry
+    button in Task Center (or the admin /tasks/{id}/retry endpoint)
+    can re-dispatch them.
+    """
+    logger.info("[Celery Beat] Reaping stuck pending tasks...")
+
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _reap():
+            supabase = await get_async_supabase_admin()
+            cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
+            now_iso = datetime.now().isoformat()
+            result = (
+                await supabase.table("unified_tasks")
+                .update({
+                    "status": "failed",
+                    "phase": "failed",
+                    "error_msg": (
+                        "Worker never claimed this task — Celery message "
+                        "was lost (worker crash / broker restart). "
+                        "Use Retry to re-queue."
+                    ),
+                    "error_code": "WORKER_LOST",
+                    "updated_at": now_iso,
+                })
+                .eq("status", "pending")
+                .eq("phase", "queued")
+                .is_("started_at", "null")
+                .lt("created_at", cutoff)
+                .execute()
+            )
+            return len(result.data) if result.data else 0
+
+        count = run_async(_reap())
+        if count:
+            logger.warning(f"[Celery Beat] Reaper marked {count} stuck pending tasks as failed")
+        else:
+            logger.info("[Celery Beat] Reaper found no stuck pending tasks")
+        return {"status": "success", "reaped": count}
+
+    except Exception as e:
+        logger.error(f"[Celery Beat] Reaper failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@shared_task
 def cleanup_old_unified_tasks():
     """
     Clean up old completed/failed/cancelled unified tasks.
