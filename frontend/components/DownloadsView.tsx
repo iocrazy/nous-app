@@ -67,7 +67,7 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Resource data ───────────────────────────────────
   const mediaIds = useMemo(() => library.map((item) => item.id).filter(Boolean), [library]);
-  const { resourceDataMap, setResourceDataMap, resourceIdMap } = useResourceDataMap(mediaIds);
+  const { resourceDataMap, setResourceDataMap, resourceIdMap, aiStatusMap } = useResourceDataMap(mediaIds);
   const tagSearchMap = useTagSearchMap(resourceDataMap);
   const { allTags, setAllTags } = useAllTags();
 
@@ -655,6 +655,7 @@ export const DownloadsView: React.FC = () => {
                     key={item.platform_id}
                     data={item}
                     resourceId={resourceIdMap[item.id]}
+                    aiStatus={aiStatusMap[item.id]}
                     onClick={(e) => handleVideoClick(item, e)}
                     onDoubleClick={() => handleVideoDoubleClick(item)}
                     onContextMenu={handleContextMenu}

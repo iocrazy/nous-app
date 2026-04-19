@@ -8,6 +8,12 @@ export interface ResourceData {
   id: string;
   notes: string | null;
   rating: number;
+  // AI pipeline statuses — sourced from resources.* (migration 067/075 moved
+  // them off parsed_media). Passed to CompactMediaCard.aiStatus so the
+  // transcript/summary/analysis icons light up correctly after processing.
+  transcript_status?: string;
+  summary_status?: string;
+  visual_analysis_status?: string;
 }
 
 export function useResourceDataMap(libraryIds: string[]) {
@@ -20,7 +26,9 @@ export function useResourceDataMap(libraryIds: string[]) {
 
     supabase
       .from('resources')
-      .select('id, media_id, notes, rating')
+      .select(
+        'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
+      )
       .in('media_id', libraryIds)
       .then(({ data, error }) => {
         if (error || !data) return;
@@ -31,6 +39,9 @@ export function useResourceDataMap(libraryIds: string[]) {
               id: String(row.id),
               notes: row.notes,
               rating: row.rating || 0,
+              transcript_status: row.transcript_status ?? undefined,
+              summary_status: row.summary_status ?? undefined,
+              visual_analysis_status: row.visual_analysis_status ?? undefined,
             };
           }
         }
@@ -46,7 +57,29 @@ export function useResourceDataMap(libraryIds: string[]) {
     return map;
   }, [resourceDataMap]);
 
-  return { resourceDataMap, setResourceDataMap, resourceIdMap };
+  // Per-media AI status map — passed to CompactMediaCard so the four AI
+  // icons (audio / transcript / summary / analysis) reflect the
+  // resource-level status. Without this the icons were stuck gray because
+  // the columns were removed from parsed_media in migration 075.
+  const aiStatusMap = useMemo(() => {
+    const map: Record<string, {
+      transcript_status?: string;
+      summary_status?: string;
+      visual_analysis_status?: string;
+    }> = {};
+    for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
+      if (rd.transcript_status || rd.summary_status || rd.visual_analysis_status) {
+        map[mediaId] = {
+          transcript_status: rd.transcript_status,
+          summary_status: rd.summary_status,
+          visual_analysis_status: rd.visual_analysis_status,
+        };
+      }
+    }
+    return map;
+  }, [resourceDataMap]);
+
+  return { resourceDataMap, setResourceDataMap, resourceIdMap, aiStatusMap };
 }
 
 export function useTagSearchMap(resourceDataMap: Record<string, ResourceData>) {
