@@ -102,21 +102,21 @@ export function DownloadMenuDropdown({
             if (hasAudioFile) {
               return (
                 <button onClick={() => onDownload('audio')} className={btnClass}>
-                  <Music size={13} className="text-amber-400" /> Download Audio
+                  <Music size={13} className="text-amber-400" /> Audio
                 </button>
               );
             }
             if (isPending(audioStatus)) {
               return (
                 <button disabled className={disabledClass}>
-                  <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbum ? 'Downloading Audio...' : 'Extracting Audio...'}
+                  <Loader2 size={13} className="text-amber-400 animate-spin" /> {isAlbum ? 'Audio Downloading...' : 'Audio Extracting...'}
                 </button>
               );
             }
             if (isAlbum && video.original_url) {
               return (
                 <button onClick={() => onFetchMedia({ video: false, cover: false })} className={btnClass}>
-                  <Music size={13} className="text-amber-400" /> Download Audio
+                  <Music size={13} className="text-amber-400" /> Fetch Audio
                 </button>
               );
             }
