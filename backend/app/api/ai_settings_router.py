@@ -75,6 +75,16 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             ai_settings["default_summary_model"] = body.default_summary_model
         if body.default_analysis_model is not None:
             ai_settings["default_analysis_model"] = body.default_analysis_model
+        if body.ai_enabled is not None:
+            ai_settings["ai_enabled"] = body.ai_enabled
+        if body.auto_transcribe is not None:
+            ai_settings["auto_transcribe"] = body.auto_transcribe
+        if body.auto_summarize is not None:
+            ai_settings["auto_summarize"] = body.auto_summarize
+        if body.preferred_language is not None:
+            ai_settings["preferred_language"] = body.preferred_language
+        if body.task_assignment is not None:
+            ai_settings["task_assignment"] = body.task_assignment
 
         settings_json[_AI_SETTINGS_KEY] = ai_settings
 
@@ -88,6 +98,11 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
                 "default_summary_model", "gpt-4o-mini"
             ),
             default_analysis_model=ai_settings.get("default_analysis_model", "gpt-4o"),
+            ai_enabled=ai_settings.get("ai_enabled", True),
+            auto_transcribe=ai_settings.get("auto_transcribe", False),
+            auto_summarize=ai_settings.get("auto_summarize", False),
+            preferred_language=ai_settings.get("preferred_language", "auto"),
+            task_assignment=ai_settings.get("task_assignment", {}),
         )
 
     except HTTPException:

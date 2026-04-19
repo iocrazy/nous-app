@@ -495,9 +495,14 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         ai_settings = _get_ai_settings(user_id)
 
         # Read summary task assignment (e.g. "openai:gpt-4o-mini", "volcengine:doubao-...")
-        summary_assignment = ai_settings.get("task_assignment", {}).get(
-            "summary", f"openai:{ai_settings.get('default_summary_model', 'gpt-4o-mini')}"
-        )
+        # Frontend stores this under "summarization"; "summary" is a legacy key kept
+        # here as a safety net for any old rows. default_summary_model may itself
+        # already be provider-qualified ("doubao:doubao-...") — don't re-prefix it.
+        _ta = ai_settings.get("task_assignment", {})
+        summary_assignment = _ta.get("summarization") or _ta.get("summary")
+        if not summary_assignment:
+            _default = ai_settings.get("default_summary_model", "gpt-4o-mini")
+            summary_assignment = _default if ":" in _default else f"openai:{_default}"
 
         # Resolve Nous platform models to their actual provider
         if summary_assignment.startswith("nous-"):
