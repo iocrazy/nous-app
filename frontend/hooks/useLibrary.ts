@@ -28,6 +28,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(-1);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  // True only when the sentinel has actually scrolled into the viewport
+  // (rootMargin: 0). Used by mobile UI to show a floating fallback button
+  // when the user is at the bottom — the auto-load observer uses a 600px
+  // preload zone, so this is strictly a later event.
+  const [isSentinelVisible, setIsSentinelVisible] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // View mode
@@ -209,6 +214,24 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
   }, [hasMoreData, isLoadingMore, isSearchActive, currentPage, library.length]);
+
+  // Visibility tracker for the floating fallback button on mobile.
+  // Fires when sentinel actually enters the viewport (no preload zone).
+  useEffect(() => {
+    if (!loadMoreRef.current) {
+      setIsSentinelVisible(false);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        setIsSentinelVisible(entry.isIntersecting);
+      },
+      { threshold: 0, rootMargin: '0px' }
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [library.length]);
 
   // --- Collection Video Loading ---
   // NOTE: media_collections table has been dropped (076 migration).
@@ -543,6 +566,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    isSentinelVisible,
     loadMoreLibrary,
 
     // View

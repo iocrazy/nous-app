@@ -55,6 +55,7 @@ export const DownloadsView: React.FC = () => {
     hasMoreData,
     isLoadingMore,
     loadMoreRef,
+    isSentinelVisible,
     loadMoreLibrary,
     libraryViewMode,
     setLibraryViewMode,
@@ -713,11 +714,14 @@ export const DownloadsView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Mobile: floating pill above the fixed tab bar so the
-                    user can tap it even when the sentinel has not yet
-                    entered the observer's 600px rootMargin zone
-                    (e.g. short initial list). */}
-                {hasMoreData && (
+                {/* Mobile: floating pill above the fixed tab bar. Only
+                    visible when the sentinel has actually entered the
+                    viewport (user scrolled to the bottom) — the 600px
+                    auto-load observer fires well before this, so the
+                    pill is strictly a fallback when auto-load didn't
+                    catch the user (e.g. slow network, or scrolling
+                    past the rootMargin in one gesture). */}
+                {hasMoreData && isSentinelVisible && (
                   <div
                     className="md:hidden fixed left-1/2 -translate-x-1/2 z-30"
                     style={{
