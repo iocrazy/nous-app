@@ -298,23 +298,19 @@ def reset_monthly_quotas():
 @shared_task
 def reap_stuck_pending_tasks():
     """
-    Mark zombie pending tasks as failed.
+    Mark zombie tasks as failed.
 
-    A task is a 'zombie' when:
-      - status = 'pending'
-      - phase  = 'queued'
-      - started_at IS NULL
-      - created_at < NOW() - 1 hour
+    Two things rot without this:
 
-    These are tasks whose Celery message was lost — the worker crashed
-    before claiming, Redis memory pressure evicted the job, or the
-    broker was restarted while the row already existed. Without this
-    reaper they sit forever in pending state and never surface a retry
-    button to the user.
+    1. unified_tasks: rows stuck in (pending/queued/no-started_at/age>1h).
+       Happens when the worker crashed before claiming, Redis dropped the
+       message, or the broker restarted. Surfaces a Retry button once
+       flipped to 'failed'.
 
-    We mark them failed with a clear error_msg so the user's Retry
-    button in Task Center (or the admin /tasks/{id}/retry endpoint)
-    can re-dispatch them.
+    2. resources.{transcript,summary,visual_analysis}_status: rows stuck
+       in 'pending' with no matching live unified_task. The card's AI
+       icons otherwise show perpetual "in-progress" for tasks that
+       already died hours ago.
     """
     logger.info("[Celery Beat] Reaping stuck pending tasks...")
 
@@ -325,6 +321,8 @@ def reap_stuck_pending_tasks():
             supabase = await get_async_supabase_admin()
             cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
             now_iso = datetime.now().isoformat()
+
+            # Pass 1: unified_tasks zombie rows
             result = (
                 await supabase.table("unified_tasks")
                 .update({
@@ -344,14 +342,50 @@ def reap_stuck_pending_tasks():
                 .lt("created_at", cutoff)
                 .execute()
             )
-            return len(result.data) if result.data else 0
+            tasks_reaped = len(result.data) if result.data else 0
 
-        count = run_async(_reap())
-        if count:
-            logger.warning(f"[Celery Beat] Reaper marked {count} stuck pending tasks as failed")
+            # Pass 2: resource-level AI status zombies (1h+ pending with
+            # no matching active unified_task). We run this in SQL to
+            # avoid a per-row NOT-IN join; the predicate is identical to
+            # the bulk UPDATE in migration 128.
+            resources_reaped = 0
+            for field in ("transcript_status", "summary_status", "visual_analysis_status"):
+                sql = f"""
+                WITH live AS (
+                  SELECT DISTINCT resource_id::text AS rid
+                  FROM unified_tasks
+                  WHERE status IN ('pending','processing','running')
+                    AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
+                    AND resource_id IS NOT NULL
+                )
+                UPDATE resources
+                   SET {field} = 'failed'
+                 WHERE {field} = 'pending'
+                   AND updated_at < NOW() - INTERVAL '1 hour'
+                   AND id::text NOT IN (SELECT rid FROM live)
+                 RETURNING id
+                """
+                try:
+                    r = await supabase.rpc("exec_sql", {"sql": sql}).execute()
+                    resources_reaped += len(r.data) if r and r.data else 0
+                except Exception:
+                    # exec_sql RPC not present — skip this pass silently.
+                    # Migration 128 already cleaned existing rows; future
+                    # zombies will accumulate slowly.
+                    break
+
+            return tasks_reaped, resources_reaped
+
+        tasks_reaped, resources_reaped = run_async(_reap())
+        if tasks_reaped or resources_reaped:
+            logger.warning(
+                f"[Celery Beat] Reaper: {tasks_reaped} unified_tasks + "
+                f"{resources_reaped} resource AI statuses flipped to failed"
+            )
         else:
-            logger.info("[Celery Beat] Reaper found no stuck pending tasks")
-        return {"status": "success", "reaped": count}
+            logger.info("[Celery Beat] Reaper found no stuck records")
+        return {"status": "success", "tasks_reaped": tasks_reaped,
+                "resources_reaped": resources_reaped}
 
     except Exception as e:
         logger.error(f"[Celery Beat] Reaper failed: {e}")
