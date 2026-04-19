@@ -594,12 +594,10 @@ export const DownloadsView: React.FC = () => {
         className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${
           libraryViewMode === 'feed'
             ? 'px-0 pt-0 pb-0 h-full min-h-0'
-            // Mobile: leave space for the fixed bottom tab bar (pill button
-            // + safe-area inset on iPhones) so the Load More button /
-            // loading indicator at the end of the list is not covered.
-            // `md:pb-5` reverts to the original 20px on desktop where the
-            // tab bar is hidden.
-            : 'px-3 pt-3 pb-[calc(5rem+env(safe-area-inset-bottom,6px))] md:pb-5'
+            // Mobile: leave enough room so the last grid row is never
+            // covered by the floating Load More pill + tab bar stack
+            // (~7rem + safe-area). Desktop reverts to the original 20 px.
+            : 'px-3 pt-3 pb-[calc(7rem+env(safe-area-inset-bottom,6px))] md:pb-5'
         }`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onTouchStart={handlePullStart}
@@ -683,20 +681,65 @@ export const DownloadsView: React.FC = () => {
             )}
 
             {!isSearchActive && libraryViewMode !== 'feed' && (
-              <div ref={loadMoreRef} className="w-full py-6 flex justify-center">
-                {isLoadingMore ? (
-                  <Loader2 size={20} className="animate-spin text-zinc-500" />
-                ) : hasMoreData ? (
-                  <button
-                    onClick={() => loadMoreLibrary()}
-                    className="px-6 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors"
+              <>
+                {/* Invisible sentinel: IntersectionObserver target.
+                    Stays at the natural end-of-list position so the
+                    600px rootMargin pre-trigger still works. */}
+                <div ref={loadMoreRef} aria-hidden="true" className="w-full h-px" />
+
+                {/* End-of-list status — natural inline position on both
+                    desktop and mobile (only when everything is loaded). */}
+                {!hasMoreData && library.length > 0 && (
+                  <div className="w-full py-6 flex justify-center">
+                    <span className="text-zinc-600 text-xs">
+                      All {library.length} items loaded
+                    </span>
+                  </div>
+                )}
+
+                {/* Desktop: inline Load More / spinner at the end of list. */}
+                {hasMoreData && (
+                  <div className="hidden md:flex w-full py-6 justify-center">
+                    {isLoadingMore ? (
+                      <Loader2 size={20} className="animate-spin text-zinc-500" />
+                    ) : (
+                      <button
+                        onClick={() => loadMoreLibrary()}
+                        className="px-6 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors"
+                      >
+                        Load More
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Mobile: floating pill above the fixed tab bar so the
+                    user can tap it even when the sentinel has not yet
+                    entered the observer's 600px rootMargin zone
+                    (e.g. short initial list). */}
+                {hasMoreData && (
+                  <div
+                    className="md:hidden fixed left-1/2 -translate-x-1/2 z-30"
+                    style={{
+                      bottom:
+                        'calc(env(safe-area-inset-bottom, 6px) + 4.5rem)',
+                    }}
                   >
-                    Load More
-                  </button>
-                ) : library.length > 0 ? (
-                  <span className="text-zinc-600 text-xs">All {library.length} items loaded</span>
-                ) : null}
-              </div>
+                    {isLoadingMore ? (
+                      <div className="px-5 py-2 bg-zinc-900/95 backdrop-blur-md border border-zinc-800/60 rounded-full shadow-2xl">
+                        <Loader2 size={18} className="animate-spin text-zinc-400" />
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => loadMoreLibrary()}
+                        className="px-5 py-2 text-sm text-zinc-200 bg-zinc-900/95 backdrop-blur-md border border-zinc-700/60 hover:bg-zinc-800 rounded-full shadow-2xl transition-colors"
+                      >
+                        Load More
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

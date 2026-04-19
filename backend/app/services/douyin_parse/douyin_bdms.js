@@ -1,4 +1,6 @@
 /* V 1.0.1.19-fix.01 */
+
+
 if (!window.bdms) {
     !function() {
         var t = {
@@ -6440,6 +6442,9 @@ if (!window.bdms) {
                                                     g(y[0], d, e, y[1]);
                                                 else {
                                                     var m = n.apply(d, e);
+                                                    if (e[0]==="a_bogus" && e.length === 2 ) {
+                                                        window.a_bogus = e[1]
+                                                    }
                                                     v[++p] = m
                                                 }
                                             } else {
@@ -6759,7 +6764,7 @@ if (!window.bdms) {
                             c = g[4],
                             a = g[5],
                             y();
-                        throw l
+                        // throw l
                     }
                     return !0
                 }
@@ -7815,3 +7820,5 @@ if (!window.bdms) {
         window.bdms = n
     }();
 }
+
+
