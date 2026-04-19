@@ -6,6 +6,7 @@
 # Claude Code / Superpowers local config
 .claude/settings.local.json
 .claude/skills/
+.claude/scheduled_tasks.lock
 .superpowers/
 
 # Local files

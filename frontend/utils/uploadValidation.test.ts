@@ -6,9 +6,11 @@ import {
 } from './uploadValidation';
 
 function makeFile(name: string, size: number): File {
-  // jsdom's File uses the Blob constructor; give it any content of the size.
-  const blob = new Blob(['x'.repeat(size)], { type: 'application/octet-stream' });
-  return new File([blob], name);
+  // Avoid actually allocating `size` bytes (tests would OOM at 500 MB).
+  // validateFile only reads file.size, so override via defineProperty.
+  const file = new File(['x'], name, { type: 'application/octet-stream' });
+  Object.defineProperty(file, 'size', { value: size, configurable: true });
+  return file;
 }
 
 describe('validateFile', () => {
