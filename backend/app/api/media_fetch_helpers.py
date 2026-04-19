@@ -277,10 +277,16 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
     except Exception as e:
         logger.warning(f"Failed to read user parse mode, using default: {e}")
 
+    # Pick a Douyin UA once per request so LightHTTP + BrowserAuto share it.
+    from app.services.douyin_parse.ua_pool import pick_ua
+    douyin_ua = pick_ua()
+
     if user_parse_mode == "drissionpage":
         try:
             logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
-            aweme_detail = await DrissionPageParser.fetch_one_video(url)
+            aweme_detail = await DrissionPageParser.fetch_one_video(
+                url, user_agent=douyin_ua
+            )
             if aweme_detail:
                 parse_method = "browser_auto"
                 parse_method_name = "BrowserAuto"
@@ -291,7 +297,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
     else:
         try:
             logger.info(f"[LightHTTP] Attempting parse: {url}")
-            aweme_detail = await IesDouyinParser.parse(url)
+            aweme_detail = await IesDouyinParser.parse(url, user_agent=douyin_ua)
             if aweme_detail:
                 parse_method = "light_http"
                 parse_method_name = "LightHTTP"
@@ -305,7 +311,9 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
         if not aweme_detail:
             try:
                 logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
-                aweme_detail = await DrissionPageParser.fetch_one_video(url)
+                aweme_detail = await DrissionPageParser.fetch_one_video(
+                    url, user_agent=douyin_ua
+                )
                 if aweme_detail:
                     parse_method = "browser_auto"
                     parse_method_name = "BrowserAuto"

@@ -30,7 +30,8 @@ def _extract_url(url: str) -> str:
 
 
 def _fetch_and_parse(valid_url: str, video_bool: bool,
-                     cover_bool: bool, categories: str = None) -> tuple:
+                     cover_bool: bool, categories: str = None,
+                     user_agent: str | None = None) -> tuple:
     """Fetch video data from platform and parse metadata.
     Returns (aweme_detail, parsed_data) tuple.
     Raises RuntimeError if fetch or parse fails.
@@ -38,7 +39,9 @@ def _fetch_and_parse(valid_url: str, video_bool: bool,
     from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
     from app.services.douyin_parse.formatter import DouyinFormatter
 
-    aweme_detail = run_async(DrissionPageParser.fetch_one_video(valid_url))
+    aweme_detail = run_async(
+        DrissionPageParser.fetch_one_video(valid_url, user_agent=user_agent)
+    )
     if not aweme_detail:
         raise RuntimeError("Cannot fetch video info")
 
@@ -118,7 +121,8 @@ def _auto_tag_media(video_db_id, platform_id: str, aweme_detail: dict,
 
 def _dispatch_download(platform_id: str, user_id: str,
                        video_bool: bool, cover_bool: bool,
-                       media_type: int, video_title: str) -> str | None:
+                       media_type: int, video_title: str,
+                       user_agent: str | None = None) -> str | None:
     """Dispatch download task. Returns download_task_id or None."""
     from app.services.system_monitor_service import check_worker_ready
     from app.tasks.download_tasks import download_unified_task
@@ -135,6 +139,7 @@ def _dispatch_download(platform_id: str, user_id: str,
         download_cover=cover_bool,
         media_type=media_type,
         video_title=video_title,
+        user_agent=user_agent,
     )
     logger.info(f"[Parse] Download task dispatched: {download_task.id}")
     return download_task.id
@@ -187,9 +192,14 @@ def parse_single_link_task(
             return {"status": "failed", "url": url, "error": f"Invalid URL: {e}"}
 
         # 2. Fetch + parse
+        # One UA per task — used by DrissionPage parse AND later download.
+        from app.services.douyin_parse.ua_pool import pick_ua
+        legacy_ua = pick_ua()
+
         try:
             aweme_detail, parsed_data = _fetch_and_parse(
-                valid_url, video_bool, cover_bool, categories
+                valid_url, video_bool, cover_bool, categories,
+                user_agent=legacy_ua,
             )
         except RuntimeError as e:
             raise self.retry(
@@ -218,7 +228,7 @@ def parse_single_link_task(
         if video_bool or cover_bool:
             download_task_id = _dispatch_download(
                 platform_id, user_id, video_bool, cover_bool,
-                media_type, video_title,
+                media_type, video_title, user_agent=legacy_ua,
             )
 
         # 6. Trigger L1 analysis (non-blocking)
@@ -353,13 +363,15 @@ def _get_douyin_method_flags() -> dict[str, bool]:
     return flags
 
 
-def _try_lighthttp(url: str, user_id: str):
+def _try_lighthttp(url: str, user_id: str, user_agent: str):
     """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
     from app.services.douyin_parse.ies_parser import IesDouyinParser
     from app.services.douyin_parse.formatter import DouyinFormatter
 
     try:
-        aweme_detail = run_async(IesDouyinParser.parse(url, user_id=user_id))
+        aweme_detail = run_async(
+            IesDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
+        )
         if aweme_detail:
             parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail, valid_url=url,
@@ -372,13 +384,15 @@ def _try_lighthttp(url: str, user_id: str):
     return None
 
 
-def _try_abogus(url: str, user_id: str):
+def _try_abogus(url: str, user_id: str, user_agent: str):
     """Attempt a_bogus signed HTTP parse. Returns (parsed, method, name) or None."""
     from app.services.douyin_parse.abogus_parser import ABogusDouyinParser
     from app.services.douyin_parse.formatter import DouyinFormatter
 
     try:
-        aweme_detail = run_async(ABogusDouyinParser.parse(url, user_id=user_id))
+        aweme_detail = run_async(
+            ABogusDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
+        )
         if aweme_detail:
             parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail, valid_url=url,
@@ -391,13 +405,17 @@ def _try_abogus(url: str, user_id: str):
     return None
 
 
-def _try_drissionpage(url: str, user_id: str):
+def _try_drissionpage(url: str, user_id: str, user_agent: str):
     """Attempt DrissionPage parse. Returns (parsed, method, name) or None."""
     from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
     from app.services.douyin_parse.formatter import DouyinFormatter
 
     try:
-        aweme_detail = run_async(DrissionPageParser.fetch_one_video(url, user_id=user_id))
+        aweme_detail = run_async(
+            DrissionPageParser.fetch_one_video(
+                url, user_id=user_id, user_agent=user_agent
+            )
+        )
         if aweme_detail:
             parsed = run_async(DouyinFormatter.parse_aweme_detail(
                 aweme_detail=aweme_detail, valid_url=url,
@@ -410,14 +428,21 @@ def _try_drissionpage(url: str, user_id: str):
     return None
 
 
-def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
+def _douyin_parse_fallback_sync(
+    url: str, user_id: str, user_agent: str
+) -> tuple:
     """Sync Douyin fallback: LightHTTP → ABogus → DrissionPage (respects admin toggles).
+
+    user_agent: 本次解析任务统一的 Douyin UA（来自 ua_pool.pick_ua()）。
+      贯穿三个 fallback tier，保证 ABogus 签名、请求 Header 和后续 yt-dlp
+      下载使用同一条 UA —— 服务端验签绑定 UA，UA 不一致会被静默拒绝。
 
     Returns (parsed_data, parse_method, parse_method_name).
     Raises RuntimeError if all enabled methods fail.
     """
     flags = _get_douyin_method_flags()
     logger.info(f"[Douyin Fallback] Method flags: {flags}")
+    logger.info(f"[Douyin Fallback] UA: {user_agent[:60]}...")
 
     methods = []
     if flags["lighthttp"]:
@@ -432,7 +457,7 @@ def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
 
     for name, fn in methods:
         logger.info(f"[Douyin Fallback] Trying {name}...")
-        result = fn(url, user_id)
+        result = fn(url, user_id, user_agent)
         if result:
             return result
 
@@ -449,10 +474,13 @@ def _dispatch_download_deduped(
     download_video: bool,
     download_cover: bool,
     url: str | None,
+    user_agent: str | None = None,
 ) -> str | None:
     """Sync wrapper: dedup check + unified_task pre-create + Celery dispatch.
 
     Called from within parse_media_task (Celery worker context).
+    `user_agent` is the same Douyin UA that was used during parse — it
+    is forwarded so yt-dlp download / direct HTTP download reuse it.
     Returns the Celery task ID or None.
     """
     from app.services.unified_task_manager import get_task_manager
@@ -517,6 +545,7 @@ def _dispatch_download_deduped(
         media_type=media_type,
         video_title=video_title[:50] or "undefined",
         resource_id=resource_id,
+        user_agent=user_agent,
         _unified_task_id=unified_task_id,
     )
 
@@ -595,6 +624,16 @@ def parse_media_task(
         parse_method = "ytdlp"
         dispatch_url = url
 
+        # Pick a Douyin UA exactly once for this task. The same UA must
+        # thread through LightHTTP / ABogus / DrissionPage / yt-dlp /
+        # the later download_unified_task — ABogus signatures are bound
+        # to the UA and CDNs watch for client consistency.
+        douyin_ua: str | None = None
+        if platform == "douyin":
+            from app.services.douyin_parse.ua_pool import pick_ua
+            douyin_ua = pick_ua()
+            logger.info(f"[Parse/Task] Douyin UA for this task: {douyin_ua[:60]}...")
+
         if unified_task_id:
             try:
                 run_async(manager.update_progress(unified_task_id, 5, subtitle="Fetching metadata..."))
@@ -611,7 +650,7 @@ def parse_media_task(
             logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin ({reason}): {url[:60]}")
             fallback_used = True
             dispatch_url = None
-            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
+            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id, douyin_ua)
             if unified_task_id:
                 try:
                     run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
@@ -619,7 +658,9 @@ def parse_media_task(
                     pass
         else:
             try:
-                ytdlp_info = run_async(YtdlpService.fetch_metadata(url, user_id=user_id))
+                ytdlp_info = run_async(
+                    YtdlpService.fetch_metadata(url, user_id=user_id, user_agent=douyin_ua)
+                )
                 if unified_task_id:
                     try:
                         run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
@@ -650,7 +691,7 @@ def parse_media_task(
                 logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
                 fallback_used = True
                 dispatch_url = None
-                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id)
+                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id, douyin_ua)
 
         _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "light_http": "LightHTTP", "drissionpage": "DrissionPage", "browser_auto": "DrissionPage"}
         method_label = _METHOD_LABELS.get(parse_method, parse_method)
@@ -760,6 +801,7 @@ def parse_media_task(
                 download_video=need_download_video,
                 download_cover=cover_bool,
                 url=dispatch_url,
+                user_agent=douyin_ua,
             )
 
         # 8. Log success

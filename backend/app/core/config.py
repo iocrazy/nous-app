@@ -62,12 +62,22 @@ class Settings(BaseSettings):
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
 
-    # 用户代理列表
+    # 用户代理列表（通用）
     USER_AGENTS: list[str] = Field(
         default_factory=lambda: [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             " (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         ]
+    )
+
+    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 LightHTTP/ABogus/DrissionPage
+    # 和 yt-dlp 下载——ABogus 签名绑定 UA，混用会让服务端验签失败。
+    DOUYIN_USER_AGENTS: list[str] = Field(
+        default_factory=lambda: [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+        ],
+        description="Douyin UA pool (Chrome-family only, rotated per parse task)",
     )
 
     # ============================================

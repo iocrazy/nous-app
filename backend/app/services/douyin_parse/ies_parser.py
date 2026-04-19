@@ -20,13 +20,9 @@ from loguru import logger
 class IesDouyinParser:
     """轻量级抖音解析器，通过 HTTP 请求解析分享页面"""
 
-    # 模拟移动端浏览器的完整 headers
-    HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-            "Version/17.4 Mobile/15E148 Safari/604.1"
-        ),
+    # 非 UA 的固定请求头。UA 由 parse() 的调用方注入，统一来自
+    # `ua_pool.pick_ua()`，保证同一次任务所有 Douyin 请求共用同一个 UA。
+    BASE_HEADERS: dict[str, str] = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh-Hans;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
@@ -81,7 +77,11 @@ class IesDouyinParser:
 
     @classmethod
     async def parse(
-        cls, share_url: str, *, user_id: Optional[str] = None
+        cls,
+        share_url: str,
+        *,
+        user_id: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         解析抖音分享链接，返回 aweme_detail 格式的数据
@@ -89,11 +89,18 @@ class IesDouyinParser:
         Args:
             share_url: 抖音分享链接 (如 https://v.douyin.com/xxx)
             user_id: 可选，用于获取用户配置的 Cookie 提高解析成功率
+            user_agent: 统一的 Douyin UA（由 ua_pool.pick_ua() 生成）。
+                调用方必须传入，以保证与后续 ABogus 签名、yt-dlp 下载共用。
+                未传入时从 ua_pool 取一条兜底。
 
         Returns:
             Dict: aweme_detail 格式的数据，与浏览器方案返回格式一致
             None: 解析失败
         """
+        if not user_agent:
+            from app.services.douyin_parse.ua_pool import pick_ua
+            user_agent = pick_ua()
+
         try:
             logger.info(f"[IesDouyinParser] 开始解析: {share_url}")
 
@@ -101,7 +108,7 @@ class IesDouyinParser:
             extra_headers = await cls._get_user_overrides(user_id)
 
             # 1. 跟随重定向获取视频 ID 和内容类型
-            result = await cls._get_video_id(share_url, extra_headers)
+            result = await cls._get_video_id(share_url, user_agent, extra_headers)
             if not result:
                 logger.warning("[IesDouyinParser] 无法获取视频 ID")
                 return None
@@ -111,7 +118,7 @@ class IesDouyinParser:
 
             # 2. 访问分享页面获取数据
             aweme_detail = await cls._fetch_share_page(
-                video_id, content_type, extra_headers
+                video_id, content_type, user_agent, extra_headers
             )
             if not aweme_detail:
                 logger.warning("[IesDouyinParser] 无法从分享页面获取数据")
@@ -128,7 +135,10 @@ class IesDouyinParser:
 
     @classmethod
     async def _get_video_id(
-        cls, share_url: str, extra_headers: Optional[Dict[str, str]] = None
+        cls,
+        share_url: str,
+        user_agent: str,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Optional[tuple[str, str]]:
         """
         从分享链接获取视频 ID 和内容类型。
@@ -138,7 +148,11 @@ class IesDouyinParser:
             None on failure.
         """
         try:
-            headers = {**cls.HEADERS, **(extra_headers or {})}
+            headers = {
+                **cls.BASE_HEADERS,
+                "User-Agent": user_agent,
+                **(extra_headers or {}),
+            }
             async with httpx.AsyncClient(
                 follow_redirects=True, timeout=cls.TIMEOUT
             ) as client:
@@ -177,17 +191,28 @@ class IesDouyinParser:
         cls,
         video_id: str,
         content_type: str = "video",
+        user_agent: str = "",
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         访问抖音分享页面，提取 _ROUTER_DATA 中的视频数据。
         content_type: "video", "note", or "slides"
+
+        user_agent 为空时从 ua_pool 兜底——所有 Douyin 请求都必须带 UA。
         """
+        if not user_agent:
+            from app.services.douyin_parse.ua_pool import pick_ua
+            user_agent = pick_ua()
+
         path_segment = "slides" if content_type == "slides" else "video"
         share_page_url = f"https://www.iesdouyin.com/share/{path_segment}/{video_id}"
 
         try:
-            headers = {**cls.HEADERS, **(extra_headers or {})}
+            headers = {
+                **cls.BASE_HEADERS,
+                "User-Agent": user_agent,
+                **(extra_headers or {}),
+            }
             async with httpx.AsyncClient(timeout=cls.TIMEOUT) as client:
                 response = await client.get(share_page_url, headers=headers)
                 response.raise_for_status()
@@ -336,14 +361,17 @@ class IesDouyinParser:
 
 
 # 便捷函数
-async def lightweight_parse(share_url: str) -> Optional[Dict[str, Any]]:
+async def lightweight_parse(
+    share_url: str, *, user_agent: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     轻量级解析抖音分享链接
 
     Args:
         share_url: 抖音分享链接
+        user_agent: 可选，与 IesDouyinParser.parse 保持一致（未传则从 ua_pool 取）
 
     Returns:
         aweme_detail 数据或 None
     """
-    return await IesDouyinParser.parse(share_url)
+    return await IesDouyinParser.parse(share_url, user_agent=user_agent)

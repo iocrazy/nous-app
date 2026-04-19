@@ -94,10 +94,9 @@ class DrissionPageParser(metaclass=SingletonMeta):
                             get: () => 'MacIntel',
                         });
 
-                        Object.defineProperty(navigator, 'userAgent', {
-                            get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-                                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-                        });
+                        // navigator.userAgent is set per-task by fetch_one_video()
+                        // after stealth init — see the UA override block there.
+                        // Keeping it undefined here forces that override to run.
 
                         // 硬件信息
                         Object.defineProperty(navigator, 'hardwareConcurrency', {
@@ -222,9 +221,23 @@ class DrissionPageParser(metaclass=SingletonMeta):
             logger.debug(f"[DrissionPage] CDP cookie injection failed: {e}")
 
     @classmethod
-    async def fetch_one_video(cls, url: str, user_id: str | None = None):
-        """获取单个抖音视频信息（真正的异步版本）"""
+    async def fetch_one_video(
+        cls,
+        url: str,
+        user_id: str | None = None,
+        user_agent: str | None = None,
+    ):
+        """获取单个抖音视频信息（真正的异步版本）
+
+        user_agent: 本次任务统一的 Douyin UA（来自 ua_pool.pick_ua()）。
+          传入后会覆盖浏览器的 navigator.userAgent，与 ABogus 签名/yt-dlp
+          下载请求共用一条 UA，避免 Douyin 风控判定多客户端。
+        """
         logger.info(f"开始获取抖音视频: {url}")
+
+        if not user_agent:
+            from app.services.douyin_parse.ua_pool import pick_ua
+            user_agent = pick_ua()
 
         # Pre-fetch cookie (async) before entering sync thread
         cookie_text = await cls._get_user_cookie_text(user_id)
@@ -252,6 +265,20 @@ class DrissionPageParser(metaclass=SingletonMeta):
                 # Inject cookies via CDP (no page navigation, no captcha trigger)
                 if cookie_text:
                     cls._inject_cookies_cdp(instance.page, cookie_text)
+
+                # 覆盖本次任务的 navigator.userAgent，使 DrissionPage 与
+                # LightHTTP/ABogus/yt-dlp 共用同一条 Douyin UA。
+                try:
+                    ua_js = (
+                        "Object.defineProperty(navigator, 'userAgent', "
+                        f"{{get: () => {user_agent!r}, configurable: true}});"
+                    )
+                    instance.page.run_js(ua_js)
+                    logger.debug(
+                        f"[DrissionPage] UA override applied: {user_agent[:60]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"[DrissionPage] UA override failed: {e}")
 
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")

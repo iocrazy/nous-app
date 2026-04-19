@@ -10,7 +10,18 @@ APP_NAME: "抖音推送下载app_yml"
 HTTP_TIMEOUT: 30.0
 DOWNLOAD_TIMEOUT: 60.0
 
-# 用户代理列表（复杂数组配置）
+# Douyin-specific UA pool (Chrome-family only).
+# One UA is picked per parse task and threaded through the entire pipeline
+# (LightHTTP → ABogus sign → API fetch → yt-dlp download) so the signature
+# and request headers stay consistent — mixing UAs breaks verify.
+DOUYIN_USER_AGENTS:
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+
+# 通用用户代理列表（复杂数组配置 — 非抖音路径使用）
 USER_AGENTS:
   - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
   - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

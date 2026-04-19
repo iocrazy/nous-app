@@ -17,11 +17,12 @@ window.location = {
     hash: "",
 };
 
+// UA is supplied by the Python caller (abogus_parser._sign_with_node):
+// either via argv[3] (passed to get_a_bogus) or via DOUYIN_UA env var.
+// We do NOT keep a hardcoded default — a stale fallback here would
+// silently desync from ua_pool.pick_ua() and break ABogus verify.
 window.navigator = {
-    userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
-        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/147.0.0.0 Safari/537.36",
+    userAgent: process.env.DOUYIN_UA || "",
     platform: "MacIntel",
     language: "en-US",
     languages: ["en-US", "en"],
@@ -158,7 +159,13 @@ if (require.main === module) {
         "&pc_client_type=1&version_code=190500&cookie_enabled=true&platform=PC";
 
     var url = process.argv[2] || DEMO_URL;
-    var ua = process.argv[3];
+    var ua = process.argv[3] || process.env.DOUYIN_UA || "";
+    if (!ua) {
+        process.stderr.write(
+            "error: DOUYIN_UA not provided — pass as argv[3] or DOUYIN_UA env var\n"
+        );
+        process.exit(3);
+    }
     var bogus = get_a_bogus(url, "GET", ua);
     if (bogus === undefined) {
         process.stderr.write("a_bogus not computed — env shim incomplete\n");

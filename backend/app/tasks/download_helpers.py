@@ -146,15 +146,19 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
     try:
         from app.services.douyin_parse.ies_parser import IesDouyinParser
         from app.services.douyin_parse.formatter import DouyinFormatter
+        from app.services.douyin_parse.ua_pool import pick_ua
+
+        # One UA for the whole re-parse sequence (LightHTTP → BrowserAuto).
+        reparse_ua = pick_ua()
 
         # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
-        aweme_detail = run_async(IesDouyinParser.parse(original_url))
+        aweme_detail = run_async(IesDouyinParser.parse(original_url, user_agent=reparse_ua))
         parse_method = "LightHTTP"
 
         # If short URL failed, try directly with platform_id (bypass URL redirect)
         if not aweme_detail and platform_id:
             logger.info(f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}")
-            aweme_detail = run_async(IesDouyinParser._fetch_share_page(platform_id))
+            aweme_detail = run_async(IesDouyinParser._fetch_share_page(platform_id, user_agent=reparse_ua))
             if aweme_detail:
                 IesDouyinParser._process_video_urls(aweme_detail)
                 parse_method = "LightHTTP-directID"
@@ -189,7 +193,9 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
             try:
                 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
-                browser_detail = run_async(DrissionPageParser.fetch_one_video(original_url))
+                browser_detail = run_async(
+                    DrissionPageParser.fetch_one_video(original_url, user_agent=reparse_ua)
+                )
                 if browser_detail:
                     parse_method = "BrowserAuto"
                     browser_parsed = run_async(DouyinFormatter.parse_aweme_detail(

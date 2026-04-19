@@ -400,7 +400,8 @@ class DownloaderService:
 
     @staticmethod
     async def download_video_by_platform_id(
-        platform_id, user_id: str = None, progress_tracker=None
+        platform_id, user_id: str = None, progress_tracker=None,
+        user_agent: str = None,
     ) -> DownloadVideoResult:
         """
         Download video and optional music files
@@ -409,6 +410,9 @@ class DownloaderService:
             platform_id: Video platform ID
             user_id: User ID (for data isolation)
             progress_tracker: Optional progress tracker
+            user_agent: Optional explicit UA — when provided, overrides the
+                random UA from Utils.get_headers() so the download request
+                matches the UA used during parse+ABogus signing.
 
         Returns:
             DownloadResult: Download result info
@@ -416,6 +420,8 @@ class DownloaderService:
         # Initialize result object, pydantic2.0 method
         result = DownloadVideoResult.model_construct()
         headers = Utils.get_headers()
+        if user_agent:
+            headers["User-Agent"] = user_agent
 
         try:
 
@@ -775,7 +781,9 @@ class DownloaderService:
             )
 
     @staticmethod
-    async def download_images_by_platform_id(platform_id, user_id: str = None):
+    async def download_images_by_platform_id(
+        platform_id, user_id: str = None, user_agent: str = None,
+    ):
         """
         Download carousel images/videos to slides/ subfolder, standalone music,
         and create resource record.
@@ -787,12 +795,15 @@ class DownloaderService:
         Args:
             platform_id: Video platform ID
             user_id: User ID (for data isolation)
+            user_agent: Optional explicit UA — see download_video_by_platform_id.
 
         Returns:
             DownloadImagesResult: Download result info
         """
         result = DownloadImagesResult.model_construct()
         headers = Utils.get_headers()
+        if user_agent:
+            headers["User-Agent"] = user_agent
 
         try:
             repo = MediaRepository()
@@ -1108,7 +1119,7 @@ class DownloaderService:
 
     @staticmethod
     async def download_cover_by_platform_id(
-        platform_id: str, user_id: str = None
+        platform_id: str, user_id: str = None, user_agent: str = None,
     ) -> DownloadCoverResult:
         """
         Download video cover image
@@ -1116,12 +1127,15 @@ class DownloaderService:
         Args:
             platform_id: Video platform ID
             user_id: User ID (for data isolation)
+            user_agent: Optional explicit UA — see download_video_by_platform_id.
 
         Returns:
             DownloadCoverResult: Download result info
         """
         result = DownloadCoverResult.model_construct()
         headers = Utils.get_headers()
+        if user_agent:
+            headers["User-Agent"] = user_agent
 
         try:
             repo = MediaRepository()

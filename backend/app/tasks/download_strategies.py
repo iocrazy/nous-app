@@ -31,8 +31,15 @@ def _do_douyin_download(
     download_cover: bool,
     media_type: int,
     tracker: UnifiedProgressTracker,
+    user_agent: str | None = None,
 ) -> dict:
-    """Douyin download strategy: reads URLs from DB, downloads via httpx."""
+    """Douyin download strategy: reads URLs from DB, downloads via httpx.
+
+    user_agent: the same Douyin UA picked by parse_media_task via
+      ua_pool.pick_ua(). When provided, overrides the random UA from
+      Utils.get_headers() so parse signature and download request share
+      a single UA across the whole task.
+    """
     results = {"video": None, "music": None, "cover": None}
 
     # Calculate stage progress ranges
@@ -76,7 +83,8 @@ def _do_douyin_download(
             logger.info(f"[Download/Exec] video: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_video_by_platform_id(
-                    platform_id, user_id=user_id, progress_tracker=tracker
+                    platform_id, user_id=user_id, progress_tracker=tracker,
+                    user_agent=user_agent,
                 )
             )
             results["video"] = (
@@ -112,6 +120,7 @@ def _do_douyin_download(
                             YtdlpService.download_video(
                                 original_url, str(storage_dir), platform_id,
                                 progress_callback=on_progress,
+                                user_agent=user_agent,
                             )
                         )
                         if ytdlp_result.get("file_path"):
@@ -163,7 +172,9 @@ def _do_douyin_download(
                         )
 
                         browser_detail = run_async(
-                            DrissionPageParser.fetch_one_video(original_url)
+                            DrissionPageParser.fetch_one_video(
+                                original_url, user_agent=user_agent
+                            )
                         )
                         if browser_detail:
                             browser_parsed = run_async(
@@ -196,6 +207,7 @@ def _do_douyin_download(
                                         platform_id,
                                         user_id=user_id,
                                         progress_tracker=tracker,
+                                        user_agent=user_agent,
                                     )
                                 )
                                 results["video"] = (
@@ -263,7 +275,7 @@ def _do_douyin_download(
             logger.info(f"[Download/Exec] image: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_images_by_platform_id(
-                    platform_id, user_id=user_id
+                    platform_id, user_id=user_id, user_agent=user_agent,
                 )
             )
             results["video"] = (
@@ -285,8 +297,16 @@ def _do_douyin_download(
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
                     )
+                    # Use the task's chosen UA so re-parse request is
+                    # consistent with the original parse+download chain.
+                    _re_ua = user_agent
+                    if not _re_ua:
+                        from app.services.douyin_parse.ua_pool import pick_ua
+                        _re_ua = pick_ua()
                     aweme_detail = run_async(
-                        IesDouyinParser._fetch_share_page(platform_id)
+                        IesDouyinParser._fetch_share_page(
+                            platform_id, user_agent=_re_ua
+                        )
                     )
                     if aweme_detail:
                         IesDouyinParser._process_video_urls(aweme_detail)
@@ -349,7 +369,7 @@ def _do_douyin_download(
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         result = run_async(
             DownloaderService.download_cover_by_platform_id(
-                platform_id, user_id=user_id
+                platform_id, user_id=user_id, user_agent=user_agent,
             )
         )
         results["cover"] = (
@@ -374,8 +394,13 @@ def _do_ytdlp_download(
     download_video: bool,
     download_cover: bool,
     tracker: UnifiedProgressTracker,
+    user_agent: str | None = None,
 ) -> dict:
-    """yt-dlp download strategy: downloads via yt-dlp using original URL."""
+    """yt-dlp download strategy: downloads via yt-dlp using original URL.
+
+    user_agent: same UA as the parse phase (Douyin only — None for other
+    platforms, which leaves yt-dlp's default behaviour unchanged).
+    """
     from app.repositories.media_repository import MediaRepository
     from app.services.url_router import URLRouter
     from app.services.ytdlp_service import YtdlpService
@@ -407,7 +432,8 @@ def _do_ytdlp_download(
 
         result = run_async(
             YtdlpService.download_video(
-                url, str(storage_dir), platform_id, progress_callback=on_progress
+                url, str(storage_dir), platform_id, progress_callback=on_progress,
+                user_agent=user_agent,
             )
         )
         if result.get("file_path"):
@@ -456,7 +482,7 @@ def _do_ytdlp_download(
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         cover_result = run_async(
             DownloaderService.download_cover_by_platform_id(
-                platform_id, user_id=user_id
+                platform_id, user_id=user_id, user_agent=user_agent,
             )
         )
         if cover_result and cover_result.cover_download_status == DownloadStatus.COMPLETED:

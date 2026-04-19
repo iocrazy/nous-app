@@ -110,20 +110,28 @@ async def fetch_videos_batch(
 
             aweme_detail = None
 
+            # One UA per URL — shared across LightHTTP + BrowserAuto fallbacks.
+            from app.services.douyin_parse.ua_pool import pick_ua
+            item_ua = pick_ua()
+
             if user_parse_mode == "drissionpage":
                 try:
-                    aweme_detail = await DrissionPageParser.fetch_one_video(url)
+                    aweme_detail = await DrissionPageParser.fetch_one_video(
+                        url, user_agent=item_ua
+                    )
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
             else:
                 try:
-                    aweme_detail = await IesDouyinParser.parse(url)
+                    aweme_detail = await IesDouyinParser.parse(url, user_agent=item_ua)
                 except Exception as e:
                     logger.warning(f"[Batch Parse] Lightweight parsing failed: {e}")
 
                 if not aweme_detail:
                     try:
-                        aweme_detail = await DrissionPageParser.fetch_one_video(url)
+                        aweme_detail = await DrissionPageParser.fetch_one_video(
+                            url, user_agent=item_ua
+                        )
                     except Exception as e:
                         logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
 

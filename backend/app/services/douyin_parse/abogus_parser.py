@@ -31,11 +31,10 @@ from loguru import logger
 SignEngine = Literal["python", "node"]
 
 
-DEFAULT_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/147.0.0.0 Safari/537.36"
-)
+# NOTE: the UA is NOT hardcoded here — it comes from ua_pool.pick_ua()
+# at the task boundary and is threaded through parse() so the ABogus
+# signature, the API request header, and yt-dlp's download header all
+# agree. See app/services/douyin_parse/ua_pool.py.
 
 DETAIL_API = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
 
@@ -109,7 +108,10 @@ class ABogusDouyinParser:
         engine: SignEngine | None = None,
     ) -> dict[str, Any] | None:
         """解析抖音分享链接 / aweme_id，返回 aweme_detail 字典。"""
-        ua = user_agent or DEFAULT_UA
+        if not user_agent:
+            from app.services.douyin_parse.ua_pool import pick_ua
+            user_agent = pick_ua()
+        ua = user_agent
         eng: SignEngine = engine or cls.DEFAULT_ENGINE
         try:
             aweme_id = await cls._resolve_aweme_id(share_url_or_aweme_id, ua)
@@ -185,6 +187,8 @@ class ABogusDouyinParser:
     @classmethod
     def _sign_with_node(cls, url: str, ua: str) -> str:
         """Legacy: spawn node env.js to compute a_bogus via douyin_bdms.js."""
+        import os
+
         node_bin = shutil.which("node") or "node"
         completed = subprocess.run(
             [node_bin, str(_ENV_JS), url, ua],
@@ -192,6 +196,7 @@ class ABogusDouyinParser:
             text=True,
             timeout=cls.SIGN_TIMEOUT,
             check=False,
+            env={**os.environ, "DOUYIN_UA": ua},
         )
         if completed.returncode != 0:
             raise RuntimeError(
@@ -322,7 +327,12 @@ class ABogusDouyinParser:
 
 
 async def abogus_parse(
-    share_url: str, *, user_id: str | None = None
+    share_url: str,
+    *,
+    user_id: str | None = None,
+    user_agent: str | None = None,
 ) -> dict[str, Any] | None:
     """便捷函数，与 `lightweight_parse` 保持一致。"""
-    return await ABogusDouyinParser.parse(share_url, user_id=user_id)
+    return await ABogusDouyinParser.parse(
+        share_url, user_id=user_id, user_agent=user_agent
+    )

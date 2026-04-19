@@ -89,13 +89,19 @@ class YtdlpService:
     """Universal video download via yt-dlp"""
 
     @staticmethod
-    async def fetch_metadata(url: str, user_id: Optional[str] = None) -> dict:
+    async def fetch_metadata(
+        url: str,
+        user_id: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> dict:
         """
         Fetch video metadata using yt-dlp --dump-json.
 
         Args:
             url: Video URL
             user_id: Optional user ID for per-user cookie lookup
+            user_agent: Optional explicit UA (used for Douyin so the same UA
+                threads through LightHTTP/ABogus/yt-dlp/download_video).
 
         Returns:
             dict: yt-dlp info_dict with video metadata
@@ -105,6 +111,7 @@ class YtdlpService:
         """
         logger.info(f"[yt-dlp] Fetching metadata: {url}")
 
+        ua_args = ["--user-agent", user_agent] if user_agent else []
         cmd = [
             "yt-dlp",
             "--dump-json",
@@ -113,6 +120,7 @@ class YtdlpService:
             "--no-playlist",
             "--socket-timeout", "15",
             "--retries", "2",
+            *ua_args,
             *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
             url,
@@ -160,6 +168,7 @@ class YtdlpService:
         platform_id: str,
         progress_callback: Optional[Callable] = None,
         user_id: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> dict:
         """
         Download video file via yt-dlp with real-time progress tracking.
@@ -170,6 +179,9 @@ class YtdlpService:
             platform_id: Used for filename
             progress_callback: Optional callback(downloaded, total, speed) for progress updates
             user_id: Optional user ID for per-user cookie lookup
+            user_agent: Optional explicit UA (reuses the same UA that was
+                used for the parse phase so the Douyin CDN sees a
+                consistent client across metadata + download).
 
         Returns:
             dict: {file_path, file_size}
@@ -178,6 +190,7 @@ class YtdlpService:
 
         output_template = os.path.join(output_dir, "video.%(ext)s")
 
+        ua_args = ["--user-agent", user_agent] if user_agent else []
         cmd = [
             "yt-dlp",
             "-f",
@@ -189,6 +202,7 @@ class YtdlpService:
             "--newline",
             "--progress-template",
             "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
+            *ua_args,
             *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
             "-o",

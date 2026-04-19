@@ -34,6 +34,7 @@ def download_unified_task(
     _dedup_key: str = None,       # Orchestrator dedup key
     _unified_task_id: str = None,  # Orchestrator task ID (for signals)
     download_music: bool = False,  # Deprecated, kept for backward compat with queued tasks
+    user_agent: str = None,  # Douyin UA chosen during parse; threaded to yt-dlp / direct HTTP
 ):
     """
     Unified download task for all platforms.
@@ -177,6 +178,7 @@ def download_unified_task(
                 download_video=download_video,
                 download_cover=download_cover,
                 tracker=tracker,
+                user_agent=user_agent,
             )
         else:
             results = _do_douyin_download(
@@ -186,6 +188,7 @@ def download_unified_task(
                 download_cover=download_cover,
                 media_type=media_type,
                 tracker=tracker,
+                user_agent=user_agent,
             )
 
         # ── Common post-download: check partial failures ──
