@@ -721,8 +721,13 @@ export const DownloadsView: React.FC = () => {
                   <div
                     className="md:hidden fixed left-1/2 -translate-x-1/2 z-30"
                     style={{
+                      // 5.5rem = 88px leaves a comfortable ~22 px gap above
+                      // the tab bar on devices without safe-area inset (e.g.
+                      // desktop emulation, non-notched phones) while staying
+                      // visually balanced on iPhones where env(safe-area-
+                      // inset-bottom) adds 20-34 px on top.
                       bottom:
-                        'calc(env(safe-area-inset-bottom, 6px) + 4.5rem)',
+                        'calc(env(safe-area-inset-bottom, 6px) + 5.5rem)',
                     }}
                   >
                     {isLoadingMore ? (
