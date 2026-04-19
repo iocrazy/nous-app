@@ -76,12 +76,16 @@ RUN uv sync
 # Create downloads directory
 RUN mkdir -p /app/downloads
 
-# Create non-root user and give it ownership of the app directory.
-# Chromium still runs (with --no-sandbox) as this user rather than root.
+# Non-root user is set up but NOT activated.
+# Reason: the NAS host mounts /app/downloads with Synology ACLs that
+# don't grant UID 10001 read access, causing every /media/{id}/cover
+# request to 500 with PermissionError. Until we coordinate the volume
+# ACLs with the host, keep the container running as root. Re-enable
+# USER app once the NAS side gives UID 10001 read+exec on downloads.
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home /app --shell /usr/sbin/nologin app \
     && chown -R app:app /app
-USER app
+# USER app  # intentionally disabled — see comment above
 
 # Expose port
 EXPOSE 8080
