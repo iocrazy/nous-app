@@ -1,16 +1,17 @@
 -- ============================================================
--- Atomic points consumption to prevent double-spending.
+-- Hotfix: rpc_consume_team_points team_id type mismatch.
 --
--- Replaces the non-atomic read-then-write pattern in
--- points_service.check_and_consume with a single-statement
--- check + decrement + member-usage increment.
+-- Migration 120 shipped with p_team_id UUID, but team_quotas.team_id
+-- is BIGINT (Snowflake since migration 051). The signature mismatch
+-- caused every /media/fetch to return HTTP 402 "Points service
+-- temporarily unavailable" because the RPC raised a type-cast error
+-- that points_service.check_and_consume caught as None.
 --
--- Returns a row with:
---   success      BOOLEAN   — whether consumption succeeded
---   points_cost  INTEGER   — amount deducted (0 when denied)
---   balance_after INTEGER  — team_quotas.points_balance after op
---   reason       TEXT      — failure reason (NULL on success)
+-- This migration drops the wrong-typed function and recreates it
+-- with the correct BIGINT signature. Safe to re-apply.
 -- ============================================================
+
+DROP FUNCTION IF EXISTS public.rpc_consume_team_points(UUID, UUID, INTEGER, BOOLEAN);
 
 CREATE OR REPLACE FUNCTION public.rpc_consume_team_points(
     p_team_id BIGINT,
@@ -38,7 +39,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Atomic decrement: only succeeds if team has enough balance.
     UPDATE team_quotas
        SET points_balance = points_balance - p_points_cost
      WHERE team_id = p_team_id
@@ -61,7 +61,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Enforce monthly member limit if configured
     IF p_monthly_limit_check THEN
         SELECT monthly_points_limit, points_used_this_month
           INTO v_monthly_limit, v_used_this_month
@@ -72,7 +71,6 @@ BEGIN
         IF v_monthly_limit IS NOT NULL
            AND (COALESCE(v_used_this_month, 0) + p_points_cost) > v_monthly_limit
         THEN
-            -- Rollback the decrement to keep balance consistent
             UPDATE team_quotas
                SET points_balance = points_balance + p_points_cost
              WHERE team_id = p_team_id;
@@ -84,7 +82,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- Increment per-member monthly counter (best-effort upsert)
     UPDATE member_quotas
        SET points_used_this_month = COALESCE(points_used_this_month, 0) + p_points_cost
      WHERE team_id = p_team_id
