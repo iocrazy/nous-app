@@ -60,7 +60,21 @@ class AdminTasksRepository:
         if task_type:
             query = query.eq("task_type", task_type)
         if search:
-            query = query.ilike("title", f"%{search}%")
+            pat = f"*{search}*"
+            or_clauses = [
+                f"title.ilike.{pat}",
+                f"subtitle.ilike.{pat}",
+                f"error_msg.ilike.{pat}",
+                f"celery_task_id.ilike.{pat}",
+                f"metadata->>original_url.ilike.{pat}",
+            ]
+            if search.isdigit():
+                or_clauses += [
+                    f"id.eq.{search}",
+                    f"media_id.eq.{search}",
+                    f"resource_id.eq.{search}",
+                ]
+            query = query.or_(",".join(or_clauses))
 
         query = query.order(sort_by, desc=sort_desc)
 
