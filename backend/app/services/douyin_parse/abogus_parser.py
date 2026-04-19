@@ -22,11 +22,13 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
 from loguru import logger
+
+SignEngine = Literal["python", "node"]
 
 
 DEFAULT_UA = (
@@ -82,7 +84,16 @@ _ID_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 class ABogusDouyinParser:
-    """轻量级抖音解析器（HTTP + Node 子进程签名）。"""
+    """轻量级抖音解析器（HTTP + a_bogus 签名直达 /aweme/v1/web/aweme/detail/）。
+
+    Two signing engines are supported:
+      - "python" (default): pure-Python ABogus from vendored f2 module.
+        ~5ms per call, no subprocess, community-maintained algorithm.
+      - "node": legacy Node subprocess over `env.js` + `douyin_bdms.js`.
+        Kept as a fallback for A/B comparison; requires `node` binary.
+    """
+
+    DEFAULT_ENGINE: SignEngine = "python"
 
     SHARE_REDIRECT_TIMEOUT = 10.0
     DETAIL_TIMEOUT = 15.0
@@ -95,9 +106,11 @@ class ABogusDouyinParser:
         *,
         user_id: str | None = None,
         user_agent: str | None = None,
+        engine: SignEngine | None = None,
     ) -> dict[str, Any] | None:
         """解析抖音分享链接 / aweme_id，返回 aweme_detail 字典。"""
         ua = user_agent or DEFAULT_UA
+        eng: SignEngine = engine or cls.DEFAULT_ENGINE
         try:
             aweme_id = await cls._resolve_aweme_id(share_url_or_aweme_id, ua)
             if not aweme_id:
@@ -107,13 +120,14 @@ class ABogusDouyinParser:
                 return None
 
             cookie, extra_headers = await cls._resolve_cookie(user_id, aweme_id)
+            fp = cls._extract_verify_fp(cookie)
 
             url = cls._build_detail_url(aweme_id)
-            signed_url = await cls._append_a_bogus(url, ua)
+            signed_url = await cls._sign(url, ua, eng, fp)
 
             return await cls._fetch_detail(signed_url, ua, cookie, extra_headers)
         except Exception as err:
-            logger.error(f"[ABogus] parse failed: {err}")
+            logger.error(f"[ABogus] parse failed (engine={eng}): {err}")
             return None
 
     # ───────────────── internals ─────────────────
@@ -144,31 +158,65 @@ class ABogusDouyinParser:
         return f"{DETAIL_API}?{urlencode(params)}"
 
     @classmethod
-    async def _append_a_bogus(cls, url: str, ua: str) -> str:
-        """调用 node env.js 计算 a_bogus 并拼到 URL 尾部。"""
-        node_bin = shutil.which("node") or "node"
+    async def _sign(cls, url: str, ua: str, engine: SignEngine, fp: str) -> str:
+        """Dispatch to the configured sign engine and append `a_bogus=`."""
+        if engine == "python":
+            bogus = await asyncio.to_thread(cls._sign_with_python, url, ua, fp)
+        elif engine == "node":
+            bogus = await asyncio.to_thread(cls._sign_with_node, url, ua)
+        else:
+            raise ValueError(f"unknown sign engine: {engine!r}")
 
-        def _run() -> str:
-            completed = subprocess.run(
-                [node_bin, str(_ENV_JS), url, ua],
-                capture_output=True,
-                text=True,
-                timeout=cls.SIGN_TIMEOUT,
-                check=False,
-            )
-            if completed.returncode != 0:
-                raise RuntimeError(
-                    f"a_bogus sign failed (rc={completed.returncode}): "
-                    f"{completed.stderr.strip() or completed.stdout.strip()}"
-                )
-            bogus = completed.stdout.strip()
-            if not bogus:
-                raise RuntimeError("a_bogus empty")
-            return bogus
-
-        bogus = await asyncio.to_thread(_run)
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}a_bogus={bogus}"
+
+    @staticmethod
+    def _sign_with_python(url: str, ua: str, fp: str) -> str:
+        """Pure-Python sign via vendored f2 ABogus (GET options = [0,1,8])."""
+        from app.services.douyin_parse._f2_abogus import ABogus
+
+        query = url.split("?", 1)[1] if "?" in url else ""
+        ab = ABogus(user_agent=ua, fp=fp or "", options=[0, 1, 8])
+        _, bogus, _, _ = ab.generate_abogus(query)
+        if not bogus:
+            raise RuntimeError("python a_bogus empty")
+        return bogus
+
+    @classmethod
+    def _sign_with_node(cls, url: str, ua: str) -> str:
+        """Legacy: spawn node env.js to compute a_bogus via douyin_bdms.js."""
+        node_bin = shutil.which("node") or "node"
+        completed = subprocess.run(
+            [node_bin, str(_ENV_JS), url, ua],
+            capture_output=True,
+            text=True,
+            timeout=cls.SIGN_TIMEOUT,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"node a_bogus sign failed (rc={completed.returncode}): "
+                f"{completed.stderr.strip() or completed.stdout.strip()}"
+            )
+        bogus = completed.stdout.strip()
+        if not bogus:
+            raise RuntimeError("node a_bogus empty")
+        return bogus
+
+    @staticmethod
+    def _extract_verify_fp(cookie: str) -> str:
+        """Pull `s_v_web_id` from a cookie string — used as verifyFp / fp.
+
+        Absent or malformed cookies → "" (f2 ABogus will generate a random
+        Edge fingerprint instead).
+        """
+        if not cookie:
+            return ""
+        for part in cookie.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "s_v_web_id" and v:
+                return v
+        return ""
 
     @classmethod
     async def _resolve_cookie(
