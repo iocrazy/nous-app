@@ -591,7 +591,16 @@ export const DownloadsView: React.FC = () => {
       {/* Content */}
       <div
         ref={contentScrollRef}
-        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${libraryViewMode === 'feed' ? 'px-0 pt-0 pb-0 h-full min-h-0' : 'px-3 pt-3 pb-5'}`}
+        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${
+          libraryViewMode === 'feed'
+            ? 'px-0 pt-0 pb-0 h-full min-h-0'
+            // Mobile: leave space for the fixed bottom tab bar (pill button
+            // + safe-area inset on iPhones) so the Load More button /
+            // loading indicator at the end of the list is not covered.
+            // `md:pb-5` reverts to the original 20px on desktop where the
+            // tab bar is hidden.
+            : 'px-3 pt-3 pb-[calc(5rem+env(safe-area-inset-bottom,6px))] md:pb-5'
+        }`}
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onTouchStart={handlePullStart}
         onTouchMove={handlePullMove}
