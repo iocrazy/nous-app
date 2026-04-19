@@ -8,11 +8,12 @@ Supabase 认证路由
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.deps import AuthDep, get_auth
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
 from app.services.points_service import PointsService
@@ -22,6 +23,39 @@ from app.services.supabase_auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+async def _require_admin(auth: AuthDep) -> None:
+    """Verify that the caller has admin or owner role in team_members.
+
+    Raises HTTP 403 if the user is not an admin/owner.
+    """
+    try:
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("role")
+            .eq("user_id", auth.user_id)
+            .in_("role", ["admin", "owner"])
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            logger.warning(
+                f"Admin endpoint access denied for user {auth.user_id}: no admin/owner role"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin role check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
 
 
 # ============================================
@@ -442,7 +476,7 @@ async def list_users(
     """
     获取用户列表（管理员）
 
-    需要管理员权限
+    需要 admin 或 owner 角色。
     """
     admin_service = SupabaseAdminAuthService()
     result = await admin_service.list_users(page=page, per_page=per_page)
@@ -460,6 +494,8 @@ async def update_user_role(
 ):
     """
     更新用户角色（管理员）
+
+    需要 admin 或 owner 角色。
 
     - **user_id**: 用户ID
     - **role**: 新角色（admin, user, test）
@@ -479,6 +515,8 @@ async def update_user_role(
 async def delete_user(user_id: str, auth: AdminAuthDep):
     """
     删除用户（管理员）
+
+    需要 admin 或 owner 角色。
 
     - **user_id**: 用户ID
     """

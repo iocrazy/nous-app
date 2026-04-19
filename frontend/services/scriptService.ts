@@ -1,16 +1,7 @@
-import { apiClient } from './apiClient';
-import {
-  ScriptProject,
-  ScriptChapter,
-  ScriptProjectSummary,
-  ScriptAsset,
-  ScriptAssetType,
-} from '../types';
-
-interface Envelope<T> {
-  success?: boolean;
-  data: T;
-}
+import { getAuthHeaders } from './parserService';
+import { getApiUrl } from '../utils/apiConfig';
+import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
+import { ScriptProject, ScriptChapter, ScriptProjectSummary, ScriptAsset, ScriptAssetType } from '../types';
 
 // ─── Script Project CRUD ─────────────────────────────────────────────────────
 
@@ -19,28 +10,26 @@ export async function fetchScriptProjects(
   page = 1,
   limit = 20,
 ): Promise<{ data: ScriptProjectSummary[]; total: number }> {
-  const result = await apiClient.get<
-    Envelope<{ items: ScriptProjectSummary[]; total: number }>
-  >('/api/v1/scripts/projects', {
-    query: { project_id: projectId, page, limit },
+  const headers = await getAuthHeaders();
+  const params = new URLSearchParams({
+    project_id: projectId,
+    page: String(page),
+    limit: String(limit),
   });
-  return {
-    data: result.data?.items ?? [],
-    total: result.data?.total ?? 0,
-  };
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects?${params}`, { headers });
+  const result = await unwrapResponse<{ items: ScriptProjectSummary[]; total: number }>(res);
+  return { data: result?.items ?? [], total: result?.total ?? 0 };
 }
 
 export interface ScriptProjectFull extends ScriptProject {
   chapters: ScriptChapter[];
 }
 
-export async function fetchScriptProject(
-  scriptId: string,
-): Promise<ScriptProjectFull> {
-  const result = await apiClient.get<
-    Envelope<{ project: ScriptProject; chapters: ScriptChapter[] }>
-  >(`/api/v1/scripts/projects/${scriptId}`);
-  return { ...result.data.project, chapters: result.data.chapters ?? [] };
+export async function fetchScriptProject(scriptId: string): Promise<ScriptProjectFull> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, { headers });
+  const raw = await unwrapResponse<{ project: ScriptProject; chapters: ScriptChapter[] }>(res);
+  return { ...raw.project, chapters: raw.chapters ?? [] };
 }
 
 export async function createScriptProject(data: {
@@ -48,26 +37,34 @@ export async function createScriptProject(data: {
   name: string;
   description?: string;
 }): Promise<ScriptProject> {
-  const result = await apiClient.post<Envelope<ScriptProject>>(
-    '/api/v1/scripts/projects',
-    data,
-  );
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<ScriptProject>(res);
 }
 
 export async function updateScriptProject(
   scriptId: string,
   data: Partial<Pick<ScriptProject, 'name' | 'description' | 'status' | 'settings_json'>>,
 ): Promise<ScriptProject> {
-  const result = await apiClient.put<Envelope<ScriptProject>>(
-    `/api/v1/scripts/projects/${scriptId}`,
-    data,
-  );
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<ScriptProject>(res);
 }
 
 export async function deleteScriptProject(scriptId: string): Promise<void> {
-  await apiClient.delete(`/api/v1/scripts/projects/${scriptId}`);
+  const headers = await getAuthHeaders();
+  await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {
+    method: 'DELETE',
+    headers,
+  });
 }
 
 // ─── Canvas Sync ─────────────────────────────────────────────────────────────
@@ -80,11 +77,13 @@ export async function syncScriptCanvas(
     deleted_chapter_ids: string[];
   },
 ): Promise<{ chapters: ScriptChapter[] }> {
-  const result = await apiClient.post<Envelope<{ chapters: ScriptChapter[] }>>(
-    `/api/v1/scripts/projects/${scriptId}/canvas/sync`,
-    syncRequest,
-  );
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}/canvas/sync`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(syncRequest),
+  });
+  return unwrapResponse<{ chapters: ScriptChapter[] }>(res);
 }
 
 // ─── Viewport ────────────────────────────────────────────────────────────────
@@ -93,10 +92,12 @@ export async function updateScriptViewport(
   scriptId: string,
   viewport: { x: number; y: number; zoom: number },
 ): Promise<void> {
-  await apiClient.patch(
-    `/api/v1/scripts/projects/${scriptId}/viewport`,
-    viewport,
-  );
+  const headers = await getAuthHeaders();
+  await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}/viewport`, {
+    method: 'PATCH',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(viewport),
+  });
 }
 
 // ─── AI Operations ───────────────────────────────────────────────────────────
@@ -105,13 +106,16 @@ export async function generateOutline(data: {
   script_id: string;
   premise: string;
   chapter_count: number;
+  genre?: string;
   style_guide?: string;
-}): Promise<{ task_id: string }> {
-  const result = await apiClient.post<Envelope<{ task_id: string }>>(
-    '/api/v1/scripts/generate-outline',
-    data,
-  );
-  return result.data;
+}): Promise<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/generate-outline`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }>(res);
 }
 
 export async function expandChapter(data: {
@@ -119,12 +123,16 @@ export async function expandChapter(data: {
   chapter_id: string;
   title: string;
   summary: string;
+  expansion_request?: string;
   context?: string;
 }): Promise<{ content: string; chapter: Record<string, unknown> }> {
-  const result = await apiClient.post<
-    Envelope<{ content: string; chapter: Record<string, unknown> }>
-  >('/api/v1/scripts/expand-chapter', data);
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/expand-chapter`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<{ content: string; chapter: Record<string, unknown> }>(res);
 }
 
 export async function createBranches(data: {
@@ -136,11 +144,13 @@ export async function createBranches(data: {
   branch_type: 'choice' | 'condition';
   context?: string;
 }): Promise<{ branches: ScriptChapter[] }> {
-  const result = await apiClient.post<Envelope<{ branches: ScriptChapter[] }>>(
-    '/api/v1/scripts/create-branches',
-    data,
-  );
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/create-branches`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<{ branches: ScriptChapter[] }>(res);
 }
 
 export async function convertToStoryboard(data: {
@@ -148,10 +158,13 @@ export async function convertToStoryboard(data: {
   chapter_id: string;
   storyboard_project_id?: string;
 }): Promise<{ task_id?: string; nodes?: Record<string, unknown>[] }> {
-  const result = await apiClient.post<
-    Envelope<{ task_id?: string; nodes?: Record<string, unknown>[] }>
-  >('/api/v1/scripts/convert-to-storyboard', data);
-  return result.data;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/convert-to-storyboard`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return unwrapResponse<{ task_id?: string; nodes?: Record<string, unknown>[] }>(res);
 }
 
 // ─── Script Assets ───────────────────────────────────────────────────────────
@@ -160,11 +173,14 @@ export async function fetchScriptAssets(
   scriptId: string,
   assetType?: ScriptAssetType,
 ): Promise<ScriptAsset[]> {
-  const result = await apiClient.get<Envelope<ScriptAsset[]>>(
-    `/api/v1/scripts/projects/${scriptId}/assets`,
-    { query: { asset_type: assetType } },
+  const headers = await getAuthHeaders();
+  const params = new URLSearchParams();
+  if (assetType) params.set('asset_type', assetType);
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/${scriptId}/assets?${params}`,
+    { headers },
   );
-  return result.data;
+  return unwrapResponse<ScriptAsset[]>(res);
 }
 
 export async function createScriptAsset(data: {
@@ -173,24 +189,72 @@ export async function createScriptAsset(data: {
   name: string;
   content?: string;
 }): Promise<ScriptAsset> {
-  const result = await apiClient.post<Envelope<ScriptAsset>>(
-    `/api/v1/scripts/projects/${data.script_id}/assets`,
-    data,
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/${data.script_id}/assets`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
   );
-  return result.data;
+  return unwrapResponse<ScriptAsset>(res);
 }
 
 export async function updateScriptAsset(
   assetId: string,
   data: Partial<Pick<ScriptAsset, 'name' | 'content' | 'data_json' | 'sort_order'>>,
 ): Promise<ScriptAsset> {
-  const result = await apiClient.put<Envelope<ScriptAsset>>(
-    `/api/v1/scripts/projects/assets/${assetId}`,
-    data,
+  const headers = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`,
+    {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
   );
-  return result.data;
+  return unwrapResponse<ScriptAsset>(res);
 }
 
 export async function deleteScriptAsset(assetId: string): Promise<void> {
-  await apiClient.delete(`/api/v1/scripts/projects/assets/${assetId}`);
+  const headers = await getAuthHeaders();
+  await fetch(`${getApiUrl()}/api/v1/scripts/projects/assets/${assetId}`, {
+    method: 'DELETE',
+    headers,
+  });
+}
+
+// ─── Import / Export ─────────────────────────────────────────────────────────
+
+export interface ImportedChapter {
+  title: string;
+  summary: string;
+  content: string;
+  content_html: string;
+}
+
+export async function importScript(
+  scriptId: string,
+  file: File,
+): Promise<{ chapters: ImportedChapter[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('script_id', scriptId);
+  const headers = await getAuthHeaders();
+  // Remove Content-Type — FormData sets it automatically with the multipart boundary
+  delete (headers as Record<string, string>)['Content-Type'];
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/import`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Import failed: ${res.status}`);
+  return res.json();
+}
+
+export function getExportUrl(scriptId: string, format: string, branchId?: string): string {
+  const params = new URLSearchParams({ format });
+  if (branchId) params.set('branch_id', branchId);
+  return `${getApiUrl()}/api/v1/scripts/${scriptId}/export?${params}`;
 }

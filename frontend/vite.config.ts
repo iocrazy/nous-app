@@ -11,18 +11,18 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: ['mediahubserver.heygo.cn', 'mediahubapi.heygo.cn'],
+      allowedHosts: ['mediahubserver.heygo.cn', 'mediahubapi.heygo.cn', 'test.heygo.cn', '10.0.0.3'],
       proxy: {
         '/api': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
         '/media': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
         '/stream': {
-          target: 'https://mediahubserver.heygo.cn:88',
+          target: 'http://127.0.0.1:8081',
           changeOrigin: true,
         },
       },
@@ -102,6 +102,19 @@ export default defineConfig(({ mode }) => {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       '__APP_VERSION__': JSON.stringify(pkg.version),
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-tiptap': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
+            'vendor-reactflow': ['@xyflow/react'],
+            'vendor-charts': ['recharts'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+          },
+        },
+      },
     },
     resolve: {
       alias: {

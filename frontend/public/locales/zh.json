@@ -102,20 +102,9 @@
     "unlimited": "无限制"
   },
   "common": {
-    "save": "保存",
     "cancel": "取消",
-    "back": "返回",
-    "delete": "删除",
-    "edit": "编辑",
-    "confirm": "确认",
-    "loading": "加载中...",
-    "error": "错误",
-    "success": "成功",
-    "search": "搜索",
-    "create": "创建",
-    "creating": "创建中...",
-    "saving": "保存中...",
-    "all": "全部"
+    "close": "关闭",
+    "delete": "删除"
   },
   "parser": {
     "title": "媒体解析",
@@ -1097,11 +1086,6 @@
     "prev": "上一张",
     "reset": "重置"
   },
-  "common": {
-    "cancel": "取消",
-    "close": "关闭",
-    "delete": "删除"
-  },
   "skills": {
     "title": "技能",
     "noSkills": "暂无技能",
@@ -1136,5 +1120,21 @@
     "noSkill": "不使用技能",
     "using": "使用中",
     "searchSkills": "搜索技能..."
+  },
+  "chat": {
+    "newConversation": "新对话",
+    "untitled": "未命名",
+    "typeMessage": "输入消息...",
+    "createSessionFirst": "请先创建会话",
+    "copy": "复制",
+    "copied": "已复制",
+    "suggestions": {
+      "outlineStory": "帮我构建故事大纲",
+      "reviewChapter": "审阅我的章节",
+      "improveDialogue": "优化对话",
+      "suggestPlot": "给我一些情节建议"
+    },
+    "emptyTitle": "开始对话",
+    "emptySubtitle": "向你的 AI 助手咨询任何与项目相关的内容。"
   }
 }

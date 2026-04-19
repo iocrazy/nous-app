@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Loader2, Users, MessageCircle, Film, FileText, Download, ArrowLeft } from 'lucide-react';
+import { Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { EditorTopBar } from '../../components/EditorTopBar';
+import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Canvas } from '../../features/storyboard/Canvas';
 import { useCanvasStore } from '../../stores/canvasStore';
@@ -148,103 +150,113 @@ export function CanvasEditorPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────
 
-  if (loading) {
-    return (
-      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex items-center justify-center bg-zinc-950" style={{ height: '100vh' }}>
-        <Loader2 size={24} className="animate-spin text-zinc-500" />
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col items-center justify-center gap-4 bg-zinc-950" style={{ height: '100vh' }}>
-        <p className="text-sm text-red-400">Failed to load project</p>
-        <p className="text-xs text-zinc-500">{loadError}</p>
-      </div>
-    );
-  }
+  const handleBack = () =>
+    navigate(teamId ? `/team/${teamId}/projects/${parentProjectId}?tab=storyboard` : '/projects');
 
   return (
-    <div className="-mx-4 -mt-14 -mb-20 sm:-mx-8 sm:-mt-20 sm:-mb-8 flex flex-col bg-zinc-950 overflow-hidden" style={{ height: 'calc(100vh)' }}>
-      {/* Canvas fills everything */}
-      <div className="flex-1 flex min-h-0">
-        <div className="flex-1 relative overflow-hidden min-h-0">
-          <ReactFlowProvider>
-            <Canvas />
-          </ReactFlowProvider>
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950">
+      {/* Fullscreen loading overlay */}
+      <EditorLoadingScreen visible={loading} />
 
-          {/* Floating panel toolbar — left side vertical */}
-          <div className="absolute top-20 left-4 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
-            <FloatingIconButton
-              icon={<ArrowLeft size={16} />}
-              tooltip="Back to project"
-              onClick={() => navigate(teamId ? `/team/${teamId}/projects/${parentProjectId}?tab=storyboard` : '/projects')}
-            />
-            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
-            <FloatingIconButton
-              icon={<FileText size={16} />}
-              tooltip="Script Import"
-              onClick={() => setShowScriptImport(true)}
-            />
-            <FloatingIconButton
-              icon={<Users size={16} />}
-              tooltip="Characters"
-              active={sidePanel === 'characters'}
-              onClick={() => toggleSidePanel('characters')}
-            />
-            <FloatingIconButton
-              icon={<Film size={16} />}
-              tooltip="Timeline"
-              active={showTimeline}
-              onClick={() => setShowTimeline((v) => !v)}
-            />
-            <FloatingIconButton
-              icon={<MessageCircle size={16} />}
-              tooltip="Chat"
-              active={sidePanel === 'chat'}
-              onClick={() => toggleSidePanel('chat')}
-            />
-            <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
-            <FloatingIconButton
-              icon={<Download size={16} />}
-              tooltip="Export"
-              onClick={() => setShowExport(true)}
-            />
-          </div>
+      {/* Error state */}
+      {!loading && loadError && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-4">
+          <p className="text-sm text-red-400">Failed to load project</p>
+          <p className="text-xs text-zinc-500">{loadError}</p>
+          <button
+            type="button"
+            onClick={handleBack}
+            className="text-sm text-indigo-400 hover:underline"
+          >
+            Back to project
+          </button>
         </div>
-
-        {/* Right side panel */}
-        {sidePanel === 'characters' && projectId && (
-          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
-            <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
-          </div>
-        )}
-        {sidePanel === 'chat' && projectId && (
-          <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
-            <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
-          </div>
-        )}
-      </div>
-
-      {/* Bottom timeline */}
-      {showTimeline && (
-        <FrameTimeline onClose={() => setShowTimeline(false)} />
       )}
 
-      {/* Dialogs */}
-      {projectId && (
+      {/* Editor UI */}
+      {!loadError && (
         <>
-          <ScriptImportDialog
-            projectId={projectId}
-            isOpen={showScriptImport}
-            onClose={() => setShowScriptImport(false)}
+          <EditorTopBar
+            projectName="Storyboard"
+            onBack={handleBack}
+            onExport={() => setShowExport(true)}
+            onImport={() => setShowScriptImport(true)}
           />
-          <ExportDialog
-            projectId={projectId}
-            isOpen={showExport}
-            onClose={() => setShowExport(false)}
-          />
+
+          {/* Canvas + side panels */}
+          <div className="flex-1 flex min-h-0">
+            <div className="flex-1 relative overflow-hidden min-h-0">
+              <ReactFlowProvider>
+                <Canvas />
+              </ReactFlowProvider>
+
+              {/* Floating panel toolbar — left side vertical */}
+              <div className="absolute top-4 left-4 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+                <FloatingIconButton
+                  icon={<FileText size={16} />}
+                  tooltip="Script Import"
+                  onClick={() => setShowScriptImport(true)}
+                />
+                <FloatingIconButton
+                  icon={<Users size={16} />}
+                  tooltip="Characters"
+                  active={sidePanel === 'characters'}
+                  onClick={() => toggleSidePanel('characters')}
+                />
+                <FloatingIconButton
+                  icon={<Film size={16} />}
+                  tooltip="Timeline"
+                  active={showTimeline}
+                  onClick={() => setShowTimeline((v) => !v)}
+                />
+                <FloatingIconButton
+                  icon={<MessageCircle size={16} />}
+                  tooltip="Chat"
+                  active={sidePanel === 'chat'}
+                  onClick={() => toggleSidePanel('chat')}
+                />
+                <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
+                <FloatingIconButton
+                  icon={<Download size={16} />}
+                  tooltip="Export"
+                  onClick={() => setShowExport(true)}
+                />
+              </div>
+            </div>
+
+            {/* Right side panel */}
+            {sidePanel === 'characters' && projectId && (
+              <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+                <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+              </div>
+            )}
+            {sidePanel === 'chat' && projectId && (
+              <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+                <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
+              </div>
+            )}
+          </div>
+
+          {/* Bottom timeline */}
+          {showTimeline && (
+            <FrameTimeline onClose={() => setShowTimeline(false)} />
+          )}
+
+          {/* Dialogs */}
+          {projectId && (
+            <>
+              <ScriptImportDialog
+                projectId={projectId}
+                isOpen={showScriptImport}
+                onClose={() => setShowScriptImport(false)}
+              />
+              <ExportDialog
+                projectId={projectId}
+                isOpen={showExport}
+                onClose={() => setShowExport(false)}
+              />
+            </>
+          )}
         </>
       )}
     </div>

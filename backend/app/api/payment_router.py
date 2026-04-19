@@ -126,42 +126,30 @@ async def wechat_callback(request: Request):
     """
     Receive payment result notification from WeChat Pay.
 
-    .. note::
+    .. warning::
 
-        This is a placeholder implementation. In production you MUST:
+        **SECURITY**: Signature verification is NOT yet implemented.
+        This endpoint is intentionally disabled until WeChat Pay SDK
+        integration is complete. All incoming callbacks are rejected
+        with HTTP 501 to prevent unverified payment state changes.
+
+        Before enabling, you MUST:
         - Verify the request signature using the WeChat API certificate.
-        - Parse the encrypted XML/JSON body per WeChat Pay v3 spec.
-        - Return the appropriate response format.
-
-    Returns WeChat-expected JSON:
-    ``{"code": "SUCCESS"|"FAIL", "message": "..."}``
+        - Decrypt and parse the encrypted XML/JSON body per WeChat Pay v3 spec.
+        - Only update order state after successful signature verification.
     """
-    try:
-        # TODO: Verify WeChat Pay signature
-        # TODO: Decrypt and parse WeChat Pay notification body
-        body = await request.body()
-        logger.info(f"WeChat callback received: {len(body)} bytes")
-
-        # --- Placeholder: extract trade_no from body ---
-        # In production, parse the notification body to get the trade_no
-        # and payment result. For now we just log the raw body.
-        #
-        # Example (pseudo-code):
-        #   data = decrypt_wechat_body(body, api_key)
-        #   trade_no = data["out_trade_no"]
-        #   paid = data["trade_state"] == "SUCCESS"
-
-        # For now, return success acknowledgement
-        # Real implementation would call:
-        #   result = await _payment_service.handle_callback(
-        #       trade_no=trade_no, payment_method="wechat", paid=paid
-        #   )
-
-        return {"code": "SUCCESS", "message": "OK"}
-
-    except Exception as e:
-        logger.error(f"WeChat callback error: {e}")
-        return {"code": "FAIL", "message": str(e)}
+    # SECURITY: Payment callbacks MUST verify provider signatures before
+    # processing any payment state changes. Accepting unverified callbacks
+    # allows attackers to fraudulently mark orders as paid.
+    # This endpoint will remain disabled until proper signature verification
+    # is integrated via the WeChat Pay v3 SDK.
+    logger.warning(
+        "WeChat Pay callback received but rejected — signature verification not implemented"
+    )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="WeChat Pay callback not yet active: signature verification required",
+    )
 
 
 @router.post("/callback/alipay", summary="Alipay callback")
@@ -169,37 +157,27 @@ async def alipay_callback(request: Request):
     """
     Receive payment result notification from Alipay.
 
-    .. note::
+    .. warning::
 
-        This is a placeholder implementation. In production you MUST:
+        **SECURITY**: Signature verification is NOT yet implemented.
+        This endpoint is intentionally disabled until Alipay SDK
+        integration is complete. All incoming callbacks are rejected
+        with HTTP 501 to prevent unverified payment state changes.
+
+        Before enabling, you MUST:
         - Verify the request signature using the Alipay public key.
         - Parse the form-encoded body per Alipay async notification spec.
-        - Return ``"success"`` or ``"fail"`` as plain text.
-
-    Returns plain text ``"success"`` or ``"fail"``.
+        - Only update order state after successful signature verification.
     """
-    try:
-        # TODO: Verify Alipay signature
-        # TODO: Parse Alipay form-encoded notification body
-        body = await request.body()
-        logger.info(f"Alipay callback received: {len(body)} bytes")
-
-        # --- Placeholder: extract trade_no from body ---
-        # In production, parse form data to get out_trade_no and trade_status.
-        #
-        # Example (pseudo-code):
-        #   form = parse_qs(body.decode())
-        #   trade_no = form["out_trade_no"][0]
-        #   paid = form["trade_status"][0] == "TRADE_SUCCESS"
-
-        # For now, return success acknowledgement
-        # Real implementation would call:
-        #   result = await _payment_service.handle_callback(
-        #       trade_no=trade_no, payment_method="alipay", paid=paid
-        #   )
-
-        return "success"
-
-    except Exception as e:
-        logger.error(f"Alipay callback error: {e}")
-        return "fail"
+    # SECURITY: Payment callbacks MUST verify provider signatures before
+    # processing any payment state changes. Accepting unverified callbacks
+    # allows attackers to fraudulently mark orders as paid.
+    # This endpoint will remain disabled until proper signature verification
+    # is integrated via the Alipay SDK.
+    logger.warning(
+        "Alipay callback received but rejected — signature verification not implemented"
+    )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Alipay callback not yet active: signature verification required",
+    )

@@ -3,10 +3,18 @@
 import json
 from typing import Any, Dict, List, Optional
 
+import bleach
 import httpx
 from loguru import logger
 
 from app.core.config import settings
+
+ALLOWED_HTML_TAGS = ["h2", "h3", "p", "strong", "em", "hr", "br"]
+
+
+def sanitize_ai_html(html: str) -> str:
+    """Sanitize AI-generated HTML, only allow script-safe tags."""
+    return bleach.clean(html, tags=ALLOWED_HTML_TAGS, strip=True)
 
 # LLM generation defaults
 DEFAULT_OUTLINE_TEMPERATURE = 0.7
@@ -75,6 +83,7 @@ class ScriptAIService:
         premise: str,
         chapter_count: int = 5,
         style_guide: Optional[str] = None,
+        genre: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Generate a story outline with chapter summaries from a premise."""
         system_prompt = (
@@ -87,6 +96,8 @@ class ScriptAIService:
             "Return ONLY a JSON array, no other text."
         )
         user_prompt = f"Story premise:\n{premise}"
+        if genre:
+            user_prompt += f"\n\n故事风格为{genre}，请围绕该风格创作。"
         if style_guide:
             user_prompt += f"\n\nStyle guide:\n{style_guide}"
 
@@ -128,19 +139,24 @@ class ScriptAIService:
         title: str,
         summary: str,
         context: Optional[str] = None,
+        expansion_request: Optional[str] = None,
     ) -> str:
-        """Expand a chapter summary into full prose content."""
-        system_prompt = (
-            "You are a professional fiction writer. "
-            "Expand the given chapter summary into full, vivid prose. "
-            "Write 3-5 paragraphs. Use descriptive language, dialogue where "
-            "appropriate, and maintain narrative flow. "
-            "Return ONLY the prose text, no JSON or markdown."
-        )
+        """Expand a chapter summary into full screenplay HTML content."""
+        system_prompt = """You are a professional screenplay writer. Expand the given chapter summary into full screenplay content.
+
+OUTPUT FORMAT (mandatory):
+- Scene headings: <h2>场景N：场景名 – 时间 – 内/外景</h2>
+- Action/description: <p>paragraph text</p>
+- Character dialogue: <p><strong>角色名</strong>：（动作描述）台词内容</p>
+- Scene separator: <hr>
+- Do NOT wrap output in any container tags. Output raw HTML fragments only.
+- Do NOT output markdown. Only HTML tags listed above."""
 
         user_prompt = f"Chapter title: {title}\nSummary: {summary}"
         if context:
             user_prompt = f"Story context:\n{context}\n\n{user_prompt}"
+        if expansion_request:
+            user_prompt += f"\n\nAdditional requirements: {expansion_request}"
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -152,7 +168,7 @@ class ScriptAIService:
             temperature=DEFAULT_EXPAND_TEMPERATURE,
             max_tokens=DEFAULT_MAX_TOKENS,
         )
-        return content[:MAX_CONTENT_LENGTH]
+        return sanitize_ai_html(content[:MAX_CONTENT_LENGTH])
 
     async def create_branches(
         self,

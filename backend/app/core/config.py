@@ -147,6 +147,18 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: float = Field(
         default=120.0, description="LLM request timeout in seconds"
     )
+    LLM_MAX_CONTEXT_TOKENS: int = Field(
+        default=28000,
+        description="Token budget for LLM context window (leave headroom for response)",
+    )
+    LLM_MAX_HISTORY_MESSAGES: int = Field(
+        default=50,
+        description="Maximum prior messages loaded before applying token budget",
+    )
+    LLM_AGENT_CACHE_TTL_SECONDS: int = Field(
+        default=300,
+        description="Cache TTL for agent config lookups (seconds)",
+    )
 
     # ============================================
     # AI Provider Configuration

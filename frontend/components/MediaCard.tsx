@@ -519,7 +519,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         setLoadingAction(null);
       }
     } else {
-      console.log(`Action triggered: ${action}`);
     }
   };
 

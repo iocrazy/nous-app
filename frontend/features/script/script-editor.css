@@ -1,0 +1,68 @@
+/* TipTap editor styles for script formatting */
+
+/* 章节节点的内容区域 — 确保 TipTap 编辑器内的样式正确 */
+.script-tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 120px;
+  padding: 12px 16px;
+}
+
+/* 场景标题 — 橙色，加粗，有上边距 */
+.script-tiptap-editor .scene-heading {
+  color: #f59e0b;
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin: 1rem 0 0.5rem;
+  line-height: 1.4;
+}
+
+.script-tiptap-editor .scene-heading:first-child {
+  margin-top: 0;
+}
+
+/* 对话行 — 橙色 */
+.script-tiptap-editor .dialogue-line {
+  color: #f59e0b;
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
+.script-tiptap-editor .dialogue-line strong {
+  font-weight: 700;
+}
+
+/* 分隔线 */
+.script-tiptap-editor hr {
+  border: none;
+  border-top: 1px solid #3f3f46;
+  margin: 0.75rem 0;
+}
+
+/* 普通段落 */
+.script-tiptap-editor p {
+  color: #e4e4e7;
+  line-height: 1.7;
+  margin: 0.25rem 0;
+}
+
+.script-tiptap-editor .tiptap p.is-editor-empty:first-child::before {
+  color: #52525b;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Chapter connector dot */
+.chapter-connector {
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  margin: 0 auto;
+}
+
+/* Export dialog format items hover */
+.export-format-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}

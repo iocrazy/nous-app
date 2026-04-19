@@ -113,9 +113,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setHasMoreData(result.hasMore);
         setCurrentPage(0);
         if (result.totalCount >= 0) setTotalCount(result.totalCount);
-        if (result.data.length === 0) {
-          console.log("Supabase connected but returned no data.");
-        }
       } else {
         setLibrary(MOCK_LIBRARY);
         setHasMoreData(false);
@@ -415,7 +412,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       .subscribe();
 
     return () => {
-      console.log('Unsubscribing from video tags realtime channel');
       supabase.removeChannel(tagsChannel);
     };
   }, [initialLoadComplete, isAuthenticated]);

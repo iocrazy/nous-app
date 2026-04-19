@@ -102,20 +102,9 @@
     "unlimited": "Unlimited"
   },
   "common": {
-    "save": "Save",
     "cancel": "Cancel",
-    "back": "Back",
-    "delete": "Delete",
-    "edit": "Edit",
-    "confirm": "Confirm",
-    "loading": "Loading...",
-    "error": "Error",
-    "success": "Success",
-    "search": "Search",
-    "create": "Create",
-    "creating": "Creating...",
-    "saving": "Saving...",
-    "all": "All"
+    "close": "Close",
+    "delete": "Delete"
   },
   "parser": {
     "title": "Media Parser",
@@ -1097,11 +1086,6 @@
     "prev": "Previous",
     "reset": "Reset"
   },
-  "common": {
-    "cancel": "Cancel",
-    "close": "Close",
-    "delete": "Delete"
-  },
   "skills": {
     "title": "Skills",
     "noSkills": "No Skills Yet",
@@ -1136,5 +1120,21 @@
     "noSkill": "No Skill",
     "using": "Using",
     "searchSkills": "Search skills..."
+  },
+  "chat": {
+    "newConversation": "New conversation",
+    "untitled": "Untitled",
+    "typeMessage": "Type a message...",
+    "createSessionFirst": "Create a session first",
+    "copy": "Copy",
+    "copied": "Copied",
+    "suggestions": {
+      "outlineStory": "Help me outline a story",
+      "reviewChapter": "Review my chapter",
+      "improveDialogue": "Improve dialogue",
+      "suggestPlot": "Suggest plot ideas"
+    },
+    "emptyTitle": "Start a conversation",
+    "emptySubtitle": "Ask your AI assistant anything about your project."
   }
 }
