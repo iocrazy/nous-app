@@ -33,10 +33,12 @@ export function DownloadMenuDropdown({
   const isPending = (s?: string) => { const l = s?.toLowerCase(); return l === 'pending' || l === 'downloading'; };
   const isFailed = (s?: string) => s?.toLowerCase() === 'failed';
 
-  // Defense: if status says "completed" but no actual file path, treat as unfetched
+  // Defense: if status says "completed" but no actual file path, treat as unfetched.
+  // Audio can come from two sources: extract_audio_path (ffmpeg-extracted from the
+  // video) OR music_download_path (separate BGM download). Either counts.
   const hasVideoFile = !!(video.download_path || video.hls_path);
   const hasCoverFile = !!video.cover_download_path;
-  const hasAudioFile = !!video.music_download_path;
+  const hasAudioFile = !!(video.extract_audio_path || video.music_download_path);
 
   const videoStatus = isCompleted(video.video_download_status) && !hasVideoFile ? undefined : video.video_download_status;
   const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
@@ -149,7 +151,7 @@ export function MobileDownloadMenu({
   const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
   const hasVideoFile = !!(video.download_path || video.hls_path);
   const hasCoverFile = !!video.cover_download_path;
-  const hasAudioFile = !!video.music_download_path;
+  const hasAudioFile = !!(video.extract_audio_path || video.music_download_path);
   const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors";
 
   return (

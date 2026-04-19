@@ -241,22 +241,38 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
 
-        music_status = video.get("music_download_status", "").lower()
-        if music_status not in ("completed", "skipped"):
-            raise HTTPException(status_code=404, detail="Music file has not been downloaded")
-
         try:
             base_path = Utils.get_download_base_path()
         except ValueError:
             raise HTTPException(status_code=404, detail="Download path not configured")
 
+        # Two possible sources (in order of preference):
+        #   1. extract_audio_path — produced by ffmpeg audio extraction from
+        #      the downloaded video (fast, no separate network call)
+        #   2. music_download_path — separate BGM fetched via music URL
+        # The gating status check was only on music_download_status, so once
+        # a user extracted audio (which only writes extract_audio_path) the
+        # endpoint still returned 404. Check both paths before falling back
+        # to status + disk scan.
+        extract_audio_path = video.get("extract_audio_path", "")
         music_download_path = video.get("music_download_path", "")
         audio_file = None
 
-        if music_download_path:
-            candidate = Path(base_path) / music_download_path
+        for rel in (extract_audio_path, music_download_path):
+            if not rel:
+                continue
+            candidate = Path(base_path) / rel
             if candidate.exists():
                 audio_file = candidate
+                break
+
+        if not audio_file:
+            music_status = video.get("music_download_status", "").lower()
+            if music_status not in ("completed", "skipped"):
+                raise HTTPException(
+                    status_code=404,
+                    detail="Audio file has not been prepared (no extracted or downloaded audio)",
+                )
 
         if not audio_file:
             storage_dir = None

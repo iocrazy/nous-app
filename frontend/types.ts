@@ -44,7 +44,8 @@ export interface ParsedMedia {
   image_download_urls?: string[];
 
   // Audio Info
-  music_download_path?: string;
+  music_download_path?: string;   // BGM downloaded from separate music URL
+  extract_audio_path?: string;    // audio track extracted from the video itself
   music_name?: string;
 
   // Cover Info
