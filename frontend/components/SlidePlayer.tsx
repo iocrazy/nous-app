@@ -5,8 +5,10 @@ import { getAuthHeaders } from '../services/parserService';
 
 interface Slide {
   name: string;
-  type: string;
-  media_type: 'image' | 'video';
+  // Short classifier: 'image' | 'video' — use this for rendering branches.
+  type: 'image' | 'video';
+  // MIME string from backend, e.g. 'image/jpeg' / 'video/mp4'.
+  media_type: string;
   url: string;
 }
 
@@ -204,7 +206,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
     >
       {/* Slide content */}
       <div className="absolute inset-0 flex items-center justify-center">
-        {currentSlide.media_type === 'video' ? (
+        {currentSlide.type === 'video' ? (
           <video
             key={currentSlide.name}
             src={buildSlideUrl(currentSlide.name)}
