@@ -26,8 +26,6 @@ const ShortcutsTagsPage = lazy(() => import('./pages/ShortcutsTagsPage').then(m 
 const StoryboardWorkbench = lazy(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
 const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
 const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
-const AdminNousModelsPage = lazy(() => import('./pages/admin/AdminNousModelsPage').then(m => ({ default: m.AdminNousModelsPage })));
-const AdminDeploymentLogsPage = lazy(() => import('./pages/admin/AdminDeploymentLogsPage').then(m => ({ default: m.AdminDeploymentLogsPage })));
 
 function PageLoader() {
   return (
@@ -83,12 +81,6 @@ export const router = createBrowserRouter([
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
         { index: true, element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
-      ]},
-
-      // Admin routes (no team scope, admin role required)
-      { path: 'admin', element: <AppLayout />, children: [
-        { path: 'nous-models', element: <SuspenseWrap><AdminNousModelsPage /></SuspenseWrap> },
-        { path: 'deployment-logs', element: <SuspenseWrap><AdminDeploymentLogsPage /></SuspenseWrap> },
       ]},
 
       // Team-scoped routes
