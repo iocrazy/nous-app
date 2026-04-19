@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
-from app.services.drissionpage_parser import DrissionPageParser
+from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
 Utils.setup_logging()

@@ -27,7 +27,9 @@ RUN maturin build --release
 # ============================================
 FROM python:3.13-slim
 
-# Install Chrome, ffmpeg, build tools and dependencies
+# Install Chrome, ffmpeg, Node.js, build tools and dependencies.
+# Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
+# which runs douyin_bdms.js to compute the a_bogus request signature.
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -38,6 +40,7 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-cjk-extra \
     build-essential \
     ffmpeg \
+    nodejs \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 

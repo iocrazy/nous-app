@@ -35,8 +35,8 @@ def _fetch_and_parse(valid_url: str, video_bool: bool,
     Returns (aweme_detail, parsed_data) tuple.
     Raises RuntimeError if fetch or parse fails.
     """
-    from app.services.drissionpage_parser import DrissionPageParser
-    from app.services.douyin_formatter import DouyinFormatter
+    from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_parse.formatter import DouyinFormatter
 
     aweme_detail = run_async(DrissionPageParser.fetch_one_video(valid_url))
     if not aweme_detail:
@@ -324,29 +324,28 @@ def parse_batch_links_task(
 # ---------------------------------------------------------------------------
 
 
+_DOUYIN_METHOD_FLAG_KEYS = {
+    "douyin_ytdlp_enabled": "ytdlp",
+    "douyin_lighthttp_enabled": "lighthttp",
+    "douyin_abogus_enabled": "abogus",
+    "douyin_drissionpage_enabled": "drissionpage",
+}
+
+
 def _get_douyin_method_flags() -> dict[str, bool]:
     """Read Douyin parse method toggles from system_settings."""
-    flags = {"ytdlp": True, "lighthttp": True, "drissionpage": True}
+    flags = {short: True for short in _DOUYIN_METHOD_FLAG_KEYS.values()}
     try:
         from app.db import get_async_supabase_admin
         client = run_async(get_async_supabase_admin())
         result = run_async(
             client.table("system_settings")
             .select("key, value")
-            .in_("key", [
-                "douyin_ytdlp_enabled",
-                "douyin_lighthttp_enabled",
-                "douyin_drissionpage_enabled",
-            ])
+            .in_("key", list(_DOUYIN_METHOD_FLAG_KEYS.keys()))
             .execute()
         )
         for row in (result.data or []):
-            key_map = {
-                "douyin_ytdlp_enabled": "ytdlp",
-                "douyin_lighthttp_enabled": "lighthttp",
-                "douyin_drissionpage_enabled": "drissionpage",
-            }
-            short_key = key_map.get(row["key"])
+            short_key = _DOUYIN_METHOD_FLAG_KEYS.get(row["key"])
             if short_key:
                 flags[short_key] = row["value"] is True or row["value"] == "true"
     except Exception as e:
@@ -356,8 +355,8 @@ def _get_douyin_method_flags() -> dict[str, bool]:
 
 def _try_lighthttp(url: str, user_id: str):
     """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
-    from app.services.ies_douyin_parser import IesDouyinParser
-    from app.services.douyin_formatter import DouyinFormatter
+    from app.services.douyin_parse.ies_parser import IesDouyinParser
+    from app.services.douyin_parse.formatter import DouyinFormatter
 
     try:
         aweme_detail = run_async(IesDouyinParser.parse(url, user_id=user_id))
@@ -373,10 +372,29 @@ def _try_lighthttp(url: str, user_id: str):
     return None
 
 
+def _try_abogus(url: str, user_id: str):
+    """Attempt a_bogus signed HTTP parse. Returns (parsed, method, name) or None."""
+    from app.services.douyin_parse.abogus_parser import ABogusDouyinParser
+    from app.services.douyin_parse.formatter import DouyinFormatter
+
+    try:
+        aweme_detail = run_async(ABogusDouyinParser.parse(url, user_id=user_id))
+        if aweme_detail:
+            parsed = run_async(DouyinFormatter.parse_aweme_detail(
+                aweme_detail=aweme_detail, valid_url=url,
+                download_video=True, download_music=False, download_cover=True,
+            ))
+            if parsed:
+                return parsed, "abogus", "ABogus"
+    except Exception as e:
+        logger.warning(f"[Douyin] ABogus failed: {e}")
+    return None
+
+
 def _try_drissionpage(url: str, user_id: str):
     """Attempt DrissionPage parse. Returns (parsed, method, name) or None."""
-    from app.services.drissionpage_parser import DrissionPageParser
-    from app.services.douyin_formatter import DouyinFormatter
+    from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
+    from app.services.douyin_parse.formatter import DouyinFormatter
 
     try:
         aweme_detail = run_async(DrissionPageParser.fetch_one_video(url, user_id=user_id))
@@ -393,7 +411,7 @@ def _try_drissionpage(url: str, user_id: str):
 
 
 def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
-    """Sync Douyin fallback: LightHTTP → DrissionPage (respects admin toggles).
+    """Sync Douyin fallback: LightHTTP → ABogus → DrissionPage (respects admin toggles).
 
     Returns (parsed_data, parse_method, parse_method_name).
     Raises RuntimeError if all enabled methods fail.
@@ -404,6 +422,8 @@ def _douyin_parse_fallback_sync(url: str, user_id: str) -> tuple:
     methods = []
     if flags["lighthttp"]:
         methods.append(("LightHTTP", _try_lighthttp))
+    if flags["abogus"]:
+        methods.append(("ABogus", _try_abogus))
     if flags["drissionpage"]:
         methods.append(("DrissionPage", _try_drissionpage))
 

@@ -144,8 +144,8 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
         return media
 
     try:
-        from app.services.ies_douyin_parser import IesDouyinParser
-        from app.services.douyin_formatter import DouyinFormatter
+        from app.services.douyin_parse.ies_parser import IesDouyinParser
+        from app.services.douyin_parse.formatter import DouyinFormatter
 
         # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
         aweme_detail = run_async(IesDouyinParser.parse(original_url))
@@ -187,7 +187,7 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
                 f"falling back to BrowserAuto for {platform_id}"
             )
             try:
-                from app.services.drissionpage_parser import DrissionPageParser
+                from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
                 browser_detail = run_async(DrissionPageParser.fetch_one_video(original_url))
                 if browser_detail:
