@@ -8,7 +8,7 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
-import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
+import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, isAlbumType } from '../utils/awemeType';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
@@ -63,14 +63,11 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         ok = await downloadWithAuth(getMusicDownloadUrl(video.platform_id), `${baseName}_audio.mp3`, { onSuccess });
         if (!ok) addToast('Audio file not available for download', 'error');
       } else if (type === 'images') {
-        const urls = video.image_download_urls?.filter(u => u && u !== '#');
-        if (urls?.length) {
-          urls.forEach((url, idx) => {
-            setTimeout(() => downloadFile(url, `${baseName}_${idx + 1}.jpg`, { onSuccess }), idx * 500);
-          });
-        } else {
-          addToast('No images available for download', 'error');
-        }
+        // Packaged zip from backend — works for image carousels AND
+        // galleries containing videos / 动图. Backend zips whatever is
+        // on disk in the slides/ folder, so one click = one file.
+        ok = await downloadWithAuth(getGalleryZipUrl(video.platform_id), `${baseName}_gallery.zip`, { onSuccess });
+        if (!ok) addToast('Gallery not available for download', 'error');
       }
     } finally {
       setIsDownloading(false);

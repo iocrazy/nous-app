@@ -330,3 +330,97 @@ async def download_music_file(platform_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to download music file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download music file")
+
+
+@router.get("/download/{platform_id}/gallery", tags=TAGS_DOWNLOAD)
+async def download_gallery_zip(platform_id: str, auth: AuthDep):
+    """Stream a zip containing every slide file for a gallery / image-text
+    post. Works whether the slides folder contains images, videos (动图),
+    or a mix — anything in slides/ is included. Falls back to the media
+    root directory if no slides/ subfolder exists.
+
+    Previously the frontend iterated image_download_urls on the client
+    and downloaded each file separately (one at a time, exposing expiring
+    CDN tokens, and silently dropping anything that wasn't an image).
+    Streaming a zip from the backend hits the downloaded-to-disk copy
+    once, and gives the user one file instead of N prompts.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    try:
+        repo = MediaRepository()
+        video = await repo.get_by_platform_id(platform_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        try:
+            base_path = Utils.get_download_base_path()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Download path not configured")
+
+        download_path = video.get("download_path", "")
+        # download_path for gallery posts is usually the slides file itself
+        # (`.../slides/001.jpg`) or the gallery root. Normalize to directory.
+        candidate_dir = None
+        if download_path:
+            p = Path(base_path) / download_path
+            if p.is_dir():
+                candidate_dir = p
+            elif p.is_file():
+                candidate_dir = p.parent
+            else:
+                candidate_dir = p.parent if p.parent.exists() else None
+
+        if not candidate_dir or not candidate_dir.exists():
+            # Fallback: search by pattern
+            for pattern in (
+                f"global/resources/web/*/{video.get('id')}",
+                f"global/resources/web/*/{platform_id}",
+                f"*/{platform_id}",
+            ):
+                matches = list(Path(base_path).glob(pattern))
+                if matches:
+                    candidate_dir = matches[0]
+                    break
+
+        if not candidate_dir or not candidate_dir.exists():
+            raise HTTPException(status_code=404, detail="Gallery folder not found")
+
+        slides_dir = candidate_dir / "slides"
+        if not slides_dir.exists() or not slides_dir.is_dir():
+            slides_dir = candidate_dir
+
+        slide_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".webm"}
+        files = sorted(
+            [f for f in slides_dir.iterdir() if f.is_file() and f.suffix.lower() in slide_exts]
+        )
+        if not files:
+            raise HTTPException(status_code=404, detail="No gallery files on disk")
+
+        video_title = video.get("title", platform_id) or platform_id
+        safe_title = "".join(
+            c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip() or platform_id
+        zip_name = f"{safe_title[:80]}_gallery.zip"
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:
+            for f in files:
+                zf.write(f, arcname=f.name)
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{zip_name}"',
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to zip gallery for {platform_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to package gallery")

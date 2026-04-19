@@ -75,6 +75,14 @@ export const getMusicDownloadUrl = (platformId: string): string => {
 };
 
 /**
+ * Get gallery zip download URL (all slides in one file, for image-text
+ * / carousel / 动图 posts). Backend packages whatever is on disk.
+ */
+export const getGalleryZipUrl = (platformId: string): string => {
+  return `${getApiUrl()}/api/v1/media/download/${platformId}/gallery`;
+};
+
+/**
  * Mark downloads stuck in 'downloading' for too long as 'failed'.
  * Called once on library load to clean up stale records.
  */

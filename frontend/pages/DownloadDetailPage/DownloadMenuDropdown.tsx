@@ -72,10 +72,15 @@ export function DownloadMenuDropdown({
               </button>
             ) : null
           )}
-          {/* Images (carousel/image content) */}
-          {video.image_download_urls && video.image_download_urls.length > 0 && (
+          {/* Gallery (image-text / carousel / 动图) — packaged zip.
+              Show for any album-type post; the backend zip endpoint
+              serves whatever is on disk (images + videos together). */}
+          {isAlbumType(video.media_type) && (
             <button onClick={() => onDownload('images')} className={btnClass}>
-              <ImageIcon size={13} className="text-pink-400" /> Images ({video.image_download_urls.length})
+              <ImageIcon size={13} className="text-pink-400" /> Gallery
+              {video.image_download_urls && video.image_download_urls.length > 0
+                ? ` (${video.image_download_urls.length})`
+                : ''}
             </button>
           )}
           {/* Cover */}
@@ -156,14 +161,21 @@ export function MobileDownloadMenu({
 
   return (
     <>
-      {isCompleted(video.video_download_status) && hasVideoFile && (
+      {/* Video: only for non-album (真正的视频) */}
+      {!isAlbumType(video.media_type) && isCompleted(video.video_download_status) && hasVideoFile && (
         <button onClick={() => { onClose(); onDownload('video'); }} className={btnClass}>
-          <Download size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Download Images' : 'Download Video'}
+          <Download size={13} className="text-indigo-400" /> Download Video
         </button>
       )}
-      {!isCompleted(video.video_download_status) && video.original_url && (
+      {!isAlbumType(video.media_type) && !isCompleted(video.video_download_status) && video.original_url && (
         <button onClick={() => { onClose(); onFetchMedia({ video: true }); }} className={btnClass}>
-          <CloudDownload size={13} className="text-indigo-400" /> {isAlbumType(video.media_type) ? 'Fetch Images' : 'Fetch Video'}
+          <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+        </button>
+      )}
+      {/* Gallery (image-text / carousel / 动图): packaged zip */}
+      {isAlbumType(video.media_type) && (
+        <button onClick={() => { onClose(); onDownload('images'); }} className={btnClass}>
+          <Download size={13} className="text-pink-400" /> Download Gallery
         </button>
       )}
       {isCompleted(video.cover_download_status) && hasCoverFile && (
