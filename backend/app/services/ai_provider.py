@@ -64,7 +64,11 @@ class OpenAIProvider(AIProvider):
         self, api_key: str = "", base_url: str = "", model: str = "gpt-4o", **kwargs
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
-        client_kwargs = {"api_key": api_key, "timeout": 120.0, "max_retries": 2}
+        # max_retries=0 on the SDK — Celery owns the retry policy. Previous
+        # stack (SDK retries 2 × 120s + Celery retries 2 × the whole thing)
+        # could keep a summary task "processing" for 30-90 minutes before
+        # finally failing.
+        client_kwargs = {"api_key": api_key, "timeout": 120.0, "max_retries": 0}
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)
@@ -130,7 +134,17 @@ class OpenAICompatibleProvider(AIProvider):
         self, api_key: str = "", base_url: str = "", model: str = "", **kwargs
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model)
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # Explicit timeout (OpenAI SDK default is 600s, too long for our
+        # Celery retry loop) + max_retries=0 so Celery — not the SDK — owns
+        # retry. Without these, a summary task could sit in 'processing'
+        # for 30-90 min before Celery's own retry policy finally surfaces
+        # the failure to the user.
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=120.0,
+            max_retries=0,
+        )
 
     async def chat(self, messages: list, model: str = None, **kwargs) -> str:
         response = await self._client.chat.completions.create(

@@ -244,10 +244,15 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             )
             await tracker.start(task_id)
 
-            await asyncio.to_thread(
+            celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
                 platform_id, auth.user_id, resource_id, task_id,
             )
+            # Link celery task id so admin panel / retry flow can locate it.
+            try:
+                await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
+            except Exception as _e:
+                logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
             return {
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
@@ -413,10 +418,14 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             )
             await tracker.start(task_id)
 
-            await asyncio.to_thread(
+            celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
                 platform_id, auth.user_id, _resource_id, task_id,
             )
+            try:
+                await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
+            except Exception as _e:
+                logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
             # No transcript, run full pipeline

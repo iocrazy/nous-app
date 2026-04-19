@@ -578,9 +578,11 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         # Celery's Retry is a subclass of Exception — let it propagate unchanged
         if isinstance(e, _CeleryRetry):
             raise
-        logger.error(f"[AI] Summary generation failed for {platform_id}: {e}")
+        logger.error(f"[AI] Summary generation failed for {platform_id} "
+                     f"(model={summary_model}): {e}")
 
-        err_msg = str(e)[:200]
+        # Prefix provider:model so the user can tell which LLM was failing.
+        err_msg = f"[{summary_model}] {str(e)}"[:200]
         retrying = self.request.retries < self.max_retries
         if retrying:
             # Update unified_task with retry progress so user sees it's not dead
@@ -775,7 +777,38 @@ def chain_ai_pipeline(
 
     if tasks:
         pipeline = chain(*tasks)
-        pipeline.apply_async()
+        async_result = pipeline.apply_async()
+
+        # Link celery_task_id back to each unified_task so the admin panel
+        # and the retry flow can locate the Celery job. Without this the
+        # admin page showed "Celery Task ID: -" for every AI task and the
+        # reaper couldn't distinguish a dispatched task from a lost one.
+        try:
+            from app.services.unified_task_manager import get_task_manager
+            _mgr = get_task_manager()
+            # chain() returns an AsyncResult whose .parent chain ends at
+            # the first task; walk the list in reverse to grab all IDs.
+            celery_ids: list[str] = []
+            _cur = async_result
+            while _cur is not None:
+                celery_ids.append(_cur.id)
+                _cur = getattr(_cur, "parent", None)
+            celery_ids = list(reversed(celery_ids))  # extract → transcribe → summary
+
+            ordered_keys = []
+            if transcript_bool:
+                ordered_keys.append("extract" if "extract" in task_ids else None)
+                ordered_keys.append("transcribe")
+            if summary_bool and transcript_bool:
+                ordered_keys.append("summary")
+
+            for key, cid in zip([k for k in ordered_keys if k], celery_ids):
+                utid = task_ids.get(key)
+                if utid and cid:
+                    run_async(_mgr._atomic_update(utid, {"celery_task_id": cid}))
+        except Exception as e:
+            logger.debug(f"[AI] Failed to link celery_task_ids: {e}")
+
         logger.info(f"[AI] Pipeline queued for {platform_id}: {len(tasks)} tasks, group={group_id}")
         run_async(
             log_user_action(
