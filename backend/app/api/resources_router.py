@@ -21,7 +21,12 @@ from app.api.resources_versions_router import router as versions_router
 # Main router — prefix is set on each sub-router (/resources)
 router = APIRouter()
 
+# IMPORTANT: folders_router must be registered BEFORE crud_router.
+# crud_router owns GET /resources/{resource_id} (a catch-all path param),
+# which would otherwise match /resources/smart-folders, /resources/folders,
+# etc. and return 404 because "smart-folders" is not a real resource id.
+# FastAPI matches routes in registration order, so static paths must win.
 router.include_router(upload_router)
-router.include_router(crud_router)
-router.include_router(versions_router)
 router.include_router(folders_router)
+router.include_router(versions_router)
+router.include_router(crud_router)
