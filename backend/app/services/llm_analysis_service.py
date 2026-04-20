@@ -25,6 +25,26 @@ class SummaryResult:
     topics: List[str]
 
 
+# Keys must match frontend/components/AISettings.tsx LANGUAGE_OPTIONS.
+# "auto" deliberately yields no directive so the model follows the transcript.
+_LANGUAGE_DIRECTIVES: dict = {
+    "auto": "",
+    "en": "Respond in English.",
+    "zh": "请用简体中文回复（summary、key_points、topics 全部用中文）。",
+    "ja": "Respond in Japanese.",
+    "ko": "Respond in Korean.",
+    "es": "Respond in Spanish.",
+    "fr": "Respond in French.",
+    "de": "Respond in German.",
+}
+
+
+def _build_language_directive(language: str) -> str:
+    if not language:
+        return ""
+    return _LANGUAGE_DIRECTIVES.get(language.lower(), "")
+
+
 class LLMAnalysisService:
     """LLM-powered analysis for video transcripts and content."""
 
@@ -43,6 +63,7 @@ class LLMAnalysisService:
         transcript_text: str,
         video_info: dict = None,
         model: str = None,
+        language: str = "auto",
     ) -> SummaryResult:
         """Generate a summary from a transcript.
 
@@ -50,6 +71,10 @@ class LLMAnalysisService:
             transcript_text: Full transcript text.
             video_info: Optional dict with title, description, author, etc.
             model: Override the default model for this request.
+            language: ISO-ish code from ai_settings.preferred_language. "auto"
+                means follow the transcript's language (no directive). Anything
+                else injects an explicit instruction so the output — summary,
+                key_points AND topics — is returned in that language.
 
         Returns:
             SummaryResult with summary, key_points, topics.
@@ -69,9 +94,12 @@ class LLMAnalysisService:
 
         context_str = "\n".join(context_parts) if context_parts else ""
 
+        language_directive = _build_language_directive(language)
+
         system_prompt = (
             "You are a helpful assistant that summarizes video transcripts. "
-            "Return your response as valid JSON with exactly these keys:\n"
+            + (language_directive + " " if language_directive else "")
+            + "Return your response as valid JSON with exactly these keys:\n"
             '- "summary": A 2-3 sentence summary of the video content.\n'
             '- "key_points": A list of 3-5 key points as strings.\n'
             '- "topics": A list of 3-7 topic tags as strings.\n'
@@ -99,6 +127,7 @@ class LLMAnalysisService:
         transcript_text: str,
         video_info: dict = None,
         model: str = None,
+        language: str = "auto",
     ) -> Optional[SummaryResult]:
         """Generate summary and persist to database.
 
@@ -107,9 +136,12 @@ class LLMAnalysisService:
             transcript_text: Full transcript text.
             video_info: Optional video metadata (title, description, author).
             model: LLM model name.
+            language: Forwarded to generate_summary.
         """
         try:
-            result = await self.generate_summary(transcript_text, video_info, model)
+            result = await self.generate_summary(
+                transcript_text, video_info, model, language=language
+            )
 
             await self._repo.save_summary(
                 resource_id,

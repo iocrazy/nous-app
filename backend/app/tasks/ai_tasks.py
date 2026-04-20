@@ -537,7 +537,11 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
             from app.core.config import settings
             provider_config["api_key"] = settings.OPENAI_API_KEY
 
-        logger.info(f"[AI] Summary using provider={provider_key}, model={summary_model}")
+        language = ai_settings.get("preferred_language") or "auto"
+        logger.info(
+            f"[AI] Summary using provider={provider_key}, model={summary_model}, "
+            f"language={language}"
+        )
 
         service = LLMAnalysisService(
             provider_key=provider_key,
@@ -556,6 +560,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
                 transcript_text=transcript["full_text"],
                 video_info=video_info,
                 model=summary_model,
+                language=language,
             )
         )
 
