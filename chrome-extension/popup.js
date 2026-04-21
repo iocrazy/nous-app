@@ -240,7 +240,10 @@ pushBtn.addEventListener('click', async () => {
 const createTagToggle = document.getElementById('createTagToggle');
 const createTagForm = document.getElementById('createTagForm');
 const newTagInput = document.getElementById('newTagInput');
-const translatePreview = document.getElementById('translatePreview');
+const translateWrapper = document.getElementById('translateWrapper');
+const translateLabel = document.getElementById('translateLabel');
+const translateInput = document.getElementById('translateInput');
+const translateSameBtn = document.getElementById('translateSameBtn');
 const newTagGroup = document.getElementById('newTagGroup');
 const newTagGroupTrigger = document.getElementById('newTagGroupTrigger');
 const newTagGroupOptions = document.getElementById('newTagGroupOptions');
@@ -304,14 +307,26 @@ function populateGroupDropdown() {
 
 const isChinese = (text) => /[\u4e00-\u9fff]/.test(text);
 
+// Show the translation row with a label matching the current direction.
+// Kept in sync with the input direction even before auto-translate lands.
+function showTranslateRow(value) {
+  translateLabel.textContent = isChinese(value) ? 'EN:' : 'ZH:';
+  translateWrapper.style.display = 'flex';
+}
+
 newTagInput.addEventListener('input', () => {
   const value = newTagInput.value.trim();
   if (translateTimer) clearTimeout(translateTimer);
   if (!value) {
-    translatePreview.style.display = 'none';
+    translateWrapper.style.display = 'none';
+    translateInput.value = '';
     return;
   }
+  showTranslateRow(value);
+  // Don't wipe a value the user already edited — only auto-fill if the
+  // translation input is currently empty.
   translateTimer = setTimeout(async () => {
+    if (translateInput.value.trim()) return;
     try {
       const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
       const res = await fetch(
@@ -320,13 +335,18 @@ newTagInput.addEventListener('input', () => {
       if (!res.ok) return;
       const data = await res.json();
       const translated = data?.responseData?.translatedText;
-      if (translated && translated !== value) {
-        translatePreview.textContent = `${isChinese(value) ? 'EN' : 'ZH'}: ${translated}`;
-        translatePreview.style.display = 'block';
-        translatePreview.dataset.translated = translated;
+      if (translated && translated !== value && !translateInput.value.trim()) {
+        translateInput.value = translated;
       }
     } catch {}
   }, 600);
+});
+
+// "=" button — force translation to match input verbatim (for technical
+// terms like Agent / Skill / LLM that should stay identical in both languages).
+translateSameBtn.addEventListener('click', () => {
+  translateInput.value = newTagInput.value.trim();
+  translateInput.focus();
 });
 
 createTagBtn.addEventListener('click', async () => {
@@ -334,7 +354,9 @@ createTagBtn.addEventListener('click', async () => {
   if (!input) return;
 
   const inputIsChinese = isChinese(input);
-  const translated = translatePreview.dataset.translated || '';
+  const translated = translateInput.value.trim();
+  // If user left the translation blank, fall back to the input itself so the
+  // tag still has a non-null name / name_zh rather than crashing.
   const name = inputIsChinese ? (translated || input) : input;
   const name_zh = inputIsChinese ? input : (translated || null);
 
@@ -376,8 +398,8 @@ createTagBtn.addEventListener('click', async () => {
     // Reload tags
     await loadTags(config);
     newTagInput.value = '';
-    translatePreview.style.display = 'none';
-    translatePreview.dataset.translated = '';
+    translateWrapper.style.display = 'none';
+    translateInput.value = '';
     selectGroup('', 'Select group (optional)');
     createTagStatus.textContent = 'Created!';
     createTagStatus.className = 'status success';

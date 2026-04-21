@@ -34,7 +34,11 @@
       <!-- Create tag form (hidden by default) -->
       <div id="createTagForm" class="create-tag-form" style="display:none;">
         <input type="text" id="newTagInput" placeholder="Tag name (auto-translate)">
-        <div id="translatePreview" class="translate-preview" style="display:none;"></div>
+        <div id="translateWrapper" class="translate-wrapper" style="display:none;">
+          <span id="translateLabel" class="translate-label"></span>
+          <input type="text" id="translateInput" class="translate-input" placeholder="Translation (editable)">
+          <button type="button" id="translateSameBtn" class="translate-same-btn" title="Use same as input (for technical terms like Agent, Skill, LLM)">=</button>
+        </div>
         <div class="custom-select" id="newTagGroupWrapper">
           <div class="custom-select-trigger" id="newTagGroupTrigger">Select group (optional)</div>
           <div class="custom-select-options" id="newTagGroupOptions" style="display:none;"></div>
