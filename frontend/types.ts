@@ -820,7 +820,7 @@ export interface ScriptProjectSummary {
   chapter_count?: number;
 }
 
-export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'skills' | 'shares' | 'trash';
+export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'tasks' | 'shares' | 'trash';
 
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 
