@@ -132,7 +132,9 @@ async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
         .eq("user_id", str(user_id))
         .execute()
     )
-    return [int(r["team_id"]) for r in (result.data or []) if r.get("team_id") is not None]
+    return [
+        int(r["team_id"]) for r in (result.data or []) if r.get("team_id") is not None
+    ]
 
 
 async def _fetch_user_project_ids(user_id: UUID) -> List[int]:
@@ -166,10 +168,7 @@ async def _fetch_team_names(team_ids: List[int]) -> Dict[int, str]:
         return {}
     client = await get_async_supabase_admin()
     result = (
-        await client.table("teams")
-        .select("id, name")
-        .in_("id", team_ids)
-        .execute()
+        await client.table("teams").select("id, name").in_("id", team_ids).execute()
     )
     return {int(r["id"]): r["name"] for r in (result.data or [])}
 

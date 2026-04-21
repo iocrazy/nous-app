@@ -13,7 +13,6 @@ import pytest
 
 from app.repositories.skill_repository import SkillRepository
 
-
 # ─── Fake Supabase client/query plumbing ──────────────────────────────
 
 

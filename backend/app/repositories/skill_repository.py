@@ -190,9 +190,7 @@ class SkillRepository(BaseRepository):
                     f"project_id.in.({','.join(str(i) for i in merged_project_ids)})"
                 )
             if team_ids:
-                or_parts.append(
-                    f"team_id.in.({','.join(str(i) for i in team_ids)})"
-                )
+                or_parts.append(f"team_id.in.({','.join(str(i) for i in team_ids)})")
 
             query = (
                 client.table(self.TABLE)
