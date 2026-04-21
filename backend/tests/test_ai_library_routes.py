@@ -149,6 +149,7 @@ def _patch_agent_repo(**attrs: Any):
         "get_skill_ids": AsyncMock(return_value=[]),
         "list_accessible": AsyncMock(return_value=[]),
         "update_fields": AsyncMock(return_value={}),
+        "update_fields_versioned": AsyncMock(return_value={}),
         "update_skill_bindings": AsyncMock(return_value=None),
     }
     defaults.update(attrs)
@@ -172,7 +173,9 @@ def _patch_skill_repo(**attrs: Any):
         "list_accessible": AsyncMock(return_value=[]),
         "list_files": AsyncMock(return_value=[]),
         "update_fields": AsyncMock(return_value={}),
+        "update_fields_versioned": AsyncMock(return_value={}),
         "upsert_file": AsyncMock(return_value={}),
+        "upsert_file_versioned": AsyncMock(return_value={}),
         "delete_file": AsyncMock(return_value=None),
     }
     defaults.update(attrs)

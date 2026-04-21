@@ -148,7 +148,10 @@ async def update_agent(
     # skill_ids is handled separately; strip from the field-level update.
     updates = payload.model_dump(exclude_none=True, exclude={"skill_ids"})
     if updates:
-        await agent_repo.update_fields(agent_uuid, updates)
+        user_uuid = _coerce_user_uuid(auth.user_id)
+        await agent_repo.update_fields_versioned(
+            agent_uuid, updates, created_by=user_uuid
+        )
     if payload.skill_ids is not None:
         await agent_repo.update_skill_bindings(agent_uuid, payload.skill_ids)
 
@@ -230,7 +233,10 @@ async def update_skill(
     skill_id = int(skill["id"])
     updates = payload.model_dump(exclude_none=True)
     if updates:
-        await skill_repo.update_fields(skill_id, updates)
+        user_uuid = _coerce_user_uuid(auth.user_id)
+        await skill_repo.update_fields_versioned(
+            skill_id, updates, created_by=user_uuid
+        )
 
     refreshed = await skill_repo.get_by_slug(slug)
     if refreshed is None:
@@ -292,12 +298,15 @@ async def upsert_skill_file(
 
     # URL-decoded path from FastAPI; prefer the URL's path over payload.path
     # to keep routing + persistence in lockstep.
-    return await skill_repo.upsert_file(
-        int(skill["id"]),
+    skill_id = int(skill["id"])
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    return await skill_repo.upsert_file_versioned(
+        skill_id=skill_id,
         path=path,
         content=payload.content,
         file_type=payload.file_type,
         binary_url=payload.binary_url,
+        created_by=user_uuid,
     )
 
 

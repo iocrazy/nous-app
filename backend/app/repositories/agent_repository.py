@@ -167,3 +167,69 @@ class AgentRepository:
         except Exception as e:
             logger.error(f"Failed to update agent {agent_id}: {e}")
             raise
+
+    # Fields snapshotted into ai_agent_versions. Narrower than update_fields'
+    # accepted fields — only behavioral content, per Phase 2 plan.
+    _VERSIONED_AGENT_FIELDS = (
+        "identity_md",
+        "soul_md",
+        "agent_md",
+        "model",
+        "temperature",
+        "max_tokens",
+    )
+
+    async def update_fields_versioned(
+        self,
+        agent_id: UUID,
+        updates: Dict[str, Any],
+        created_by: Optional[UUID] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Snapshot-then-update: record pre-update behavioral content into
+        ai_agent_versions, then apply the patch with bumped current_version.
+
+        No-op if none of the tracked behavioral fields actually differs from
+        the current row (silences seed-loader reruns). Raises ValueError if
+        the agent does not exist.
+
+        Seed loader should keep using ``update_fields`` (non-versioned) —
+        bulk idempotent sync should not pollute version history.
+
+        Note: the snapshot INSERT and live UPDATE are NOT in a single transaction.
+        See ``SkillRepository.upsert_file_versioned`` for the same limitation and
+        Phase 3 mitigation path.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .eq("id", str(agent_id))
+            .maybe_single()
+            .execute()
+        )
+        current = result.data if result and result.data else None
+        if current is None:
+            raise ValueError(f"agent {agent_id} not found")
+
+        tracked_changed = any(
+            k in updates and updates[k] != current.get(k)
+            for k in self._VERSIONED_AGENT_FIELDS
+        )
+        if not tracked_changed:
+            return
+
+        current_version = int(current.get("current_version") or 1)
+        snapshot: Dict[str, Any] = {
+            "agent_id": str(agent_id),
+            "version_number": current_version,
+            "notes": notes,
+            "created_by": str(created_by) if created_by else None,
+        }
+        for field in self._VERSIONED_AGENT_FIELDS:
+            snapshot[field] = current.get(field)
+
+        await client.table("ai_agent_versions").insert(snapshot).execute()
+
+        patch = {**updates, "current_version": current_version + 1}
+        await client.table(self.TABLE).update(patch).eq("id", str(agent_id)).execute()
