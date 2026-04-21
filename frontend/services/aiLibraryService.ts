@@ -17,6 +17,7 @@ import type {
   AILibraryAgent,
   AILibrarySkill,
   AILibrarySkillFile,
+  CreateAgentPayload,
 } from '../types';
 
 const base = (): string => `${getApiUrl()}/api/v1/ai-library`;
@@ -72,6 +73,18 @@ export const aiLibraryService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(updates),
+    });
+    return handle<AILibraryAgent>(resp);
+  },
+
+  async createAgent(payload: CreateAgentPayload): Promise<AILibraryAgent> {
+    const resp = await fetch(`${base()}/agents`, {
+      method: 'POST',
+      headers: {
+        ...(await getAuthHeaders()),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
     return handle<AILibraryAgent>(resp);
   },

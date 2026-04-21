@@ -33,6 +33,7 @@ from app.core.deps import AuthDep
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import (
+    AgentCreate,
     AgentOut,
     AgentUpdate,
     SkillFileOut,
@@ -116,6 +117,85 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     agent_uuid = UUID(str(agent["id"]))
     agent = {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     return agent
+
+
+@router.post(
+    "/agents",
+    response_model=AgentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new user-owned agent (optionally forked)",
+)
+async def create_agent(
+    payload: AgentCreate,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """Create a non-preset agent owned by the current user.
+
+    If ``fork_from`` is set, copies identity_md / soul_md / agent_md /
+    model / temperature / max_tokens from that agent as a starting point.
+    Explicit fields in the payload override forked values. Skill bindings
+    are NOT copied — the user adds them separately via PATCH.
+    """
+    agent_repo, _ = _repos()
+
+    # Slug must be unique
+    if await agent_repo.get_by_slug(payload.slug):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"agent slug '{payload.slug}' already exists",
+        )
+
+    # Start from defaults
+    fields: Dict[str, Any] = {
+        "slug": payload.slug,
+        "name": payload.name,
+        "description": payload.description,
+        "persona": payload.description or f"{payload.name} (user-created)",
+        "is_system_preset": False,
+        "user_id": str(_coerce_user_uuid(auth.user_id)),
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4096,
+        "identity_md": None,
+        "soul_md": None,
+        "agent_md": None,
+    }
+
+    # If fork_from given, copy content fields from source (source may be
+    # a system preset — we're only READING its fields).
+    if payload.fork_from:
+        source = await agent_repo.get_by_slug(payload.fork_from)
+        if not source:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"fork source agent '{payload.fork_from}' not found",
+            )
+        for key in (
+            "identity_md",
+            "soul_md",
+            "agent_md",
+            "model",
+            "temperature",
+            "max_tokens",
+        ):
+            if source.get(key) is not None:
+                fields[key] = source[key]
+
+    # Explicit payload field overrides win over forked values.
+    for key in (
+        "model",
+        "temperature",
+        "max_tokens",
+        "identity_md",
+        "soul_md",
+        "agent_md",
+    ):
+        val = getattr(payload, key)
+        if val is not None:
+            fields[key] = val
+
+    created = await agent_repo.insert(fields)
+    return {**created, "skill_ids": []}
 
 
 @router.patch(
