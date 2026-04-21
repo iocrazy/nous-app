@@ -26,8 +26,9 @@ import {
   ImageIcon,
   Mic,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic } from '../types';
+import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
+import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { useSettingsStore } from '../stores/settingsStore';
 
@@ -232,9 +233,25 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
+  const [agents, setAgents] = useState<AILibraryAgent[]>([]);
 
   useEffect(() => {
     getNousModels().then(setNousModels).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    aiLibraryService
+      .listAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list);
+      })
+      .catch((err) => {
+        console.error('[AISettings] listAgents failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Toggle AI globally
@@ -415,49 +432,22 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       }));
   };
 
-  // Helper: build task assignment options with model info
-  const getTaskOptions = (taskType: 'transcription' | 'summarization' | 'visual_analysis') => {
+  // Helper: build transcription task options (provider:model format).
+  // Transcription doesn't use agent framework — it stays as provider:model.
+  const getTranscriptionOptions = (): { value: string; label: string }[] => {
     const options: { value: string; label: string }[] = [];
     const enabledProviders = getEnabledProviders();
 
     for (const { key, name } of enabledProviders) {
       const meta = PROVIDER_META[key];
-      const config = getProviderConfig(key);
-
-      // Use detected models from server if available, otherwise hardcoded list
-      const detectedModels: string[] = config.models || [];
-
-      if (taskType === 'transcription') {
-        const models = meta?.whisperModels || [];
-        for (const model of models) {
-          options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-        }
-      } else if (taskType === 'summarization') {
-        const models = detectedModels.length > 0
-          ? detectedModels
-          : (meta?.summaryModels || meta?.models || []);
-        for (const model of models) {
-          options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-        }
-      } else if (taskType === 'visual_analysis') {
-        const models = detectedModels.length > 0
-          ? detectedModels
-          : (meta?.analysisModels || meta?.models || []);
-        for (const model of models) {
-          options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
-        }
+      const models = meta?.whisperModels || [];
+      for (const model of models) {
+        options.push({ value: `${key}:${model}`, label: `${name} ${model}` });
       }
     }
 
-    // Append Nous platform models for the matching category
-    const categoryMap: Record<string, string> = {
-      transcription: 'transcription',
-      summarization: 'summarization',
-      visual_analysis: 'analysis',
-    };
-    const nousCategory = categoryMap[taskType];
-    const matchingNousModels = nousModels.filter((m) => m.category === nousCategory);
-
+    // Append Nous platform transcription models
+    const matchingNousModels = nousModels.filter((m) => m.category === 'transcription');
     for (const model of matchingNousModels) {
       const pricingLabel =
         model.pricing_type === 'per_hour'
@@ -476,6 +466,62 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }
 
     return options;
+  };
+
+  // Helper: build agent picker options, grouped by system preset vs. user's own.
+  // Used for summarization / visual_analysis / script_generation — all run
+  // through the agent framework and the value is an agent slug.
+  type AgentOption = { value: string; label: string; group: 'system' | 'mine' };
+  const getAgentOptions = (): AgentOption[] => {
+    return agents.map((a) => ({
+      value: a.slug,
+      label: a.is_system_preset ? `[System] ${a.name}` : `${a.name} (mine)`,
+      group: a.is_system_preset ? 'system' : 'mine',
+    }));
+  };
+
+  // Render an agent <select> with optgroup (system vs mine) + legacy value fallback.
+  const renderAgentSelect = (
+    taskKey: keyof AISettingsType['task_assignment'],
+    currentValue: string,
+  ) => {
+    const options = getAgentOptions();
+    const systemOptions = options.filter((o) => o.group === 'system');
+    const mineOptions = options.filter((o) => o.group === 'mine');
+    const knownSlugs = new Set(options.map((o) => o.value));
+    const isLegacy = currentValue !== '' && !knownSlugs.has(currentValue);
+
+    return (
+      <div className="relative">
+        <select
+          value={currentValue}
+          onChange={(e) => updateTaskAssignment(taskKey, e.target.value)}
+          className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+        >
+          {options.length === 0 && (
+            <option value="">No Agents Available</option>
+          )}
+          {isLegacy && (
+            <option value={currentValue}>{currentValue} (legacy — please reselect)</option>
+          )}
+          {systemOptions.length > 0 && (
+            <optgroup label="System">
+              {systemOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </optgroup>
+          )}
+          {mineOptions.length > 0 && (
+            <optgroup label="My Agents">
+              {mineOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+      </div>
+    );
   };
 
   // Render toggle switch
@@ -628,7 +674,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
                 className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
               >
-                {getTaskOptions('transcription').map((opt) => (
+                {getTranscriptionOptions().map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
@@ -641,18 +687,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <Sparkles size={16} className="text-zinc-400" />
               <span className="text-sm font-medium text-zinc-300">Summarization</span>
             </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.summarization}
-                onChange={(e) => updateTaskAssignment('summarization', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('summarization').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
+            {renderAgentSelect('summarization', localSettings.task_assignment.summarization)}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -660,18 +695,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <Search size={16} className="text-zinc-400" />
               <span className="text-sm font-medium text-zinc-300">Visual Analysis</span>
             </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.visual_analysis}
-                onChange={(e) => updateTaskAssignment('visual_analysis', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('visual_analysis').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
+            {renderAgentSelect('visual_analysis', localSettings.task_assignment.visual_analysis)}
           </div>
         </div>
         )}
@@ -724,24 +748,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             })()}
           </div>
 
-          {/* Script / Prompt — single select from text LLMs */}
+          {/* Script / Prompt — agent picker (script_generation routes to storyboard agent) */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-zinc-400" />
               <span className="text-sm font-medium text-zinc-300">Script / Prompt</span>
             </div>
-            <div className="relative">
-              <select
-                value={localSettings.task_assignment.script_generation ?? ''}
-                onChange={(e) => updateTaskAssignment('script_generation' as keyof typeof localSettings.task_assignment, e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
-              >
-                {getTaskOptions('summarization').map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-            </div>
+            {renderAgentSelect('script_generation', localSettings.task_assignment.script_generation ?? '')}
           </div>
         </div>
         )}

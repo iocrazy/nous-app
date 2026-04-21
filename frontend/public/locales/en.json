@@ -1152,7 +1152,18 @@
       "instructionsTitle": "Instructions",
       "boundSkills": "Bound Skills",
       "saveChanges": "Save Changes",
-      "presetReadOnly": "System preset — read only"
+      "saved": "Agent saved",
+      "presetReadOnly": "System preset — read only",
+      "nameLabel": "Name",
+      "slugLabel": "Slug",
+      "descriptionLabel": "Description",
+      "modelLabel": "Model",
+      "temperatureLabel": "Temperature",
+      "maxTokensLabel": "Max tokens",
+      "enabledLabel": "Enabled",
+      "modelProviderNotEnabled": "provider not enabled",
+      "forkAgent": "Fork to My Agents",
+      "forkedToast": "Forked as {{slug}}"
     },
     "skills": {
       "addFile": "+ Add file",
