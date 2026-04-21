@@ -151,7 +151,9 @@ class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     category: Optional[str] = None
-    icon: Optional[str] = "✨"
+    # Default None so fork_from can copy the source's icon. The router falls
+    # back to "✨" for non-forked skills where the caller omits it.
+    icon: Optional[str] = None
     body_md: Optional[str] = None
     frontmatter_json: Optional[dict] = None
     output_format: Optional[str] = None
