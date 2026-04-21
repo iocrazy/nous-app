@@ -288,3 +288,121 @@ async def test_skill_update_fields_versioned_noop_when_untracked_change() -> Non
 
     assert inserted == []
     assert updated == []
+
+
+# ─── skill file upsert versioned ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_skill_file_upsert_versioned_existing_file_snapshots() -> None:
+    """Existing file → snapshot old content, bump current_version."""
+    file_id = uuid4()
+    live_row = {
+        "id": str(file_id),
+        "skill_id": 7,
+        "path": "references/examples.md",
+        "content": "OLD content",
+        "file_type": "markdown",
+        "binary_url": None,
+        "current_version": 2,
+    }
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row, inserted, updated)
+
+    repo = SkillRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    await repo.upsert_file_versioned(
+        skill_id=7,
+        path="references/examples.md",
+        content="NEW content",
+        file_type="markdown",
+        created_by=None,
+    )
+
+    assert len(inserted) == 1
+    snap = inserted[0]
+    assert snap["skill_file_id"] == str(file_id)
+    assert snap["version_number"] == 2
+    assert snap["path"] == "references/examples.md"
+    assert snap["content"] == "OLD content"
+    assert snap["file_type"] == "markdown"
+
+    assert len(updated) == 1
+    patch = updated[0]
+    assert patch["content"] == "NEW content"
+    assert patch["current_version"] == 3
+
+
+@pytest.mark.asyncio
+async def test_skill_file_upsert_versioned_new_file_no_snapshot() -> None:
+    """No existing file → insert with current_version=1, no snapshot."""
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row=None, inserted=inserted, updated=updated)
+
+    repo = SkillRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    await repo.upsert_file_versioned(
+        skill_id=7,
+        path="scripts/validate.py",
+        content="print('hi')",
+        file_type="script",
+        created_by=None,
+    )
+
+    # New-file path: ONE insert into skill_files with current_version=1.
+    # NO snapshot row (nothing to snapshot).
+    assert len(inserted) == 1
+    row = inserted[0]
+    assert row["skill_id"] == 7
+    assert row["path"] == "scripts/validate.py"
+    assert row["content"] == "print('hi')"
+    assert row["file_type"] == "script"
+    assert row["current_version"] == 1
+    assert updated == []
+
+
+@pytest.mark.asyncio
+async def test_skill_file_upsert_versioned_noop_when_content_unchanged() -> None:
+    """Existing file, same content → no snapshot, no update."""
+    live_row = {
+        "id": str(uuid4()),
+        "skill_id": 7,
+        "path": "references/examples.md",
+        "content": "same",
+        "file_type": "markdown",
+        "binary_url": None,
+        "current_version": 1,
+    }
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row, inserted, updated)
+
+    repo = SkillRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    await repo.upsert_file_versioned(
+        skill_id=7,
+        path="references/examples.md",
+        content="same",
+        file_type="markdown",
+        created_by=None,
+    )
+
+    assert inserted == []
+    assert updated == []
