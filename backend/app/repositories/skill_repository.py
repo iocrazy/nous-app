@@ -161,20 +161,38 @@ class SkillRepository(BaseRepository):
         self,
         user_id: UUID,
         project_id: Optional[int] = None,
+        team_ids: Optional[List[int]] = None,
+        project_ids: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         """List active skills accessible to this user.
 
         A skill is accessible when ``status='active'`` and either:
           * ``is_public = true`` (including system presets), or
-          * ``project_id`` matches the supplied project (when given).
+          * ``created_by = user_id`` (the user's own skills), or
+          * ``team_id IN team_ids`` (any of the user's teams), or
+          * ``project_id IN project_ids`` (any of the user's projects).
+
+        The legacy ``project_id`` argument is kept for back-compat as a
+        single-project shortcut (appends to ``project_ids``). New callers
+        should pass the plural forms directly.
 
         Sorted by ``updated_at DESC`` for a freshest-first UX.
         """
         try:
             client = await self._get_client()
-            or_parts = ["is_public.eq.true"]
-            if project_id is not None:
-                or_parts.append(f"project_id.eq.{project_id}")
+            or_parts = ["is_public.eq.true", f"created_by.eq.{user_id}"]
+
+            merged_project_ids: list[int] = list(project_ids or [])
+            if project_id is not None and project_id not in merged_project_ids:
+                merged_project_ids.append(project_id)
+            if merged_project_ids:
+                or_parts.append(
+                    f"project_id.in.({','.join(str(i) for i in merged_project_ids)})"
+                )
+            if team_ids:
+                or_parts.append(
+                    f"team_id.in.({','.join(str(i) for i in team_ids)})"
+                )
 
             query = (
                 client.table(self.TABLE)

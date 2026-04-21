@@ -63,21 +63,31 @@ class AgentRepository:
     async def list_accessible(
         self,
         user_id: UUID,
-        project_id: Optional[int] = None,
-        team_id: Optional[int] = None,
+        team_ids: Optional[List[int]] = None,
+        project_ids: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         """List agents accessible to the user.
 
-        Returns system presets + user-owned + project/team scoped agents,
-        ordered by sort_order then name.
+        Visible set = union of:
+          * ``is_system_preset = true`` (every user sees presets)
+          * ``user_id = user_id`` (the user's own agents)
+          * ``team_id IN team_ids`` (agents scoped to any of the user's teams)
+          * ``project_id IN project_ids`` (agents scoped to user's projects)
+
+        The backend uses the service-role client (RLS bypassed), so this OR
+        filter must be enforced here to match migration 138's RLS policy.
+
+        Sorted by ``sort_order`` then ``name``.
         """
         try:
             client = await self._get_client()
             filters = ["is_system_preset.eq.true", f"user_id.eq.{user_id}"]
-            if project_id is not None:
-                filters.append(f"project_id.eq.{project_id}")
-            if team_id is not None:
-                filters.append(f"team_id.eq.{team_id}")
+            if team_ids:
+                filters.append(f"team_id.in.({','.join(str(i) for i in team_ids)})")
+            if project_ids:
+                filters.append(
+                    f"project_id.in.({','.join(str(i) for i in project_ids)})"
+                )
 
             query = (
                 client.table(self.TABLE)
