@@ -264,3 +264,51 @@ async def test_bindings_skip_when_script_ai_missing(
 
     assert bound == 0
     agent_repo.update_skill_bindings.assert_not_awaited()
+
+
+# ─── _format_error ────────────────────────────────────────────────────
+
+
+def test_format_error_plain_exception() -> None:
+    """Plain Exception → message only, no code/status."""
+    from app.services.seed_loader import _format_error
+
+    err = _format_error(ValueError("boom"))
+    assert err["type"] == "ValueError"
+    assert err["message"] == "boom"
+    assert err.get("code") is None
+    assert err.get("status") is None
+
+
+def test_format_error_postgrest_apierror_shape() -> None:
+    """Postgrest-style error with code/message/details/hint → all extracted."""
+    from app.services.seed_loader import _format_error
+
+    class _FakePostgrestError(Exception):
+        code = "42501"
+        message = "new row violates row-level security policy"
+        details = "for table ai_agents"
+        hint = None
+
+        def __str__(self) -> str:
+            return self.message
+
+    err = _format_error(_FakePostgrestError())
+    assert err["type"] == "_FakePostgrestError"
+    assert err["message"] == "new row violates row-level security policy"
+    assert err["code"] == "42501"
+    assert err["details"] == "for table ai_agents"
+
+
+def test_format_error_httpx_status() -> None:
+    """Exception with `response.status_code` attr → status extracted."""
+    from app.services.seed_loader import _format_error
+
+    class _FakeResp:
+        status_code = 503
+
+    class _FakeHttpErr(Exception):
+        response = _FakeResp()
+
+    err = _format_error(_FakeHttpErr("service unavailable"))
+    assert err["status"] == 503

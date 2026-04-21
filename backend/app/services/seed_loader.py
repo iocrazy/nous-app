@@ -17,6 +17,31 @@ TEXT_ASSET_EXTS = {".json", ".yaml", ".yml", ".txt"}
 SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
 
 
+def _format_error(exc: BaseException) -> dict[str, Any]:
+    """Extract structured fields from a Supabase/postgrest/httpx exception.
+
+    Loguru `logger.exception` already captures the traceback; this helper
+    pulls out the diagnostic bits that a log-grep can match on:
+    Postgres SQLSTATE code, HTTP status, hint, details.
+
+    Safe on any Exception subclass — missing attrs are simply omitted.
+    """
+    info: dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
+    for attr in ("code", "details", "hint"):
+        v = getattr(exc, attr, None)
+        if v is not None:
+            info[attr] = v
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            info["status"] = status
+    return info
+
+
 class SeedLoader:
     """Idempotently load seed markdown from filesystem into the AI Library tables."""
 
