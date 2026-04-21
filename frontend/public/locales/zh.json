@@ -1178,7 +1178,16 @@
       "groupSystemPresets": "系统预置",
       "groupPrivate": "我的私有",
       "groupTeam": "团队：{{name}}",
-      "groupProject": "项目：{{name}}"
+      "groupProject": "项目：{{name}}",
+      "currentSkills": "已绑定的技能",
+      "availableSkills": "可用技能",
+      "addSkill": "添加",
+      "removeSkill": "移除",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "noSkillsBound": "还未绑定技能。从下方添加。",
+      "noAvailableSkills": "没有可用技能。请先在技能 tab 创建。",
+      "skillsUpdatedToast": "技能已更新"
     },
     "skills": {
       "addFile": "+ 添加文件",
