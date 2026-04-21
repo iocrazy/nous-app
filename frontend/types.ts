@@ -927,3 +927,64 @@ export interface ProjectSummary {
   frame_count?: number;
   character_count?: number;
 }
+
+// ---------- AI Library ----------
+//
+// Types for the AI Library feature (prompts/skills library, backend route
+// `/api/v1/ai-library/*`).
+//
+// Naming: prefixed `AILibrary*` to avoid collision with:
+//   - legacy `AIAgent` in `services/aiService.ts` (chat agent — different shape)
+//   - existing top-level `Skill` interface above (style templates — different shape)
+//
+// BIGINT precision note: backend returns `skills.id` as JSON number. For Phase 1
+// these are small serial-like values well below 2^53, so `number` is safe.
+// `ai_agents.id` and `skill_files.id` are UUID strings.
+
+export interface AILibraryAgent {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  identity_md?: string | null;
+  soul_md?: string | null;
+  agent_md?: string | null;
+  is_system_preset: boolean;
+  team_id?: number | null;
+  project_id?: number | null;
+  user_id?: string | null;
+  enabled: boolean;
+  skill_ids: number[]; // BIGINT from backend — Phase 1 values fit in Number
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AILibrarySkillFile {
+  id: string;
+  skill_id: number; // BIGINT
+  path: string;
+  content?: string | null;
+  file_type: 'markdown' | 'script' | 'text-asset' | 'binary-ref';
+  binary_url?: string | null;
+  updated_at: string;
+}
+
+export interface AILibrarySkill {
+  id: number; // BIGINT
+  slug?: string;
+  name: string;
+  description?: string | null;
+  body_md?: string | null;
+  category?: string | null;
+  icon?: string | null;
+  is_public: boolean;
+  team_id?: number | null;
+  project_id?: number | null;
+  output_format?: string | null;
+  frontmatter_json: Record<string, unknown>;
+  files: AILibrarySkillFile[];
+  updated_at: string;
+}
