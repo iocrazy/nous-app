@@ -69,11 +69,18 @@ def test_tools_passed_through():
 
 
 @pytest.mark.unit
-def test_api_url_stored_as_provided():
-    # Base class no longer strips trailing slashes; the caller should pass
-    # a full endpoint URL (including path) without a trailing slash.
-    adapter = QwenAdapter(api_url="http://fake", api_key="k")
-    assert adapter.api_url == "http://fake"
+def test_api_url_gets_chat_completions_suffix_when_missing():
+    # Legacy Phase 1 env style stored LLM_API_URL as a base URL (e.g.
+    # "http://host/v1"). The adapter now normalizes by appending
+    # /chat/completions if missing, so both legacy base URLs and
+    # explicit full endpoint URLs work transparently.
+    base_url_adapter = QwenAdapter(api_url="http://fake/v1", api_key="k")
+    assert base_url_adapter.api_url == "http://fake/v1/chat/completions"
+
+    full_url_adapter = QwenAdapter(
+        api_url="http://fake/v1/chat/completions", api_key="k"
+    )
+    assert full_url_adapter.api_url == "http://fake/v1/chat/completions"
 
 
 @pytest.mark.unit

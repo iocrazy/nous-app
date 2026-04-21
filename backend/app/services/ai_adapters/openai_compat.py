@@ -16,6 +16,22 @@ from loguru import logger
 from app.schemas.ai_library import ComposedSystemPrompt
 
 
+def _ensure_chat_completions_suffix(url: str) -> str:
+    """Accept either a base URL (legacy Phase 1 env style, e.g.
+    ``http://host/v1``) or a full endpoint URL. Always return the full
+    ``/chat/completions`` path so the adapter can POST directly.
+
+    The previous Phase 1 ``QwenAdapter`` expected a base URL and appended
+    the path inside ``call()``. The refactored base class takes a full
+    endpoint URL so every provider works the same way, and existing
+    ``LLM_API_URL`` values (``http://host/v1``) still work transparently.
+    """
+    trimmed = url.rstrip("/")
+    if trimmed.endswith("/chat/completions"):
+        return trimmed
+    return f"{trimmed}/chat/completions"
+
+
 class OpenAICompatibleAdapter:
     """Adapter for OpenAI-compatible chat-completion endpoints."""
 
@@ -26,7 +42,7 @@ class OpenAICompatibleAdapter:
         default_model: str = "",
         timeout_seconds: float = 60.0,
     ) -> None:
-        self.api_url = api_url
+        self.api_url = _ensure_chat_completions_suffix(api_url)
         self.api_key = api_key
         self.default_model = default_model
         self.timeout_seconds = timeout_seconds
