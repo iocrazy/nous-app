@@ -32,6 +32,7 @@ class _FakeInsertQuery:
     async def execute(self) -> Any:
         class _R:
             data = [{"id": self._returned_id}]
+
         return _R()
 
 
@@ -174,9 +175,7 @@ async def test_load_skills_loads_reference_file(tmp_path: Path) -> None:
     """SKILL.md + references/example.md → 1 skill + 1 file upsert."""
     skill_dir = tmp_path / "skills" / "my-skill"
     (skill_dir / "references").mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: My Skill\n---\nbody\n"
-    )
+    (skill_dir / "SKILL.md").write_text("---\nname: My Skill\n---\nbody\n")
     (skill_dir / "references" / "example.md").write_text("# Example ref")
 
     agent_repo = _make_agent_repo()
@@ -201,12 +200,8 @@ async def test_load_skills_categorizes_scripts(tmp_path: Path) -> None:
     """scripts/validate.py → file_type='script'."""
     skill_dir = tmp_path / "skills" / "my-skill"
     (skill_dir / "scripts").mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: My Skill\n---\nbody\n"
-    )
-    (skill_dir / "scripts" / "validate.py").write_text(
-        "print('validate')\n"
-    )
+    (skill_dir / "SKILL.md").write_text("---\nname: My Skill\n---\nbody\n")
+    (skill_dir / "scripts" / "validate.py").write_text("print('validate')\n")
 
     agent_repo = _make_agent_repo()
     skill_repo = _make_skill_repo(get_by_slug_result=None)

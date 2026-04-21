@@ -4,6 +4,7 @@ These exercise the pure helpers (_assemble_system_message, _build_tools,
 _fingerprint) directly — no Supabase, no async repos needed. We pass
 ``None`` in for the repos since the helpers do not touch them.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -85,9 +86,7 @@ def test_skills_xml_section_present(fake_agent, fake_skills):
 @pytest.mark.unit
 def test_empty_skills_skips_xml_section(fake_agent):
     composer = PromptComposer(agent_repo=None, skill_repo=None)
-    msg = composer._assemble_system_message(
-        fake_agent, [], request_instructions=None
-    )
+    msg = composer._assemble_system_message(fake_agent, [], request_instructions=None)
     assert "<available_skills>" not in msg
 
 

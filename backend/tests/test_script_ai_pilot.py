@@ -90,14 +90,12 @@ def test_no_hardcoded_system_prompt_left():
     src = inspect.getsource(script_ai_service)
 
     # No leftover `system_prompt = "..."` assignments
-    assert "system_prompt" not in src, (
-        "script_ai_service still references `system_prompt` directly"
-    )
+    assert (
+        "system_prompt" not in src
+    ), "script_ai_service still references `system_prompt` directly"
     # No direct LLM call helper
-    assert "_call_llm" not in src, (
-        "script_ai_service still defines/uses `_call_llm`"
-    )
+    assert "_call_llm" not in src, "script_ai_service still defines/uses `_call_llm`"
     # No direct httpx usage — all HTTP goes through QwenAdapter now
-    assert "httpx" not in src, (
-        "script_ai_service still imports or uses `httpx` directly"
-    )
+    assert (
+        "httpx" not in src
+    ), "script_ai_service still imports or uses `httpx` directly"

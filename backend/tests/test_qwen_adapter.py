@@ -3,6 +3,7 @@
 No network: exercises _build_body shape and constructor invariants. The
 ``call()`` method is integration scope and covered elsewhere.
 """
+
 from uuid import UUID
 
 import pytest

@@ -78,7 +78,9 @@ class ScriptAIService:
             api_key=settings.LLM_API_KEY,
             default_model=settings.LLM_MODEL,
         )
-        return AgentRunner(adapter=adapter, skill_tool=SkillToolService(SkillRepository()))
+        return AgentRunner(
+            adapter=adapter, skill_tool=SkillToolService(SkillRepository())
+        )
 
     async def _run_agent(
         self,
@@ -252,11 +254,13 @@ class ScriptAIService:
                 branch_label = str(branch_label)[:MAX_BRANCH_LABEL_LENGTH]
             else:
                 branch_label = branch_label[:MAX_BRANCH_LABEL_LENGTH]
-            sanitized.append({
-                "title": b_title,
-                "summary": b_summary,
-                "branch_label": branch_label,
-            })
+            sanitized.append(
+                {
+                    "title": b_title,
+                    "summary": b_summary,
+                    "branch_label": branch_label,
+                }
+            )
         return sanitized
 
     async def split_chapter_to_scenes(

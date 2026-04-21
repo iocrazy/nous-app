@@ -427,9 +427,7 @@ class QwenAdapter:
         composed: ComposedSystemPrompt,
         user_messages: list[dict],
     ) -> dict:
-        messages: list[dict] = [
-            {"role": "system", "content": composed.system_message}
-        ]
+        messages: list[dict] = [{"role": "system", "content": composed.system_message}]
         messages.extend(user_messages)
         body: dict = {
             "model": composed.model or self.default_model,

@@ -18,6 +18,7 @@ return 403. User- and project-scoped resources are mutable by their owners.
 Mirrors the flat ``app/api/*_router.py`` convention used elsewhere in this
 backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -162,9 +163,7 @@ async def update_agent(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/skills", response_model=List[SkillOut], summary="List accessible skills"
-)
+@router.get("/skills", response_model=List[SkillOut], summary="List accessible skills")
 async def list_skills(auth: AuthDep) -> List[Dict[str, Any]]:
     """Return skills visible to the current user, each enriched with its files."""
     _, skill_repo = _repos()

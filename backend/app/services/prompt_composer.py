@@ -27,6 +27,7 @@ helpers (:meth:`_assemble_system_message`, :meth:`_build_tools`,
 :meth:`_fingerprint`) are pure functions of the fetched dicts, so they
 are unit-testable without touching Supabase.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -135,9 +136,7 @@ class PromptComposer:
                 "override it."
             )
 
-        instruction = (
-            agent.get("agent_md") or agent.get("persona") or ""
-        ).strip()
+        instruction = (agent.get("agent_md") or agent.get("persona") or "").strip()
         if instruction:
             parts.append(f"# Agent Instructions\n{instruction}")
 
@@ -147,9 +146,7 @@ class PromptComposer:
         parts.append(CACHE_BOUNDARY_MARKER)
 
         if request_instructions and request_instructions.strip():
-            parts.append(
-                f"# Request Instructions\n{request_instructions.strip()}"
-            )
+            parts.append(f"# Request Instructions\n{request_instructions.strip()}")
 
         parts.append(self._render_runtime_line(agent))
 
@@ -171,9 +168,7 @@ class PromptComposer:
             xml.append("  <skill>")
             xml.append(f"    <name>{s.get('slug') or s.get('name')}</name>")
             desc = (
-                (s.get("description") or "")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
+                (s.get("description") or "").replace("<", "&lt;").replace(">", "&gt;")
             )
             xml.append(f"    <description>{desc}</description>")
             xml.append("  </skill>")
@@ -210,9 +205,7 @@ class PromptComposer:
                         "properties": {
                             "skill": {
                                 "type": "string",
-                                "description": (
-                                    "Skill slug from <available_skills>."
-                                ),
+                                "description": ("Skill slug from <available_skills>."),
                             },
                             "file": {
                                 "type": "string",
@@ -246,9 +239,7 @@ class PromptComposer:
         h.update(str(agent.get("updated_at", "")).encode())
         h.update((agent.get("identity_md") or "").encode())
         h.update((agent.get("soul_md") or "").encode())
-        h.update(
-            (agent.get("agent_md") or agent.get("persona") or "").encode()
-        )
+        h.update((agent.get("agent_md") or agent.get("persona") or "").encode())
         for s in sorted(skills, key=lambda x: str(x.get("id"))):
             h.update(str(s.get("id", "")).encode())
             h.update(str(s.get("updated_at", "")).encode())

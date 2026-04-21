@@ -26,6 +26,7 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
@@ -34,6 +35,7 @@ class _FakeQuery:
 
         class _R:
             data = self._data
+
         return _R()
 
 

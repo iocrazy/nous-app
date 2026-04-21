@@ -15,6 +15,7 @@ Test cases (6 total):
     5. GET /skills/script-outline includes references/examples.md in files
     6. PATCH /skills/script-outline (system preset) returns 403
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -326,9 +327,7 @@ async def test_get_script_outline_includes_files(client: AsyncClient) -> None:
 async def test_patch_system_preset_skill_rejected(client: AsyncClient) -> None:
     """PATCH /skills/script-outline → 403 (public + no project = system preset)."""
     skill_patches = _patch_skill_repo(
-        get_by_slug=AsyncMock(
-            return_value=_skill_row(is_public=True, project_id=None)
-        ),
+        get_by_slug=AsyncMock(return_value=_skill_row(is_public=True, project_id=None)),
     )
     agent_patches = _patch_agent_repo()
     _apply(agent_patches)

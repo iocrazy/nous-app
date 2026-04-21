@@ -27,6 +27,7 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
@@ -35,6 +36,7 @@ class _FakeQuery:
 
         class _R:
             data = self._data
+
         return _R()
 
 
@@ -238,9 +240,7 @@ async def test_upsert_file_raises_when_no_data_returned(
     """Writes never silently no-op — empty result must raise."""
     fake_query._data = []
     with pytest.raises(RuntimeError):
-        await repo.upsert_file(
-            10, path="x.md", content="", file_type="markdown"
-        )
+        await repo.upsert_file(10, path="x.md", content="", file_type="markdown")
 
 
 # ─── delete_file ──────────────────────────────────────────────────────

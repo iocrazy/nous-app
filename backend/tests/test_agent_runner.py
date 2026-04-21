@@ -54,7 +54,9 @@ async def test_tool_call_resolved_then_final_content():
                                 "id": "tc1",
                                 "function": {
                                     "name": "Skill",
-                                    "arguments": json.dumps({"skill": "script-outline"}),
+                                    "arguments": json.dumps(
+                                        {"skill": "script-outline"}
+                                    ),
                                 },
                             }
                         ],

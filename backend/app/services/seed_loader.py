@@ -1,4 +1,5 @@
 """Load agent & skill seed content from backend/seeds/ into DB (idempotent)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -161,9 +162,7 @@ class SeedLoader:
                 try:
                     content = f.read_text()
                 except UnicodeDecodeError:
-                    logger.warning(
-                        f"seed_loader: cannot read {rel} as text, skipping"
-                    )
+                    logger.warning(f"seed_loader: cannot read {rel} as text, skipping")
                     continue
                 await self.skill_repo.upsert_file(
                     skill_id, path=rel, content=content, file_type=file_type

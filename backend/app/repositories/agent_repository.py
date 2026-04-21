@@ -1,4 +1,5 @@
 """Repository for ai_agents + agent_skills tables (AI Library Phase 1)."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -115,9 +116,7 @@ class AgentRepository:
     # Writes
     # ------------------------------------------------------------------
 
-    async def update_skill_bindings(
-        self, agent_id: UUID, skill_ids: List[int]
-    ) -> None:
+    async def update_skill_bindings(self, agent_id: UUID, skill_ids: List[int]) -> None:
         """Replace all skill bindings for an agent (delete existing + insert new).
 
         Preserves requested order via sort_order.
@@ -149,9 +148,7 @@ class AgentRepository:
                 len(skill_ids),
             )
         except Exception as e:
-            logger.error(
-                f"Failed to update skill bindings for agent {agent_id}: {e}"
-            )
+            logger.error(f"Failed to update skill bindings for agent {agent_id}: {e}")
             raise
 
     async def update_fields(

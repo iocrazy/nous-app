@@ -1,4 +1,5 @@
 """Drive a single agent turn with tool-call resolution."""
+
 from __future__ import annotations
 
 import json
@@ -41,10 +42,12 @@ class AgentRunner:
                 except json.JSONDecodeError:
                     args = {}
                 result = await self.skill_tool.execute(args)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id"),
-                    "name": "Skill",
-                    "content": json.dumps(result, ensure_ascii=False),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id"),
+                        "name": "Skill",
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
         return {"content": "", "raw": None, "error": "max_tool_iterations_exceeded"}

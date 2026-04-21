@@ -1,4 +1,5 @@
 """Pydantic models for AI Library (agents, prompts-as-agent-fields, skills, skill files)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 # ---------- Agents ----------
+
 
 class AgentBase(BaseModel):
     slug: str = Field(..., min_length=1, max_length=64)
@@ -48,6 +50,7 @@ class AgentUpdate(BaseModel):
 
 
 # ---------- Skills & files ----------
+
 
 class SkillFileOut(BaseModel):
     id: UUID
@@ -95,8 +98,10 @@ class SkillUpdate(BaseModel):
 
 # ---------- Composer output ----------
 
+
 class ComposedSystemPrompt(BaseModel):
     """Output of prompt_composer.compose()."""
+
     agent_id: UUID
     agent_slug: str
     model: str

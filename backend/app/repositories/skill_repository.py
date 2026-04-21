@@ -186,9 +186,7 @@ class SkillRepository(BaseRepository):
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to list accessible skills for user {user_id}: {e}"
-            )
+            logger.error(f"Failed to list accessible skills for user {user_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -212,9 +210,7 @@ class SkillRepository(BaseRepository):
             logger.error(f"Failed to list files for skill {skill_id}: {e}")
             return []
 
-    async def get_file(
-        self, skill_id: int, path: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_file(self, skill_id: int, path: str) -> Optional[Dict[str, Any]]:
         """Fetch a single file row by (skill_id, path); None if missing."""
         try:
             client = await self._get_client()
@@ -228,9 +224,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(
-                f"Failed to get file {path!r} for skill {skill_id}: {e}"
-            )
+            logger.error(f"Failed to get file {path!r} for skill {skill_id}: {e}")
             return None
 
     async def upsert_file(
@@ -269,9 +263,7 @@ class SkillRepository(BaseRepository):
                 )
             return result.data[0]
         except Exception as e:
-            logger.error(
-                f"Failed to upsert file {path!r} for skill {skill_id}: {e}"
-            )
+            logger.error(f"Failed to upsert file {path!r} for skill {skill_id}: {e}")
             raise
 
     async def delete_file(self, skill_id: int, path: str) -> None:
@@ -285,13 +277,9 @@ class SkillRepository(BaseRepository):
                 .eq("path", path)
                 .execute()
             )
-            logger.info(
-                "Deleted skill_files row skill_id=%s path=%s", skill_id, path
-            )
+            logger.info("Deleted skill_files row skill_id=%s path=%s", skill_id, path)
         except Exception as e:
-            logger.error(
-                f"Failed to delete file {path!r} for skill {skill_id}: {e}"
-            )
+            logger.error(f"Failed to delete file {path!r} for skill {skill_id}: {e}")
             raise
 
     # ------------------------------------------------------------------
