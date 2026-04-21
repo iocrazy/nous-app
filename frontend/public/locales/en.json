@@ -1136,5 +1136,29 @@
     },
     "emptyTitle": "Start a conversation",
     "emptySubtitle": "Ask your AI assistant anything about your project."
+  },
+  "aiLibrary": {
+    "title": "AI Library",
+    "menuItem": "AI Library",
+    "tabs": {
+      "agents": "Agents",
+      "skills": "Skills"
+    },
+    "agents": {
+      "systemPreset": "System Preset",
+      "selectAgent": "Select an agent to edit",
+      "identityTitle": "Identity",
+      "soulTitle": "Soul",
+      "instructionsTitle": "Instructions",
+      "boundSkills": "Bound Skills",
+      "saveChanges": "Save Changes",
+      "presetReadOnly": "System preset — read only"
+    },
+    "skills": {
+      "addFile": "+ Add file",
+      "fileType": "File type",
+      "pathPlaceholder": "path e.g., references/examples.md",
+      "deleteFile": "Delete file"
+    }
   }
 }

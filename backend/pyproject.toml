@@ -49,6 +49,7 @@ dependencies = [
     "python-docx>=1.2.0",
     "slowapi>=0.1.9",
     "gmssl>=3.2.2",
+    "python-frontmatter>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "unit: pure unit tests (no DB, no network)",
+    "integration: integration tests (DB or network required)",
+]
 
 [project.scripts]
 mediahub = "app.main:main"
