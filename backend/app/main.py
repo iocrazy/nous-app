@@ -60,8 +60,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
-    # Load AI Library seeds (agents + skills) from backend/seeds/
+    # Load AI Library seeds (agents + skills) from backend/seeds/.
     # Wrapped defensively: a seed failure must not block server startup.
+    # Breadcrumb logs below are load-bearing for post-incident diagnosis —
+    # keep the entry/exit pair even if the body is refactored.
+    seeds_root = Path(__file__).resolve().parent.parent / "seeds"
+    logger.info(
+        f"seed_loader: entering (seeds_root={seeds_root}, "
+        f"exists={seeds_root.exists()})"
+    )
     try:
         from app.repositories.agent_repository import AgentRepository
         from app.repositories.skill_repository import SkillRepository
@@ -70,12 +77,12 @@ async def lifespan(app: FastAPI):
         seed_loader = SeedLoader(
             agent_repo=AgentRepository(),
             skill_repo=SkillRepository(),
-            seeds_root=Path(__file__).resolve().parent.parent / "seeds",
+            seeds_root=seeds_root,
         )
         seed_results = await seed_loader.load_all()
-        logger.info(f"seed_loader: {seed_results}")
+        logger.info(f"seed_loader: exiting, results={seed_results}")
     except Exception as e:
-        logger.exception(f"seed_loader failed: {e}")
+        logger.exception(f"seed_loader: exiting with exception: {e}")
 
     # Record deployment log — read build-info.json baked in by CI
     try:

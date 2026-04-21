@@ -93,7 +93,7 @@ async def test_load_agents_reads_three_md_files(tmp_path: Path) -> None:
     insert_q = _attach_fake_insert_client(agent_repo, insert_id=str(uuid4()))
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    count = await loader._load_agents()
+    count = await loader._load_agents([])
 
     assert count == 1
     assert len(insert_q.inserted_rows) == 1
@@ -118,7 +118,7 @@ async def test_load_agents_handles_missing_md_gracefully(tmp_path: Path) -> None
     insert_q = _attach_fake_insert_client(agent_repo, insert_id=str(uuid4()))
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    await loader._load_agents()
+    await loader._load_agents([])
 
     row = insert_q.inserted_rows[0]
     assert row["slug"] == "skeleton_ai"
@@ -152,7 +152,7 @@ async def test_load_skills_parses_frontmatter(tmp_path: Path) -> None:
     insert_q = _attach_fake_insert_client(skill_repo, insert_id=42)
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    count = await loader._load_skills()
+    count = await loader._load_skills([])
 
     assert count == 1
     assert len(insert_q.inserted_rows) == 1
@@ -183,7 +183,7 @@ async def test_load_skills_loads_reference_file(tmp_path: Path) -> None:
     _attach_fake_insert_client(skill_repo, insert_id=99)
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    await loader._load_skills()
+    await loader._load_skills([])
 
     skill_repo.upsert_file.assert_awaited_once()
     kwargs = skill_repo.upsert_file.await_args.kwargs
@@ -208,7 +208,7 @@ async def test_load_skills_categorizes_scripts(tmp_path: Path) -> None:
     _attach_fake_insert_client(skill_repo, insert_id=7)
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    await loader._load_skills()
+    await loader._load_skills([])
 
     skill_repo.upsert_file.assert_awaited_once()
     kwargs = skill_repo.upsert_file.await_args.kwargs
@@ -243,7 +243,7 @@ async def test_bindings_set_when_all_three_skills_present(
     skill_repo.get_by_slug = AsyncMock(side_effect=_get_skill_by_slug)
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    bound = await loader._bind_script_ai_skills()
+    bound = await loader._bind_script_ai_skills([])
 
     assert bound == 3
     agent_repo.update_skill_bindings.assert_awaited_once()
@@ -260,7 +260,108 @@ async def test_bindings_skip_when_script_ai_missing(
     skill_repo = _make_skill_repo()
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    bound = await loader._bind_script_ai_skills()
+    bound = await loader._bind_script_ai_skills([])
 
     assert bound == 0
     agent_repo.update_skill_bindings.assert_not_awaited()
+
+
+# ─── _format_error ────────────────────────────────────────────────────
+
+
+def test_format_error_plain_exception() -> None:
+    """Plain Exception → message only, no code/status."""
+    from app.services.seed_loader import _format_error
+
+    err = _format_error(ValueError("boom"))
+    assert err["type"] == "ValueError"
+    assert err["message"] == "boom"
+    assert err.get("code") is None
+    assert err.get("status") is None
+
+
+def test_format_error_postgrest_apierror_shape() -> None:
+    """Postgrest-style error with code/message/details/hint → all extracted."""
+    from app.services.seed_loader import _format_error
+
+    class _FakePostgrestError(Exception):
+        code = "42501"
+        message = "new row violates row-level security policy"
+        details = "for table ai_agents"
+        hint = None
+
+        def __str__(self) -> str:
+            return self.message
+
+    err = _format_error(_FakePostgrestError())
+    assert err["type"] == "_FakePostgrestError"
+    assert err["message"] == "new row violates row-level security policy"
+    assert err["code"] == "42501"
+    assert err["details"] == "for table ai_agents"
+
+
+def test_format_error_httpx_status() -> None:
+    """Exception with `response.status_code` attr → status extracted."""
+    from app.services.seed_loader import _format_error
+
+    class _FakeResp:
+        status_code = 503
+
+    class _FakeHttpErr(Exception):
+        response = _FakeResp()
+
+    err = _format_error(_FakeHttpErr("service unavailable"))
+    assert err["status"] == 503
+
+
+# ─── load_all error aggregation ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_load_all_aggregates_per_agent_errors(tmp_path: Path) -> None:
+    """Agent A inserts OK, agent B fails → load_all returns errors list
+    with agent_b entry AND still reports agents=1 counted successfully."""
+    (tmp_path / "agents" / "agent_a").mkdir(parents=True)
+    (tmp_path / "agents" / "agent_a" / "IDENTITY.md").write_text("a")
+    (tmp_path / "agents" / "agent_b").mkdir(parents=True)
+    (tmp_path / "agents" / "agent_b" / "IDENTITY.md").write_text("b")
+
+    agent_repo = _make_agent_repo(get_by_slug_result=None)
+
+    # First insert succeeds, second raises
+    call_count = {"n": 0}
+
+    async def _flaky_get_client():
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("simulated RLS denial")
+
+        class _OK:
+            def table(self, _):
+                class _Q:
+                    def insert(self, _row):
+                        return self
+
+                    async def execute(self):
+                        class _R:
+                            data = [{"id": str(uuid4())}]
+
+                        return _R()
+
+                return _Q()
+
+        return _OK()
+
+    agent_repo._get_client = _flaky_get_client  # type: ignore[method-assign]
+    skill_repo = _make_skill_repo()
+
+    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
+    results = await loader.load_all()
+
+    assert results["agents"] == 1
+    assert "errors" in results
+    agent_errors = [e for e in results["errors"] if e["scope"] == "agent"]
+    assert len(agent_errors) == 1
+    assert agent_errors[0]["slug"] == "agent_b"
+    assert agent_errors[0]["error"]["type"] == "RuntimeError"
+    assert "RLS" in agent_errors[0]["error"]["message"]

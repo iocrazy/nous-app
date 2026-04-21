@@ -21,12 +21,14 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
+from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -38,6 +40,7 @@ from app.schemas.ai_library import (
     SkillOut,
     SkillUpdate,
 )
+from app.services.seed_loader import SeedLoader
 
 router = APIRouter(prefix="/ai-library", tags=["AI Library"])
 
@@ -317,3 +320,36 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
             detail="system preset skills are read-only in phase 1",
         )
     await skill_repo.delete_file(int(skill["id"]), path)
+
+
+# ---------------------------------------------------------------------------
+# Admin: reload seeds from disk
+# ---------------------------------------------------------------------------
+
+
+@router.post("/admin/reload-seeds", response_model=Dict[str, Any])
+async def reload_seeds(auth: AdminAuthDep) -> Dict[str, Any]:
+    """Re-run SeedLoader.load_all() against backend/seeds/.
+
+    Admin-only. Returns the same dict shape as the startup path:
+    ``{"agents": N, "skills": M, "agent_skill_bindings": K, "errors": [...]}``.
+
+    Intended for recovery after a startup seed failure — see
+    ``docs/superpowers/plans/2026-04-21-ai-library-phase2-seed-loader-fix.md``.
+
+    Returns 500 (not 403) on DB-level failures — see AdminAuthDep.
+    """
+    # AdminAuthDep raises 403 before body executes — no manual guard needed.
+    agent_repo, skill_repo = _repos()
+    # Path math: this file is at backend/app/api/ai_library_router.py,
+    # so .parent.parent.parent / "seeds" points at backend/seeds/.
+    seeds_root = Path(__file__).resolve().parent.parent.parent / "seeds"
+    logger.info(f"reload_seeds: invoked by {auth.user_id}, seeds_root={seeds_root}")
+    loader = SeedLoader(
+        agent_repo=agent_repo,
+        skill_repo=skill_repo,
+        seeds_root=seeds_root,
+    )
+    results = await loader.load_all()
+    logger.info(f"reload_seeds: completed, {results}")
+    return results
