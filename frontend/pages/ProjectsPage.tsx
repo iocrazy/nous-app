@@ -17,15 +17,12 @@ import { ProjectSharesView } from '../components/ProjectSharesView';
 import { ProjectStoryboardTab } from '../components/project/ProjectStoryboardTab';
 import { ProjectScriptsTab } from '../components/project/ProjectScriptsTab';
 import { ProjectOutputTab } from '../components/project/ProjectOutputTab';
-import { ProjectSkillsTab } from '../components/project/ProjectSkillsTab';
-import { SkillEditor } from '../components/project/SkillEditor';
 
 // Map URL tab param → ProjectNavSidebar section key
 const TAB_TO_SECTION: Record<string, string> = {
   files: 'files',
   scripts: 'scripts',
   storyboard: 'storyboard',
-  skills: 'skills',
   output: 'output',
   tasks: 'tasks',
   shares: 'shares',
@@ -48,7 +45,6 @@ export function ProjectsPage() {
   const [shareCount, setShareCount] = useState(0);
   const [trashCount, setTrashCount] = useState(0);
   const [activeFilter, setActiveFilter] = useState('all');
-  const [editingSkillId, setEditingSkillId] = useState<string | null | undefined>(undefined);
 
   // Active tab from URL
   const activeTab: ProjectTab = (searchParams.get('tab') as ProjectTab) || 'files';
@@ -221,19 +217,6 @@ export function ProjectsPage() {
             )}
             {activeTab === 'scripts' && <ProjectScriptsTab projectId={selectedProject.id} />}
             {activeTab === 'storyboard' && <ProjectStoryboardTab projectId={selectedProject.id} />}
-            {activeTab === 'skills' && editingSkillId !== undefined && (
-              <SkillEditor
-                skillId={editingSkillId}
-                projectId={selectedProject.id}
-                onClose={() => setEditingSkillId(undefined)}
-              />
-            )}
-            {activeTab === 'skills' && editingSkillId === undefined && (
-              <ProjectSkillsTab
-                projectId={selectedProject.id}
-                onEditSkill={(id) => setEditingSkillId(id)}
-              />
-            )}
             {activeTab === 'output' && <ProjectOutputTab projectId={selectedProject.id} />}
             {activeTab === 'tasks' && <KanbanBoard projectId={selectedProject.id} teamId={selectedTeamId || undefined} />}
             {activeTab === 'shares' && <ProjectSharesView projectId={selectedProject.id} onCountChange={setShareCount} />}

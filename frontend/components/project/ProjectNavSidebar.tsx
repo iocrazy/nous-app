@@ -18,7 +18,6 @@ import {
   LayoutGrid,
   Calendar,
   Tag,
-  Wand2,
 } from 'lucide-react';
 import { Project } from '../../types';
 
@@ -44,7 +43,6 @@ const NAV_SECTIONS = [
   { key: 'files', label: 'Files', icon: FolderOpen, iconColor: '' },
   { key: 'scripts', label: 'Scripts', icon: FileText, iconColor: '' },
   { key: 'storyboard', label: 'Storyboard', icon: Clapperboard, iconColor: '' },
-  { key: 'skills', label: 'Skills', icon: Wand2, iconColor: 'text-violet-400' },
   { key: 'output', label: 'Output', icon: Download, iconColor: '' },
   { key: 'tasks', label: 'Tasks', icon: KanbanSquare, iconColor: '' },
   { key: 'divider-1', label: '', icon: null, iconColor: '' },

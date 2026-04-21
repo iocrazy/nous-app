@@ -75,7 +75,11 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   // Cached on the editor instance — reused across tab switches until the agent
   // slug changes (which remounts the effect via the loadSkills dependency).
   useEffect(() => {
-    if (sub !== 'skills' || allSkills !== null || skillsLoading) return;
+    // skillsLoading must NOT be a dep: setSkillsLoading(true) below would
+    // retrigger this effect, run cleanup on the previous pass, flip
+    // `cancelled=true`, and the in-flight fetch would then silently no-op in
+    // both its .then and .finally — UI stuck on "Loading skills..." forever.
+    if (sub !== 'skills' || allSkills !== null) return;
     let cancelled = false;
     setSkillsLoading(true);
     aiLibraryService
@@ -98,7 +102,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     return () => {
       cancelled = true;
     };
-  }, [sub, allSkills, skillsLoading, addToast]);
+  }, [sub, allSkills, addToast]);
 
   if (error) {
     return (
