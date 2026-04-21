@@ -302,3 +302,138 @@ class SkillRepository(BaseRepository):
         except Exception as e:
             logger.error(f"Failed to update skill {skill_id}: {e}")
             raise
+
+    # Fields snapshotted into skill_versions. Narrower than update_fields'
+    # accepted fields — only behavioral content, per Phase 2 plan.
+    _VERSIONED_SKILL_FIELDS = ("body_md", "frontmatter_json")
+
+    # Fields snapshotted into skill_file_versions on change.
+    _VERSIONED_SKILL_FILE_FIELDS = ("path", "content", "file_type", "binary_url")
+
+    async def update_fields_versioned(
+        self,
+        skill_id: int,
+        updates: Dict[str, Any],
+        created_by: Optional[UUID] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Snapshot-then-update for skills. See AgentRepository.update_fields_versioned
+        for the pattern rationale.
+
+        No-op if none of ``body_md`` / ``frontmatter_json`` actually differs.
+        Raises ValueError if the skill does not exist.
+
+        Note: the snapshot INSERT and live UPDATE are NOT in a single transaction.
+        See ``upsert_file_versioned`` for the same limitation and Phase 3 mitigation path.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .eq("id", skill_id)
+            .maybe_single()
+            .execute()
+        )
+        current = result.data if result and result.data else None
+        if current is None:
+            raise ValueError(f"skill {skill_id} not found")
+
+        tracked_changed = any(
+            k in updates and updates[k] != current.get(k)
+            for k in self._VERSIONED_SKILL_FIELDS
+        )
+        if not tracked_changed:
+            return
+
+        current_version = int(current.get("current_version") or 1)
+        snapshot = {
+            "skill_id": skill_id,
+            "version_number": current_version,
+            "notes": notes,
+            "created_by": str(created_by) if created_by else None,
+        }
+        for field in self._VERSIONED_SKILL_FIELDS:
+            snapshot[field] = current.get(field)
+
+        await client.table("skill_versions").insert(snapshot).execute()
+
+        patch = {**updates, "current_version": current_version + 1}
+        await client.table(self.TABLE).update(patch).eq("id", skill_id).execute()
+
+    async def upsert_file_versioned(
+        self,
+        skill_id: int,
+        path: str,
+        content: Optional[str] = None,
+        file_type: Optional[str] = None,
+        binary_url: Optional[str] = None,
+        created_by: Optional[UUID] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create or update a skill file with version capture.
+
+        Three paths:
+        - No existing file at (skill_id, path) → INSERT with current_version=1.
+          Returns the inserted row.
+        - Existing file, at least one of path/content/file_type/binary_url
+          differs → INSERT snapshot of old content into skill_file_versions
+          with version_number = existing current_version, then UPDATE live row.
+          Returns the merged (new) row.
+        - Existing file, nothing tracked differs → NO-OP. Returns current row.
+
+        Note: the snapshot INSERT and live UPDATE are NOT in a single transaction.
+        A partial failure (INSERT ok, UPDATE fails) leaves an orphaned version row
+        that will collide on the next edit via the UNIQUE(skill_file_id, version_number)
+        constraint, forcing a 500 until manual cleanup. Phase 3 should move this to
+        a Postgres rpc() for atomicity.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("skill_files")
+            .select("*")
+            .eq("skill_id", skill_id)
+            .eq("path", path)
+            .maybe_single()
+            .execute()
+        )
+        current = result.data if result and result.data else None
+
+        new_payload: Dict[str, Any] = {
+            "path": path,
+            "content": content,
+            "file_type": file_type,
+            "binary_url": binary_url,
+        }
+
+        if current is None:
+            insert_row = {
+                "skill_id": skill_id,
+                **new_payload,
+                "current_version": 1,
+            }
+            resp = await client.table("skill_files").insert(insert_row).execute()
+            return resp.data[0] if resp.data else insert_row
+
+        tracked_changed = any(
+            new_payload[k] != current.get(k) for k in self._VERSIONED_SKILL_FILE_FIELDS
+        )
+        if not tracked_changed:
+            return current
+
+        current_version = int(current.get("current_version") or 1)
+        snapshot: Dict[str, Any] = {
+            "skill_file_id": current["id"],
+            "version_number": current_version,
+            "notes": notes,
+            "created_by": str(created_by) if created_by else None,
+        }
+        for field in self._VERSIONED_SKILL_FILE_FIELDS:
+            snapshot[field] = current.get(field)
+
+        await client.table("skill_file_versions").insert(snapshot).execute()
+
+        patch = {**new_payload, "current_version": current_version + 1}
+        await (
+            client.table("skill_files").update(patch).eq("id", current["id"]).execute()
+        )
+        return {**current, **patch}
