@@ -195,6 +195,10 @@ class AgentRepository:
 
         Seed loader should keep using ``update_fields`` (non-versioned) —
         bulk idempotent sync should not pollute version history.
+
+        Note: the snapshot INSERT and live UPDATE are NOT in a single transaction.
+        See ``SkillRepository.upsert_file_versioned`` for the same limitation and
+        Phase 3 mitigation path.
         """
         client = await self._get_client()
         result = (
