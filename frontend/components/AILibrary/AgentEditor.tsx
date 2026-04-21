@@ -7,12 +7,13 @@
 // - Draft state is local; `save()` PATCHes via aiLibraryService and replaces
 //   the hydrated agent immutably on success.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibraryAgent } from '../../types';
+import type { AILibraryAgent, AISettings as AISettingsType } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
+import { ChevronDown } from 'lucide-react';
 import { MarkdownEditor } from './MarkdownEditor';
 
 type SubTab = 'overview' | 'files' | 'skills';
@@ -24,9 +25,10 @@ interface AgentEditorProps {
 
 export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _onSelectAgent }) => {
   const { t } = useTranslation();
-  const { userProfile } = useAuth();
+  const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
   const isAdmin = userProfile.role === 'admin';
+  const modelGroups = useMemo(() => getAvailableModels(aiSettings), [aiSettings]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [sub, setSub] = useState<SubTab>('overview');
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
@@ -192,13 +194,16 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
             <label className="block text-xs font-medium text-zinc-400">
               {t('aiLibrary.agents.modelLabel', 'Model')}
             </label>
-            <input
-              type="text"
-              value={draft.model ?? ''}
-              onChange={(e) => updateDraft('model', e.target.value)}
-              disabled={readOnly}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-mono text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-            />
+            {renderModelSelect({
+              value: draft.model ?? '',
+              groups: modelGroups,
+              disabled: readOnly,
+              onChange: (v) => updateDraft('model', v),
+              providerNotEnabledLabel: t(
+                'aiLibrary.agents.modelProviderNotEnabled',
+                'provider not enabled',
+              ),
+            })}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -306,6 +311,105 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
     </div>
   );
 };
+
+/**
+ * Model group — one entry per enabled provider, with its available models.
+ * Used to render grouped <optgroup> in the model picker.
+ */
+interface ProviderModelGroup {
+  providerKey: string;
+  providerName: string;
+  models: string[];
+}
+
+// Friendly names for providers when the Overview model picker renders optgroups.
+// Keep in sync with AISettings.tsx PROVIDER_META (we don't import from there to
+// avoid a circular-ish dependency; this mapping is small and stable).
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  openai: 'OpenAI',
+  deepseek: 'DeepSeek',
+  doubao: 'Doubao',
+  minimax: 'MiniMax',
+  kimi: 'Kimi',
+  qwen: 'Qwen',
+  volcengine: 'Volcengine',
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio',
+};
+
+/**
+ * Collect the union of models exposed by every enabled provider in aiSettings.
+ * Prefers `config.models` detected from the server (via "Test Connection"); if
+ * the provider has no detected models yet, returns an empty list for that
+ * provider (the dropdown hides empty groups).
+ *
+ * Exported as a named function (not inside the component) so it can be unit-
+ * tested later without a React render.
+ */
+export function getAvailableModels(
+  settings: AISettingsType | null | undefined,
+): ProviderModelGroup[] {
+  if (!settings?.providers) return [];
+  return Object.entries(settings.providers)
+    .filter(([, config]) => config?.enabled)
+    .map(([key, config]) => ({
+      providerKey: key,
+      providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
+      models: Array.from(new Set(config?.models ?? [])).filter(Boolean),
+    }))
+    .filter((g) => g.models.length > 0);
+}
+
+/**
+ * Render the grouped model <select>. If the current value is not present in
+ * any provider group (e.g. the user has disabled the provider that owned it),
+ * we still show it as a leading disabled option so the user sees the stale
+ * selection rather than it silently flipping to the first option.
+ */
+function renderModelSelect(params: {
+  value: string;
+  groups: ProviderModelGroup[];
+  disabled: boolean;
+  onChange: (v: string) => void;
+  providerNotEnabledLabel: string;
+}): React.ReactElement {
+  const { value, groups, disabled, onChange, providerNotEnabledLabel } = params;
+  const knownModels = new Set(groups.flatMap((g) => g.models));
+  const showOrphan = value !== '' && !knownModels.has(value);
+
+  return (
+    <div className="relative mt-1">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 pr-8 text-sm font-mono text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {showOrphan && (
+          <option value={value}>
+            {value} ({providerNotEnabledLabel})
+          </option>
+        )}
+        {groups.length === 0 && !showOrphan && (
+          <option value="">No models available — enable a provider</option>
+        )}
+        {groups.map((group) => (
+          <optgroup key={group.providerKey} label={group.providerName}>
+            {group.models.map((m) => (
+              <option key={`${group.providerKey}:${m}`} value={m}>
+                {m}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <ChevronDown
+        size={14}
+        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+      />
+    </div>
+  );
+}
 
 /**
  * Build the editable draft subset from a hydrated agent. Keeps keys that the
