@@ -72,11 +72,13 @@ class ScriptAIService:
     def _build_composer(self) -> PromptComposer:
         return PromptComposer(AgentRepository(), SkillRepository())
 
-    def _build_runner(self) -> AgentRunner:
-        # Pick adapter based on the agent's configured model (empty → Qwen default
-        # per get_adapter's fallback for Phase 1 compat). script_ai agent rows that
-        # have no model set will resolve to QwenAdapter with settings.LLM_MODEL.
-        adapter = get_adapter("", settings)
+    def _build_runner(self, model: str = "") -> AgentRunner:
+        # Pick adapter based on the agent's configured model. Empty / unknown-to-
+        # the-factory models fall back to QwenAdapter + settings.LLM_MODEL for
+        # Phase 1 compat. The model is threaded in from ComposedSystemPrompt
+        # (composer.compose() pulls it from the ai_agents row), not read from
+        # global settings, so agents can declare their own provider in DB.
+        adapter = get_adapter(model, settings)
         return AgentRunner(
             adapter=adapter, skill_tool=SkillToolService(SkillRepository())
         )
@@ -94,7 +96,7 @@ class ScriptAIService:
                 request_instructions=request_instructions,
             )
         )
-        runner = self._build_runner()
+        runner = self._build_runner(composed.model or "")
         result = await runner.run_turn(
             composed,
             user_messages=[{"role": "user", "content": user_content}],
