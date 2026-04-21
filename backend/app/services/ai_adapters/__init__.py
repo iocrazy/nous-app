@@ -8,6 +8,7 @@ from app.services.ai_adapters.base import AIAdapter
 from app.services.ai_adapters.claude import ClaudeAdapter
 from app.services.ai_adapters.deepseek import DeepSeekAdapter
 from app.services.ai_adapters.doubao import DoubaoAdapter
+from app.services.ai_adapters.factory import get_adapter
 from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.ai_adapters.qwen import QwenAdapter
 
@@ -16,6 +17,7 @@ __all__ = [
     "ClaudeAdapter",
     "DeepSeekAdapter",
     "DoubaoAdapter",
+    "get_adapter",
     "OpenAICompatibleAdapter",
     "QwenAdapter",
 ]

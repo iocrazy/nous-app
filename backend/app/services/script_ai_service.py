@@ -32,7 +32,7 @@ from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.agent_runner import AgentRunner
-from app.services.ai_provider import QwenAdapter
+from app.services.ai_adapters import get_adapter
 from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.skill_tool_service import SkillToolService
 
@@ -73,11 +73,10 @@ class ScriptAIService:
         return PromptComposer(AgentRepository(), SkillRepository())
 
     def _build_runner(self) -> AgentRunner:
-        adapter = QwenAdapter(
-            api_url=settings.LLM_API_URL,
-            api_key=settings.LLM_API_KEY,
-            default_model=settings.LLM_MODEL,
-        )
+        # Pick adapter based on the agent's configured model (empty → Qwen default
+        # per get_adapter's fallback for Phase 1 compat). script_ai agent rows that
+        # have no model set will resolve to QwenAdapter with settings.LLM_MODEL.
+        adapter = get_adapter("", settings)
         return AgentRunner(
             adapter=adapter, skill_tool=SkillToolService(SkillRepository())
         )
