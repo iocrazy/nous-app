@@ -8,20 +8,33 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { GitFork } from 'lucide-react';
 import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
 import { MarkdownEditor } from './MarkdownEditor';
+import { NewSkillModal } from './NewSkillModal';
 
 interface SkillEditorProps {
   slug: string;
   onBack: () => void;
+  /**
+   * Called after a successful fork. Parent should refresh its skill list
+   * and (ideally) select the new slug so the user lands on their fresh
+   * copy. If omitted, the editor falls back to ``onBack`` so the user
+   * returns to the list where the new skill is visible after reload.
+   */
+  onSkillForked?: (newSlug: string) => void;
 }
 
 const SKILL_MD = 'SKILL.md';
 
-export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
+export const SkillEditor: React.FC<SkillEditorProps> = ({
+  slug,
+  onBack,
+  onSkillForked,
+}) => {
   const { t } = useTranslation();
   const { userProfile } = useAuth();
   const { addToast } = useToast();
@@ -32,6 +45,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forkModalOpen, setForkModalOpen] = useState(false);
+  const [allSkills, setAllSkills] = useState<AILibrarySkill[]>([]);
 
   const load = async (): Promise<void> => {
     try {
@@ -104,6 +119,36 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Open the fork modal. Lazily fetch the full skill list so the Fork-from
+   * dropdown inside <NewSkillModal> has something to show if the user wants
+   * to pick a different source after opening.
+   */
+  const openForkModal = async (): Promise<void> => {
+    setForkModalOpen(true);
+    if (allSkills.length === 0) {
+      try {
+        const list = await aiLibraryService.listSkills();
+        setAllSkills(list);
+      } catch (err) {
+        console.error('[SkillEditor] listSkills for fork failed:', err);
+      }
+    }
+  };
+
+  const handleForkCreated = (newSlug: string): void => {
+    setForkModalOpen(false);
+    addToast(
+      t('aiLibrary.skills.forkedToast', 'Forked as {{slug}}', { slug: newSlug }),
+      'success',
+    );
+    if (onSkillForked) {
+      onSkillForked(newSlug);
+    } else {
+      onBack();
     }
   };
 
@@ -193,6 +238,15 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
           <SkillScopeBadge skill={skill} isPreset={isPreset} />
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openForkModal}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
+            title={t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
+          >
+            <GitFork size={14} />
+            {t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
+          </button>
           {canDelete && (
             <button
               type="button"
@@ -313,6 +367,15 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
           </div>
         </section>
       </div>
+
+      {forkModalOpen && (
+        <NewSkillModal
+          existingSkills={allSkills.length > 0 ? allSkills : [skill]}
+          initialForkFrom={skill.slug ?? String(skill.id)}
+          onClose={() => setForkModalOpen(false)}
+          onCreated={handleForkCreated}
+        />
+      )}
     </div>
   );
 };

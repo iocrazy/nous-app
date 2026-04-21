@@ -165,6 +165,10 @@ export const SkillsTab: React.FC = () => {
           setSelectedSlug(null);
           void loadSkills();
         }}
+        onSkillForked={async (newSlug) => {
+          await loadSkills();
+          setSelectedSlug(newSlug);
+        }}
       />
     );
   }
