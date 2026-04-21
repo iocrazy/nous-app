@@ -141,3 +141,29 @@ async def test_call_omits_authorization_when_api_key_empty() -> None:
 
     kwargs = mock_instance.post.call_args.kwargs
     assert "Authorization" not in kwargs["headers"]
+
+
+# ─── subclass defaults ─────────────────────────────────────────────────
+
+
+def test_qwen_adapter_has_dashscope_default_url() -> None:
+    from app.services.ai_adapters import QwenAdapter
+
+    a = QwenAdapter(api_key="test")
+    assert "dashscope" in a.api_url
+    assert a.default_model == "qwen-max"
+
+
+def test_deepseek_adapter_has_deepseek_default_url() -> None:
+    from app.services.ai_adapters import DeepSeekAdapter
+
+    a = DeepSeekAdapter(api_key="test")
+    assert "api.deepseek.com" in a.api_url
+    assert a.default_model == "deepseek-chat"
+
+
+def test_doubao_adapter_has_volces_default_url() -> None:
+    from app.services.ai_adapters import DoubaoAdapter
+
+    a = DoubaoAdapter(api_key="test")
+    assert "volces.com" in a.api_url
