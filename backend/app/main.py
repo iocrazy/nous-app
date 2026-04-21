@@ -80,7 +80,6 @@ async def lifespan(app: FastAPI):
     # Record deployment log — read build-info.json baked in by CI
     try:
         import json
-        from pathlib import Path
 
         build_info_path = Path("/app/build-info.json")
         if build_info_path.exists():
