@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from app.repositories.agent_repository import AgentRepository
+from app.repositories.skill_repository import SkillRepository
 
 # ─── Fake client plumbing ──────────────────────────────────────────────
 
@@ -212,3 +213,78 @@ async def test_agent_update_fields_versioned_missing_row_raises() -> None:
 
     with pytest.raises(ValueError, match="not found"):
         await repo.update_fields_versioned(uuid4(), {"identity_md": "x"})
+
+
+# ─── skill versioned update ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_skill_update_fields_versioned_snapshots_body_and_frontmatter() -> None:
+    """body_md or frontmatter_json change → snapshot + bump."""
+    skill_id = 42
+    live_row = {
+        "id": skill_id,
+        "body_md": "OLD body",
+        "frontmatter_json": {"name": "Old"},
+        "current_version": 1,
+    }
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row, inserted, updated)
+
+    repo = SkillRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    caller_id = uuid4()
+    await repo.update_fields_versioned(
+        skill_id,
+        {"body_md": "NEW body"},
+        created_by=caller_id,
+    )
+
+    assert len(inserted) == 1
+    snap = inserted[0]
+    assert snap["skill_id"] == skill_id
+    assert snap["version_number"] == 1
+    assert snap["body_md"] == "OLD body"
+    assert snap["frontmatter_json"] == {"name": "Old"}
+    assert snap["created_by"] == str(caller_id)
+
+    assert len(updated) == 1
+    patch = updated[0]
+    assert patch["body_md"] == "NEW body"
+    assert patch["current_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_skill_update_fields_versioned_noop_when_untracked_change() -> None:
+    """Updating only non-tracked fields (name, description) → no version row.
+    (Those fields still get patched via the non-versioned path in the router
+    if needed, but they never produce version history.)"""
+    skill_id = 7
+    live_row = {
+        "id": skill_id,
+        "body_md": "same",
+        "frontmatter_json": {},
+        "current_version": 5,
+    }
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row, inserted, updated)
+
+    repo = SkillRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    # name is not in _VERSIONED_SKILL_FIELDS → update is a no-op to the versioned path.
+    await repo.update_fields_versioned(skill_id, {"name": "Renamed"}, created_by=None)
+
+    assert inserted == []
+    assert updated == []

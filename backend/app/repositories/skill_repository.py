@@ -302,3 +302,54 @@ class SkillRepository(BaseRepository):
         except Exception as e:
             logger.error(f"Failed to update skill {skill_id}: {e}")
             raise
+
+    # Fields snapshotted into skill_versions. Narrower than update_fields'
+    # accepted fields — only behavioral content, per Phase 2 plan.
+    _VERSIONED_SKILL_FIELDS = ("body_md", "frontmatter_json")
+
+    async def update_fields_versioned(
+        self,
+        skill_id: int,
+        updates: Dict[str, Any],
+        created_by: Optional[UUID] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        """Snapshot-then-update for skills. See AgentRepository.update_fields_versioned
+        for the pattern rationale.
+
+        No-op if none of ``body_md`` / ``frontmatter_json`` actually differs.
+        Raises ValueError if the skill does not exist.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table(self.TABLE)
+            .select("*")
+            .eq("id", skill_id)
+            .maybe_single()
+            .execute()
+        )
+        current = result.data if result and result.data else None
+        if current is None:
+            raise ValueError(f"skill {skill_id} not found")
+
+        tracked_changed = any(
+            k in updates and updates[k] != current.get(k)
+            for k in self._VERSIONED_SKILL_FIELDS
+        )
+        if not tracked_changed:
+            return
+
+        current_version = int(current.get("current_version") or 1)
+        snapshot = {
+            "skill_id": skill_id,
+            "version_number": current_version,
+            "notes": notes,
+            "created_by": str(created_by) if created_by else None,
+        }
+        for field in self._VERSIONED_SKILL_FIELDS:
+            snapshot[field] = current.get(field)
+
+        await client.table("skill_versions").insert(snapshot).execute()
+
+        patch = {**updates, "current_version": current_version + 1}
+        await client.table(self.TABLE).update(patch).eq("id", skill_id).execute()
