@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie,
+  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, Library,
 } from 'lucide-react';
 import { fetchCookieStatuses, CookieStatus } from '../services/cookiesService';
 import { PersonalSettings } from './PersonalSettings';
 import { SettingsView } from './SettingsView';
 import { TeamSettings } from './TeamSettings';
+import { AILibraryPanel } from './AILibrary/AILibraryPanel';
 import { UserSettings, AISettings as AISettingsType, Team } from '../types';
 
-type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies';
+type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'aiLibrary' | 'docs' | 'cookies';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -71,6 +72,7 @@ const APP_SETTINGS_SECTION: NavSection = {
     { id: 'tasks', label: 'Tasks', icon: ListTodo },
     { id: 'tags', label: 'Tags', icon: Tag },
     { id: 'ai', label: 'AI', icon: Sparkles },
+    { id: 'aiLibrary', label: 'AI Library', icon: Library },
     { id: 'docs', label: 'API Docs', icon: FileText },
     { id: 'cookies', label: 'Cookies', icon: Cookie },
   ],
@@ -85,6 +87,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   tasks: 'Tasks',
   tags: 'Tags',
   ai: 'AI',
+  aiLibrary: 'AI Library',
   docs: 'API Docs',
   cookies: 'Cookies',
 };
@@ -156,7 +159,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   // Is it an app-settings tab (rendered by SettingsView)?
-  const isAppSettingsTab = activeTab !== 'personal' && activeTab !== 'team';
+  // AI Library has its own panel — exclude it from SettingsView forwarding.
+  const isAppSettingsTab =
+    activeTab !== 'personal' && activeTab !== 'team' && activeTab !== 'aiLibrary';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -321,6 +326,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onSaveAISettings={onSaveAISettings}
                 embedded
               />
+            )}
+
+            {activeTab === 'aiLibrary' && (
+              <AILibraryPanel />
             )}
           </div>
         </div>

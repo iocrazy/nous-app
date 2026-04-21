@@ -1136,5 +1136,29 @@
     },
     "emptyTitle": "开始对话",
     "emptySubtitle": "向你的 AI 助手咨询任何与项目相关的内容。"
+  },
+  "aiLibrary": {
+    "title": "AI 库",
+    "menuItem": "AI 库",
+    "tabs": {
+      "agents": "智能体",
+      "skills": "技能"
+    },
+    "agents": {
+      "systemPreset": "系统预置",
+      "selectAgent": "选择一个智能体进行编辑",
+      "identityTitle": "身份",
+      "soulTitle": "性格",
+      "instructionsTitle": "指令",
+      "boundSkills": "绑定的技能",
+      "saveChanges": "保存更改",
+      "presetReadOnly": "系统预置 — 只读"
+    },
+    "skills": {
+      "addFile": "+ 添加文件",
+      "fileType": "文件类型",
+      "pathPlaceholder": "路径，例如 references/examples.md",
+      "deleteFile": "删除文件"
+    }
   }
 }
