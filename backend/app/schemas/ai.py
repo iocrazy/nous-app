@@ -33,7 +33,17 @@ class AISettingsUpdate(BaseModel):
     auto_transcribe: Optional[bool] = None
     auto_summarize: Optional[bool] = None
     preferred_language: Optional[str] = None
-    task_assignment: Optional[Dict[str, str]] = None
+    task_assignment: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Task-to-handler routing. As of migration 142 (Phase 2 PR 2.8b), "
+            "the summarization / visual_analysis / script_generation keys "
+            "store an AI Library agent slug (e.g. 'summarize', 'analyze', "
+            "'storyboard'). The transcription key still stores a legacy "
+            "'provider:model' string (e.g. 'volcengine:bigasr') because "
+            "transcription does not route through the agent framework."
+        ),
+    )
 
 
 class AISettingsResponse(BaseModel):
@@ -57,7 +67,13 @@ class AISettingsResponse(BaseModel):
             "transcription": "",
             "summarization": "",
             "visual_analysis": "",
-        }
+        },
+        description=(
+            "Task-to-handler routing. As of migration 142 (Phase 2 PR 2.8b), "
+            "summarization / visual_analysis / script_generation hold an "
+            "AI Library agent slug (e.g. 'summarize', 'analyze', 'storyboard'). "
+            "transcription remains a 'provider:model' string."
+        ),
     )
 
 
