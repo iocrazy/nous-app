@@ -11,16 +11,24 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from fastapi import BackgroundTasks, Header
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
-    ResourceTagRequest,
     ResourceMoveRequest,
+    ResourceTagRequest,
     ResourceUpdate,
 )
 from app.services.resources_service import ResourcesService
@@ -225,9 +233,9 @@ async def serve_resource_cover(resource_id: str):
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        from app.core.config import settings
-
         import mimetypes
+
+        from app.core.config import settings
 
         # Try thumbnail first, then cover image
         for field in ("thumbnail_path", "cover_image_path"):

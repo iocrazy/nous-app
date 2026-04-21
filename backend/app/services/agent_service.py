@@ -128,9 +128,9 @@ class AgentService:
         agent = await self.load_agent(agent_id)
 
         # 2. Get or create session
-        from app.services.ai_session_service import (
+        from app.services.ai_session_service import (  # local import to avoid circular
             AISessionService,
-        )  # local import to avoid circular
+        )
 
         session_svc = AISessionService()
         if session_id:

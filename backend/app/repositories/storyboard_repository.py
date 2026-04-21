@@ -14,7 +14,6 @@ from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
 
-
 # --------------------------------------------------------------------------- #
 # 1. StoryboardProjectRepository
 # --------------------------------------------------------------------------- #

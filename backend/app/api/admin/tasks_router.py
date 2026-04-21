@@ -9,12 +9,11 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tasks_repository import AdminTasksRepository
 from app.schemas.admin import (
-    AdminTaskResponse,
     AdminTaskListResponse,
+    AdminTaskResponse,
     AdminTaskStatsResponse,
 )
-from app.utils.admin_helpers import create_audit_log, batch_get_user_auth_info
-
+from app.utils.admin_helpers import batch_get_user_auth_info, create_audit_log
 
 router = APIRouter()
 

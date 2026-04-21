@@ -21,7 +21,6 @@ from loguru import logger
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
-
 # ---------------------------------------------------------------------------
 # Cookie format helpers
 # ---------------------------------------------------------------------------

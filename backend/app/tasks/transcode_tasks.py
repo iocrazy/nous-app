@@ -19,7 +19,6 @@ from app.core.config import settings
 from app.repositories.user_logs_repository import log_user_action
 from app.tasks.utils import run_async
 
-
 # ── Gating thresholds ──
 MIN_SIZE_MB = None  # Read from settings.TRANSCODE_MIN_SIZE_MB at runtime
 MIN_DURATION_SEC = 600  # ... or > 10 minutes
@@ -163,6 +162,7 @@ def transcode_to_hls(
         if unified_task_id and user_id:
             import json as _json
             import time as _time
+
             from app.core.redis import get_sync_redis
 
             _redis = get_sync_redis()

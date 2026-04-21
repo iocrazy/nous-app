@@ -384,7 +384,9 @@ def transcribe_audio_task(
             video_dir = os.path.dirname(download_path)
             audio_filename = os.path.basename(audio_path)
 
-            import hashlib, hmac as hmac_mod, time as time_mod
+            import hashlib
+            import hmac as hmac_mod
+            import time as time_mod
 
             expires_at = int(time_mod.time()) + 3600
             payload = f"{user_id}.{expires_at}"

@@ -7,7 +7,6 @@ from loguru import logger
 
 from app.db import get_async_supabase_admin
 
-
 # ============================================
 # Audit Logging
 # ============================================

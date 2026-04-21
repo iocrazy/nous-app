@@ -1,10 +1,10 @@
 """Script import service — parse uploaded files and split into chapters via AI."""
 
 import io
-from typing import List, Dict
+from typing import Dict, List
 
-import pypdf
 import docx
+import pypdf
 from loguru import logger
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB

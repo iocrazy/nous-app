@@ -18,12 +18,12 @@ from fastapi import HTTPException
 from loguru import logger
 
 from app.repositories.storyboard_repository import (
-    StoryboardProjectRepository,
-    StoryboardNodeRepository,
+    StoryboardAssetRepository,
+    StoryboardCharacterRepository,
     StoryboardEdgeRepository,
     StoryboardFrameRepository,
-    StoryboardCharacterRepository,
-    StoryboardAssetRepository,
+    StoryboardNodeRepository,
+    StoryboardProjectRepository,
 )
 from app.schemas.storyboard import CanvasSyncRequest
 

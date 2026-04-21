@@ -17,9 +17,9 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.storyboard_repository import (
-    StoryboardNodeRepository,
     StoryboardEdgeRepository,
     StoryboardFrameRepository,
+    StoryboardNodeRepository,
 )
 from app.schemas.storyboard import (
     CanvasSyncRequest,
@@ -406,8 +406,8 @@ async def serve_asset_file(
         # Verify access via project
         await svc.verify_project_access(str(asset["project_id"]), auth.user_id)
 
-        from pathlib import Path
         import os
+        from pathlib import Path
 
         nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
 

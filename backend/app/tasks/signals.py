@@ -27,7 +27,6 @@ from typing import Any, Optional
 from celery.signals import task_failure, task_prerun, task_success
 from loguru import logger
 
-
 # ─── Async helper ────────────────────────────────────────────────────
 
 

@@ -1,9 +1,9 @@
 """Notification schemas for API requests and responses."""
 
 from datetime import datetime
-from typing import Optional, List, Literal
-from pydantic import BaseModel
+from typing import List, Literal, Optional
 
+from pydantic import BaseModel
 
 NotificationType = Literal["system", "team"]
 

@@ -6,7 +6,6 @@ from loguru import logger
 
 from app.repositories.base_repository import BaseRepository
 
-
 # Columns returned in list queries (excludes content_md, output_format for performance)
 _SUMMARY_COLUMNS = (
     "id, team_id, project_id, created_by, name, description, "

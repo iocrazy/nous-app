@@ -1,7 +1,7 @@
 """Admin API routes for Request Logs and Frontend Error Logs."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel

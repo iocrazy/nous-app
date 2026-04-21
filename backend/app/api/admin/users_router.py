@@ -9,20 +9,19 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.users_repository import AdminUsersRepository
 from app.schemas.admin import (
-    AdminUserResponse,
-    AdminUserListResponse,
-    AdminUserUpdate,
     AdminUserBanRequest,
+    AdminUserListResponse,
+    AdminUserResponse,
+    AdminUserUpdate,
 )
 from app.utils.admin_helpers import (
-    create_audit_log,
     batch_get_user_auth_info,
     batch_get_user_counts,
+    create_audit_log,
     get_user_auth_info,
-    get_user_video_count,
     get_user_team_count,
+    get_user_video_count,
 )
-
 
 router = APIRouter()
 

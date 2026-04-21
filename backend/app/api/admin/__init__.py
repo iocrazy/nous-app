@@ -2,23 +2,23 @@
 
 from fastapi import APIRouter
 
-from .users_router import router as users_router
-from .teams_router import router as teams_router
-from .audit_logs_router import router as audit_logs_router
-from .stats_router import router as stats_router
-from .videos_router import router as videos_router
-from .settings_router import router as settings_router
-from .request_logs_router import router as request_logs_router
-from .monitoring_router import router as monitoring_router
-from .search_router import router as search_router
 from .alert_rules_router import router as alert_rules_router
-from .transcode_router import router as transcode_router
-from .tasks_router import router as tasks_router
-from .table_preferences_router import router as table_preferences_router
-from .credits_router import router as credits_router
-from .tags_router import router as tags_router
+from .audit_logs_router import router as audit_logs_router
 from .celery_router import router as celery_router
+from .credits_router import router as credits_router
+from .monitoring_router import router as monitoring_router
 from .nous_router import router as nous_router
+from .request_logs_router import router as request_logs_router
+from .search_router import router as search_router
+from .settings_router import router as settings_router
+from .stats_router import router as stats_router
+from .table_preferences_router import router as table_preferences_router
+from .tags_router import router as tags_router
+from .tasks_router import router as tasks_router
+from .teams_router import router as teams_router
+from .transcode_router import router as transcode_router
+from .users_router import router as users_router
+from .videos_router import router as videos_router
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 

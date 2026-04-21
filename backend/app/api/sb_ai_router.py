@@ -19,12 +19,12 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.services.storyboard_service import StoryboardService
 from app.schemas.storyboard import (
     GenerateImageRequest,
     GenerateVideoRequest,
     SplitScriptRequest,
 )
+from app.services.storyboard_service import StoryboardService
 from app.services.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/storyboard")

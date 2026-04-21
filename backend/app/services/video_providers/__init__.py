@@ -2,13 +2,13 @@ from app.services.video_providers.base import (
     BaseImageProvider,
     BaseVideoProvider,
     ImageGenResult,
-    VideoGenResult,
     TaskStatus,
+    VideoGenResult,
 )
 from app.services.video_providers.registry import (
+    ModelInfo,
     ProviderRegistry,
     provider_registry,
-    ModelInfo,
 )
 
 __all__ = [

@@ -352,8 +352,8 @@ def split_script_to_storyboard(
 
     try:
         from app.repositories.storyboard_repository import (
-            StoryboardNodeRepository,
             StoryboardFrameRepository,
+            StoryboardNodeRepository,
         )
         from app.services.storyboard_ai_service import StoryboardAIService
 
@@ -457,8 +457,8 @@ def analyze_video_scenes(
 
     try:
         from app.repositories.storyboard_repository import (
-            StoryboardNodeRepository,
             StoryboardFrameRepository,
+            StoryboardNodeRepository,
         )
         from app.services.storyboard_ai_service import StoryboardAIService
 

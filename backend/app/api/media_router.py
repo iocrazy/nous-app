@@ -21,15 +21,15 @@ from fastapi.responses import RedirectResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from app.core.deps import AuthDep
-from app.core.enums import DownloadStatus
-from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
-from app.repositories.media_repository import MediaRepository
+from app.api.media_download_router import router as download_router
 
 # Import sub-routers
 from app.api.media_fetch_router import router as fetch_router
-from app.api.media_download_router import router as download_router
 from app.api.media_slides_router import router as slides_router
+from app.core.deps import AuthDep
+from app.core.enums import DownloadStatus
+from app.repositories.media_repository import MediaRepository
+from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 
 router = APIRouter(prefix="/media")
 

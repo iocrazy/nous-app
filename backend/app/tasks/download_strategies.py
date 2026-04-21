@@ -184,13 +184,13 @@ def _do_douyin_download(
                         f"(DrissionPage) to get fresh URLs for {platform_id}"
                     )
                     try:
+                        from app.repositories.media_repository import (
+                            MediaRepository as _MR_browser,
+                        )
                         from app.services.douyin_parse.drissionpage_parser import (
                             DrissionPageParser,
                         )
                         from app.services.douyin_parse.formatter import DouyinFormatter
-                        from app.repositories.media_repository import (
-                            MediaRepository as _MR_browser,
-                        )
 
                         browser_detail = run_async(
                             DrissionPageParser.fetch_one_video(
@@ -323,9 +323,9 @@ def _do_douyin_download(
 
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
+                    from app.repositories.media_repository import MediaRepository
                     from app.services.douyin_parse.formatter import DouyinFormatter
                     from app.services.douyin_parse.ies_parser import IesDouyinParser
-                    from app.repositories.media_repository import MediaRepository
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"

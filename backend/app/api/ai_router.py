@@ -91,9 +91,10 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     # === End dedup ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
-    from app.repositories.user_settings_repository import UserSettingsRepository
-    from app.repositories.nous_repository import NousRepository
     import math
+
+    from app.repositories.nous_repository import NousRepository
+    from app.repositories.user_settings_repository import UserSettingsRepository
 
     settings_repo = UserSettingsRepository()
     user_settings = await settings_repo.get_by_user_id(auth.user_id)
@@ -244,8 +245,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
-            from app.tasks.ai_tasks import generate_summary_task
             from app.services.unified_task_manager import get_task_manager
+            from app.tasks.ai_tasks import generate_summary_task
 
             # Create unified task for Task Center visibility
             tracker = get_task_manager()
@@ -446,8 +447,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
-            from app.tasks.ai_tasks import generate_summary_task
             from app.services.unified_task_manager import get_task_manager
+            from app.tasks.ai_tasks import generate_summary_task
 
             tracker = get_task_manager()
             task_id = await tracker.create(

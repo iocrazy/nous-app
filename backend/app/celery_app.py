@@ -9,11 +9,11 @@ Celery 应用初始化模块
 import pkgutil
 
 from celery import Celery
-from celery.signals import worker_process_init, beat_init
 from celery.schedules import crontab
+from celery.signals import beat_init, worker_process_init
 
-from app.core.config import settings
 import app.tasks as _tasks_pkg
+from app.core.config import settings
 
 
 @worker_process_init.connect

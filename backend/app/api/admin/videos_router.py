@@ -9,13 +9,12 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.videos_repository import AdminVideosRepository
 from app.schemas.admin import (
-    AdminVideoResponse,
-    AdminVideoListResponse,
     AdminVideoDetailResponse,
+    AdminVideoListResponse,
+    AdminVideoResponse,
     AdminVideoStatsResponse,
 )
 from app.utils.admin_helpers import create_audit_log
-
 
 router = APIRouter()
 

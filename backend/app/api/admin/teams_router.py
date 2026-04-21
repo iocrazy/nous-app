@@ -7,27 +7,26 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.modules import ALL_MODULE_KEYS, MODULE_DEFINITIONS, validate_module_keys
 from app.core.team_permissions import ASSIGNABLE_ROLES, get_role_info
 from app.repositories.admin.teams_repository import AdminTeamsRepository
 from app.schemas.admin import (
-    AdminTeamResponse,
+    AdminModuleDefinition,
     AdminTeamListResponse,
     AdminTeamMemberResponse,
-    AdminUpdateMemberRoleRequest,
     AdminTeamModulesResponse,
-    AdminModuleDefinition,
+    AdminTeamResponse,
+    AdminUpdateMemberRoleRequest,
     AdminUpdateModulesRequest,
     TeamRoleResponse,
 )
-from app.core.modules import MODULE_DEFINITIONS, ALL_MODULE_KEYS, validate_module_keys
 from app.utils.admin_helpers import (
-    create_audit_log,
-    get_user_info,
-    get_team_member_count,
-    batch_get_user_info,
     batch_get_team_member_counts,
+    batch_get_user_info,
+    create_audit_log,
+    get_team_member_count,
+    get_user_info,
 )
-
 
 router = APIRouter()
 

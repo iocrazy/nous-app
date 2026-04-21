@@ -14,8 +14,8 @@ from loguru import logger
 from pydantic import BaseModel, field_validator
 
 from app.core.deps import AuthDep
-from app.repositories.tags_repository import TagsRepository
 from app.core.utils import Utils
+from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
@@ -24,7 +24,6 @@ from app.services.douyin_parse.ies_parser import IesDouyinParser
 from app.services.points_service import PointsService
 from app.services.url_router import URLRouter
 from app.services.ytdlp_service import YtdlpService
-
 
 # ============================================
 # Models

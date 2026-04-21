@@ -20,8 +20,8 @@ from loguru import logger
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
-from app.repositories.user_logs_repository import log_user_action
 from app.repositories.media_repository import MediaRepository
+from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import (
     DownloadCoverResult,
     DownloadImagesResult,

@@ -1,6 +1,7 @@
 """Admin-specific dependencies for FastAPI routes."""
 
 from typing import Annotated
+
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 

@@ -1,7 +1,8 @@
 """Notification repository for database operations."""
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin

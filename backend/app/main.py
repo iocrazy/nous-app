@@ -14,12 +14,12 @@ from slowapi.util import get_remote_address
 
 from app.api import api_router
 from app.api.frontend_config_router import load_config as load_frontend_config
-from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志

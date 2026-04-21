@@ -101,6 +101,7 @@ async def serve_slide_file(
     Authentication: Bearer Token, API Key, or ?token= query param
     """
     import mimetypes as _mt
+
     from app.api.media_auth import validate_media_cookie
 
     if not auth and token:

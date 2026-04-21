@@ -616,8 +616,8 @@ class TranscodeService:
     def _get_db_setting(key: str) -> Optional[str]:
         """Read a single value from system_settings table (sync-safe for Celery)."""
         try:
-            from app.tasks.utils import run_async
             from app.db import get_async_supabase_admin
+            from app.tasks.utils import run_async
 
             supabase = run_async(get_async_supabase_admin())
             result = run_async(

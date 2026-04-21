@@ -6,11 +6,10 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.notification_repository import NotificationRepository
 from app.schemas.notification import (
-    NotificationResponse,
-    NotificationListResponse,
     MarkReadResponse,
+    NotificationListResponse,
+    NotificationResponse,
 )
-
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 

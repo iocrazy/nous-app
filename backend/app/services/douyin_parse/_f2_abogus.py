@@ -16,11 +16,11 @@
 # future `curl upstream | diff` updates are trivial. Add local wrappers
 # in `abogus_parser.py` instead of editing here.
 
-import time
 import random
+import time
+from typing import Callable, Dict, List, Union
 
-from gmssl import sm3, func
-from typing import Union, Callable, List, Dict
+from gmssl import func, sm3
 
 
 class StringProcessor:

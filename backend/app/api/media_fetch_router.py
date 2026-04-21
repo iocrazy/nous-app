@@ -12,24 +12,23 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
 
-from app.core.deps import AuthDep
-from app.core.utils import Utils
-from app.repositories.user_logs_repository import log_user_action
-from app.repositories.media_repository import MediaRepository
-from app.services.douyin_parse.formatter import DouyinFormatter
-from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.points_service import PointsService
-from app.services.url_router import URLRouter
-from app.schemas.media import MediaTypeFetchRequest
-from app.services.media_service import MediaService
-
+from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
-    resolve_team_id,
     dedup_and_dispatch,
     handle_ytdlp_fetch,
+    resolve_team_id,
 )
-from app.api.media_batch_router import router as batch_router
+from app.core.deps import AuthDep
+from app.core.utils import Utils
+from app.repositories.media_repository import MediaRepository
+from app.repositories.user_logs_repository import log_user_action
+from app.schemas.media import MediaTypeFetchRequest
+from app.services.douyin_parse.formatter import DouyinFormatter
+from app.services.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media_service import MediaService
+from app.services.points_service import PointsService
+from app.services.url_router import URLRouter
 
 router = APIRouter()
 router.include_router(batch_router)
@@ -343,6 +342,7 @@ async def extract_audio(
 
         async def _do_extract(pid: str, task_id: str | None):
             import asyncio
+
             from app.tasks.download_tasks import _extract_audio_from_video
 
             _tracker = get_task_manager()

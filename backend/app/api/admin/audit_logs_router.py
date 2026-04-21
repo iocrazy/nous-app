@@ -1,7 +1,7 @@
 """Admin API routes for Audit Logs management."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
@@ -9,11 +9,10 @@ from pydantic import BaseModel
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.audit_logs_repository import AuditLogsRepository
 from app.schemas.admin import (
-    AuditLogResponse,
     AuditLogListResponse,
+    AuditLogResponse,
 )
 from app.utils.admin_helpers import batch_get_user_info
-
 
 router = APIRouter()
 

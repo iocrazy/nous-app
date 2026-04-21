@@ -6,16 +6,15 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.team_repository import TeamRepository
 from app.schemas.team import (
-    TeamCreate,
-    TeamUpdate,
-    TeamResponse,
-    TeamListResponse,
-    TeamMemberResponse,
-    TeamMemberListResponse,
-    TeamMemberUpdate,
     JoinTeamRequest,
+    TeamCreate,
+    TeamListResponse,
+    TeamMemberListResponse,
+    TeamMemberResponse,
+    TeamMemberUpdate,
+    TeamResponse,
+    TeamUpdate,
 )
-
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
 

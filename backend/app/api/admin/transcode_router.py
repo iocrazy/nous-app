@@ -11,14 +11,13 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
 from app.repositories.admin.transcode_repository import AdminTranscodeRepository
 from app.schemas.admin import (
-    AdminTranscodeVersionResponse,
     AdminTranscodeListResponse,
-    AdminTranscodeStatsResponse,
     AdminTranscodeSettingsResponse,
     AdminTranscodeSettingsUpdate,
+    AdminTranscodeStatsResponse,
+    AdminTranscodeVersionResponse,
 )
 from app.utils.admin_helpers import create_audit_log
-
 
 router = APIRouter()
 

@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tags_repository import AdminTagsRepository
 
-
 router = APIRouter()
 
 

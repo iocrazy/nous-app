@@ -17,7 +17,6 @@ from app.repositories.user_logs_repository import log_user_action
 from app.services.classification_service import ClassificationService
 from app.tasks.utils import run_async
 
-
 # ---------------------------------------------------------------------------
 # Helper functions (extracted from parse_single_link_task)
 # ---------------------------------------------------------------------------
@@ -405,8 +404,8 @@ def _get_douyin_method_flags() -> dict[str, bool]:
 
 def _try_lighthttp(url: str, user_id: str, user_agent: str):
     """Attempt LightHTTP parse. Returns (parsed, method, name) or None."""
-    from app.services.douyin_parse.ies_parser import IesDouyinParser
     from app.services.douyin_parse.formatter import DouyinFormatter
+    from app.services.douyin_parse.ies_parser import IesDouyinParser
 
     try:
         aweme_detail = run_async(

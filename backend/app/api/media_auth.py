@@ -21,7 +21,7 @@ import hmac
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 

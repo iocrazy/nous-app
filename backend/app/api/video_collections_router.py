@@ -6,16 +6,15 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.video_collection_repository import VideoCollectionRepository
 from app.schemas.video_collection import (
-    VideoCollectionCreate,
-    VideoCollectionUpdate,
-    VideoCollectionResponse,
-    VideoCollectionListResponse,
     AddVideoRequest,
-    VideoCollectionVideosResponse,
-    CollectionVideosAwemeIdsResponse,
     CollectionVideosAwemeIdsRequest,
+    CollectionVideosAwemeIdsResponse,
+    VideoCollectionCreate,
+    VideoCollectionListResponse,
+    VideoCollectionResponse,
+    VideoCollectionUpdate,
+    VideoCollectionVideosResponse,
 )
-
 
 router = APIRouter(prefix="/video-collections", tags=["Video Collections"])
 

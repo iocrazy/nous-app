@@ -6,13 +6,13 @@ Replaces direct Supabase Realtime connections - frontend only connects to FastAP
 import asyncio
 import json
 from typing import AsyncGenerator
-from fastapi import APIRouter, Request, HTTPException, status
+
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.core.deps import OptionalAuthDep
 from app.db.supabase_client import get_async_supabase_admin
-
 
 router = APIRouter(prefix="/realtime", tags=["Realtime"])
 

@@ -11,22 +11,21 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 
+from app.api.media_fetch_helpers import (
+    BatchFetchRequest,
+    resolve_and_attach_tags,
+    resolve_team_id,
+)
 from app.core.deps import AuthDep
 from app.core.utils import Utils
+from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 from app.services.douyin_parse.formatter import DouyinFormatter
 from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.points_service import PointsService
 from app.services.media_service import MediaService
-from app.repositories.tags_repository import TagsRepository
-
-from app.api.media_fetch_helpers import (
-    BatchFetchRequest,
-    resolve_team_id,
-    resolve_and_attach_tags,
-)
+from app.services.points_service import PointsService
 
 router = APIRouter()
 
@@ -166,6 +165,7 @@ async def fetch_videos_batch(
                             uid: str,
                         ):
                             import asyncio
+
                             from app.repositories.resources_repository import (
                                 ResourcesRepository,
                             )

@@ -7,10 +7,10 @@ from app.repositories.collections_repository import CollectionsRepository
 from app.schemas.collections import (
     CollectionCreate,
     CollectionListResponse,
+    CollectionMediaResponse,
     CollectionResponse,
     CollectionRules,
     CollectionUpdate,
-    CollectionMediaResponse,
 )
 from app.services.collections_service import CollectionsService
 

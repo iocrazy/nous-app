@@ -15,7 +15,6 @@ from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.tasks.utils import run_async
 
-
 # ─── Post-download chain helpers ─────────────────────────────────────
 
 
@@ -157,8 +156,8 @@ def ensure_download_urls(
         return media
 
     try:
-        from app.services.douyin_parse.ies_parser import IesDouyinParser
         from app.services.douyin_parse.formatter import DouyinFormatter
+        from app.services.douyin_parse.ies_parser import IesDouyinParser
         from app.services.douyin_parse.ua_pool import pick_ua
 
         # One UA for the whole re-parse sequence (LightHTTP → BrowserAuto).
