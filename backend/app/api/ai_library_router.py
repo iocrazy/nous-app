@@ -37,6 +37,7 @@ from app.schemas.ai_library import (
     AgentCreate,
     AgentOut,
     AgentUpdate,
+    SkillCreate,
     SkillFileOut,
     SkillFileUpsert,
     SkillOut,
@@ -486,6 +487,117 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
         )
     skill_id = int(skill["id"])
     return {**skill, "files": await skill_repo.list_files(skill_id)}
+
+
+@router.post(
+    "/skills",
+    response_model=SkillOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new user-owned skill (optionally forked)",
+)
+async def create_skill(
+    payload: SkillCreate,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """Create a non-preset skill owned by the current user.
+
+    Scope:
+      * No ``team_id`` / ``project_id``: private per-user skill (default).
+      * ``team_id`` set: visible to all team members. Caller must be a member.
+      * ``project_id`` set: visible to project owner + members. Caller must
+        be the owner or a member.
+      * ``team_id`` + ``project_id`` both set → 400 (mutually exclusive).
+
+    If ``fork_from`` is set, copies body_md / frontmatter_json / category /
+    icon / output_format / description from that skill as a starting point.
+    Skill files (the auxiliary ``skill_files`` rows) are NOT forked — only
+    the primary SKILL.md body + metadata. Explicit payload fields override
+    forked values.
+    """
+    _, skill_repo = _repos()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+
+    # Scope validation — schema already rejected both-set, but we still want
+    # the HTTP-level 400 / 403 distinctions. Pydantic's model_validator raises
+    # 422, so we handle the user-friendlier variant first via the payload.
+    if payload.team_id is not None:
+        if not await _user_is_team_member(user_uuid, payload.team_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"user is not a member of team {payload.team_id}",
+            )
+    if payload.project_id is not None:
+        if not await _user_can_write_project(user_uuid, payload.project_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"user is not the owner or a member of project "
+                    f"{payload.project_id}"
+                ),
+            )
+
+    # Slug must be unique
+    if await skill_repo.get_by_slug(payload.slug):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"skill slug '{payload.slug}' already exists",
+        )
+
+    # Base fields. User-created skills are private by default (is_public=False),
+    # status='active', and owned by the creator.
+    fields: Dict[str, Any] = {
+        "slug": payload.slug,
+        "name": payload.name,
+        "description": payload.description,
+        "category": payload.category,
+        "icon": payload.icon if payload.icon is not None else "✨",
+        "body_md": payload.body_md,
+        "frontmatter_json": payload.frontmatter_json or {},
+        "output_format": payload.output_format,
+        "is_public": False,
+        "status": "active",
+        "created_by": str(user_uuid),
+        "team_id": payload.team_id,
+        "project_id": payload.project_id,
+    }
+
+    # If fork_from given, copy body/metadata from source (source may be a
+    # system preset — we're only READING its fields).
+    if payload.fork_from:
+        source = await skill_repo.get_by_slug(payload.fork_from)
+        if not source:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"fork source skill '{payload.fork_from}' not found",
+            )
+        for key in (
+            "body_md",
+            "frontmatter_json",
+            "category",
+            "icon",
+            "output_format",
+            "description",
+        ):
+            if source.get(key) is not None:
+                fields[key] = source[key]
+
+    # Explicit payload field overrides win over forked values.
+    for key in (
+        "description",
+        "category",
+        "icon",
+        "body_md",
+        "frontmatter_json",
+        "output_format",
+    ):
+        val = getattr(payload, key)
+        if val is not None:
+            fields[key] = val
+
+    created = await skill_repo.insert(fields)
+    skill_id = int(created["id"])
+    files = await skill_repo.list_files(skill_id)
+    return {**created, "files": files}
 
 
 @router.patch(
