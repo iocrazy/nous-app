@@ -83,7 +83,7 @@ class SeedLoader:
                 fields = self._read_agent_fields(agent_dir, slug)
                 await self._upsert_agent(slug, fields)
                 count += 1
-            except Exception as e:
+            except Exception as e:  # Broad catch intentional: one bad seed must not abort the batch
                 err = {"scope": "agent", "slug": slug, "error": _format_error(e)}
                 errors.append(err)
                 logger.exception(f"seed_loader: agent '{slug}' failed: {err['error']}")
@@ -158,7 +158,7 @@ class SeedLoader:
                 skill_id = await self._upsert_skill(slug, fields)
                 await self._load_skill_subfiles(skill_id, skill_dir)
                 count += 1
-            except Exception as e:
+            except Exception as e:  # Broad catch intentional: one bad seed must not abort the batch
                 err = {"scope": "skill", "slug": slug, "error": _format_error(e)}
                 errors.append(err)
                 logger.exception(f"seed_loader: skill '{slug}' failed: {err['error']}")
@@ -222,7 +222,7 @@ class SeedLoader:
             await self.agent_repo.update_skill_bindings(UUID(agent["id"]), skill_ids)
             logger.info(f"seed_loader: bound {len(skill_ids)} skills to script_ai")
             return len(skill_ids)
-        except Exception as e:
+        except Exception as e:  # Broad catch intentional: one bad seed must not abort the batch
             err = {"scope": "binding", "slug": "script_ai", "error": _format_error(e)}
             errors.append(err)
             logger.exception(f"seed_loader: script_ai binding failed: {err['error']}")
