@@ -11,88 +11,21 @@ import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { AgentEditor } from './AgentEditor';
 import { NewAgentModal } from './NewAgentModal';
+import { ScopedList, groupByScope } from './ScopedList';
+import type { ScopedGroup, ScopedLabels } from './ScopedList';
 
 /**
- * One rendered section in the sidebar. ``key`` doubles as the React key and
- * a stable identifier for test selectors; it is NOT shown to the user.
- */
-interface AgentGroup {
-  key: string;
-  label: string;
-  agents: AILibraryAgent[];
-}
-
-/**
- * Slot an agent into a scope-derived group. Ordering priority:
- *   1. System Presets (is_system_preset = true)
- *   2. My Private     (user-owned, no team / no project)
- *   3. Each Team      (one group per distinct team_id)
- *   4. Each Project   (one group per distinct project_id)
+ * Slot an agent into a scope-derived group. Thin wrapper around the shared
+ * ``groupByScope`` helper so unit tests can keep exercising the groupings
+ * via a stable import.
  *
  * Exported separately so it can be unit-tested without a React render.
  */
 export function groupAgentsByScope(
   agents: AILibraryAgent[],
-  labels: {
-    systemPresets: string;
-    privateLabel: string;
-    teamLabel: (name: string) => string;
-    projectLabel: (name: string) => string;
-  },
-): AgentGroup[] {
-  const presets: AILibraryAgent[] = [];
-  const privateOnes: AILibraryAgent[] = [];
-  const byTeam = new Map<number, { name: string; agents: AILibraryAgent[] }>();
-  const byProject = new Map<number, { name: string; agents: AILibraryAgent[] }>();
-
-  for (const a of agents) {
-    if (a.is_system_preset) {
-      presets.push(a);
-      continue;
-    }
-    if (a.team_id != null) {
-      const entry = byTeam.get(a.team_id) ?? {
-        name: a.team_name ?? String(a.team_id),
-        agents: [],
-      };
-      entry.agents.push(a);
-      byTeam.set(a.team_id, entry);
-      continue;
-    }
-    if (a.project_id != null) {
-      const entry = byProject.get(a.project_id) ?? {
-        name: a.project_name ?? String(a.project_id),
-        agents: [],
-      };
-      entry.agents.push(a);
-      byProject.set(a.project_id, entry);
-      continue;
-    }
-    privateOnes.push(a);
-  }
-
-  const groups: AgentGroup[] = [];
-  if (presets.length > 0) {
-    groups.push({ key: 'system', label: labels.systemPresets, agents: presets });
-  }
-  if (privateOnes.length > 0) {
-    groups.push({ key: 'private', label: labels.privateLabel, agents: privateOnes });
-  }
-  for (const [teamId, entry] of byTeam) {
-    groups.push({
-      key: `team:${teamId}`,
-      label: labels.teamLabel(entry.name),
-      agents: entry.agents,
-    });
-  }
-  for (const [projectId, entry] of byProject) {
-    groups.push({
-      key: `project:${projectId}`,
-      label: labels.projectLabel(entry.name),
-      agents: entry.agents,
-    });
-  }
-  return groups;
+  labels: ScopedLabels,
+): ScopedGroup<AILibraryAgent>[] {
+  return groupByScope(agents, (a) => a.is_system_preset, labels);
 }
 
 export const AgentsTab: React.FC = () => {
@@ -160,14 +93,15 @@ export const AgentsTab: React.FC = () => {
     );
   }
 
-  const groups = groupAgentsByScope(agents, {
+  const labels: ScopedLabels = {
     systemPresets: t('aiLibrary.agents.groupSystemPresets', 'System Presets'),
     privateLabel: t('aiLibrary.agents.groupPrivate', 'My Private'),
     teamLabel: (name: string) =>
       t('aiLibrary.agents.groupTeam', 'Team: {{name}}', { name }),
     projectLabel: (name: string) =>
       t('aiLibrary.agents.groupProject', 'Project: {{name}}', { name }),
-  });
+  };
+  const hasAgents = agents.length > 0;
 
   return (
     <div className="flex h-full">
@@ -181,37 +115,35 @@ export const AgentsTab: React.FC = () => {
             + {t('aiLibrary.agents.newAgent', 'New Agent')}
           </button>
         </div>
-        {groups.length === 0 ? (
+        {!hasAgents ? (
           <div className="p-4 text-xs text-zinc-500">
             {t('aiLibrary.agents.selectAgent', 'No agents yet.')}
           </div>
         ) : (
-          groups.map((group) => (
-            <div key={group.key}>
-              <div className="sticky top-0 z-10 bg-zinc-950/95 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800/60">
-                {group.label}
-              </div>
-              {group.agents.map((a) => {
-                const active = selectedSlug === a.slug;
-                return (
-                  <button
-                    key={a.slug}
-                    onClick={() => setSelectedSlug(a.slug)}
-                    className={`flex w-full flex-col items-start border-b border-zinc-800/40 px-4 py-3 text-left transition-colors ${
-                      active
-                        ? 'bg-indigo-500/10 text-zinc-100'
-                        : 'text-zinc-300 hover:bg-zinc-800/50'
-                    }`}
-                  >
-                    <span className="font-medium truncate w-full">{a.name}</span>
-                    <span className="mt-0.5 text-xs text-zinc-500 truncate w-full">
-                      {a.model}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))
+          <ScopedList
+            items={agents}
+            isSystemPreset={(a) => a.is_system_preset}
+            labels={labels}
+            headerVariant="sidebar"
+            renderItem={(a) => {
+              const active = selectedSlug === a.slug;
+              return (
+                <button
+                  onClick={() => setSelectedSlug(a.slug)}
+                  className={`flex w-full flex-col items-start border-b border-zinc-800/40 px-4 py-3 text-left transition-colors ${
+                    active
+                      ? 'bg-indigo-500/10 text-zinc-100'
+                      : 'text-zinc-300 hover:bg-zinc-800/50'
+                  }`}
+                >
+                  <span className="font-medium truncate w-full">{a.name}</span>
+                  <span className="mt-0.5 text-xs text-zinc-500 truncate w-full">
+                    {a.model}
+                  </span>
+                </button>
+              );
+            }}
+          />
         )}
       </aside>
       <main className="flex-1 overflow-y-auto p-6">

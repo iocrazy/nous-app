@@ -9,85 +9,22 @@ import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { SkillEditor } from './SkillEditor';
 import { NewSkillModal } from './NewSkillModal';
+import { ScopedList, groupByScope } from './ScopedList';
+import type { ScopedGroup, ScopedLabels } from './ScopedList';
+
+/** Preset detector for skills — public + no team/project ownership. */
+const skillIsSystemPreset = (s: AILibrarySkill): boolean =>
+  s.is_public && s.team_id == null && s.project_id == null;
 
 /**
- * One rendered section in the sidebar. ``key`` doubles as the React key and
- * a stable identifier for test selectors; it is NOT shown to the user.
- */
-interface SkillGroup {
-  key: string;
-  label: string;
-  skills: AILibrarySkill[];
-}
-
-/**
- * Slot a skill into a scope-derived group. Ordering priority:
- *   1. System Presets (is_public && !team_id && !project_id)
- *   2. My Private     (user-owned, no team / no project)
- *   3. Each Team      (one group per distinct team_id)
- *   4. Each Project   (one group per distinct project_id)
- *
- * Exported separately so it can be unit-tested without a React render.
+ * Thin wrapper around the shared ``groupByScope`` helper so unit tests can
+ * keep exercising the skill-specific groupings via a stable import.
  */
 export function groupSkillsByScope(
   skills: AILibrarySkill[],
-  labels: {
-    systemPresets: string;
-    privateLabel: string;
-    teamLabel: (name: string) => string;
-    projectLabel: (name: string) => string;
-  },
-): SkillGroup[] {
-  const presets: AILibrarySkill[] = [];
-  const privateOnes: AILibrarySkill[] = [];
-  const byTeam = new Map<number, { skills: AILibrarySkill[] }>();
-  const byProject = new Map<number, { skills: AILibrarySkill[] }>();
-
-  for (const s of skills) {
-    const isSystemPreset =
-      s.is_public && s.team_id == null && s.project_id == null;
-    if (isSystemPreset) {
-      presets.push(s);
-      continue;
-    }
-    if (s.team_id != null) {
-      const entry = byTeam.get(s.team_id) ?? { skills: [] };
-      entry.skills.push(s);
-      byTeam.set(s.team_id, entry);
-      continue;
-    }
-    if (s.project_id != null) {
-      const entry = byProject.get(s.project_id) ?? { skills: [] };
-      entry.skills.push(s);
-      byProject.set(s.project_id, entry);
-      continue;
-    }
-    privateOnes.push(s);
-  }
-
-  const groups: SkillGroup[] = [];
-  if (presets.length > 0) {
-    groups.push({ key: 'system', label: labels.systemPresets, skills: presets });
-  }
-  if (privateOnes.length > 0) {
-    groups.push({ key: 'private', label: labels.privateLabel, skills: privateOnes });
-  }
-  for (const [teamId, entry] of byTeam) {
-    // Skill list doesn't carry denormalized team_name yet — fall back to the id.
-    groups.push({
-      key: `team:${teamId}`,
-      label: labels.teamLabel(String(teamId)),
-      skills: entry.skills,
-    });
-  }
-  for (const [projectId, entry] of byProject) {
-    groups.push({
-      key: `project:${projectId}`,
-      label: labels.projectLabel(String(projectId)),
-      skills: entry.skills,
-    });
-  }
-  return groups;
+  labels: ScopedLabels,
+): ScopedGroup<AILibrarySkill>[] {
+  return groupByScope(skills, skillIsSystemPreset, labels);
 }
 
 export const SkillsTab: React.FC = () => {
@@ -160,18 +97,23 @@ export const SkillsTab: React.FC = () => {
           setSelectedSlug(null);
           void loadSkills();
         }}
+        onSkillForked={async (newSlug) => {
+          await loadSkills();
+          setSelectedSlug(newSlug);
+        }}
       />
     );
   }
 
-  const groups = groupSkillsByScope(skills, {
+  const labels: ScopedLabels = {
     systemPresets: t('aiLibrary.skills.groupSystemPresets', 'System Presets'),
     privateLabel: t('aiLibrary.skills.groupPrivate', 'My Private'),
     teamLabel: (name: string) =>
       t('aiLibrary.skills.groupTeam', 'Team: {{name}}', { name }),
     projectLabel: (name: string) =>
       t('aiLibrary.skills.groupProject', 'Project: {{name}}', { name }),
-  });
+  };
+  const hasSkills = skills.length > 0;
 
   return (
     <div className="p-6">
@@ -188,48 +130,42 @@ export const SkillsTab: React.FC = () => {
         </button>
       </div>
 
-      {groups.length === 0 ? (
+      {!hasSkills ? (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-500">
           {t('aiLibrary.skills.empty', 'No skills yet. Create your first one.')}
         </div>
       ) : (
         <div className="space-y-6">
-          {groups.map((group) => (
-            <section key={group.key}>
-              <div className="sticky top-0 z-10 -mx-6 mb-3 border-b border-zinc-800/60 bg-zinc-950/95 px-6 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {group.label}
-              </div>
+          <ScopedList
+            items={skills}
+            isSystemPreset={skillIsSystemPreset}
+            labels={labels}
+            headerVariant="section"
+            renderGroupBody={(_group, children) => (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {group.skills.map((s) => {
-                  const key = s.slug ?? String(s.id);
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setSelectedSlug(s.slug ?? String(s.id))}
-                      className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-800/60 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <div className="mb-2 text-2xl leading-none">
-                        {s.icon ?? '🧩'}
-                      </div>
-                      <div className="truncate font-semibold text-zinc-100">
-                        {s.name}
-                      </div>
-                      {s.category && (
-                        <div className="mt-1 truncate text-xs text-zinc-500">
-                          {s.category}
-                        </div>
-                      )}
-                      {s.description && (
-                        <p className="mt-2 line-clamp-3 text-sm text-zinc-400">
-                          {s.description}
-                        </p>
-                      )}
-                    </button>
-                  );
-                })}
+                {children}
               </div>
-            </section>
-          ))}
+            )}
+            renderItem={(s) => (
+              <button
+                onClick={() => setSelectedSlug(s.slug ?? String(s.id))}
+                className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-800/60 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <div className="mb-2 text-2xl leading-none">{s.icon ?? '🧩'}</div>
+                <div className="truncate font-semibold text-zinc-100">{s.name}</div>
+                {s.category && (
+                  <div className="mt-1 truncate text-xs text-zinc-500">
+                    {s.category}
+                  </div>
+                )}
+                {s.description && (
+                  <p className="mt-2 line-clamp-3 text-sm text-zinc-400">
+                    {s.description}
+                  </p>
+                )}
+              </button>
+            )}
+          />
         </div>
       )}
 

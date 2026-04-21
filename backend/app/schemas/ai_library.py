@@ -120,6 +120,11 @@ class SkillOut(BaseModel):
     frontmatter_json: dict = Field(default_factory=dict)
     files: list[SkillFileOut] = Field(default_factory=list)
     updated_at: datetime
+    # Phase 2 minor cleanup — denormalized names for the scope badge in the UI.
+    # Populated by the router when team_id / project_id is set. Both optional
+    # (absent for private skills and system presets). Mirrors AgentOut.
+    team_name: Optional[str] = None
+    project_name: Optional[str] = None
 
 
 class SkillUpdate(BaseModel):

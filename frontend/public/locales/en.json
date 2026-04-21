@@ -104,7 +104,8 @@
   "common": {
     "cancel": "Cancel",
     "close": "Close",
-    "delete": "Delete"
+    "delete": "Delete",
+    "deleting": "Deleting..."
   },
   "parser": {
     "title": "Media Parser",
@@ -1212,7 +1213,12 @@
       "groupPrivate": "My Private",
       "groupTeam": "Team: {{name}}",
       "groupProject": "Project: {{name}}",
-      "createdToast": "Skill created: {{slug}}"
+      "createdToast": "Skill created: {{slug}}",
+      "deleteSkill": "Delete Skill",
+      "deleteSkillConfirm": "Delete skill \"{{name}}\"? This cannot be undone.",
+      "deletedToast": "Skill deleted: {{name}}",
+      "forkSkill": "Fork to My Skills",
+      "forkedToast": "Forked as {{slug}}"
     }
   }
 }

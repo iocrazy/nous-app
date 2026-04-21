@@ -8,24 +8,45 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { GitFork } from 'lucide-react';
 import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../Toast';
 import { MarkdownEditor } from './MarkdownEditor';
+import { NewSkillModal } from './NewSkillModal';
 
 interface SkillEditorProps {
   slug: string;
   onBack: () => void;
+  /**
+   * Called after a successful fork. Parent should refresh its skill list
+   * and (ideally) select the new slug so the user lands on their fresh
+   * copy. If omitted, the editor falls back to ``onBack`` so the user
+   * returns to the list where the new skill is visible after reload.
+   */
+  onSkillForked?: (newSlug: string) => void;
 }
 
 const SKILL_MD = 'SKILL.md';
 
-export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
+export const SkillEditor: React.FC<SkillEditorProps> = ({
+  slug,
+  onBack,
+  onSkillForked,
+}) => {
   const { t } = useTranslation();
+  const { userProfile } = useAuth();
+  const { addToast } = useToast();
+  const isAdmin = userProfile.role === 'admin';
   const [skill, setSkill] = useState<AILibrarySkill | null>(null);
   const [activeTab, setActiveTab] = useState<string>(SKILL_MD);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forkModalOpen, setForkModalOpen] = useState(false);
+  const [allSkills, setAllSkills] = useState<AILibrarySkill[]>([]);
 
   const load = async (): Promise<void> => {
     try {
@@ -72,6 +93,9 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
 
   // System preset skills in Phase 1 = is_public=true AND project_id is null.
   const isPreset = skill.is_public && !skill.project_id;
+  // Delete button visibility: owner can delete their skill. For presets,
+  // only admin can delete. The server re-enforces this.
+  const canDelete = isPreset ? isAdmin : !isPreset;
 
   const save = async (): Promise<void> => {
     if (isPreset) return;
@@ -95,6 +119,67 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Open the fork modal. Lazily fetch the full skill list so the Fork-from
+   * dropdown inside <NewSkillModal> has something to show if the user wants
+   * to pick a different source after opening.
+   */
+  const openForkModal = async (): Promise<void> => {
+    setForkModalOpen(true);
+    if (allSkills.length === 0) {
+      try {
+        const list = await aiLibraryService.listSkills();
+        setAllSkills(list);
+      } catch (err) {
+        console.error('[SkillEditor] listSkills for fork failed:', err);
+      }
+    }
+  };
+
+  const handleForkCreated = (newSlug: string): void => {
+    setForkModalOpen(false);
+    addToast(
+      t('aiLibrary.skills.forkedToast', 'Forked as {{slug}}', { slug: newSlug }),
+      'success',
+    );
+    if (onSkillForked) {
+      onSkillForked(newSlug);
+    } else {
+      onBack();
+    }
+  };
+
+  const handleDelete = async (): Promise<void> => {
+    if (!canDelete) return;
+    const label = t('aiLibrary.skills.deleteSkill', 'Delete Skill');
+    const prompt =
+      t(
+        'aiLibrary.skills.deleteSkillConfirm',
+        'Delete skill "{{name}}"? This cannot be undone.',
+        { name: skill.name },
+      );
+    if (!window.confirm(prompt)) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await aiLibraryService.deleteSkill(slug);
+      addToast(
+        t('aiLibrary.skills.deletedToast', 'Skill deleted: {{name}}', {
+          name: skill.name,
+        }),
+        'success',
+      );
+      onBack();
+    } catch (err) {
+      console.error('[SkillEditor] deleteSkill failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      addToast(`${label}: ${msg}`, 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -152,13 +237,37 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
           </h2>
           <SkillScopeBadge skill={skill} isPreset={isPreset} />
         </div>
-        <button
-          onClick={save}
-          disabled={saving || isPreset}
-          className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-        >
-          {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openForkModal}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
+            title={t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
+          >
+            <GitFork size={14} />
+            {t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
+          </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || saving}
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              title={t('aiLibrary.skills.deleteSkill', 'Delete Skill')}
+            >
+              {deleting
+                ? t('common.deleting', 'Deleting...')
+                : `🗑️ ${t('aiLibrary.skills.deleteSkill', 'Delete Skill')}`}
+            </button>
+          )}
+          <button
+            onClick={save}
+            disabled={saving || isPreset}
+            className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
+          </button>
+        </div>
       </header>
 
       <div className="grid flex-1 grid-cols-[260px_1fr] overflow-hidden">
@@ -258,6 +367,15 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
           </div>
         </section>
       </div>
+
+      {forkModalOpen && (
+        <NewSkillModal
+          existingSkills={allSkills.length > 0 ? allSkills : [skill]}
+          initialForkFrom={skill.slug ?? String(skill.id)}
+          onClose={() => setForkModalOpen(false)}
+          onCreated={handleForkCreated}
+        />
+      )}
     </div>
   );
 };
@@ -286,7 +404,7 @@ const SkillScopeBadge: React.FC<{
     return (
       <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
         {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
-          name: skill.team_id,
+          name: skill.team_name ?? skill.team_id,
         })}
       </span>
     );
@@ -295,7 +413,7 @@ const SkillScopeBadge: React.FC<{
     return (
       <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
         {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
-          name: skill.project_id,
+          name: skill.project_name ?? skill.project_id,
         })}
       </span>
     );

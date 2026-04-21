@@ -104,7 +104,8 @@
   "common": {
     "cancel": "取消",
     "close": "关闭",
-    "delete": "删除"
+    "delete": "删除",
+    "deleting": "删除中..."
   },
   "parser": {
     "title": "媒体解析",
@@ -1212,7 +1213,12 @@
       "groupPrivate": "我的私有",
       "groupTeam": "团队：{{name}}",
       "groupProject": "项目：{{name}}",
-      "createdToast": "已创建技能：{{slug}}"
+      "createdToast": "已创建技能：{{slug}}",
+      "deleteSkill": "删除技能",
+      "deleteSkillConfirm": "确认删除技能 \"{{name}}\"？此操作不可恢复。",
+      "deletedToast": "已删除技能：{{name}}",
+      "forkSkill": "复制到我的技能",
+      "forkedToast": "已创建 {{slug}}"
     }
   }
 }
