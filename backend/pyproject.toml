@@ -63,6 +63,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "unit: pure unit tests (no DB, no network)",
+    "integration: integration tests (DB or network required)",
+]
 
 [project.scripts]
 mediahub = "app.main:main"
