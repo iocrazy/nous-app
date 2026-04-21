@@ -1,21 +1,37 @@
 # backend/app/services/llm_analysis_service.py
 
-"""
-LLM analysis service.
+"""LLM analysis service — transcript summarization.
 
-Provides:
-- Transcript summarization (summary, key points, topics)
-- Visual analysis via multimodal LLM (planned)
+Phase 2 PR 2.4 migrated this from a hardcoded-prompt design to the AI
+Library agent framework. The prompt (IDENTITY / SOUL / AGENT) now lives
+in the `summarize` ``ai_agents`` row, composed via :class:`PromptComposer`
+and executed via :class:`AgentRunner`.
+
+Per-user provider routing (picked by the Celery task from the user's
+``task_assignment.summarization`` setting) is preserved by letting the
+caller inject an explicit adapter — bypassing :func:`get_adapter`'s
+DB-model dispatch since summarize's model is chosen at call time, not
+in the agent row.
 """
+
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.ai_repository import AIRepository
-from app.services.ai_provider import AIProviderFactory
+from app.repositories.skill_repository import SkillRepository
+from app.services.agent_runner import AgentRunner
+from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.prompt_composer import ComposerInput, PromptComposer
+from app.services.skill_tool_service import SkillToolService
+
+# Agent slug in the ai_agents table (seeded from backend/seeds/agents/summarize/).
+AGENT_SLUG = "summarize"
 
 
 @dataclass
@@ -27,7 +43,7 @@ class SummaryResult:
 
 # Keys must match frontend/components/AISettings.tsx LANGUAGE_OPTIONS.
 # "auto" deliberately yields no directive so the model follows the transcript.
-_LANGUAGE_DIRECTIVES: dict = {
+_LANGUAGE_DIRECTIVES: Dict[str, str] = {
     "auto": "",
     "en": "Respond in English.",
     "zh": "请用简体中文回复（summary、key_points、topics 全部用中文）。",
@@ -45,45 +61,103 @@ def _build_language_directive(language: str) -> str:
     return _LANGUAGE_DIRECTIVES.get(language.lower(), "")
 
 
-class LLMAnalysisService:
-    """LLM-powered analysis for video transcripts and content."""
+def _build_adapter_from_provider_config(
+    provider_key: str, provider_config: Dict[str, Any]
+) -> OpenAICompatibleAdapter:
+    """Build an OpenAI-compatible adapter from the Celery task's provider config.
 
-    def __init__(self, provider_key: str = "openai", provider_config: dict = None):
-        """
-        Args:
-            provider_key: AI provider key (e.g. 'openai', 'deepseek').
-            provider_config: Config dict for the provider.
-        """
+    The per-user task-assignment flow (``task_assignment.summarization = "openai:gpt-4o-mini"``)
+    already gives us ``api_key`` / ``base_url``. Reuse that directly rather
+    than routing through :func:`get_adapter`, which reads from global
+    settings — those are the wrong scope for per-user BYO keys.
+    """
+    api_key = provider_config.get("api_key", "")
+    base_url = provider_config.get("base_url", "") or ""
+    default_model = provider_config.get("model", "") or ""
+    # Callers historically passed just a base URL like "http://host/v1";
+    # OpenAICompatibleAdapter's __init__ auto-appends /chat/completions.
+    return OpenAICompatibleAdapter(
+        api_url=base_url,
+        api_key=api_key,
+        default_model=default_model,
+    )
+
+
+class LLMAnalysisService:
+    """LLM-powered analysis for video transcripts and content.
+
+    Prompts come from the ``summarize`` ai_agents row. The caller supplies
+    the provider/model (preserving user-scoped task-assignment + Nous
+    platform routing from the Celery task layer).
+    """
+
+    AGENT_SLUG: str = AGENT_SLUG
+
+    def __init__(
+        self,
+        provider_key: str = "openai",
+        provider_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self._provider_key = provider_key
         self._provider_config = provider_config or {}
         self._repo = AIRepository()
 
+    # ------------------------------------------------------------------
+    # Shared plumbing — composer / runner wiring
+    # ------------------------------------------------------------------
+
+    def _build_composer(self) -> PromptComposer:
+        return PromptComposer(AgentRepository(), SkillRepository())
+
+    def _build_runner(self) -> AgentRunner:
+        """Build a runner whose adapter is injected from the caller's
+        provider_config (per-user BYO key), not from global settings."""
+        adapter = _build_adapter_from_provider_config(
+            self._provider_key, self._provider_config
+        )
+        return AgentRunner(
+            adapter=adapter, skill_tool=SkillToolService(SkillRepository())
+        )
+
+    async def _run_agent(
+        self, request_instructions: str, user_content: str, model: Optional[str]
+    ) -> str:
+        composer = self._build_composer()
+        composed = await composer.compose(
+            ComposerInput(
+                agent_slug=self.AGENT_SLUG,
+                request_instructions=request_instructions,
+            )
+        )
+        # Caller's per-request model takes precedence over the agent row's
+        # model — summarize's model routing is set per-user in the task
+        # assignment UI, not in the agent row.
+        if model:
+            composed = composed.model_copy(update={"model": model})
+        runner = self._build_runner()
+        result = await runner.run_turn(
+            composed,
+            user_messages=[{"role": "user", "content": user_content}],
+        )
+        if result.get("error"):
+            logger.warning(
+                "[Summarize] agent runner returned error: %s", result.get("error")
+            )
+        return result.get("content", "") or ""
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     async def generate_summary(
         self,
         transcript_text: str,
-        video_info: dict = None,
-        model: str = None,
+        video_info: Optional[Dict[str, Any]] = None,
+        model: Optional[str] = None,
         language: str = "auto",
     ) -> SummaryResult:
-        """Generate a summary from a transcript.
-
-        Args:
-            transcript_text: Full transcript text.
-            video_info: Optional dict with title, description, author, etc.
-            model: Override the default model for this request.
-            language: ISO-ish code from ai_settings.preferred_language. "auto"
-                means follow the transcript's language (no directive). Anything
-                else injects an explicit instruction so the output — summary,
-                key_points AND topics — is returned in that language.
-
-        Returns:
-            SummaryResult with summary, key_points, topics.
-        """
-        provider = AIProviderFactory.get_provider(
-            self._provider_key, self._provider_config
-        )
-
-        context_parts = []
+        """Generate a summary from a transcript."""
+        context_parts: List[str] = []
         if video_info:
             if video_info.get("title"):
                 context_parts.append(f"Title: {video_info['title']}")
@@ -91,58 +165,43 @@ class LLMAnalysisService:
                 context_parts.append(f"Description: {video_info['description']}")
             if video_info.get("author"):
                 context_parts.append(f"Author: {video_info['author']}")
-
         context_str = "\n".join(context_parts) if context_parts else ""
 
         language_directive = _build_language_directive(language)
 
-        system_prompt = (
-            "You are a helpful assistant that summarizes video transcripts. "
-            + (language_directive + " " if language_directive else "")
-            + "Return your response as valid JSON with exactly these keys:\n"
-            '- "summary": A 2-3 sentence summary of the video content.\n'
-            '- "key_points": A list of 3-5 key points as strings.\n'
-            '- "topics": A list of 3-7 topic tags as strings.\n'
-            "Only return the JSON object, nothing else."
-        )
-
-        user_message = "Summarize this video transcript.\n\n"
+        # `request_instructions` carries per-call dynamic guidance. The
+        # static task definition + output schema + style rules live in
+        # the agent's AGENT.md (composed into the system prompt).
+        instruction_bits = ["Task: summarize the transcript below."]
+        if language_directive:
+            instruction_bits.append(language_directive)
         if context_str:
-            user_message += f"Video info:\n{context_str}\n\n"
-        user_message += f"Transcript:\n{transcript_text[:8000]}"
+            instruction_bits.append(f"Video metadata:\n{context_str}")
+        request_instructions = "\n\n".join(instruction_bits)
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
+        # Truncate transcript to the budget the original hardcoded prompt used.
+        user_content = f"Transcript:\n{transcript_text[:8000]}"
 
-        logger.info(f"Generating summary with {self._provider_key}")
-        response_text = await provider.chat(messages, model=model)
-
+        logger.info(
+            f"[Summarize] provider={self._provider_key} model={model or '(default)'} "
+            f"language={language}"
+        )
+        response_text = await self._run_agent(request_instructions, user_content, model)
         return self._parse_summary_response(response_text)
 
     async def generate_summary_and_save(
         self,
         resource_id: str,
         transcript_text: str,
-        video_info: dict = None,
-        model: str = None,
+        video_info: Optional[Dict[str, Any]] = None,
+        model: Optional[str] = None,
         language: str = "auto",
     ) -> Optional[SummaryResult]:
-        """Generate summary and persist to database.
-
-        Args:
-            resource_id: ID of the resource to associate the summary with.
-            transcript_text: Full transcript text.
-            video_info: Optional video metadata (title, description, author).
-            model: LLM model name.
-            language: Forwarded to generate_summary.
-        """
+        """Generate summary and persist to database."""
         try:
             result = await self.generate_summary(
                 transcript_text, video_info, model, language=language
             )
-
             await self._repo.save_summary(
                 resource_id,
                 {
@@ -154,26 +213,21 @@ class LLMAnalysisService:
                     "llm_provider": self._provider_key,
                 },
             )
-
             logger.info(f"Summary saved for resource {resource_id}")
             return result
-
         except Exception as e:
             logger.error(f"Summary generation failed for resource {resource_id}: {e}")
             raise
 
     def _parse_summary_response(self, text: str) -> SummaryResult:
-        """Parse LLM JSON response into SummaryResult."""
-        # Strip markdown code fences if present
+        """Parse LLM JSON response into SummaryResult. Tolerant of markdown fences."""
         cleaned = text.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
-            # Remove first and last lines (fences)
             lines = lines[1:]
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             cleaned = "\n".join(lines)
-
         try:
             data = json.loads(cleaned)
             return SummaryResult(
