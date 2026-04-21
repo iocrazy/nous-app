@@ -175,3 +175,5 @@ async def test_call_invokes_messages_create_with_normalized_output() -> None:
     assert kwargs["model"] == "claude-opus-4-5"
     assert kwargs["max_tokens"] == 1024
     assert kwargs["system"] == "You are helpful."
+    # Empty tools list must NOT be passed — Anthropic rejects tools=[]
+    assert "tools" not in kwargs

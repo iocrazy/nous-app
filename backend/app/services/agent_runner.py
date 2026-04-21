@@ -27,7 +27,10 @@ class AgentRunner:
             msg = resp["choices"][0]["message"]
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
-                return {"content": msg.get("content", ""), "raw": resp}
+                # msg.get("content") can be None (e.g. Claude emits null
+                # content on a pure-tool-use turn). The `or ""` guarantees
+                # the contract — callers always receive a str.
+                return {"content": msg.get("content") or "", "raw": resp}
             # Append assistant tool-call stub
             messages.append(msg)
             # Resolve each tool call
