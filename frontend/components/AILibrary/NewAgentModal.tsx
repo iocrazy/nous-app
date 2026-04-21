@@ -11,6 +11,11 @@ interface NewAgentModalProps {
   existingAgents: AILibraryAgent[];
   onClose: () => void;
   onCreated: (slug: string) => void;
+  /**
+   * Preselect a source agent to fork from. When set, the "Fork from" dropdown
+   * opens with this value already selected. Used by AgentEditor's fork button.
+   */
+  initialForkFrom?: string;
 }
 
 const SLUG_PATTERN = /^[a-z0-9_-]+$/;
@@ -19,12 +24,13 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
   existingAgents,
   onClose,
   onCreated,
+  initialForkFrom,
 }) => {
   const { t } = useTranslation();
   const [slug, setSlug] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [forkFrom, setForkFrom] = useState<string>(''); // empty = no fork
+  const [forkFrom, setForkFrom] = useState<string>(initialForkFrom ?? ''); // empty = no fork
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -13,17 +13,22 @@ import type { AILibraryAgent, AISettings as AISettingsType } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, GitFork } from 'lucide-react';
 import { MarkdownEditor } from './MarkdownEditor';
+import { NewAgentModal } from './NewAgentModal';
 
 type SubTab = 'overview' | 'files' | 'skills';
 
 interface AgentEditorProps {
   slug: string;
-  onSelectAgent?: (slug: string) => void;
+  /**
+   * Called after a successful fork. Parent should refresh its agent list and
+   * (ideally) select the new slug so the user lands on their fresh copy.
+   */
+  onAgentForked?: (newSlug: string) => void;
 }
 
-export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _onSelectAgent }) => {
+export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked }) => {
   const { t } = useTranslation();
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
@@ -34,6 +39,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forkModalOpen, setForkModalOpen] = useState(false);
+  const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +105,32 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
     setDraft((d) => ({ ...d, [key]: value }));
   };
 
+  /**
+   * Open the fork modal. We lazily fetch the full agent list so the Fork-from
+   * dropdown inside <NewAgentModal> has something to show if the user wants to
+   * pick a different source after opening.
+   */
+  const openForkModal = async () => {
+    setForkModalOpen(true);
+    if (allAgents.length === 0) {
+      try {
+        const list = await aiLibraryService.listAgents();
+        setAllAgents(list);
+      } catch (err) {
+        console.error('[AgentEditor] listAgents for fork failed:', err);
+      }
+    }
+  };
+
+  const handleForkCreated = (newSlug: string) => {
+    setForkModalOpen(false);
+    addToast(
+      t('aiLibrary.agents.forkedToast', 'Forked as {{slug}}', { slug: newSlug }),
+      'success',
+    );
+    onAgentForked?.(newSlug);
+  };
+
   const subTabs: SubTab[] = ['overview', 'files', 'skills'];
 
   return (
@@ -116,15 +149,27 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
             )}
           </div>
         </div>
-        {!readOnly && (
-          <button
-            onClick={save}
-            disabled={saving}
-            className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-          >
-            {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {isPreset && (
+            <button
+              onClick={openForkModal}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
+              title={t('aiLibrary.agents.forkAgent', 'Fork to My Agents')}
+            >
+              <GitFork size={14} />
+              {t('aiLibrary.agents.forkAgent', 'Fork to My Agents')}
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              onClick={save}
+              disabled={saving}
+              className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            >
+              {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
+            </button>
+          )}
+        </div>
       </header>
 
       <nav className="mb-4 flex gap-1 border-b border-zinc-800">
@@ -307,6 +352,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onSelectAgent: _
           </p>
           {/* Phase 2: multi-select with toggles to bind/unbind skills */}
         </section>
+      )}
+
+      {forkModalOpen && (
+        <NewAgentModal
+          existingAgents={allAgents.length > 0 ? allAgents : [agent]}
+          initialForkFrom={agent.slug}
+          onClose={() => setForkModalOpen(false)}
+          onCreated={handleForkCreated}
+        />
       )}
     </div>
   );
