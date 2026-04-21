@@ -173,7 +173,21 @@ class Settings(BaseSettings):
     # ============================================
     # AI Provider Configuration
     # ============================================
+    # DeepSeek provider (optional — set when using deepseek-* models)
+    DEEPSEEK_API_URL: str = Field(
+        default="https://api.deepseek.com/v1/chat/completions",
+        description="DeepSeek chat-completions endpoint URL",
+    )
     DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")
+
+    # Claude (Anthropic) provider (optional — set when using claude-* models)
+    CLAUDE_API_KEY: str = Field(default="", description="Anthropic API key.")
+
+    # Doubao (Volcengine Ark) provider (optional — set when using doubao-*/ep-* models)
+    DOUBAO_API_URL: str = Field(
+        default="https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+        description="Doubao (Volcengine Ark) chat-completions endpoint URL",
+    )
     DOUBAO_API_KEY: str = Field(default="", description="Doubao API Key")
     WHISPER_PROVIDER: str = Field(
         default="openai_api",

@@ -15,7 +15,9 @@ from typing import List
 from loguru import logger
 from openai import AsyncOpenAI
 
-from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai_adapters import (  # noqa: F401 — backward-compat re-export
+    QwenAdapter,
+)
 
 
 @dataclass
@@ -399,64 +401,3 @@ class AIProviderFactory:
     def available_providers(cls) -> list:
         """Return list of registered provider keys."""
         return list(cls._registry.keys())
-
-
-class QwenAdapter:
-    """Adapter for Qwen/DashScope chat-completions OpenAI-compatible endpoint.
-
-    Takes a ComposedSystemPrompt + user messages, issues a single chat-completions
-    request. Tool-call resolution loops are driven by the caller (see AgentRunner
-    in Task 8). This is intentionally separate from ``QwenProvider`` — that class
-    uses the OpenAI SDK for simple text chat; this adapter uses raw httpx so the
-    caller can inspect ``tool_calls`` in the response and resume the loop with
-    tool-result messages.
-    """
-
-    def __init__(
-        self,
-        api_url: str,
-        api_key: str,
-        default_model: str = "qwen-max",
-    ) -> None:
-        self.api_url = api_url.rstrip("/")
-        self.api_key = api_key
-        self.default_model = default_model
-
-    def _build_body(
-        self,
-        composed: ComposedSystemPrompt,
-        user_messages: list[dict],
-    ) -> dict:
-        messages: list[dict] = [{"role": "system", "content": composed.system_message}]
-        messages.extend(user_messages)
-        body: dict = {
-            "model": composed.model or self.default_model,
-            "messages": messages,
-            "temperature": composed.temperature,
-            "max_tokens": composed.max_tokens,
-        }
-        if composed.tools:
-            body["tools"] = composed.tools
-            body["tool_choice"] = "auto"
-        return body
-
-    async def call(
-        self,
-        composed: ComposedSystemPrompt,
-        user_messages: list[dict],
-    ) -> dict:
-        """Single-shot call. Tool-call loop handled by caller."""
-        import httpx
-
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.api_url}/chat/completions",
-                json=self._build_body(composed, user_messages),
-                headers=headers,
-            )
-            resp.raise_for_status()
-            return resp.json()

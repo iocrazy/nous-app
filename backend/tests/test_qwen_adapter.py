@@ -31,7 +31,7 @@ def test_request_body_has_system_message_first():
     adapter = QwenAdapter(api_url="http://fake", api_key="k", default_model="qwen-max")
     body = adapter._build_body(
         _sample_composed(),
-        user_messages=[{"role": "user", "content": "hi"}],
+        messages=[{"role": "user", "content": "hi"}],
     )
     assert body["messages"][0]["role"] == "system"
     assert body["messages"][0]["content"] == "SYSTEM"
@@ -42,7 +42,7 @@ def test_request_body_has_system_message_first():
 @pytest.mark.unit
 def test_body_uses_composed_model_and_params():
     adapter = QwenAdapter(api_url="http://fake", api_key="k")
-    body = adapter._build_body(_sample_composed(), user_messages=[])
+    body = adapter._build_body(_sample_composed(), messages=[])
     assert body["model"] == "qwen-max"
     assert body["temperature"] == 0.7
     assert body["max_tokens"] == 1024
@@ -51,7 +51,7 @@ def test_body_uses_composed_model_and_params():
 @pytest.mark.unit
 def test_no_tools_field_when_empty():
     adapter = QwenAdapter(api_url="http://fake", api_key="k", default_model="qwen-max")
-    body = adapter._build_body(_sample_composed(tools=[]), user_messages=[])
+    body = adapter._build_body(_sample_composed(tools=[]), messages=[])
     assert "tools" not in body
     assert "tool_choice" not in body
 
@@ -62,16 +62,25 @@ def test_tools_passed_through():
     sample_tool = {"type": "function", "function": {"name": "Skill"}}
     body = adapter._build_body(
         _sample_composed(tools=[sample_tool]),
-        user_messages=[],
+        messages=[],
     )
     assert body["tools"][0]["function"]["name"] == "Skill"
     assert body["tool_choice"] == "auto"
 
 
 @pytest.mark.unit
-def test_trailing_slash_stripped():
-    adapter = QwenAdapter(api_url="http://fake/", api_key="k")
-    assert adapter.api_url == "http://fake"
+def test_api_url_gets_chat_completions_suffix_when_missing():
+    # Legacy Phase 1 env style stored LLM_API_URL as a base URL (e.g.
+    # "http://host/v1"). The adapter now normalizes by appending
+    # /chat/completions if missing, so both legacy base URLs and
+    # explicit full endpoint URLs work transparently.
+    base_url_adapter = QwenAdapter(api_url="http://fake/v1", api_key="k")
+    assert base_url_adapter.api_url == "http://fake/v1/chat/completions"
+
+    full_url_adapter = QwenAdapter(
+        api_url="http://fake/v1/chat/completions", api_key="k"
+    )
+    assert full_url_adapter.api_url == "http://fake/v1/chat/completions"
 
 
 @pytest.mark.unit
