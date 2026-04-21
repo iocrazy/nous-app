@@ -1014,3 +1014,24 @@ export interface AILibrarySkill {
   files: AILibrarySkillFile[];
   updated_at: string;
 }
+
+/**
+ * Payload for POST /skills — creating a new user-owned (non-preset) skill.
+ * ``fork_from`` optionally copies body_md / frontmatter_json / category /
+ * icon / output_format / description from an existing skill. Explicit fields
+ * in the payload win over forked values. ``team_id`` and ``project_id`` are
+ * mutually exclusive — omit both for a private per-user skill.
+ */
+export interface CreateSkillPayload {
+  slug: string;
+  name: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  body_md?: string;
+  frontmatter_json?: Record<string, unknown>;
+  output_format?: string;
+  team_id?: number;
+  project_id?: number;
+  fork_from?: string;
+}
