@@ -1152,7 +1152,18 @@
       "instructionsTitle": "指令",
       "boundSkills": "绑定的技能",
       "saveChanges": "保存更改",
-      "presetReadOnly": "系统预置 — 只读"
+      "saved": "已保存",
+      "presetReadOnly": "系统预置 — 只读",
+      "nameLabel": "名称",
+      "slugLabel": "Slug",
+      "descriptionLabel": "描述",
+      "modelLabel": "模型",
+      "temperatureLabel": "温度",
+      "maxTokensLabel": "最大 Token",
+      "enabledLabel": "启用",
+      "modelProviderNotEnabled": "提供方未启用",
+      "forkAgent": "复制到我的智能体",
+      "forkedToast": "已创建 {{slug}}"
     },
     "skills": {
       "addFile": "+ 添加文件",
