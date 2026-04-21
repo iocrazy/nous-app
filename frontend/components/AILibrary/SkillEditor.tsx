@@ -286,7 +286,7 @@ const SkillScopeBadge: React.FC<{
     return (
       <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
         {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
-          name: skill.team_id,
+          name: skill.team_name ?? skill.team_id,
         })}
       </span>
     );
@@ -295,7 +295,7 @@ const SkillScopeBadge: React.FC<{
     return (
       <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
         {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
-          name: skill.project_id,
+          name: skill.project_name ?? skill.project_id,
         })}
       </span>
     );

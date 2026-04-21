@@ -1013,6 +1013,9 @@ export interface AILibrarySkill {
   frontmatter_json: Record<string, unknown>;
   files: AILibrarySkillFile[];
   updated_at: string;
+  // Phase 2 minor cleanup — denormalized by the backend for scope badges.
+  team_name?: string | null;
+  project_name?: string | null;
 }
 
 /**

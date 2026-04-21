@@ -40,8 +40,8 @@ export function groupSkillsByScope(
 ): SkillGroup[] {
   const presets: AILibrarySkill[] = [];
   const privateOnes: AILibrarySkill[] = [];
-  const byTeam = new Map<number, { skills: AILibrarySkill[] }>();
-  const byProject = new Map<number, { skills: AILibrarySkill[] }>();
+  const byTeam = new Map<number, { name: string; skills: AILibrarySkill[] }>();
+  const byProject = new Map<number, { name: string; skills: AILibrarySkill[] }>();
 
   for (const s of skills) {
     const isSystemPreset =
@@ -51,13 +51,19 @@ export function groupSkillsByScope(
       continue;
     }
     if (s.team_id != null) {
-      const entry = byTeam.get(s.team_id) ?? { skills: [] };
+      const entry = byTeam.get(s.team_id) ?? {
+        name: s.team_name ?? String(s.team_id),
+        skills: [],
+      };
       entry.skills.push(s);
       byTeam.set(s.team_id, entry);
       continue;
     }
     if (s.project_id != null) {
-      const entry = byProject.get(s.project_id) ?? { skills: [] };
+      const entry = byProject.get(s.project_id) ?? {
+        name: s.project_name ?? String(s.project_id),
+        skills: [],
+      };
       entry.skills.push(s);
       byProject.set(s.project_id, entry);
       continue;
@@ -73,17 +79,16 @@ export function groupSkillsByScope(
     groups.push({ key: 'private', label: labels.privateLabel, skills: privateOnes });
   }
   for (const [teamId, entry] of byTeam) {
-    // Skill list doesn't carry denormalized team_name yet — fall back to the id.
     groups.push({
       key: `team:${teamId}`,
-      label: labels.teamLabel(String(teamId)),
+      label: labels.teamLabel(entry.name),
       skills: entry.skills,
     });
   }
   for (const [projectId, entry] of byProject) {
     groups.push({
       key: `project:${projectId}`,
-      label: labels.projectLabel(String(projectId)),
+      label: labels.projectLabel(entry.name),
       skills: entry.skills,
     });
   }

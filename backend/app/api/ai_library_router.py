@@ -188,12 +188,14 @@ async def _fetch_project_names(project_ids: List[int]) -> Dict[int, str]:
     return {int(r["id"]): r["name"] for r in (result.data or [])}
 
 
-async def _enrich_agents_with_scope_names(
+async def _enrich_rows_with_scope_names(
     rows: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Attach ``team_name`` / ``project_name`` to each agent row (Phase 2 PR 2.9).
+    """Attach ``team_name`` / ``project_name`` to each row.
 
-    Single batch query per scope — avoids N+1.
+    Shared between agents and skills — both surface a denormalized scope
+    badge in the UI. Single batch query per scope, avoids N+1. Returns
+    new dicts (never mutates the inputs).
     """
     team_ids = sorted({int(r["team_id"]) for r in rows if r.get("team_id") is not None})
     project_ids = sorted(
@@ -216,6 +218,11 @@ async def _enrich_agents_with_scope_names(
             }
         )
     return enriched
+
+
+# Kept as an alias so existing call sites remain readable at each callsite.
+_enrich_agents_with_scope_names = _enrich_rows_with_scope_names
+_enrich_skills_with_scope_names = _enrich_rows_with_scope_names
 
 
 # ---------------------------------------------------------------------------
@@ -471,14 +478,17 @@ async def list_skills(auth: AuthDep) -> List[Dict[str, Any]]:
             continue
         files = await skill_repo.list_files(skill_id)
         enriched.append({**s, "files": files})
-    return enriched
+    return await _enrich_skills_with_scope_names(enriched)
 
 
 @router.get(
     "/skills/{slug}", response_model=SkillOut, summary="Get a single skill by slug"
 )
 async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
-    """Fetch a single skill (with its files) by slug, 404 if missing."""
+    """Fetch a single skill (with its files) by slug, 404 if missing.
+
+    Response includes ``team_name`` / ``project_name`` for scope display.
+    """
     _, skill_repo = _repos()
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
@@ -486,7 +496,9 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
     skill_id = int(skill["id"])
-    return {**skill, "files": await skill_repo.list_files(skill_id)}
+    row = {**skill, "files": await skill_repo.list_files(skill_id)}
+    enriched = await _enrich_skills_with_scope_names([row])
+    return enriched[0]
 
 
 @router.post(
@@ -597,7 +609,8 @@ async def create_skill(
     created = await skill_repo.insert(fields)
     skill_id = int(created["id"])
     files = await skill_repo.list_files(skill_id)
-    return {**created, "files": files}
+    enriched = await _enrich_skills_with_scope_names([{**created, "files": files}])
+    return enriched[0]
 
 
 @router.patch(
@@ -641,7 +654,9 @@ async def update_skill(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="skill disappeared after update",
         )
-    return {**refreshed, "files": await skill_repo.list_files(skill_id)}
+    row = {**refreshed, "files": await skill_repo.list_files(skill_id)}
+    enriched = await _enrich_skills_with_scope_names([row])
+    return enriched[0]
 
 
 # ---------------------------------------------------------------------------
