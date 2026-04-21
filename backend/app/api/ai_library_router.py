@@ -317,3 +317,75 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
             detail="system preset skills are read-only in phase 1",
         )
     await skill_repo.delete_file(int(skill["id"]), path)
+
+
+# ---------------------------------------------------------------------------
+# Admin: reload seeds from disk
+# ---------------------------------------------------------------------------
+
+
+from pathlib import Path  # noqa: E402 — module top imports limited by Phase 1 pattern
+
+from app.db.supabase_client import get_async_supabase_admin  # noqa: E402
+from app.services.seed_loader import SeedLoader  # noqa: E402
+
+
+async def _require_admin(auth: AuthDep) -> None:
+    """Gate admin endpoints to users with admin/owner role in team_members.
+
+    Mirrors the check in ``supabase_auth_router._require_admin``. Fails
+    closed (returns 403) on any lookup error so a broken DB never
+    accidentally grants admin privileges.
+    """
+    try:
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("role")
+            .eq("user_id", auth.user_id)
+            .in_("role", ["admin", "owner"])
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            logger.warning(
+                f"AI Library admin endpoint denied for user {auth.user_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AI Library admin role check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+
+@router.post("/admin/reload-seeds", response_model=Dict[str, Any])
+async def reload_seeds(auth: AuthDep) -> Dict[str, Any]:
+    """Re-run SeedLoader.load_all() against backend/seeds/.
+
+    Admin-only. Returns the same dict shape as the startup path:
+    ``{"agents": N, "skills": M, "agent_skill_bindings": K, "errors": [...]}``.
+
+    Intended for recovery after a startup seed failure — see
+    ``docs/superpowers/plans/2026-04-21-ai-library-phase2-seed-loader-fix.md``.
+    """
+    await _require_admin(auth)
+    agent_repo, skill_repo = _repos()
+    # Path math: this file is at backend/app/api/ai_library_router.py,
+    # so .parent.parent.parent / "seeds" points at backend/seeds/.
+    seeds_root = Path(__file__).resolve().parent.parent.parent / "seeds"
+    logger.info(f"reload_seeds: invoked by {auth.user_id}, seeds_root={seeds_root}")
+    loader = SeedLoader(
+        agent_repo=agent_repo,
+        skill_repo=skill_repo,
+        seeds_root=seeds_root,
+    )
+    results = await loader.load_all()
+    logger.info(f"reload_seeds: completed, {results}")
+    return results
