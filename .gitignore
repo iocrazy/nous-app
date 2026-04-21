@@ -296,3 +296,4 @@ toolkit/
 # uv.lock
 .gstack/
 *.png
+.idea/
