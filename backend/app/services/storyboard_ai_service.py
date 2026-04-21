@@ -23,7 +23,10 @@ import httpx
 from loguru import logger
 
 from app.core.config import settings
+from app.repositories.agent_repository import AgentRepository
+from app.repositories.skill_repository import SkillRepository
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
+from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.storyboard_service import StoryboardService
 from app.services.video_providers import (
     ImageGenResult,
@@ -31,35 +34,39 @@ from app.services.video_providers import (
     provider_registry,
 )
 
-# ---------------------------------------------------------------------------
-# Scene schema description (used in LLM prompts)
-# ---------------------------------------------------------------------------
-
-_SCENE_SCHEMA_DESC = """\
-[
-  {
-    "scene_number": 1,
-    "description": "Brief scene description",
-    "shot_type": "wide|medium|close-up|extreme-close-up|over-the-shoulder|pov",
-    "camera_angle": "eye-level|low-angle|high-angle|dutch-angle|bird's-eye|worm's-eye",
-    "camera_movement": "static|pan|tilt|dolly|zoom|handheld|tracking",
-    "focal_length": "wide|standard|telephoto",
-    "lighting": "natural|studio|dramatic|silhouette|golden-hour|night",
-    "duration": 3.5,
-    "characters": ["CharacterA", "CharacterB"],
-    "dialogue": "Optional dialogue text for this scene",
-    "suggested_prompt": "Detailed image generation prompt for this scene"
-  }
-]
-"""
+# Agent slug in the ai_agents table (seeded from backend/seeds/agents/storyboard/).
+AGENT_SLUG = "storyboard"
 
 
 class StoryboardAIService:
     """AI orchestration layer for the Storyboard Workbench module."""
 
+    AGENT_SLUG: str = AGENT_SLUG
+
     def __init__(self) -> None:
         self.storyboard_service = StoryboardService()
         self.character_repo = StoryboardCharacterRepository()
+
+    # ------------------------------------------------------------------ #
+    # Agent prompt composition (Phase 2 PR 2.6 — DB-driven prompts)
+    # ------------------------------------------------------------------ #
+
+    async def _compose_system_prompt(self, instruction: str) -> str:
+        """Fetch the ``storyboard`` agent's composed system message from DB.
+
+        The agent's AGENT.md documents 3 modes (split_script / annotate_keyframe /
+        chat). The per-call ``instruction`` tells the model which mode to use
+        and carries any dynamic context (style guide, project characters,
+        selected frame details, skill injection, etc.).
+        """
+        composer = PromptComposer(AgentRepository(), SkillRepository())
+        composed = await composer.compose(
+            ComposerInput(
+                agent_slug=self.AGENT_SLUG,
+                request_instructions=instruction,
+            )
+        )
+        return composed.system_message
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -470,23 +477,14 @@ class StoryboardAIService:
             ValueError: If the LLM response cannot be parsed as a JSON array.
             RuntimeError: If the LLM API call fails.
         """
-        style_instruction = ""
+        instruction_parts = ["Mode: split_script. Follow Mode A of your AGENT spec."]
         if style_guide:
-            style_instruction = (
-                f"\nApply this visual style guide to all scenes: {style_guide}\n"
+            instruction_parts.append(
+                f"Apply this visual style guide to all scenes: {style_guide}"
             )
+        instruction = "\n\n".join(instruction_parts)
 
-        system_prompt = (
-            "You are a professional storyboard artist and cinematographer. "
-            "Analyse the provided script and break it into individual scenes. "
-            "Return ONLY a valid JSON array (no markdown, no extra text) "
-            "where each element matches this schema:\n"
-            f"{_SCENE_SCHEMA_DESC}"
-            f"{style_instruction}"
-            "Infer duration from pacing. Keep suggested_prompt vivid and "
-            "suitable for an image generation model."
-        )
-
+        system_prompt = await self._compose_system_prompt(instruction)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Script:\n\n{script_text}"},
@@ -548,25 +546,20 @@ class StoryboardAIService:
             logger.info("analyze_video: no keyframes detected in %s", video_path)
             return {"keyframes": []}
 
+        # Compose Mode B system prompt ONCE — every keyframe uses the same
+        # prompt, only the user content varies, so avoid N DB round-trips.
+        annotate_system_prompt = await self._compose_system_prompt(
+            "Mode: annotate_keyframe. Follow Mode B of your AGENT spec."
+        )
+
         async def _annotate_keyframe(kf: Dict[str, Any]) -> Dict[str, Any]:
             image_path = kf.get("image_path", "")
             timestamp = kf.get("time", 0.0)
-
-            system_prompt = (
-                "You are a cinematography expert. Given the description of a "
-                "video frame at a specific timestamp, identify the shot type, "
-                "camera angle, camera movement, and write a detailed "
-                "image-generation prompt that would reproduce this frame. "
-                "Return ONLY valid JSON (no markdown) matching:\n"
-                '{"shot_type": "...", "camera_angle": "...", '
-                '"movement": "...", "suggested_prompt": "..."}'
-            )
             user_content = (
-                f"Video frame at t={timestamp:.2f}s. " f"Image file: {image_path}"
+                f"Video frame at t={timestamp:.2f}s. Image file: {image_path}"
             )
-
             messages = [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": annotate_system_prompt},
                 {"role": "user", "content": user_content},
             ]
 
@@ -718,19 +711,17 @@ class StoryboardAIService:
             except Exception as exc:
                 logger.warning("chat: skill lookup failed: %s", exc)
 
-        system_prompt = skill_prefix + (
-            "You are a helpful storyboard assistant. "
-            "You help filmmakers and animators develop their storyboard projects.\n\n"
-            "When appropriate, you may suggest structured actions by including a "
-            "JSON block at the END of your response like:\n"
-            "```actions\n"
-            '[{"type": "modify_frame", "frame_id": "...", "data": {...}}, '
-            '{"type": "suggest_prompt", "prompt": "..."}]\n'
-            "```\n\n"
-            "Context about the current project:\n"
-            f"{context_block}"
-        )
+        # Chat's dynamic instruction carries the full per-turn context:
+        # optional skill prefix (specialized behavior), project characters,
+        # and selected-frame details. The static agent AGENT.md covers
+        # Mode C conventions (when to emit the actions block).
+        instruction_parts = ["Mode: chat. Follow Mode C of your AGENT spec."]
+        if skill_prefix:
+            instruction_parts.append(skill_prefix.strip())
+        instruction_parts.append(f"Project context:\n{context_block}")
+        instruction = "\n\n".join(instruction_parts)
 
+        system_prompt = await self._compose_system_prompt(instruction)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": message},
