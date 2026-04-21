@@ -1,12 +1,40 @@
-"""Script AI Service — LLM-powered outline, expansion, and branching."""
+"""Script AI Service — DB-driven outline, expansion, and branching.
+
+All prompts are sourced from the ``ai_agents`` row with slug ``script_ai``
+and its bound skills (see migration 138). This service is intentionally
+thin: it composes the system message via :class:`PromptComposer`, then
+delegates LLM execution (and tool-call resolution) to :class:`AgentRunner`.
+
+Public methods preserve their original signatures so existing callers
+(``app.api.script_ai_router``, ``app.tasks.script_tasks``) keep working
+without changes:
+
+* ``generate_outline``       → JSON array of chapters
+* ``expand_chapter``         → sanitized HTML string
+* ``create_branches``        → JSON array of branch objects
+* ``split_chapter_to_scenes``→ JSON array of scene objects
+
+Each method builds a small per-request instruction string (the only
+place task-specific guidance lives outside the DB) and runs one agent
+turn. Post-processing (JSON extraction, HTML sanitization, field
+coercion) matches the behaviour of the previous hardcoded version.
+"""
+
+from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
 
 import bleach
-import httpx
+from loguru import logger
 
 from app.core.config import settings
+from app.repositories.agent_repository import AgentRepository
+from app.repositories.skill_repository import SkillRepository
+from app.services.agent_runner import AgentRunner
+from app.services.ai_provider import QwenAdapter
+from app.services.prompt_composer import ComposerInput, PromptComposer
+from app.services.skill_tool_service import SkillToolService
 
 ALLOWED_HTML_TAGS = ["h2", "h3", "p", "strong", "em", "hr", "br"]
 
@@ -16,54 +44,69 @@ def sanitize_ai_html(html: str) -> str:
     return bleach.clean(html, tags=ALLOWED_HTML_TAGS, strip=True)
 
 
-# LLM generation defaults
-DEFAULT_OUTLINE_TEMPERATURE = 0.7
-DEFAULT_EXPAND_TEMPERATURE = 0.8
-DEFAULT_BRANCH_TEMPERATURE = 0.9
-DEFAULT_MAX_TOKENS = 4096
-
 # Output safety limits
 MAX_TITLE_LENGTH = 200
 MAX_SUMMARY_LENGTH = 5000
 MAX_CONTENT_LENGTH = 50000
 MAX_BRANCH_LABEL_LENGTH = 100
 
+# Agent slug in ai_agents table (seeded by migration 138 + seed_loader)
+AGENT_SLUG = "script_ai"
+
 
 class ScriptAIService:
-    """AI operations for the script editor module."""
+    """AI operations for the script editor module (DB-driven prompts)."""
+
+    AGENT_SLUG: str = AGENT_SLUG
 
     def __init__(self) -> None:
-        self.api_url = settings.LLM_API_URL
-        self.api_key = settings.LLM_API_KEY
+        # Retained for backwards compat with legacy smoke tests that
+        # inspect ``.model``. The actual model per turn comes from the
+        # agent row via :class:`PromptComposer`.
         self.model = settings.LLM_MODEL
-        self.timeout = settings.LLM_TIMEOUT_SECONDS
 
-    async def _call_llm(
+    # ------------------------------------------------------------------
+    # Shared plumbing — composer / runner wiring
+    # ------------------------------------------------------------------
+
+    def _build_composer(self) -> PromptComposer:
+        return PromptComposer(AgentRepository(), SkillRepository())
+
+    def _build_runner(self) -> AgentRunner:
+        adapter = QwenAdapter(
+            api_url=settings.LLM_API_URL,
+            api_key=settings.LLM_API_KEY,
+            default_model=settings.LLM_MODEL,
+        )
+        return AgentRunner(adapter=adapter, skill_tool=SkillToolService(SkillRepository()))
+
+    async def _run_agent(
         self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
+        request_instructions: str,
+        user_content: str,
     ) -> str:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.api_url}/chat/completions",
-                json=payload,
-                headers=headers,
+        """Compose the agent prompt and run one turn. Returns raw LLM content."""
+        composer = self._build_composer()
+        composed = await composer.compose(
+            ComposerInput(
+                agent_slug=self.AGENT_SLUG,
+                request_instructions=request_instructions,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+        )
+        runner = self._build_runner()
+        result = await runner.run_turn(
+            composed,
+            user_messages=[{"role": "user", "content": user_content}],
+        )
+        if result.get("error"):
+            logger.warning(
+                "[ScriptAI] agent runner returned error: %s", result.get("error")
+            )
+        return result.get("content", "") or ""
+
+    # ------------------------------------------------------------------
+    # JSON helpers
+    # ------------------------------------------------------------------
 
     def _extract_json(self, text: str) -> Any:
         """Extract JSON from LLM response that may be wrapped in markdown fences."""
@@ -78,6 +121,10 @@ class ScriptAIService:
                 cleaned = "\n".join(lines[start:])
         return json.loads(cleaned)
 
+    # ------------------------------------------------------------------
+    # Public API — signatures preserved from the hardcoded version
+    # ------------------------------------------------------------------
+
     async def generate_outline(
         self,
         premise: str,
@@ -86,31 +133,22 @@ class ScriptAIService:
         genre: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Generate a story outline with chapter summaries from a premise."""
-        system_prompt = (
-            "You are a professional screenwriter and story architect. "
-            "Generate a story outline as a JSON array of chapter objects.\n\n"
-            "Each chapter object must have:\n"
+        request_instructions = (
+            "Task: generate story outline.\n"
+            "Return a JSON array of chapter objects. Each object must have:\n"
             '- "title": string (chapter title)\n'
-            '- "summary": string (2-3 sentence plot summary)\n\n'
+            '- "summary": string (2-3 sentence plot summary)\n'
             f"Generate exactly {chapter_count} chapters.\n"
             "Return ONLY a JSON array, no other text."
         )
+
         user_prompt = f"Story premise:\n{premise}"
         if genre:
             user_prompt += f"\n\n故事风格为{genre}，请围绕该风格创作。"
         if style_guide:
             user_prompt += f"\n\nStyle guide:\n{style_guide}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        response = await self._call_llm(
-            messages,
-            temperature=DEFAULT_OUTLINE_TEMPERATURE,
-            max_tokens=DEFAULT_MAX_TOKENS,
-        )
+        response = await self._run_agent(request_instructions, user_prompt)
         chapters = self._extract_json(response)
 
         if not isinstance(chapters, list):
@@ -120,7 +158,6 @@ class ScriptAIService:
         for i, ch in enumerate(chapters):
             if not isinstance(ch, dict):
                 continue
-            # Ensure values are strings, not nested structures
             title = ch.get("title", f"Chapter {i + 1}")
             if not isinstance(title, str):
                 title = str(title)[:MAX_TITLE_LENGTH]
@@ -142,15 +179,16 @@ class ScriptAIService:
         expansion_request: Optional[str] = None,
     ) -> str:
         """Expand a chapter summary into full screenplay HTML content."""
-        system_prompt = """You are a professional screenplay writer. Expand the given chapter summary into full screenplay content.
-
-OUTPUT FORMAT (mandatory):
-- Scene headings: <h2>场景N：场景名 – 时间 – 内/外景</h2>
-- Action/description: <p>paragraph text</p>
-- Character dialogue: <p><strong>角色名</strong>：（动作描述）台词内容</p>
-- Scene separator: <hr>
-- Do NOT wrap output in any container tags. Output raw HTML fragments only.
-- Do NOT output markdown. Only HTML tags listed above."""
+        request_instructions = (
+            "Task: expand chapter into screenplay HTML.\n"
+            "OUTPUT FORMAT (mandatory):\n"
+            "- Scene headings: <h2>场景N：场景名 – 时间 – 内/外景</h2>\n"
+            "- Action/description: <p>paragraph text</p>\n"
+            "- Character dialogue: <p><strong>角色名</strong>：（动作描述）台词内容</p>\n"
+            "- Scene separator: <hr>\n"
+            "- Do NOT wrap output in any container tags. Output raw HTML fragments only.\n"
+            "- Do NOT output markdown. Only the HTML tags listed above."
+        )
 
         user_prompt = f"Chapter title: {title}\nSummary: {summary}"
         if context:
@@ -158,16 +196,7 @@ OUTPUT FORMAT (mandatory):
         if expansion_request:
             user_prompt += f"\n\nAdditional requirements: {expansion_request}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        content = await self._call_llm(
-            messages,
-            temperature=DEFAULT_EXPAND_TEMPERATURE,
-            max_tokens=DEFAULT_MAX_TOKENS,
-        )
+        content = await self._run_agent(request_instructions, user_prompt)
         return sanitize_ai_html(content[:MAX_CONTENT_LENGTH])
 
     async def create_branches(
@@ -179,18 +208,18 @@ OUTPUT FORMAT (mandatory):
         context: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Generate alternative story branches from a chapter."""
-        system_prompt = (
-            "You are a professional interactive fiction writer. "
+        request_instructions = (
+            "Task: create branching story alternatives.\n"
             f"Create exactly {branch_count} alternative story branches "
-            f"from the given chapter. Branch type: {branch_type}.\n\n"
+            f"from the given chapter. Branch type: {branch_type}.\n"
             "For 'choice' type: each branch represents a different decision "
             "the protagonist could make.\n"
             "For 'condition' type: each branch represents a different "
-            "circumstance that could unfold.\n\n"
+            "circumstance that could unfold.\n"
             "Return a JSON array of branch objects, each with:\n"
             '- "title": string (branch chapter title)\n'
             '- "summary": string (2-3 sentence plot summary for this branch)\n'
-            '- "branch_label": string (short label like "Fight" or "Flee")\n\n'
+            '- "branch_label": string (short label like "Fight" or "Flee")\n'
             "Return ONLY a JSON array, no other text."
         )
 
@@ -198,16 +227,7 @@ OUTPUT FORMAT (mandatory):
         if context:
             user_prompt = f"Story context:\n{context}\n\n{user_prompt}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        response = await self._call_llm(
-            messages,
-            temperature=DEFAULT_BRANCH_TEMPERATURE,
-            max_tokens=DEFAULT_MAX_TOKENS,
-        )
+        response = await self._run_agent(request_instructions, user_prompt)
         branches = self._extract_json(response)
 
         if not isinstance(branches, list):
@@ -217,29 +237,26 @@ OUTPUT FORMAT (mandatory):
         for i, b in enumerate(branches[:branch_count]):
             if not isinstance(b, dict):
                 continue
-            # Ensure values are strings, not nested structures
-            title = b.get("title", f"Branch {i + 1}")
-            if not isinstance(title, str):
-                title = str(title)[:MAX_TITLE_LENGTH]
+            b_title = b.get("title", f"Branch {i + 1}")
+            if not isinstance(b_title, str):
+                b_title = str(b_title)[:MAX_TITLE_LENGTH]
             else:
-                title = title[:MAX_TITLE_LENGTH]
-            summary = b.get("summary", "")
-            if not isinstance(summary, str):
-                summary = str(summary)[:MAX_SUMMARY_LENGTH]
+                b_title = b_title[:MAX_TITLE_LENGTH]
+            b_summary = b.get("summary", "")
+            if not isinstance(b_summary, str):
+                b_summary = str(b_summary)[:MAX_SUMMARY_LENGTH]
             else:
-                summary = summary[:MAX_SUMMARY_LENGTH]
+                b_summary = b_summary[:MAX_SUMMARY_LENGTH]
             branch_label = b.get("branch_label", f"Path {i + 1}")
             if not isinstance(branch_label, str):
                 branch_label = str(branch_label)[:MAX_BRANCH_LABEL_LENGTH]
             else:
                 branch_label = branch_label[:MAX_BRANCH_LABEL_LENGTH]
-            sanitized.append(
-                {
-                    "title": title,
-                    "summary": summary,
-                    "branch_label": branch_label,
-                }
-            )
+            sanitized.append({
+                "title": b_title,
+                "summary": b_summary,
+                "branch_label": branch_label,
+            })
         return sanitized
 
     async def split_chapter_to_scenes(
@@ -250,16 +267,15 @@ OUTPUT FORMAT (mandatory):
         style_guide: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """Split a chapter into 3-8 visual scenes for storyboard conversion."""
-        system_prompt = (
-            "You are a professional storyboard artist and visual storyteller. "
-            "Split the given story chapter into 3-8 distinct visual scenes "
-            "suitable for a storyboard.\n\n"
+        request_instructions = (
+            "Task: split chapter into visual scenes for storyboard.\n"
+            "Produce 3-8 distinct visual scenes.\n"
             "Each scene object must have:\n"
             '- "scene_number": int (sequential starting from 1)\n'
-            '- "description": string (detailed visual description of the scene, '
-            "what is happening, who is present, setting details)\n"
+            '- "description": string (detailed visual description — what is '
+            "happening, who is present, setting details)\n"
             '- "camera_notes": string (camera angle, shot type, mood, '
-            "lighting suggestions)\n\n"
+            "lighting suggestions)\n"
             "Return ONLY a JSON array, no other text."
         )
 
@@ -269,16 +285,7 @@ OUTPUT FORMAT (mandatory):
         if style_guide:
             user_prompt += f"\n\nStyle guide:\n{style_guide}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        response = await self._call_llm(
-            messages,
-            temperature=DEFAULT_OUTLINE_TEMPERATURE,
-            max_tokens=DEFAULT_MAX_TOKENS,
-        )
+        response = await self._run_agent(request_instructions, user_prompt)
         scenes = self._extract_json(response)
 
         if not isinstance(scenes, list):
