@@ -180,6 +180,9 @@ class Settings(BaseSettings):
     )
     DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")
 
+    # Claude (Anthropic) provider (optional — set when using claude-* models)
+    CLAUDE_API_KEY: str = Field(default="", description="Anthropic API key.")
+
     # Doubao (Volcengine Ark) provider (optional — set when using doubao-*/ep-* models)
     DOUBAO_API_URL: str = Field(
         default="https://ark.cn-beijing.volces.com/api/v3/chat/completions",
