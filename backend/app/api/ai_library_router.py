@@ -21,12 +21,14 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
+from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -38,6 +40,7 @@ from app.schemas.ai_library import (
     SkillOut,
     SkillUpdate,
 )
+from app.services.seed_loader import SeedLoader
 
 router = APIRouter(prefix="/ai-library", tags=["AI Library"])
 
@@ -324,49 +327,8 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
 # ---------------------------------------------------------------------------
 
 
-from pathlib import Path  # noqa: E402 — module top imports limited by Phase 1 pattern
-
-from app.db.supabase_client import get_async_supabase_admin  # noqa: E402
-from app.services.seed_loader import SeedLoader  # noqa: E402
-
-
-async def _require_admin(auth: AuthDep) -> None:
-    """Gate admin endpoints to users with admin/owner role in team_members.
-
-    Mirrors the check in ``supabase_auth_router._require_admin``. Fails
-    closed (returns 403) on any lookup error so a broken DB never
-    accidentally grants admin privileges.
-    """
-    try:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("role")
-            .eq("user_id", auth.user_id)
-            .in_("role", ["admin", "owner"])
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
-            logger.warning(
-                f"AI Library admin endpoint denied for user {auth.user_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin access required",
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"AI Library admin role check failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-
-
 @router.post("/admin/reload-seeds", response_model=Dict[str, Any])
-async def reload_seeds(auth: AuthDep) -> Dict[str, Any]:
+async def reload_seeds(auth: AdminAuthDep) -> Dict[str, Any]:
     """Re-run SeedLoader.load_all() against backend/seeds/.
 
     Admin-only. Returns the same dict shape as the startup path:
@@ -374,8 +336,10 @@ async def reload_seeds(auth: AuthDep) -> Dict[str, Any]:
 
     Intended for recovery after a startup seed failure — see
     ``docs/superpowers/plans/2026-04-21-ai-library-phase2-seed-loader-fix.md``.
+
+    Returns 500 (not 403) on DB-level failures — see AdminAuthDep.
     """
-    await _require_admin(auth)
+    # AdminAuthDep raises 403 before body executes — no manual guard needed.
     agent_repo, skill_repo = _repos()
     # Path math: this file is at backend/app/api/ai_library_router.py,
     # so .parent.parent.parent / "seeds" points at backend/seeds/.
