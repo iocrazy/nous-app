@@ -1,0 +1,58 @@
+# .github/workflows/pr-behind-check.yml
+#
+# Block PRs that have fallen too far behind master. Forces "rebase early, rebase
+# often" — prevents the multi-day cherry-pick + port marathons that happen when
+# feature branches drift for weeks.
+#
+# Threshold: 30 commits behind master.  Tune below if too strict.
+#
+# Soft warning at 15 commits via PR comment.
+
+name: PR behind master
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute behind/ahead
+        id: counts
+        run: |
+          git fetch origin master:master 2>/dev/null || true
+          BEHIND=$(git rev-list --count HEAD..origin/master)
+          AHEAD=$(git rev-list --count origin/master..HEAD)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          echo "PR is $AHEAD ahead, $BEHIND behind master"
+
+      - name: Soft warning (>= 15 behind)
+        if: steps.counts.outputs.behind >= '15' && steps.counts.outputs.behind < '30'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ⚠️ This PR is **${{ steps.counts.outputs.behind }} commits behind master**.
+
+            Rebase before more conflicts accumulate:
+            ```bash
+            git fetch origin
+            git rebase origin/master
+            git push --force-with-lease
+            ```
+
+            (Hard limit kicks in at 30.)
+
+      - name: Hard fail (>= 30 behind)
+        if: steps.counts.outputs.behind >= '30'
+        run: |
+          echo "::error::PR is ${{ steps.counts.outputs.behind }} commits behind master."
+          echo "::error::Rebase required before merge: git fetch origin && git rebase origin/master && git push --force-with-lease"
+          exit 1
