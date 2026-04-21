@@ -8,7 +8,6 @@ from typing import Any
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.skill_tool_service import SkillToolService
 
-
 MAX_TOOL_ITERATIONS = 5
 
 

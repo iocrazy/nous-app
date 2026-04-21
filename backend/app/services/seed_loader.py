@@ -12,7 +12,6 @@ from loguru import logger
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 
-
 SCRIPT_EXTS = {".py", ".sh", ".js", ".ts"}
 TEXT_ASSET_EXTS = {".json", ".yaml", ".yml", ".txt"}
 SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
