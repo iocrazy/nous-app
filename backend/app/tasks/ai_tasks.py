@@ -528,8 +528,12 @@ def generate_summary_task(
 
     summary_model = "unknown"
     try:
+        from uuid import UUID
+
+        from app.repositories.agent_repository import AgentRepository
         from app.repositories.ai_repository import AIRepository
         from app.repositories.media_repository import MediaRepository
+        from app.services.ai_adapters.factory import provider_key_for_model
         from app.services.llm_analysis_service import LLMAnalysisService
 
         video_repo = MediaRepository()
@@ -568,59 +572,100 @@ def generate_summary_task(
         # Load user AI settings
         ai_settings = _get_ai_settings(user_id)
 
-        # Read summary task assignment (e.g. "openai:gpt-4o-mini", "volcengine:doubao-...")
-        # Frontend stores this under "summarization"; "summary" is a legacy key kept
-        # here as a safety net for any old rows. default_summary_model may itself
-        # already be provider-qualified ("doubao:doubao-...") — don't re-prefix it.
+        # ------------------------------------------------------------------
+        # task_assignment.summarization is an AI Library agent slug as of
+        # migration 142 (Phase 2 PR 2.8b). Nous platform models are the one
+        # legacy fallback still routed through a provider:model string —
+        # they represent platform-hosted models, not agents.
+        # ------------------------------------------------------------------
         _ta = ai_settings.get("task_assignment", {})
-        summary_assignment = _ta.get("summarization") or _ta.get("summary")
-        if not summary_assignment:
-            _default = ai_settings.get("default_summary_model", "gpt-4o-mini")
-            summary_assignment = _default if ":" in _default else f"openai:{_default}"
+        summary_assignment = (_ta.get("summarization") or "").strip() or "summarize"
 
-        # Resolve Nous platform models to their actual provider
         if summary_assignment.startswith("nous-"):
+            # Legacy Nous platform path: still provider:model, not an agent.
             from app.repositories.nous_repository import NousRepository
 
             nous_repo = NousRepository()
             nous_model = run_async(nous_repo.get_by_name(summary_assignment))
-            if nous_model:
-                summary_assignment = (
-                    f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
-                )
-                ai_settings = {
-                    **ai_settings,
-                    "ai_providers": {
-                        nous_model["actual_provider"]: {
-                            "api_key": nous_model["api_key"],
-                            "app_id": nous_model.get("app_id", ""),
-                            "base_url": nous_model.get("base_url", ""),
-                            "enabled": True,
-                        }
-                    },
-                }
-                logger.info(
-                    f"[AI] Using Nous model '{nous_model['name']}' -> {summary_assignment}"
-                )
+            if not nous_model:
+                err = f"Nous model '{summary_assignment}' not found"
+                logger.error(f"[AI] {err}")
+                _update_resource_status(resource_id, "summary_status", "failed")
+                _update_status(platform_id, "summary_status", "failed")
+                _fail_unified(unified_task_id, err)
+                return {"status": "failed", "error": err}
 
-        # Split provider:model
-        if ":" in summary_assignment:
-            provider_key, summary_model = summary_assignment.split(":", 1)
+            provider_key = nous_model["actual_provider"]
+            summary_model = nous_model["actual_model"]
+            provider_config = {
+                "api_key": nous_model["api_key"],
+                "app_id": nous_model.get("app_id", ""),
+                "base_url": nous_model.get("base_url", ""),
+                "enabled": True,
+            }
+            agent_slug_for_log = f"nous:{summary_assignment}"
+            logger.info(
+                f"[AI] Using Nous model '{nous_model['name']}' -> "
+                f"{provider_key}:{summary_model}"
+            )
         else:
-            provider_key, summary_model = "openai", summary_assignment
+            # Agent-slug path (the new single source of truth).
+            agent_repo = AgentRepository()
+            agent = run_async(agent_repo.get_by_slug(summary_assignment))
+            if not agent:
+                err = f"Agent slug '{summary_assignment}' not found"
+                logger.error(f"[AI] {err}")
+                _update_resource_status(resource_id, "summary_status", "failed")
+                _update_status(platform_id, "summary_status", "failed")
+                _fail_unified(unified_task_id, err)
+                return {"status": "failed", "error": err}
 
-        provider_config = _get_provider_config(ai_settings, provider_key)
+            summary_model = (agent.get("model") or "").strip()
+            try:
+                provider_key = provider_key_for_model(summary_model)
+            except ValueError as exc:
+                err = f"Agent '{summary_assignment}' has unsupported model: {exc}"
+                logger.error(f"[AI] {err}")
+                _update_resource_status(resource_id, "summary_status", "failed")
+                _update_status(platform_id, "summary_status", "failed")
+                _fail_unified(unified_task_id, err)
+                return {"status": "failed", "error": err}
 
-        # Fallback: use global OpenAI key if user didn't configure a per-user one for OpenAI
-        if provider_key == "openai" and not provider_config.get("api_key"):
-            from app.core.config import settings
+            # Per-user BYO key — required path. Falls back to global only if
+            # the user has not configured the provider in Settings.
+            provider_config = dict(_get_provider_config(ai_settings, provider_key))
+            if not provider_config.get("api_key"):
+                from app.core.config import settings
 
-            provider_config["api_key"] = settings.OPENAI_API_KEY
+                fallback_map = {
+                    "qwen": settings.LLM_API_KEY,
+                    "doubao": settings.DOUBAO_API_KEY,
+                    "deepseek": settings.DEEPSEEK_API_KEY,
+                    "claude": settings.CLAUDE_API_KEY,
+                }
+                provider_config["api_key"] = fallback_map.get(provider_key, "")
+            if not provider_config.get("base_url"):
+                from app.core.config import settings
+
+                base_url_map = {
+                    "qwen": settings.LLM_API_URL,
+                    "doubao": settings.DOUBAO_API_URL,
+                    "deepseek": settings.DEEPSEEK_API_URL,
+                    # Claude uses the SDK default endpoint — leave empty.
+                    "claude": "",
+                }
+                provider_config["base_url"] = base_url_map.get(provider_key, "")
+            # Propagate model on provider_config so the service's adapter has
+            # a sane default_model if the per-call model ever comes back empty.
+            provider_config["model"] = summary_model
+
+            agent_slug_for_log = summary_assignment
+            UUID(str(agent["id"]))  # sanity-check agent id shape for logging
 
         language = ai_settings.get("preferred_language") or "auto"
         logger.info(
-            f"[AI] Summary using provider={provider_key}, model={summary_model}, "
-            f"language={language}"
+            f"[AI] Summary using agent={agent_slug_for_log}, "
+            f"provider={provider_key}, model={summary_model}, language={language}"
         )
 
         service = LLMAnalysisService(

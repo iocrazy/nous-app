@@ -22,10 +22,13 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.core.config import settings as app_settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.ai_repository import AIRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.agent_runner import AgentRunner
+from app.services.ai_adapters.base import AIAdapter
+from app.services.ai_adapters.factory import get_adapter_for_user
 from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.skill_tool_service import SkillToolService
@@ -63,24 +66,40 @@ def _build_language_directive(language: str) -> str:
 
 def _build_adapter_from_provider_config(
     provider_key: str, provider_config: Dict[str, Any]
-) -> OpenAICompatibleAdapter:
-    """Build an OpenAI-compatible adapter from the Celery task's provider config.
+) -> AIAdapter:
+    """Build an adapter from the Celery task's per-user provider config.
 
-    The per-user task-assignment flow (``task_assignment.summarization = "openai:gpt-4o-mini"``)
-    already gives us ``api_key`` / ``base_url``. Reuse that directly rather
-    than routing through :func:`get_adapter`, which reads from global
-    settings — those are the wrong scope for per-user BYO keys.
+    As of Phase 2 PR 2.8b (migration 142), ``task_assignment.summarization``
+    is an agent slug. The Celery task resolves that slug to an agent row,
+    derives the provider from the agent's ``model`` field, and hands us a
+    ``provider_config`` reflecting the user's BYO credentials (with a global
+    settings fallback already applied at the task layer).
+
+    For native multi-provider support we route through
+    :func:`get_adapter_for_user`, which picks the right adapter class
+    (Qwen / Doubao / DeepSeek / Claude) per model prefix. Unknown providers
+    fall through to a generic OpenAI-compatible adapter so callers that
+    hand-craft a custom OpenAI endpoint still work.
     """
-    api_key = provider_config.get("api_key", "")
-    base_url = provider_config.get("base_url", "") or ""
-    default_model = provider_config.get("model", "") or ""
-    # Callers historically passed just a base URL like "http://host/v1";
-    # OpenAICompatibleAdapter's __init__ auto-appends /chat/completions.
-    return OpenAICompatibleAdapter(
-        api_url=base_url,
-        api_key=api_key,
-        default_model=default_model,
-    )
+    model = provider_config.get("model", "") or ""
+    user_cfg_scoped = {
+        provider_key: {
+            "api_key": provider_config.get("api_key", ""),
+            "base_url": provider_config.get("base_url", "") or "",
+            "app_id": provider_config.get("app_id", ""),
+        }
+    }
+    try:
+        return get_adapter_for_user(model, user_cfg_scoped, app_settings)
+    except ValueError:
+        # Unknown model prefix (e.g. an OpenAI-compatible custom endpoint
+        # with a non-standard model name). Fall back to the generic adapter
+        # using whatever api_url / api_key the task handed us.
+        return OpenAICompatibleAdapter(
+            api_url=provider_config.get("base_url", "") or "",
+            api_key=provider_config.get("api_key", ""),
+            default_model=model,
+        )
 
 
 class LLMAnalysisService:
