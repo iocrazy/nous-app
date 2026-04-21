@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 import bleach
 import httpx
-from loguru import logger
 
 from app.core.config import settings
 

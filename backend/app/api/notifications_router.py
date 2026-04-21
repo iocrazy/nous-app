@@ -1,7 +1,6 @@
 """API routes for Notifications management."""
 
 from fastapi import APIRouter, HTTPException, status
-from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.notification_repository import NotificationRepository

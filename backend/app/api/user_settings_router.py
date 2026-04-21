@@ -426,7 +426,7 @@ class HeadersUpsertRequest(BaseModel):
 async def get_headers(platform: str, auth: AuthDep):
     """Get custom headers for a platform."""
     if platform not in SUPPORTED_PLATFORMS:
-        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+        raise HTTPException(status_code=400, detail="Unsupported platform")
     try:
         repo = CookiesRepository()
         row = await repo.get_by_user_and_platform(auth.user_id, platform)
@@ -443,7 +443,7 @@ async def get_headers(platform: str, auth: AuthDep):
 async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDep):
     """Set custom headers for a platform (stored alongside cookies)."""
     if platform not in SUPPORTED_PLATFORMS:
-        raise HTTPException(status_code=400, detail=f"Unsupported platform")
+        raise HTTPException(status_code=400, detail="Unsupported platform")
     try:
         repo = CookiesRepository()
         await repo.upsert(

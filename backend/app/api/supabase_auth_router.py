@@ -8,12 +8,12 @@ Supabase 认证路由
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
 from app.core.admin_deps import AdminAuthDep
-from app.core.deps import AuthDep, get_auth
+from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
 from app.services.points_service import PointsService

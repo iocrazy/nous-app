@@ -7,7 +7,6 @@ Regular folder and smart folder CRUD operations.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger

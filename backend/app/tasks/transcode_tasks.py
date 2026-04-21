@@ -161,7 +161,6 @@ def transcode_to_hls(
         on_progress = None
         if unified_task_id and user_id:
             import json as _json
-            import time as _time
 
             from app.core.redis import get_sync_redis
 

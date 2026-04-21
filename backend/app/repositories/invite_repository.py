@@ -3,8 +3,6 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
-
 from app.db.supabase_client import get_async_supabase_admin
 
 # Expiry time mapping in milliseconds

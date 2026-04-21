@@ -8,8 +8,6 @@ Handles CRUD for review_comments, review_annotations, and review_status tables.
 
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
-
 from app.db.supabase_client import get_async_supabase_admin
 
 

@@ -17,7 +17,6 @@ import json
 import logging
 import subprocess
 import tempfile
-from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin

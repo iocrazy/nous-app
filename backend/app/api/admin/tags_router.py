@@ -2,8 +2,7 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
-from loguru import logger
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep

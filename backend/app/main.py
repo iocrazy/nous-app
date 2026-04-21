@@ -13,7 +13,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api import api_router
-from app.api.frontend_config_router import load_config as load_frontend_config
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers

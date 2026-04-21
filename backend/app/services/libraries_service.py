@@ -8,8 +8,6 @@ Business logic for team libraries: creation, listing, and management.
 
 from typing import Optional
 
-from loguru import logger
-
 from app.repositories.libraries_repository import LibrariesRepository
 
 

@@ -27,7 +27,6 @@ from app.schemas.admin import (
 from app.utils.admin_helpers import (
     batch_get_team_member_counts,
     batch_get_user_auth_info,
-    batch_get_user_info,
     create_audit_log,
     get_user_info,
 )

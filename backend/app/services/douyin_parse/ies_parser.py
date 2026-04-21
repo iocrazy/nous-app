@@ -309,7 +309,7 @@ class IesDouyinParser:
 
                 if not item_list:
                     logger.warning(
-                        f"[IesDouyinParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
+                        "[IesDouyinParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
                     )
                     return None
 

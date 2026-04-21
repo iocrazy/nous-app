@@ -224,7 +224,7 @@ class TranscodeService:
 
                 if not passthrough_ok:
                     logger.warning(
-                        f"[Transcode] H.264 passthrough failed, falling back to full encode"
+                        "[Transcode] H.264 passthrough failed, falling back to full encode"
                     )
                     # Fall through to standard encoding path below
                 else:

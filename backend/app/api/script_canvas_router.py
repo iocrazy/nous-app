@@ -1,6 +1,6 @@
 """Script Canvas Router — chapter node CRUD and canvas sync endpoints."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger

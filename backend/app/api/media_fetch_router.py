@@ -7,7 +7,6 @@ Endpoints for parsing and fetching media (single, batch, per-type, extract-audio
 Helper functions are in media_fetch_helpers.py.
 """
 
-import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
@@ -93,7 +92,7 @@ async def fetch_video(
                     raise HTTPException(status_code=402, detail=points_result["reason"])
                 _points_cost = points_result.get("points_cost", 0)
             else:
-                logger.info(f"[Fetch/Parse] URL already parsed, skipping points charge")
+                logger.info("[Fetch/Parse] URL already parsed, skipping points charge")
 
         platform, handler_type = URLRouter.detect_platform(url)
         logger.info(f"[URLRouter] Platform: {platform}, Handler: {handler_type}")

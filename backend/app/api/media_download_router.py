@@ -7,7 +7,6 @@ Endpoints for downloading video/cover/music files, managing pending/retry downlo
 """
 
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse

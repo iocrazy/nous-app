@@ -13,13 +13,10 @@ from typing import Optional
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
-    File,
     Header,
     HTTPException,
     Query,
     Request,
-    UploadFile,
 )
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -32,7 +29,6 @@ from app.schemas.resources import (
     ResourceUpdate,
 )
 from app.services.resources_service import ResourcesService
-from app.services.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/resources")
 

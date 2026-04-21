@@ -7,7 +7,6 @@ Endpoints for managing canvas nodes, edges, and frames:
 individual CRUD, batch sync, frame metadata updates, and reorder.
 """
 
-import asyncio
 import mimetypes
 from typing import Any, Dict, List, Optional
 

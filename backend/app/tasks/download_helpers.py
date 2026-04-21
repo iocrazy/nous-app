@@ -11,7 +11,6 @@ import os
 
 from loguru import logger
 
-from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.tasks.utils import run_async
 

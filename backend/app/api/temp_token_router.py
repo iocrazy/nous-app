@@ -20,7 +20,6 @@ import json
 import secrets
 
 from fastapi import APIRouter, HTTPException, Query, status
-from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
