@@ -14,7 +14,6 @@ from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
 
-
 # --------------------------------------------------------------------------- #
 # 1. StoryboardProjectRepository
 # --------------------------------------------------------------------------- #
@@ -77,7 +76,9 @@ class StoryboardProjectRepository:
             logger.error(f"Failed to update storyboard project {project_id}: {e}")
             raise
 
-    async def update_viewport(self, project_id: str, viewport_json: Dict[str, Any]) -> None:
+    async def update_viewport(
+        self, project_id: str, viewport_json: Dict[str, Any]
+    ) -> None:
         """
         Lightweight viewport update — does NOT touch updated_at.
 
@@ -234,7 +235,9 @@ class StoryboardNodeRepository:
     async def _get_client(self):
         return await get_async_supabase_admin()
 
-    async def bulk_upsert(self, project_id: str, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def bulk_upsert(
+        self, project_id: str, nodes: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
         Insert or update multiple nodes for a project atomically.
 
@@ -297,12 +300,7 @@ class StoryboardNodeRepository:
         """
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_NAME)
-                .delete()
-                .eq("id", node_id)
-                .execute()
-            )
+            await client.table(self.TABLE_NAME).delete().eq("id", node_id).execute()
             logger.info(f"Deleted storyboard node {node_id}")
         except Exception as e:
             logger.error(f"Failed to delete storyboard node {node_id}: {e}")
@@ -365,7 +363,9 @@ class StoryboardEdgeRepository:
     async def _get_client(self):
         return await get_async_supabase_admin()
 
-    async def bulk_upsert(self, project_id: str, edges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def bulk_upsert(
+        self, project_id: str, edges: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
         Insert or update multiple edges for a project atomically.
 
@@ -403,12 +403,7 @@ class StoryboardEdgeRepository:
         """
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_NAME)
-                .delete()
-                .eq("id", edge_id)
-                .execute()
-            )
+            await client.table(self.TABLE_NAME).delete().eq("id", edge_id).execute()
             logger.info(f"Deleted storyboard edge {edge_id}")
         except Exception as e:
             logger.error(f"Failed to delete storyboard edge {edge_id}: {e}")
@@ -490,7 +485,9 @@ class StoryboardFrameRepository:
             logger.error(f"Failed to create storyboard frame: {e}")
             raise
 
-    async def bulk_upsert(self, node_id: str, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def bulk_upsert(
+        self, node_id: str, frames: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
         Insert or update multiple frames for a node atomically.
 
@@ -699,10 +696,7 @@ class StoryboardCharacterRepository:
         try:
             client = await self._get_client()
             await (
-                client.table(self.TABLE_NAME)
-                .delete()
-                .eq("id", character_id)
-                .execute()
+                client.table(self.TABLE_NAME).delete().eq("id", character_id).execute()
             )
             logger.info(f"Deleted storyboard character {character_id}")
         except Exception as e:
@@ -818,9 +812,7 @@ class StoryboardAssetRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(
-                f"Failed to find asset by hash in project {project_id}: {e}"
-            )
+            logger.error(f"Failed to find asset by hash in project {project_id}: {e}")
             return None
 
     async def delete(self, asset_id: str) -> None:
@@ -832,12 +824,7 @@ class StoryboardAssetRepository:
         """
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_NAME)
-                .delete()
-                .eq("id", asset_id)
-                .execute()
-            )
+            await client.table(self.TABLE_NAME).delete().eq("id", asset_id).execute()
             logger.info(f"Deleted storyboard asset {asset_id}")
         except Exception as e:
             logger.error(f"Failed to delete storyboard asset {asset_id}: {e}")

@@ -9,7 +9,7 @@ and pushes progress messages to the connected client.
 
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.core.redis import get_async_redis

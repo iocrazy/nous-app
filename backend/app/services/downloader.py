@@ -20,8 +20,8 @@ from loguru import logger
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
-from app.repositories.user_logs_repository import log_user_action
 from app.repositories.media_repository import MediaRepository
+from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import (
     DownloadCoverResult,
     DownloadImagesResult,
@@ -65,7 +65,9 @@ class DownloaderService:
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
+                _, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=300
+                )
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.wait()
@@ -92,7 +94,9 @@ class DownloaderService:
                     os.remove(temp_path)
                     return False
             else:
-                stderr_text = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
+                stderr_text = (
+                    stderr_bytes.decode(errors="replace") if stderr_bytes else ""
+                )
                 logger.warning(
                     f"视频优化失败: {stderr_text[:200] if stderr_text else 'Unknown error'}"
                 )
@@ -138,7 +142,9 @@ class DownloaderService:
                 logger.warning(f"视频验证超时: {os.path.basename(file_path)}")
                 return True  # Don't fail on timeout, assume OK
 
-            stderr = stderr_bytes.decode(errors="replace").lower() if stderr_bytes else ""
+            stderr = (
+                stderr_bytes.decode(errors="replace").lower() if stderr_bytes else ""
+            )
 
             # Check for critical errors
             critical_errors = [
@@ -173,7 +179,10 @@ class DownloaderService:
 
     @staticmethod
     async def download_file(
-        url: str, file_path: str, headers: Dict[str, Any] = None, progress_tracker=None,
+        url: str,
+        file_path: str,
+        headers: Dict[str, Any] = None,
+        progress_tracker=None,
         platform_id: str = None,
     ) -> bool:
         """
@@ -201,13 +210,20 @@ class DownloaderService:
         if platform_id and "douyin" in url.lower():
             try:
                 from app.core.redis import get_async_redis
+
                 r = await get_async_redis()
                 cached = await r.get(f"douyin_browser_cookies:{platform_id}")
                 if cached:
-                    cookie_value = cached.decode() if isinstance(cached, bytes) else cached
+                    cookie_value = (
+                        cached.decode() if isinstance(cached, bytes) else cached
+                    )
                     existing = headers.get("Cookie", "")
-                    headers["Cookie"] = f"{existing}; {cookie_value}" if existing else cookie_value
-                    logger.debug(f"[Download/File] Using cached browser cookies for {platform_id}")
+                    headers["Cookie"] = (
+                        f"{existing}; {cookie_value}" if existing else cookie_value
+                    )
+                    logger.debug(
+                        f"[Download/File] Using cached browser cookies for {platform_id}"
+                    )
             except Exception as e:
                 logger.debug(f"[Download/File] Cookie lookup failed: {e}")
 
@@ -274,7 +290,9 @@ class DownloaderService:
                         if expected_size == 0:
                             expected_size = total
                         if total == 0 and expected_size > 0:
-                            total = expected_size  # Use HEAD's content-length as fallback
+                            total = (
+                                expected_size  # Use HEAD's content-length as fallback
+                            )
                             logger.info(
                                 f"[Download/File] Streaming content-length=0, "
                                 f"using HEAD expected_size={expected_size} for progress"
@@ -341,7 +359,9 @@ class DownloaderService:
 
                     if response.status_code == 200:
                         content_len = len(response.content)
-                        logger.info(f"[Download/File] HTTP 200, content_length={content_len}, saving to {os.path.basename(file_path)}")
+                        logger.info(
+                            f"[Download/File] HTTP 200, content_length={content_len}, saving to {os.path.basename(file_path)}"
+                        )
                         async with aiofiles.open(file_path, mode="wb") as f:
                             await f.write(response.content)
 
@@ -393,14 +413,18 @@ class DownloaderService:
                         return False
 
         except Exception as e:
-            logger.error(f"[Download/File] Exception downloading {url[:100]}...: {type(e).__name__}: {str(e)}")
+            logger.error(
+                f"[Download/File] Exception downloading {url[:100]}...: {type(e).__name__}: {str(e)}"
+            )
             if progress_tracker:
                 progress_tracker.failed(str(e))
             return False
 
     @staticmethod
     async def download_video_by_platform_id(
-        platform_id, user_id: str = None, progress_tracker=None,
+        platform_id,
+        user_id: str = None,
+        progress_tracker=None,
         user_agent: str = None,
     ) -> DownloadVideoResult:
         """
@@ -432,12 +456,16 @@ class DownloaderService:
             try:
                 video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
-                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
+                logger.error(
+                    f"DB query failed for {platform_id}: {db_err}", exc_info=True
+                )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = f"Database query failed: {db_err}"
                 return result
             if not video_data:
-                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                logger.error(
+                    f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}"
+                )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
@@ -461,11 +489,16 @@ class DownloaderService:
             video_urls = video_data.get("video_download_urls") or []
 
             # Ensure a stable play URL fallback exists (no expiry, unlike CDN URLs)
-            play_addr = video_data.get("video", {}).get("play_addr", {}) if isinstance(video_data.get("video"), dict) else {}
+            play_addr = (
+                video_data.get("video", {}).get("play_addr", {})
+                if isinstance(video_data.get("video"), dict)
+                else {}
+            )
             video_uri = play_addr.get("uri", "")
             if not video_uri:
                 # Try to extract video_id from existing URLs
                 import re
+
                 for _u in video_urls:
                     _m = re.search(r"video_id=([^&]+)", _u)
                     if _m:
@@ -475,7 +508,9 @@ class DownloaderService:
                 stable_url = f"https://aweme.snssdk.com/aweme/v1/play/?video_id={video_uri}&ratio=720p&line=0"
                 if stable_url not in video_urls:
                     video_urls.append(stable_url)
-                    logger.info(f"[Download/Video] Appended stable play URL fallback for {platform_id}")
+                    logger.info(
+                        f"[Download/Video] Appended stable play URL fallback for {platform_id}"
+                    )
 
             if not video_urls:
                 logger.warning(f"视频 {platform_id} 没有可用的下载URL")
@@ -500,24 +535,35 @@ class DownloaderService:
             for i, url in enumerate(video_urls):
                 try:
                     async with httpx.AsyncClient(http2=True) as _diag:
-                        _r = await _diag.head(url, headers=headers, follow_redirects=True, timeout=10.0)
+                        _r = await _diag.head(
+                            url, headers=headers, follow_redirects=True, timeout=10.0
+                        )
                         logger.info(
                             f"[Download/Diag] URL {i+1}/{len(video_urls)} HEAD: "
                             f"status={_r.status_code}, final_url={str(_r.url)[:80]}"
                         )
                 except Exception as e:
-                    logger.warning(f"[Download/Diag] URL {i+1} HEAD failed: {type(e).__name__}: {e}")
+                    logger.warning(
+                        f"[Download/Diag] URL {i+1} HEAD failed: {type(e).__name__}: {e}"
+                    )
 
             # download video while one of the urls is successful
             for idx, url in enumerate(video_urls):
-                logger.info(f"[Download/Video] Trying URL {idx+1}/{len(video_urls)} for {platform_id}: {url[:100]}")
+                logger.info(
+                    f"[Download/Video] Trying URL {idx+1}/{len(video_urls)} for {platform_id}: {url[:100]}"
+                )
                 success = await DownloaderService.download_file(
-                    url, video_full_path, headers, progress_tracker,
+                    url,
+                    video_full_path,
+                    headers,
+                    progress_tracker,
                     platform_id=platform_id,
                 )
                 if not success:
                     download_errors.append(f"URL{idx+1}: download_file returned False")
-                    logger.warning(f"[Download/Video] URL {idx+1} failed for {platform_id}")
+                    logger.warning(
+                        f"[Download/Video] URL {idx+1} failed for {platform_id}"
+                    )
                     continue
                 if success:
                     # Optimize video for streaming (move moov atom to beginning)
@@ -574,7 +620,9 @@ class DownloaderService:
                     break
 
             if result.video_download_status != DownloadStatus.COMPLETED:
-                error_detail = "; ".join(download_errors) if download_errors else "unknown"
+                error_detail = (
+                    "; ".join(download_errors) if download_errors else "unknown"
+                )
                 logger.error(
                     f"All {len(video_urls)} download URLs for video {platform_id} failed: {error_detail}"
                 )
@@ -614,7 +662,11 @@ class DownloaderService:
 
     @staticmethod
     async def download_slide_item(
-        index: int, url_list: list, slides_dir: str, is_video: bool, headers: dict,
+        index: int,
+        url_list: list,
+        slides_dir: str,
+        is_video: bool,
+        headers: dict,
         platform_id: str = None,
     ) -> dict:
         """Download a single slide item (image or video clip) to the slides/ subfolder.
@@ -643,7 +695,9 @@ class DownloaderService:
 
         for j, url in enumerate(url_list):
             try:
-                if await DownloaderService.download_file(url, file_path, headers, platform_id=platform_id):
+                if await DownloaderService.download_file(
+                    url, file_path, headers, platform_id=platform_id
+                ):
                     return {"success": True, "path": file_path}
             except Exception as e:
                 logger.warning(f"Slide {filename} URL {j} failed: {e}")
@@ -701,9 +755,7 @@ class DownloaderService:
                     logger.error(
                         f"[Music/Standalone] DB update failed for {platform_id}: {e}"
                     )
-                logger.success(
-                    f"[Music/Standalone] Downloaded music for {platform_id}"
-                )
+                logger.success(f"[Music/Standalone] Downloaded music for {platform_id}")
                 return True
 
         logger.warning(
@@ -782,7 +834,9 @@ class DownloaderService:
 
     @staticmethod
     async def download_images_by_platform_id(
-        platform_id, user_id: str = None, user_agent: str = None,
+        platform_id,
+        user_id: str = None,
+        user_agent: str = None,
     ):
         """
         Download carousel images/videos to slides/ subfolder, standalone music,
@@ -812,12 +866,16 @@ class DownloaderService:
             try:
                 video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
-                logger.error(f"DB query failed for {platform_id}: {db_err}", exc_info=True)
+                logger.error(
+                    f"DB query failed for {platform_id}: {db_err}", exc_info=True
+                )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = f"Database query failed: {db_err}"
                 return result
             if not video_data:
-                logger.error(f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}")
+                logger.error(
+                    f"Record not found in parsed_media: platform_id={platform_id}, user_id={user_id}"
+                )
                 result.video_download_status = DownloadStatus.FAILED
                 result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
@@ -827,8 +885,8 @@ class DownloaderService:
             # Create structured path: global/resources/web/{platform}/{media_id}/
             source_platform = video_data.get("source_platform", "douyin")
             media_id = str(video_data["id"])
-            resource_dir_full, resource_dir_relative = (
-                Utils.create_web_resource_path(source_platform, media_id)
+            resource_dir_full, resource_dir_relative = Utils.create_web_resource_path(
+                source_platform, media_id
             )
             slides_dir = os.path.join(str(resource_dir_full), "slides")
             os.makedirs(slides_dir, exist_ok=True)
@@ -863,7 +921,11 @@ class DownloaderService:
                     for i, (url_list, is_video) in enumerate(slide_items):
                         task = tg.create_task(
                             DownloaderService.download_slide_item(
-                                i, url_list, slides_dir, is_video, headers,
+                                i,
+                                url_list,
+                                slides_dir,
+                                is_video,
+                                headers,
                                 platform_id=platform_id,
                             )
                         )
@@ -1017,7 +1079,9 @@ class DownloaderService:
                     logger.debug(f"[Music/Diag] {platform_id}: URL[{i}]={u[:120]}...")
 
             if not music_urls:
-                logger.warning(f"[Music/Diag] {platform_id}: NO music URLs in DB — music download will fail")
+                logger.warning(
+                    f"[Music/Diag] {platform_id}: NO music URLs in DB — music download will fail"
+                )
 
             # Create structured path: global/resources/web/{platform}/{media_id}/
             source_platform = music_data.get("source_platform", "douyin")
@@ -1032,7 +1096,9 @@ class DownloaderService:
 
             # Try to download music
             for idx, url in enumerate(music_urls):
-                logger.info(f"[Music/Diag] {platform_id}: trying URL[{idx}] → {url[:80]}...")
+                logger.info(
+                    f"[Music/Diag] {platform_id}: trying URL[{idx}] → {url[:80]}..."
+                )
                 if await DownloaderService.download_file(url, music_full_path, headers):
                     try:
                         await repo.update(
@@ -1046,9 +1112,7 @@ class DownloaderService:
                         logger.error(
                             f"Music {platform_id} downloaded but failed to update DB: {e}."
                         )
-                        result.error = (
-                            f"Music {platform_id} downloaded but failed to update DB: {e}."
-                        )
+                        result.error = f"Music {platform_id} downloaded but failed to update DB: {e}."
 
                     result.music_path = music_relative_path  # Return relative path
                     result.music_download_status = DownloadStatus.COMPLETED
@@ -1119,7 +1183,9 @@ class DownloaderService:
 
     @staticmethod
     async def download_cover_by_platform_id(
-        platform_id: str, user_id: str = None, user_agent: str = None,
+        platform_id: str,
+        user_id: str = None,
+        user_agent: str = None,
     ) -> DownloadCoverResult:
         """
         Download video cover image
@@ -1144,12 +1210,16 @@ class DownloaderService:
             try:
                 video_data = await repo.get_by_platform_id(platform_id)
             except Exception as db_err:
-                logger.error(f"DB query failed for cover {platform_id}: {db_err}", exc_info=True)
+                logger.error(
+                    f"DB query failed for cover {platform_id}: {db_err}", exc_info=True
+                )
                 result.cover_download_status = DownloadStatus.FAILED
                 result.error = f"Database query failed: {db_err}"
                 return result
             if not video_data:
-                logger.error(f"Record not found for cover: platform_id={platform_id}, user_id={user_id}")
+                logger.error(
+                    f"Record not found for cover: platform_id={platform_id}, user_id={user_id}"
+                )
                 result.cover_download_status = DownloadStatus.FAILED
                 result.error = f"Record not found: {platform_id} (user={user_id})"
                 return result
@@ -1255,9 +1325,13 @@ class DownloaderService:
                 repo = MediaRepository()
                 await repo.update(
                     platform_id,
-                    {"cover_download_status": DownloadStatus.FAILED.value,
-                     "error_message": str(e)[:500]},
+                    {
+                        "cover_download_status": DownloadStatus.FAILED.value,
+                        "error_message": str(e)[:500],
+                    },
                 )
             except Exception:
-                logger.debug(f"Failed to persist cover failure status for {platform_id}")
+                logger.debug(
+                    f"Failed to persist cover failure status for {platform_id}"
+                )
             return result

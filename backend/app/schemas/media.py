@@ -136,9 +136,7 @@ class MediaUpdate(MediaBase):
     platform_id: Optional[str] = Field(
         None, description="Unique media identifier from platform"
     )
-    original_url: Optional[str] = Field(
-        None, description="Original media URL"
-    )
+    original_url: Optional[str] = Field(None, description="Original media URL")
 
 
 class MediaInDB(MediaBase):

@@ -40,8 +40,8 @@ SPRITE_QUALITY = 75
 WAVEFORM_WIDTH = 320
 WAVEFORM_HEIGHT = 180
 WAVEFORM_BAR_COUNT = 160
-WAVEFORM_BG_COLOR = (15, 15, 23)       # near-black
-WAVEFORM_BAR_COLOR = (99, 102, 241)    # indigo-500
+WAVEFORM_BG_COLOR = (15, 15, 23)  # near-black
+WAVEFORM_BAR_COLOR = (99, 102, 241)  # indigo-500
 WAVEFORM_BAR_BRIGHT = (139, 142, 255)  # lighter bar center
 
 
@@ -117,29 +117,33 @@ class ThumbnailService:
             return thumb_relative
 
         except Exception as e:
-            logger.error(
-                f"Thumbnail generation failed for resource {resource_id}: {e}"
-            )
+            logger.error(f"Thumbnail generation failed for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------ #
     # Video thumbnail: extract single frame with ffmpeg
     # ------------------------------------------------------------------ #
 
-    async def _generate_video_thumbnail(
-        self, src_path: str, dst_path: str
-    ) -> bool:
+    async def _generate_video_thumbnail(self, src_path: str, dst_path: str) -> bool:
         """Extract a frame at 1s, scaled to 320px width. Returns True on success."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y",
-                "-ss", "1",
-                "-i", src_path,
-                "-vframes", "1",
-                "-vf", f"scale={THUMBNAIL_MAX_WIDTH}:-1",
-                "-c:v", "libwebp",
-                "-quality", "80",
-                "-preset", "photo",
+                "ffmpeg",
+                "-y",
+                "-ss",
+                "1",
+                "-i",
+                src_path,
+                "-vframes",
+                "1",
+                "-vf",
+                f"scale={THUMBNAIL_MAX_WIDTH}:-1",
+                "-c:v",
+                "libwebp",
+                "-quality",
+                "80",
+                "-preset",
+                "photo",
                 dst_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -169,9 +173,7 @@ class ThumbnailService:
     # Video sprite: extract N frames into horizontal strip
     # ------------------------------------------------------------------ #
 
-    async def _generate_video_sprite(
-        self, src_path: str, dst_path: str
-    ) -> bool:
+    async def _generate_video_sprite(self, src_path: str, dst_path: str) -> bool:
         """
         Generate a horizontal sprite sheet of N frames for hover scrub.
         Frames are evenly distributed across the video duration.
@@ -194,12 +196,18 @@ class ThumbnailService:
             for i, ts in enumerate(timestamps):
                 frame_path = Path(dst_path).parent / f"_sprite_frame_{i}.jpg"
                 proc = await asyncio.create_subprocess_exec(
-                    "ffmpeg", "-y",
-                    "-ss", f"{ts:.2f}",
-                    "-i", src_path,
-                    "-vframes", "1",
-                    "-vf", f"scale={SPRITE_FRAME_WIDTH}:-1",
-                    "-q:v", "4",
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    f"{ts:.2f}",
+                    "-i",
+                    src_path,
+                    "-vframes",
+                    "1",
+                    "-vf",
+                    f"scale={SPRITE_FRAME_WIDTH}:-1",
+                    "-q:v",
+                    "4",
                     str(frame_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -238,9 +246,12 @@ class ThumbnailService:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -252,9 +263,7 @@ class ThumbnailService:
         except Exception:
             return None
 
-    def _combine_sprite_frames(
-        self, frame_paths: list[Path], dst_path: str
-    ) -> bool:
+    def _combine_sprite_frames(self, frame_paths: list[Path], dst_path: str) -> bool:
         """Combine individual frame images into a horizontal strip."""
         try:
             images = [Image.open(fp) for fp in frame_paths]
@@ -280,9 +289,7 @@ class ThumbnailService:
     # Image thumbnail: resize with Pillow
     # ------------------------------------------------------------------ #
 
-    async def _generate_image_thumbnail(
-        self, src_path: str, dst_path: str
-    ) -> bool:
+    async def _generate_image_thumbnail(self, src_path: str, dst_path: str) -> bool:
         """Resize an image to max 320px width. Returns True on success."""
         try:
             return await asyncio.to_thread(self._resize_image, src_path, dst_path)
@@ -306,9 +313,7 @@ class ThumbnailService:
         try:
             with Image.open(src_path) as img:
                 if self._is_animated(img):
-                    logger.info(
-                        f"Skipping thumbnail for animated image: {src_path}"
-                    )
+                    logger.info(f"Skipping thumbnail for animated image: {src_path}")
                     return False
 
                 if img.mode not in ("RGB", "L"):
@@ -333,18 +338,21 @@ class ThumbnailService:
     # Audio thumbnail: waveform visualization
     # ------------------------------------------------------------------ #
 
-    async def _generate_audio_thumbnail(
-        self, src_path: str, dst_path: str
-    ) -> bool:
+    async def _generate_audio_thumbnail(self, src_path: str, dst_path: str) -> bool:
         """Generate waveform visualization thumbnail for audio files."""
         try:
             # Extract raw PCM data: mono, 8kHz, 16-bit signed LE
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y",
-                "-i", src_path,
-                "-ac", "1",
-                "-ar", "8000",
-                "-f", "s16le",
+                "ffmpeg",
+                "-y",
+                "-i",
+                src_path,
+                "-ac",
+                "1",
+                "-ar",
+                "8000",
+                "-f",
+                "s16le",
                 "pipe:1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

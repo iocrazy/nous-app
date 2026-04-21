@@ -105,7 +105,8 @@ def parse_date_range(
 async def get_logs(
     current_user: dict = Depends(get_current_user),
     level: Optional[str] = Query(
-        None, description="Filter by levels (comma-separated: info,success,warn,error,pending,debug)"
+        None,
+        description="Filter by levels (comma-separated: info,success,warn,error,pending,debug)",
     ),
     date_range: Optional[str] = Query(
         None, description="Date range: today, 7days, 30days"

@@ -29,14 +29,16 @@ async def get_celery_workers():
         pool = stats.get("pool", {})
         total = stats.get("total", {})
         processed = sum(total.values()) if isinstance(total, dict) else 0
-        workers.append({
-            "name": name,
-            "status": "online",
-            "active": len(active_tasks),
-            "processed": processed,
-            "concurrency": pool.get("max-concurrency"),
-            "uptime": stats.get("clock", None),
-        })
+        workers.append(
+            {
+                "name": name,
+                "status": "online",
+                "active": len(active_tasks),
+                "processed": processed,
+                "concurrency": pool.get("max-concurrency"),
+                "uptime": stats.get("clock", None),
+            }
+        )
 
     return {
         "online": len(workers),

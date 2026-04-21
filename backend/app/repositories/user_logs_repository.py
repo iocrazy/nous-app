@@ -138,9 +138,7 @@ class UserLogsRepository:
             count_query = table.select("id", count="exact").eq("user_id", user_id)
             # Data query
             data_query = (
-                table.select("*")
-                .eq("user_id", user_id)
-                .order("created_at", desc=True)
+                table.select("*").eq("user_id", user_id).order("created_at", desc=True)
             )
 
             # Filter by status/level

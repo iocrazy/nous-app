@@ -203,10 +203,7 @@ class CollectionsRepository:
         ]
 
         table = await self._get_table()
-        rows = [
-            {"user_id": user_id, **preset, "cached_count": 0}
-            for preset in presets
-        ]
+        rows = [{"user_id": user_id, **preset, "cached_count": 0} for preset in presets]
         result = await table.insert(rows).execute()
         created = result.data or []
 

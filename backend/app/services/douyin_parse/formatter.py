@@ -18,7 +18,9 @@ class DouyinFormatter:
     """Douyin data parsing service, responsible for cleaning and structuring Douyin API data"""
 
     @staticmethod
-    async def _extract_music_play_urls(aweme_detail: Dict[str, Any], source: str = "") -> list:
+    async def _extract_music_play_urls(
+        aweme_detail: Dict[str, Any], source: str = ""
+    ) -> list:
         """Extract music play URLs from aweme_detail, trying multiple paths.
 
         Douyin's music structure varies between API sources:
@@ -48,16 +50,23 @@ class DouyinFormatter:
 
         # Path 3: music.mid → fetch play_url from Douyin mobile API
         if not urls:
-            mid = str(music_obj.get("mid", "") or music_obj.get("id_str", "") or music_obj.get("id", ""))
+            mid = str(
+                music_obj.get("mid", "")
+                or music_obj.get("id_str", "")
+                or music_obj.get("id", "")
+            )
             if mid and mid != "0" and mid != "":
                 try:
                     import httpx
+
                     # Try multiple API endpoints (DNS may vary by environment)
                     api_endpoints = [
                         f"https://aweme.snssdk.com/aweme/v1/music/detail/?music_id={mid}",
                         f"https://api-va.tiktokv.com/aweme/v1/music/detail/?music_id={mid}",
                     ]
-                    api_headers = {"User-Agent": "com.ss.android.ugc.aweme/330101 (Linux; U; Android 14;)"}
+                    api_headers = {
+                        "User-Agent": "com.ss.android.ugc.aweme/330101 (Linux; U; Android 14;)"
+                    }
                     for api_url in api_endpoints:
                         try:
                             async with httpx.AsyncClient(timeout=10) as client:
@@ -68,12 +77,18 @@ class DouyinFormatter:
                                     if isinstance(api_play_url, dict):
                                         urls = api_play_url.get("url_list", [])
                                     if urls:
-                                        logger.info(f"[DouyinFormatter/{source}] Fetched music via API: mid={mid}, urls={len(urls)}, endpoint={api_url[:40]}")
+                                        logger.info(
+                                            f"[DouyinFormatter/{source}] Fetched music via API: mid={mid}, urls={len(urls)}, endpoint={api_url[:40]}"
+                                        )
                                         break
                         except Exception as ep_err:
-                            logger.debug(f"[DouyinFormatter/{source}] Music API endpoint failed: {api_url[:40]}: {ep_err}")
+                            logger.debug(
+                                f"[DouyinFormatter/{source}] Music API endpoint failed: {api_url[:40]}: {ep_err}"
+                            )
                 except Exception as e:
-                    logger.warning(f"[DouyinFormatter/{source}] Music API fetch failed for mid={mid}: {e}")
+                    logger.warning(
+                        f"[DouyinFormatter/{source}] Music API fetch failed for mid={mid}: {e}"
+                    )
 
         # Path 4: music.url (sometimes present)
         if not urls:
@@ -168,16 +183,24 @@ class DouyinFormatter:
                     f"未知媒体类型 {aweme_type}，检测到 images 字段，按图文处理: aweme_id={aweme_id}"
                 )
                 return await DouyinFormatter._parse_image_text(
-                    aweme_detail, aweme_id, valid_url,
-                    download_video, download_music, download_cover,
+                    aweme_detail,
+                    aweme_id,
+                    valid_url,
+                    download_video,
+                    download_music,
+                    download_cover,
                 )
             elif has_video:
                 logger.info(
                     f"未知媒体类型 {aweme_type}，检测到 video 字段，按视频处理: aweme_id={aweme_id}"
                 )
                 return await DouyinFormatter._parse_video(
-                    aweme_detail, aweme_id, valid_url,
-                    download_video, download_music, download_cover,
+                    aweme_detail,
+                    aweme_id,
+                    valid_url,
+                    download_video,
+                    download_music,
+                    download_cover,
                 )
             else:
                 logger.warning(f"不支持的媒体类型: {aweme_type}, aweme_id={aweme_id}")
@@ -258,7 +281,9 @@ class DouyinFormatter:
                     video_download_urls.append(vid_urls)
                 else:
                     # Pure image: save image
-                    image_urls = item.get("url_list") or item.get("download_url_list", [])
+                    image_urls = item.get("url_list") or item.get(
+                        "download_url_list", []
+                    )
                     if image_urls:
                         image_download_urls.append(image_urls)
 
@@ -285,14 +310,20 @@ class DouyinFormatter:
             top_urls = play_addr["url_list"]
             if isinstance(uri, str) and ".mp3" in uri:
                 top_level_music_urls = [uri] if uri.startswith("http") else top_urls
-                logger.info(f"[DouyinFormatter/image_text] Top-level video is audio: uri={uri[:80]}")
+                logger.info(
+                    f"[DouyinFormatter/image_text] Top-level video is audio: uri={uri[:80]}"
+                )
 
         # Extract standalone music play URL
         if top_level_music_urls:
             music_play_urls = top_level_music_urls
-            logger.info(f"[DouyinFormatter/image_text] Using audio from video.play_addr: {len(music_play_urls)} URLs")
+            logger.info(
+                f"[DouyinFormatter/image_text] Using audio from video.play_addr: {len(music_play_urls)} URLs"
+            )
         else:
-            music_play_urls = await DouyinFormatter._extract_music_play_urls(aweme_detail, "image_text")
+            music_play_urls = await DouyinFormatter._extract_music_play_urls(
+                aweme_detail, "image_text"
+            )
 
         # Build return data
         return {
@@ -451,12 +482,16 @@ class DouyinFormatter:
             for item in images:
                 # Check if this image item has an embedded video (like type 68)
                 if item.get("video", {}):
-                    vid_urls = item.get("video", {}).get("play_addr", {}).get("url_list", [])
+                    vid_urls = (
+                        item.get("video", {}).get("play_addr", {}).get("url_list", [])
+                    )
                     if vid_urls:
                         video_download_urls.append(vid_urls)
                 else:
                     # Prefer url_list (no watermark) over download_url_list (watermarked)
-                    image_urls = item.get("url_list") or item.get("download_url_list", [])
+                    image_urls = item.get("url_list") or item.get(
+                        "download_url_list", []
+                    )
                     if image_urls:
                         image_download_urls.append(image_urls)
 
@@ -472,10 +507,14 @@ class DouyinFormatter:
             if isinstance(uri, str) and ".mp3" in uri:
                 # It's audio — use URI directly as the best music URL
                 top_level_music_urls = [uri] if uri.startswith("http") else top_urls
-                logger.info(f"[DouyinFormatter] Image collection top-level video is audio: uri={uri[:80]}")
+                logger.info(
+                    f"[DouyinFormatter] Image collection top-level video is audio: uri={uri[:80]}"
+                )
             elif top_urls:
                 video_download_urls.append(top_urls)
-                logger.info(f"[DouyinFormatter] Image collection has top-level video: {len(top_urls)} URLs")
+                logger.info(
+                    f"[DouyinFormatter] Image collection has top-level video: {len(top_urls)} URLs"
+                )
 
         # Build music name
         music_author = aweme_detail.get("music", {}).get("author", "undefined")
@@ -490,9 +529,13 @@ class DouyinFormatter:
         # Priority: top-level video.play_addr (if mp3) > music.mid API > music.play_url
         if top_level_music_urls:
             music_play_urls = top_level_music_urls
-            logger.info(f"[DouyinFormatter/image_collection] Using audio from video.play_addr: {len(music_play_urls)} URLs")
+            logger.info(
+                f"[DouyinFormatter/image_collection] Using audio from video.play_addr: {len(music_play_urls)} URLs"
+            )
         else:
-            music_play_urls = await DouyinFormatter._extract_music_play_urls(aweme_detail, "image_collection")
+            music_play_urls = await DouyinFormatter._extract_music_play_urls(
+                aweme_detail, "image_collection"
+            )
 
         return {
             "platform_id": aweme_id,

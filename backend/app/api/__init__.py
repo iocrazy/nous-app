@@ -8,54 +8,54 @@ Uses Supabase as backend data storage.
 
 from fastapi import APIRouter
 
+from app.api.admin import admin_router
+from app.api.ai_agents_router import router as ai_agents_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.analysis_router import router as analysis_router
 from app.api.api_key_router import router as api_key_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
+from app.api.error_report_router import router as error_report_router
 from app.api.frontend_config_router import router as frontend_config_router
+from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
 from app.api.logs_router import router as logs_router
+from app.api.media_auth import router as media_auth_router
+from app.api.media_router import legacy_router as legacy_douyin_router
+from app.api.media_router import media_content_router
+from app.api.media_router import router as media_router
+from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
 from app.api.projects_router import router as projects_router
+from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
 from app.api.reviews_router import router as reviews_router
+from app.api.sb_ai_router import router as sb_ai_router
+from app.api.sb_canvas_router import router as sb_canvas_router
+from app.api.sb_characters_router import router as sb_characters_router
+from app.api.sb_export_router import router as sb_export_router
+from app.api.sb_projects_router import router as sb_projects_router
+from app.api.script_ai_router import router as script_ai_router
+from app.api.script_assets_router import router as script_assets_router
+from app.api.script_canvas_router import router as script_canvas_router
+from app.api.script_export_router import router as script_export_router
+from app.api.script_import_router import router as script_import_router
+from app.api.script_projects_router import router as script_projects_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
+from app.api.skills_router import router as skills_router
+from app.api.style_templates_router import router as style_templates_router
 from app.api.supabase_auth_router import router as auth_router
-from app.api.temp_token_router import router as temp_token_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
 from app.api.task_manager_router import router as task_manager_router
 from app.api.task_router import router as task_router
-from app.api.user_settings_router import router as settings_router
-from app.api.media_router import legacy_router as legacy_douyin_router
-from app.api.media_router import router as media_router
-from app.api.media_router import media_content_router
 from app.api.teams_router import router as teams_router
-from app.api.invites_router import router as invites_router
+from app.api.temp_token_router import router as temp_token_router
+from app.api.user_settings_router import router as settings_router
 from app.api.video_collections_router import router as video_collections_router
-from app.api.notifications_router import router as notifications_router
-from app.api.realtime_router import router as realtime_router
-from app.api.error_report_router import router as error_report_router
-from app.api.admin import admin_router
-from app.api.media_auth import router as media_auth_router
-from app.api.sb_projects_router import router as sb_projects_router
-from app.api.sb_canvas_router import router as sb_canvas_router
-from app.api.sb_characters_router import router as sb_characters_router
-from app.api.sb_ai_router import router as sb_ai_router
-from app.api.sb_export_router import router as sb_export_router
-from app.api.style_templates_router import router as style_templates_router
-from app.api.skills_router import router as skills_router
-from app.api.script_projects_router import router as script_projects_router
-from app.api.script_canvas_router import router as script_canvas_router
-from app.api.script_assets_router import router as script_assets_router
-from app.api.script_ai_router import router as script_ai_router
-from app.api.script_import_router import router as script_import_router
-from app.api.script_export_router import router as script_export_router
-from app.api.ai_agents_router import router as ai_agents_router
 
 api_router = APIRouter()
 

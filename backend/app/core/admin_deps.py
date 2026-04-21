@@ -1,6 +1,7 @@
 """Admin-specific dependencies for FastAPI routes."""
 
 from typing import Annotated
+
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
@@ -35,7 +36,9 @@ async def get_admin_auth(
             .execute()
         )
     except Exception as e:
-        logger.error(f"[AdminAuth] Failed to query user profile for {auth.user_id}: {e}")
+        logger.error(
+            f"[AdminAuth] Failed to query user profile for {auth.user_id}: {e}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify admin access: {type(e).__name__}",

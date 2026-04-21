@@ -94,6 +94,7 @@ async def load_config_cached() -> dict:
     Used by the GET endpoint, which hits Supabase on every page load
     otherwise. Writes invalidate via save_config().
     """
+
     async def _loader() -> dict:
         return _load_config_from_disk()
 
@@ -139,15 +140,19 @@ transcode:
             default_download_path=config.get(
                 "default_download_path", get_default_download_path()
             ),
-            transcode_enabled="true" if transcode.get(
-                "enabled", settings.TRANSCODE_ENABLED
-            ) else "false",
+            transcode_enabled=(
+                "true"
+                if transcode.get("enabled", settings.TRANSCODE_ENABLED)
+                else "false"
+            ),
             transcode_tiers=transcode.get("tiers", settings.TRANSCODE_TIERS),
             transcode_encoder=transcode.get("encoder", settings.FFMPEG_ENCODER),
             transcode_preset=transcode.get("preset", settings.FFMPEG_PRESET),
-            transcode_parallel="true" if transcode.get(
-                "parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
-            ) else "false",
+            transcode_parallel=(
+                "true"
+                if transcode.get("parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS)
+                else "false"
+            ),
         )
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -227,6 +232,7 @@ async def update_frontend_config(
 
         # Handle transcode settings — persist to database (system_settings)
         from app.db import get_async_supabase_admin
+
         supabase_admin = await get_async_supabase_admin()
         transcode_updates = {
             "transcode_enabled": request.transcode_enabled,

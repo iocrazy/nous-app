@@ -10,7 +10,16 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -90,13 +99,13 @@ async def upload_version(
 
 
 @router.post("/{resource_id}/versions/{version_number}/set-current")
-async def set_current_version(
-    resource_id: str, version_number: int, auth: AuthDep
-):
+async def set_current_version(resource_id: str, version_number: int, auth: AuthDep):
     """Set a specific version as the current active version."""
     try:
         svc = ResourcesService()
-        result = await svc.set_current_version(resource_id, version_number, auth.user_id)
+        result = await svc.set_current_version(
+            resource_id, version_number, auth.user_id
+        )
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -106,9 +115,7 @@ async def set_current_version(
 
 
 @router.delete("/{resource_id}/versions/{version_id}")
-async def delete_version(
-    resource_id: str, version_id: str, auth: AuthDep
-):
+async def delete_version(resource_id: str, version_id: str, auth: AuthDep):
     """Delete a specific version (must keep at least one)."""
     try:
         svc = ResourcesService()
@@ -172,8 +179,8 @@ async def serve_hls_file(
         content_types = {
             ".m3u8": "application/vnd.apple.mpegurl",
             ".ts": "video/mp2t",
-            ".m4s": "video/iso.segment",   # fMP4 segments
-            ".mp4": "video/mp4",            # fMP4 init segments
+            ".m4s": "video/iso.segment",  # fMP4 segments
+            ".mp4": "video/mp4",  # fMP4 init segments
         }
         media_type = content_types.get(suffix, "application/octet-stream")
 
@@ -214,13 +221,18 @@ async def retry_transcode(
 
         mime = version.get("mime_type", "")
         if not mime.startswith("video/"):
-            raise HTTPException(status_code=400, detail="Only video files can be transcoded")
+            raise HTTPException(
+                status_code=400, detail="Only video files can be transcoded"
+            )
 
         # Reset status before retrying
         await repo.update_version(version_id, {"transcode_status": "pending"})
 
         from app.tasks.transcode_tasks import transcode_to_hls
-        await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, auth.user_id)
+
+        await asyncio.to_thread(
+            transcode_to_hls.delay, resource_id, version_id, auth.user_id
+        )
 
         return {"success": True, "message": "Transcoding queued"}
     except HTTPException:
@@ -258,6 +270,7 @@ async def serve_version_file(
             raise HTTPException(status_code=404, detail="No file available")
 
         from app.core.config import settings
+
         full_path = Path(settings.DOWNLOAD_PATH) / file_path
         if not full_path.exists():
             raise HTTPException(status_code=404, detail="File not found on disk")

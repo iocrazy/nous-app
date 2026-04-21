@@ -24,8 +24,15 @@ TAGS_MEDIA_CONTENT = ["Media Content"]
 async def _get_media_download_path(media_id: str) -> tuple[dict, str]:
     """Resolve media_id to download_path. Returns (media_record, download_path)."""
     from app.db.supabase_client import get_async_supabase_admin
+
     supabase = await get_async_supabase_admin()
-    res = await supabase.table("parsed_media").select("*").eq("id", media_id).maybe_single().execute()
+    res = (
+        await supabase.table("parsed_media")
+        .select("*")
+        .eq("id", media_id)
+        .maybe_single()
+        .execute()
+    )
     if not res or not res.data:
         raise HTTPException(status_code=404, detail="Media not found")
     download_path = res.data.get("download_path")
@@ -64,12 +71,14 @@ async def list_slides(media_id: str, auth: AuthDep):
                 mt = f"video/{suffix.lstrip('.')}"
             else:
                 continue
-            slides.append({
-                "name": f.name,
-                "type": slide_type,
-                "media_type": mt,
-                "url": f"/api/v1/media/{media_id}/slides/{f.name}",
-            })
+            slides.append(
+                {
+                    "name": f.name,
+                    "type": slide_type,
+                    "media_type": mt,
+                    "url": f"/api/v1/media/{media_id}/slides/{f.name}",
+                }
+            )
 
         return {"slides": slides, "count": len(slides)}
     except HTTPException:
@@ -80,7 +89,9 @@ async def list_slides(media_id: str, auth: AuthDep):
 
 
 @router.get("/{media_id}/slides/{filename}", tags=TAGS_MEDIA_CONTENT)
-async def serve_slide_file(media_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None):
+async def serve_slide_file(
+    media_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None
+):
     """
     Serve a single slide file.
 
@@ -90,6 +101,7 @@ async def serve_slide_file(media_id: str, filename: str, auth: OptionalAuthDep =
     Authentication: Bearer Token, API Key, or ?token= query param
     """
     import mimetypes as _mt
+
     from app.api.media_auth import validate_media_cookie
 
     if not auth and token:
@@ -124,7 +136,9 @@ async def serve_slide_file(media_id: str, filename: str, auth: OptionalAuthDep =
 
 
 @router.get("/{media_id}/audio", tags=TAGS_MEDIA_CONTENT)
-async def serve_audio_file(media_id: str, auth: OptionalAuthDep = None, token: str = None):
+async def serve_audio_file(
+    media_id: str, auth: OptionalAuthDep = None, token: str = None
+):
     """
     Serve standalone background audio for carousel content.
 
@@ -157,7 +171,11 @@ async def serve_audio_file(media_id: str, auth: OptionalAuthDep = None, token: s
         if not audio_file:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
-        return FileResponse(path=str(audio_file), media_type="audio/mpeg", content_disposition_type="inline")
+        return FileResponse(
+            path=str(audio_file),
+            media_type="audio/mpeg",
+            content_disposition_type="inline",
+        )
     except HTTPException:
         raise
     except Exception as e:

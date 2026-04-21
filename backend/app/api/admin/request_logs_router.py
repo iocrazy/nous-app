@@ -1,7 +1,7 @@
 """Admin API routes for Request Logs and Frontend Error Logs."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
@@ -124,9 +124,13 @@ async def list_request_logs(
     page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
     method: Optional[str] = Query(None, description="Filter by HTTP method"),
     path: Optional[str] = Query(None, description="Filter by path (ilike)"),
-    status_group: Optional[str] = Query(None, description="Filter by status group: 2xx, 4xx, 5xx"),
+    status_group: Optional[str] = Query(
+        None, description="Filter by status group: 2xx, 4xx, 5xx"
+    ),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    min_response_time: Optional[int] = Query(None, description="Min response time (ms)"),
+    min_response_time: Optional[int] = Query(
+        None, description="Min response time (ms)"
+    ),
     request_id: Optional[str] = Query(None, description="Filter by request ID"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
@@ -160,23 +164,25 @@ async def list_request_logs(
         if uid and uid in user_info:
             email = user_info[uid][0]  # (email, username)
 
-        data.append(RequestLogItem(
-            id=str(log["id"]),
-            request_id=log["request_id"],
-            user_id=uid,
-            user_email=email,
-            auth_type=log.get("auth_type", "anonymous"),
-            method=log["method"],
-            path=log["path"],
-            query_params=log.get("query_params"),
-            request_body=log.get("request_body"),
-            status_code=log.get("status_code"),
-            response_time_ms=log.get("response_time_ms"),
-            ip_address=log.get("ip_address"),
-            user_agent=log.get("user_agent"),
-            error_detail=log.get("error_detail"),
-            timestamp=log["timestamp"],
-        ))
+        data.append(
+            RequestLogItem(
+                id=str(log["id"]),
+                request_id=log["request_id"],
+                user_id=uid,
+                user_email=email,
+                auth_type=log.get("auth_type", "anonymous"),
+                method=log["method"],
+                path=log["path"],
+                query_params=log.get("query_params"),
+                request_body=log.get("request_body"),
+                status_code=log.get("status_code"),
+                response_time_ms=log.get("response_time_ms"),
+                ip_address=log.get("ip_address"),
+                user_agent=log.get("user_agent"),
+                error_detail=log.get("error_detail"),
+                timestamp=log["timestamp"],
+            )
+        )
 
     return RequestLogListResponse(data=data, total=total)
 
@@ -192,7 +198,9 @@ async def get_request_log_stats(
     logs = await repo.stats_since(start_time)
 
     if not logs:
-        return RequestLogStats(by_method=[], by_status=[], top_paths=[], by_hour=[], total=0)
+        return RequestLogStats(
+            by_method=[], by_status=[], top_paths=[], by_hour=[], total=0
+        )
 
     total = len(logs)
 
@@ -201,7 +209,10 @@ async def get_request_log_stats(
     for log in logs:
         m = log.get("method", "UNKNOWN")
         method_counts[m] = method_counts.get(m, 0) + 1
-    by_method = [MethodCount(method=m, count=c) for m, c in sorted(method_counts.items(), key=lambda x: -x[1])]
+    by_method = [
+        MethodCount(method=m, count=c)
+        for m, c in sorted(method_counts.items(), key=lambda x: -x[1])
+    ]
 
     # By status group
     status_counts: dict[str, int] = {}
@@ -210,7 +221,9 @@ async def get_request_log_stats(
         if sc is not None:
             group = f"{sc // 100}xx"
             status_counts[group] = status_counts.get(group, 0) + 1
-    by_status = [StatusCount(status_group=s, count=c) for s, c in sorted(status_counts.items())]
+    by_status = [
+        StatusCount(status_group=s, count=c) for s, c in sorted(status_counts.items())
+    ]
 
     # Top paths
     path_data: dict[str, list] = {}
@@ -225,7 +238,11 @@ async def get_request_log_stats(
         TopPath(
             path=p,
             count=len(times),
-            avg_response_time_ms=int(sum(t for t in times if t) / max(len([t for t in times if t]), 1)) if times else None,
+            avg_response_time_ms=(
+                int(sum(t for t in times if t) / max(len([t for t in times if t]), 1))
+                if times
+                else None
+            ),
         )
         for p, times in top_paths_list
     ]
@@ -281,20 +298,22 @@ async def list_frontend_errors(
         if uid and uid in user_info:
             email = user_info[uid][0]
 
-        data.append(FrontendErrorItem(
-            id=str(log["id"]),
-            user_id=uid,
-            user_email=email,
-            session_id=log.get("session_id"),
-            error_type=log["error_type"],
-            message=log.get("message"),
-            stack=log.get("stack"),
-            url=log.get("url"),
-            component=log.get("component"),
-            user_agent=log.get("user_agent"),
-            metadata=log.get("metadata"),
-            created_at=log["created_at"],
-        ))
+        data.append(
+            FrontendErrorItem(
+                id=str(log["id"]),
+                user_id=uid,
+                user_email=email,
+                session_id=log.get("session_id"),
+                error_type=log["error_type"],
+                message=log.get("message"),
+                stack=log.get("stack"),
+                url=log.get("url"),
+                component=log.get("component"),
+                user_agent=log.get("user_agent"),
+                metadata=log.get("metadata"),
+                created_at=log["created_at"],
+            )
+        )
 
     return FrontendErrorListResponse(data=data, total=total)
 
@@ -307,7 +326,9 @@ async def list_app_logs(
     level: Optional[str] = Query(None, description="Filter by log level"),
     module: Optional[str] = Query(None, description="Filter by module (ilike)"),
     message: Optional[str] = Query(None, description="Filter by message (ilike)"),
-    has_exception: Optional[bool] = Query(None, description="Filter logs with exceptions"),
+    has_exception: Optional[bool] = Query(
+        None, description="Filter logs with exceptions"
+    ),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
 ):

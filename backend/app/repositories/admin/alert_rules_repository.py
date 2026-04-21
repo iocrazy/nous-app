@@ -30,16 +30,11 @@ class AlertRulesRepository:
     async def list_active_rules(self) -> list[dict[str, Any]]:
         client = await self._client()
         result = await (
-            client.table(self.RULES_TABLE)
-            .select("*")
-            .eq("is_active", True)
-            .execute()
+            client.table(self.RULES_TABLE).select("*").eq("is_active", True).execute()
         )
         return result.data or []
 
-    async def create_rule(
-        self, payload: dict[str, Any]
-    ) -> Optional[dict[str, Any]]:
+    async def create_rule(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
         client = await self._client()
         result = await client.table(self.RULES_TABLE).insert(payload).execute()
         return result.data[0] if result.data else None
@@ -54,21 +49,13 @@ class AlertRulesRepository:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         result = await (
-            client.table(self.RULES_TABLE)
-            .update(changes)
-            .eq("id", rule_id)
-            .execute()
+            client.table(self.RULES_TABLE).update(changes).eq("id", rule_id).execute()
         )
         return result.data[0] if result.data else None
 
     async def delete_rule(self, rule_id: str) -> None:
         client = await self._client()
-        await (
-            client.table(self.RULES_TABLE)
-            .delete()
-            .eq("id", rule_id)
-            .execute()
-        )
+        await client.table(self.RULES_TABLE).delete().eq("id", rule_id).execute()
 
     async def auto_unmute_rule(self, rule_id: str) -> None:
         """Clear the mute flag when mute_until has passed."""
@@ -125,9 +112,7 @@ class AlertRulesRepository:
 
     # ─── Metric queries (for alert evaluation) ─────────────────────────
 
-    async def request_status_codes(
-        self, since_iso: str
-    ) -> list[dict[str, Any]]:
+    async def request_status_codes(self, since_iso: str) -> list[dict[str, Any]]:
         client = await self._client()
         result = await (
             client.table("api_request_logs")
@@ -137,9 +122,7 @@ class AlertRulesRepository:
         )
         return result.data or []
 
-    async def request_response_times(
-        self, since_iso: str
-    ) -> list[dict[str, Any]]:
+    async def request_response_times(self, since_iso: str) -> list[dict[str, Any]]:
         client = await self._client()
         result = await (
             client.table("api_request_logs")
@@ -149,9 +132,7 @@ class AlertRulesRepository:
         )
         return result.data or []
 
-    async def app_log_count_by_levels(
-        self, levels: list[str], since_iso: str
-    ) -> int:
+    async def app_log_count_by_levels(self, levels: list[str], since_iso: str) -> int:
         client = await self._client()
         result = await (
             client.table("application_logs")
@@ -162,9 +143,7 @@ class AlertRulesRepository:
         )
         return result.count or 0
 
-    async def app_log_count_by_level(
-        self, level: str, since_iso: str
-    ) -> int:
+    async def app_log_count_by_level(self, level: str, since_iso: str) -> int:
         client = await self._client()
         result = await (
             client.table("application_logs")

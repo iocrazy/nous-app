@@ -9,19 +9,24 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tasks_repository import AdminTasksRepository
 from app.schemas.admin import (
-    AdminTaskResponse,
     AdminTaskListResponse,
+    AdminTaskResponse,
     AdminTaskStatsResponse,
 )
-from app.utils.admin_helpers import create_audit_log, batch_get_user_auth_info
-
+from app.utils.admin_helpers import batch_get_user_auth_info, create_audit_log
 
 router = APIRouter()
 
 VALID_STATUSES = {"pending", "processing", "completed", "failed", "cancelled"}
 VALID_TASK_TYPES = {
-    "parse", "download", "upload", "transcode",
-    "ai_pipeline", "ai_extract", "ai_transcription", "ai_summary",
+    "parse",
+    "download",
+    "upload",
+    "transcode",
+    "ai_pipeline",
+    "ai_extract",
+    "ai_transcription",
+    "ai_summary",
 }
 VALID_SORT_FIELDS = {"created_at", "started_at", "completed_at", "status"}
 
@@ -84,9 +89,7 @@ async def list_tasks(
     email_map: dict[str, str] = {}
     if user_ids:
         auth_info = await batch_get_user_auth_info(user_ids)
-        email_map = {
-            uid: email for uid, (email, _) in auth_info.items() if email
-        }
+        email_map = {uid: email for uid, (email, _) in auth_info.items() if email}
 
     items = [
         AdminTaskResponse(
@@ -145,9 +148,12 @@ async def cancel_task(
     if celery_task_id:
         try:
             from app.celery_app import celery_app
+
             celery_app.control.revoke(celery_task_id, terminate=True)
         except Exception as e:
-            logger.warning(f"[Admin] Failed to revoke Celery task {celery_task_id}: {e}")
+            logger.warning(
+                f"[Admin] Failed to revoke Celery task {celery_task_id}: {e}"
+            )
 
     await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"})
 

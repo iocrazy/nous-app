@@ -77,9 +77,7 @@ class PermissionRepository:
             logger.error(f"Failed to get library {library_id}: {e}")
             return None
 
-    async def get_team_member_role(
-        self, user_id: str, team_id: str
-    ) -> Optional[str]:
+    async def get_team_member_role(self, user_id: str, team_id: str) -> Optional[str]:
         """Get a user's role in a team (owner/admin/member)."""
         try:
             client = await self._get_client()

@@ -21,7 +21,7 @@ import hmac
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -33,7 +33,9 @@ router = APIRouter(prefix="/auth", tags=["Media Auth"])
 # Cookie config
 COOKIE_NAME = "media_session"
 COOKIE_MAX_AGE = 7 * 24 * 3600  # 7 days (matches Supabase refresh token lifetime)
-MEDIA_TOKEN_MAX_AGE = 4 * 3600  # 4 hours (refreshed on every Supabase TOKEN_REFRESHED event)
+MEDIA_TOKEN_MAX_AGE = (
+    4 * 3600
+)  # 4 hours (refreshed on every Supabase TOKEN_REFRESHED event)
 
 
 def _get_secret() -> str:

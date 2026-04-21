@@ -52,18 +52,21 @@ class AISettingsResponse(BaseModel):
     auto_transcribe: bool = False
     auto_summarize: bool = False
     preferred_language: str = "auto"
-    task_assignment: Dict[str, str] = Field(default_factory=lambda: {
-        "transcription": "",
-        "summarization": "",
-        "visual_analysis": "",
-    })
+    task_assignment: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "transcription": "",
+            "summarization": "",
+            "visual_analysis": "",
+        }
+    )
 
 
 class TestConnectionRequest(BaseModel):
     """Request body for testing an AI provider connection."""
 
     provider_key: str = Field(
-        ..., description="Provider key: openai, deepseek, doubao, volcengine, ollama, lmstudio"
+        ...,
+        description="Provider key: openai, deepseek, doubao, volcengine, ollama, lmstudio",
     )
     api_key: Optional[str] = Field(default="", description="API key for the provider")
     app_id: Optional[str] = Field(default="", description="App ID (for volcengine)")

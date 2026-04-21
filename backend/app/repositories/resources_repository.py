@@ -74,7 +74,9 @@ class ResourcesRepository:
             logger.error(f"Failed to get resource by media_id {media_id}: {e}")
             return None
 
-    async def get_resource_by_platform_id(self, platform_id: str) -> Optional[Dict[str, Any]]:
+    async def get_resource_by_platform_id(
+        self, platform_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Look up resource by the external platform content ID (e.g. douyin aweme_id).
 
         Two-step: parsed_media.platform_id -> parsed_media.id -> resources.media_id
@@ -114,7 +116,9 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource for media={media_id}, creator={creator_id}: {e}")
+            logger.error(
+                f"Failed to get resource for media={media_id}, creator={creator_id}: {e}"
+            )
             return None
 
     async def update_download_status(
@@ -127,8 +131,10 @@ class ResourcesRepository:
             statuses: Dict of status fields, e.g. {"video_download_status": "completed"}.
         """
         valid_fields = {
-            "video_download_status", "music_download_status",
-            "cover_download_status", "image_download_status",
+            "video_download_status",
+            "music_download_status",
+            "cover_download_status",
+            "image_download_status",
         }
         data = {k: v for k, v in statuses.items() if k in valid_fields}
         if not data:
@@ -361,12 +367,7 @@ class ResourcesRepository:
         the parent resource if this was the last reference."""
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_ITEMS)
-                .delete()
-                .eq("id", item_id)
-                .execute()
-            )
+            await client.table(self.TABLE_ITEMS).delete().eq("id", item_id).execute()
             logger.info(f"Deleted resource_item {item_id}")
             return True
         except Exception as e:
@@ -489,7 +490,9 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get version {version_number} for {resource_id}: {e}")
+            logger.error(
+                f"Failed to get version {version_number} for {resource_id}: {e}"
+            )
             return None
 
     async def delete_version(self, version_id: str) -> bool:
@@ -627,8 +630,7 @@ class ResourcesRepository:
                     .execute()
                 )
                 resource_ids = [
-                    str(item["resource_id"])
-                    for item in (items_result.data or [])
+                    str(item["resource_id"]) for item in (items_result.data or [])
                 ]
                 for rid in resource_ids:
                     await (
@@ -737,9 +739,7 @@ class ResourcesRepository:
             logger.error(f"Failed to get descendant folders for {folder_id}: {e}")
             return []
 
-    async def count_folder_contents(
-        self, folder_ids: List[str]
-    ) -> Dict[str, int]:
+    async def count_folder_contents(self, folder_ids: List[str]) -> Dict[str, int]:
         """Count resources and sub-folders within the given folder IDs."""
         try:
             client = await self._get_client()
@@ -786,7 +786,7 @@ class ResourcesRepository:
                     .eq("folder_id", fid)
                     .execute()
                 )
-                for item in (items_result.data or []):
+                for item in items_result.data or []:
                     rid = str(item["resource_id"])
                     update_data = {
                         **trash_data,
@@ -830,10 +830,7 @@ class ResourcesRepository:
         try:
             client = await self._get_client()
             await (
-                client.table(self.TABLE_FOLDERS)
-                .delete()
-                .eq("id", folder_id)
-                .execute()
+                client.table(self.TABLE_FOLDERS).delete().eq("id", folder_id).execute()
             )
             logger.info(f"Deleted folder {folder_id}")
             return True
@@ -1134,8 +1131,4 @@ class ResourcesRepository:
                 return all(results)
             return any(results)
 
-        return [
-            item
-            for item in items
-            if matches_tags(item.get("resource_id", ""))
-        ]
+        return [item for item in items if matches_tags(item.get("resource_id", ""))]

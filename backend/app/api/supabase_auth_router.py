@@ -8,12 +8,12 @@ Supabase 认证路由
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
 from app.core.admin_deps import AdminAuthDep
-from app.core.deps import AuthDep, get_auth
+from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
 from app.services.points_service import PointsService
@@ -85,7 +85,9 @@ async def _create_team_quota_for_new_user(user_id: str) -> None:
 
         team_id = team_result.data[0]["team_id"]
         points_service = PointsService()
-        await points_service.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
+        await points_service.ensure_team_quota(
+            team_id, grant_free_points=True, user_id=user_id
+        )
         logger.info(
             f"Created team quota with welcome points for user {user_id}, "
             f"team {team_id}"

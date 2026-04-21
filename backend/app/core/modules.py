@@ -4,12 +4,32 @@ from typing import Dict, List
 
 # All controllable modules with display names
 MODULE_DEFINITIONS: List[Dict[str, str]] = [
-    {"key": "parser", "name": "Parser", "description": "URL parsing, video downloading"},
-    {"key": "resources", "name": "Resources", "description": "Resource library CRUD, folders, tags"},
+    {
+        "key": "parser",
+        "name": "Parser",
+        "description": "URL parsing, video downloading",
+    },
+    {
+        "key": "resources",
+        "name": "Resources",
+        "description": "Resource library CRUD, folders, tags",
+    },
     {"key": "library", "name": "Library", "description": "Media library browsing"},
-    {"key": "projects", "name": "Projects", "description": "Project management, file review"},
-    {"key": "ai_analysis", "name": "AI Analysis", "description": "Transcription, summary, visual analysis"},
-    {"key": "dashboard", "name": "Dashboard", "description": "Statistics and analytics"},
+    {
+        "key": "projects",
+        "name": "Projects",
+        "description": "Project management, file review",
+    },
+    {
+        "key": "ai_analysis",
+        "name": "AI Analysis",
+        "description": "Transcription, summary, visual analysis",
+    },
+    {
+        "key": "dashboard",
+        "name": "Dashboard",
+        "description": "Statistics and analytics",
+    },
     {"key": "cleanup", "name": "Cleanup", "description": "Storage cleanup suggestions"},
 ]
 

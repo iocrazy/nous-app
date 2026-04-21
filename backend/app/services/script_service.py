@@ -167,9 +167,7 @@ class ScriptService:
     async def create_asset(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return await self.asset_repo.create(data)
 
-    async def update_asset(
-        self, asset_id: str, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def update_asset(self, asset_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         return await self.asset_repo.update(asset_id, data)
 
     async def delete_asset(self, asset_id: str) -> None:
@@ -182,15 +180,11 @@ class ScriptService:
 
     # ─── Script-Storyboard link operations ───────────────────────────
 
-    async def create_storyboard_link(
-        self, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def create_storyboard_link(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return await self.link_repo.create(data)
 
     async def delete_storyboard_link(self, link_id: str) -> None:
         await self.link_repo.delete(link_id)
 
-    async def list_links_by_chapter(
-        self, chapter_id: str
-    ) -> List[Dict[str, Any]]:
+    async def list_links_by_chapter(self, chapter_id: str) -> List[Dict[str, Any]]:
         return await self.link_repo.list_by_chapter(chapter_id)

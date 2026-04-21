@@ -149,9 +149,11 @@ async def get_monitoring_stats(
         (error_requests / total_requests * 100) if total_requests > 0 else 0, 2
     )
     avg_ms = round(
-        sum(r.get("response_time_ms") or 0 for r in req_logs) / total_requests
-        if total_requests > 0
-        else 0,
+        (
+            sum(r.get("response_time_ms") or 0 for r in req_logs) / total_requests
+            if total_requests > 0
+            else 0
+        ),
         1,
     )
     app_error_count = sum(
@@ -201,9 +203,7 @@ async def get_monitoring_stats(
         avg = round(sum(times_sorted) / count, 1)
         p95_idx = min(int(count * 0.95), count - 1)
         p95 = times_sorted[p95_idx]
-        top_slow.append(
-            SlowApiEntry(path=path, avg_ms=avg, p95_ms=p95, count=count)
-        )
+        top_slow.append(SlowApiEntry(path=path, avg_ms=avg, p95_ms=p95, count=count))
 
     top_slow.sort(key=lambda x: x.avg_ms, reverse=True)
     top_slow_apis = top_slow[:10]

@@ -22,8 +22,13 @@ router = APIRouter(prefix="/task-manager")
 @router.get("/tasks")
 async def list_tasks(
     auth: AuthDep,
-    task_type: Optional[str] = Query(None, pattern="^(parse|download|upload|transcode|ai_pipeline|ai_extract|ai_transcription|ai_summary)$"),
-    status: Optional[str] = Query(None, pattern="^(pending|processing|completed|failed|cancelled)$"),
+    task_type: Optional[str] = Query(
+        None,
+        pattern="^(parse|download|upload|transcode|ai_pipeline|ai_extract|ai_transcription|ai_summary)$",
+    ),
+    status: Optional[str] = Query(
+        None, pattern="^(pending|processing|completed|failed|cancelled)$"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -86,16 +91,28 @@ async def retry_task(task_id: str, auth: AuthDep):
             if not version_id:
                 # Fallback: look up current version from resource
                 from app.repositories.resources_repository import ResourcesRepository
+
                 repo = ResourcesRepository()
                 versions = await repo.get_versions(resource_id)
                 if versions:
                     version_id = str(versions[0]["id"])
             if version_id:
                 from app.tasks.transcode_tasks import transcode_to_hls
-                await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, user_id, _unified_task_id=str(task_id))
-                logger.info(f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}")
+
+                await asyncio.to_thread(
+                    transcode_to_hls.delay,
+                    resource_id,
+                    version_id,
+                    user_id,
+                    _unified_task_id=str(task_id),
+                )
+                logger.info(
+                    f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}"
+                )
             else:
-                logger.warning(f"[TaskRetry] No version found for resource={resource_id}, skipping dispatch")
+                logger.warning(
+                    f"[TaskRetry] No version found for resource={resource_id}, skipping dispatch"
+                )
 
         elif task_type == "download":
             # Re-dispatch the download. The reaper marks zombie pending
@@ -112,12 +129,18 @@ async def retry_task(task_id: str, auth: AuthDep):
             mrepo = MediaRepository()
             media = await mrepo.get_by_platform_id(media_id)
             if not media:
-                logger.warning(f"[TaskRetry] Media not found for retry of {task_id}: {media_id}")
+                logger.warning(
+                    f"[TaskRetry] Media not found for retry of {task_id}: {media_id}"
+                )
                 return {"success": True, "data": task}
 
             meta = task.get("metadata") or {}
             subtitle = task.get("subtitle") or ""
-            want_video = "Image" in subtitle or "Video" in subtitle or int(media.get("media_type") or 0) in (0, 2, 4, 61, 68)
+            want_video = (
+                "Image" in subtitle
+                or "Video" in subtitle
+                or int(media.get("media_type") or 0) in (0, 2, 4, 61, 68)
+            )
             want_cover = "Cover" in subtitle
 
             celery_task = await asyncio.to_thread(
@@ -134,26 +157,38 @@ async def retry_task(task_id: str, auth: AuthDep):
                 _unified_task_id=str(task_id),
             )
             try:
-                await tracker._atomic_update(str(task_id), {"celery_task_id": celery_task.id})
+                await tracker._atomic_update(
+                    str(task_id), {"celery_task_id": celery_task.id}
+                )
             except Exception as _e:
                 logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
-            logger.info(f"[TaskRetry] Re-dispatched download for task={task_id}, media={media_id}")
+            logger.info(
+                f"[TaskRetry] Re-dispatched download for task={task_id}, media={media_id}"
+            )
 
         elif task_type == "ai_summary" and resource_id:
             from app.tasks.ai_tasks import generate_summary_task
+
             media_id = task.get("media_id")
             celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
-                media_id, user_id, resource_id, str(task_id),
+                media_id,
+                user_id,
+                resource_id,
+                str(task_id),
             )
             try:
-                await tracker._atomic_update(str(task_id), {"celery_task_id": celery_task.id})
+                await tracker._atomic_update(
+                    str(task_id), {"celery_task_id": celery_task.id}
+                )
             except Exception as _e:
                 logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
             logger.info(f"[TaskRetry] Re-dispatched summary for task={task_id}")
 
     except Exception as e:
-        logger.error(f"[TaskRetry] Failed to dispatch {task_type} for task {task_id}: {e}")
+        logger.error(
+            f"[TaskRetry] Failed to dispatch {task_type} for task {task_id}: {e}"
+        )
 
     return {"success": True, "data": task}
 
@@ -208,6 +243,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     if celery_id:
         try:
             from app.celery_app import celery_app
+
             redis_client = celery_app.backend.client
             raw = redis_client.get(f"download_progress:{celery_id}")
             if raw:

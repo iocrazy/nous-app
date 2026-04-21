@@ -90,7 +90,9 @@ def _apply_text_filter(value: Optional[str], query: str) -> bool:
     return query.lower() in value.lower()
 
 
-def _apply_filter(entry: dict, field: str, operator: str, value: str, negate: bool) -> bool:
+def _apply_filter(
+    entry: dict, field: str, operator: str, value: str, negate: bool
+) -> bool:
     """Apply a single structured filter to an entry."""
     actual = entry.get(field)
     if actual is None:
@@ -140,7 +142,9 @@ def _apply_filter(entry: dict, field: str, operator: str, value: str, negate: bo
 async def search_logs(
     auth: AdminAuthDep,
     q: Optional[str] = Query(None, description="Free text search"),
-    filters: Optional[str] = Query(None, description="JSON array of structured filters"),
+    filters: Optional[str] = Query(
+        None, description="JSON array of structured filters"
+    ),
     sources: Optional[str] = Query(
         "request,app,frontend,audit",
         description="Comma-separated sources to search",
@@ -167,7 +171,9 @@ async def search_logs(
     start_iso = t_start.isoformat()
     end_iso = t_end.isoformat()
 
-    source_list = [s.strip() for s in (sources or "request,app,frontend,audit").split(",")]
+    source_list = [
+        s.strip() for s in (sources or "request,app,frontend,audit").split(",")
+    ]
 
     # Parse structured filters
     parsed_filters: List[dict] = []
@@ -205,15 +211,19 @@ async def search_logs(
             # Apply structured filters
             skip = False
             for pf in parsed_filters:
-                if not _apply_filter(entry, pf["field"], pf["operator"], pf["value"], pf.get("negate", False)):
+                if not _apply_filter(
+                    entry,
+                    pf["field"],
+                    pf["operator"],
+                    pf["value"],
+                    pf.get("negate", False),
+                ):
                     skip = True
                     break
             if skip:
                 continue
 
-            all_entries.append(
-                UnifiedLogEntry(id=str(r.get("id", "")), **entry)
-            )
+            all_entries.append(UnifiedLogEntry(id=str(r.get("id", "")), **entry))
 
             # Facets
             sc = str(r.get("status_code", ""))
@@ -243,15 +253,19 @@ async def search_logs(
 
             skip = False
             for pf in parsed_filters:
-                if not _apply_filter(entry, pf["field"], pf["operator"], pf["value"], pf.get("negate", False)):
+                if not _apply_filter(
+                    entry,
+                    pf["field"],
+                    pf["operator"],
+                    pf["value"],
+                    pf.get("negate", False),
+                ):
                     skip = True
                     break
             if skip:
                 continue
 
-            all_entries.append(
-                UnifiedLogEntry(id=str(r.get("id", "")), **entry)
-            )
+            all_entries.append(UnifiedLogEntry(id=str(r.get("id", "")), **entry))
 
             level = r.get("level", "")
             facets.sources["app"] = facets.sources.get("app", 0) + 1
@@ -282,15 +296,19 @@ async def search_logs(
 
             skip = False
             for pf in parsed_filters:
-                if not _apply_filter(entry, pf["field"], pf["operator"], pf["value"], pf.get("negate", False)):
+                if not _apply_filter(
+                    entry,
+                    pf["field"],
+                    pf["operator"],
+                    pf["value"],
+                    pf.get("negate", False),
+                ):
                     skip = True
                     break
             if skip:
                 continue
 
-            all_entries.append(
-                UnifiedLogEntry(id=str(r.get("id", "")), **entry)
-            )
+            all_entries.append(UnifiedLogEntry(id=str(r.get("id", "")), **entry))
 
             facets.sources["frontend"] = facets.sources.get("frontend", 0) + 1
             facets.levels["ERROR"] = facets.levels.get("ERROR", 0) + 1
@@ -313,15 +331,19 @@ async def search_logs(
 
             skip = False
             for pf in parsed_filters:
-                if not _apply_filter(entry, pf["field"], pf["operator"], pf["value"], pf.get("negate", False)):
+                if not _apply_filter(
+                    entry,
+                    pf["field"],
+                    pf["operator"],
+                    pf["value"],
+                    pf.get("negate", False),
+                ):
                     skip = True
                     break
             if skip:
                 continue
 
-            all_entries.append(
-                UnifiedLogEntry(id=str(r.get("id", "")), **entry)
-            )
+            all_entries.append(UnifiedLogEntry(id=str(r.get("id", "")), **entry))
 
             facets.sources["audit"] = facets.sources.get("audit", 0) + 1
 

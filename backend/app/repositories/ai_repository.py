@@ -74,7 +74,9 @@ class AIRepository:
     # Summaries
     # ------------------------------------------------------------------
 
-    async def save_summary(self, resource_id: str, data: Dict[str, Any]) -> Optional[Dict]:
+    async def save_summary(
+        self, resource_id: str, data: Dict[str, Any]
+    ) -> Optional[Dict]:
         """Save a summary record for a resource.
 
         Args:

@@ -27,11 +27,12 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-
 # ─── Phase Enum ───────────────────────────────────────────────────────
+
 
 class TaskPhase(str, Enum):
     """Fine-grained task lifecycle phases."""
+
     QUEUED = "queued"
     DEDUP_CHECK = "dedup_check"
     PROCESSING = "processing"
@@ -43,12 +44,22 @@ class TaskPhase(str, Enum):
 # ─── Valid Transitions ────────────────────────────────────────────────
 
 VALID_TRANSITIONS: Dict[TaskPhase, set[TaskPhase]] = {
-    TaskPhase.QUEUED:      {TaskPhase.DEDUP_CHECK, TaskPhase.PROCESSING, TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
-    TaskPhase.DEDUP_CHECK: {TaskPhase.PROCESSING, TaskPhase.COMPLETED, TaskPhase.FAILED},
-    TaskPhase.PROCESSING:  {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
-    TaskPhase.COMPLETED:   set(),  # terminal
-    TaskPhase.FAILED:      {TaskPhase.QUEUED},  # retry path
-    TaskPhase.CANCELLED:   set(),  # terminal
+    TaskPhase.QUEUED: {
+        TaskPhase.DEDUP_CHECK,
+        TaskPhase.PROCESSING,
+        TaskPhase.COMPLETED,
+        TaskPhase.FAILED,
+        TaskPhase.CANCELLED,
+    },
+    TaskPhase.DEDUP_CHECK: {
+        TaskPhase.PROCESSING,
+        TaskPhase.COMPLETED,
+        TaskPhase.FAILED,
+    },
+    TaskPhase.PROCESSING: {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
+    TaskPhase.COMPLETED: set(),  # terminal
+    TaskPhase.FAILED: {TaskPhase.QUEUED},  # retry path
+    TaskPhase.CANCELLED: set(),  # terminal
 }
 
 _TERMINAL_PHASES = {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED}
@@ -57,47 +68,48 @@ _TERMINAL_PHASES = {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED}
 # ─── Dedup Key Fields ────────────────────────────────────────────────
 
 DEDUP_KEY_FIELDS: Dict[str, str] = {
-    "parse":             "url",
-    "download":          "platform_id",
-    "transcode":         "version_id",
-    "ai_extract":        "platform_id",
-    "ai_transcription":  "platform_id",
-    "ai_summary":        "platform_id",
+    "parse": "url",
+    "download": "platform_id",
+    "transcode": "version_id",
+    "ai_extract": "platform_id",
+    "ai_transcription": "platform_id",
+    "ai_summary": "platform_id",
 }
 
 
 # ─── Error Codes ──────────────────────────────────────────────────────
 
 ERROR_CODES: Dict[str, Dict[str, Any]] = {
-    "NETWORK_TIMEOUT":    {"retryable": True,  "auto_retry": False},
-    "RESOURCE_404":       {"retryable": False},
-    "STORAGE_FULL":       {"retryable": False},
-    "RATE_LIMITED":       {"retryable": True,  "auto_retry": True},
-    "TRANSCODE_FAILED":   {"retryable": False},
-    "AI_QUOTA_EXCEEDED":  {"retryable": False},
-    "UNKNOWN":            {"retryable": True,  "auto_retry": False},
+    "NETWORK_TIMEOUT": {"retryable": True, "auto_retry": False},
+    "RESOURCE_404": {"retryable": False},
+    "STORAGE_FULL": {"retryable": False},
+    "RATE_LIMITED": {"retryable": True, "auto_retry": True},
+    "TRANSCODE_FAILED": {"retryable": False},
+    "AI_QUOTA_EXCEEDED": {"retryable": False},
+    "UNKNOWN": {"retryable": True, "auto_retry": False},
 }
 
 
 # ─── Constants ────────────────────────────────────────────────────────
 
-DEDUP_LOCK_TTL = 3600           # seconds (1 hour)
-LOCK_RENEWAL_INTERVAL = 600     # seconds (10 minutes)
+DEDUP_LOCK_TTL = 3600  # seconds (1 hour)
+LOCK_RENEWAL_INTERVAL = 600  # seconds (10 minutes)
 
 
 # ─── Phase → legacy status mapping ───────────────────────────────────
 
 _PHASE_TO_STATUS = {
-    TaskPhase.QUEUED:      "pending",
+    TaskPhase.QUEUED: "pending",
     TaskPhase.DEDUP_CHECK: "pending",
-    TaskPhase.PROCESSING:  "processing",
-    TaskPhase.COMPLETED:   "completed",
-    TaskPhase.FAILED:      "failed",
-    TaskPhase.CANCELLED:   "cancelled",
+    TaskPhase.PROCESSING: "processing",
+    TaskPhase.COMPLETED: "completed",
+    TaskPhase.FAILED: "failed",
+    TaskPhase.CANCELLED: "cancelled",
 }
 
 
 # ─── UnifiedTaskManager ──────────────────────────────────────────────
+
 
 class UnifiedTaskManager:
     """Unified task lifecycle manager with phase state machine, dedup, and subscriber fan-out."""
@@ -105,20 +117,24 @@ class UnifiedTaskManager:
     THROTTLE_INTERVAL = 1.0  # seconds between progress writes
 
     def __init__(self) -> None:
-        self._last_progress: Dict[str, float] = {}   # task_id -> last_write_time
-        self._last_progress_value: Dict[str, int] = {}  # task_id -> last_progress_percent
-        self._last_renewal: Dict[str, float] = {}     # dedup_key -> last renewal epoch
+        self._last_progress: Dict[str, float] = {}  # task_id -> last_write_time
+        self._last_progress_value: Dict[str, int] = (
+            {}
+        )  # task_id -> last_progress_percent
+        self._last_renewal: Dict[str, float] = {}  # dedup_key -> last renewal epoch
 
     # ── Internal helpers ──────────────────────────────────────────────
 
     async def _get_client(self):
         """Lazy-import async Supabase admin client."""
         from app.db.supabase_client import get_async_supabase_admin
+
         return await get_async_supabase_admin()
 
     def _get_redis(self):
         """Get Redis connection from Celery backend."""
         from app.celery_app import celery_app
+
         return celery_app.backend.client
 
     async def _get_phase(self, task_id: str) -> TaskPhase:
@@ -149,12 +165,7 @@ class UnifiedTaskManager:
     async def _atomic_update(self, task_id: str, updates: Dict[str, Any]) -> None:
         """Write updates to a unified_tasks row."""
         client = await self._get_client()
-        await (
-            client.table("unified_tasks")
-            .update(updates)
-            .eq("id", task_id)
-            .execute()
-        )
+        await client.table("unified_tasks").update(updates).eq("id", task_id).execute()
 
     # ── Lifecycle: create ─────────────────────────────────────────────
 
@@ -222,15 +233,20 @@ class UnifiedTaskManager:
         if current == TaskPhase.PROCESSING:
             return  # already processing
         if current in _TERMINAL_PHASES:
-            logger.debug(f"[TaskManager] start() skipped: {task_id} already terminal ({current.value})")
+            logger.debug(
+                f"[TaskManager] start() skipped: {task_id} already terminal ({current.value})"
+            )
             return
         self._validate_transition(current, TaskPhase.PROCESSING)
         now_iso = datetime.now(timezone.utc).isoformat()
-        await self._atomic_update(task_id, {
-            "phase": TaskPhase.PROCESSING.value,
-            "status": _PHASE_TO_STATUS[TaskPhase.PROCESSING],
-            "started_at": now_iso,
-        })
+        await self._atomic_update(
+            task_id,
+            {
+                "phase": TaskPhase.PROCESSING.value,
+                "status": _PHASE_TO_STATUS[TaskPhase.PROCESSING],
+                "started_at": now_iso,
+            },
+        )
         logger.debug(f"[TaskManager] Started {task_id} ({current.value} -> processing)")
 
     # ── Lifecycle: update_progress ────────────────────────────────────
@@ -273,7 +289,13 @@ class UnifiedTaskManager:
         if title is not None:
             updates["title"] = title
         if metadata_patch:
-            existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
+            existing = (
+                await client.table("unified_tasks")
+                .select("metadata")
+                .eq("id", task_id)
+                .single()
+                .execute()
+            )
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
             updates["metadata"] = merged
 
@@ -294,7 +316,9 @@ class UnifiedTaskManager:
         """
         current = await self._get_phase(task_id)
         if current in _TERMINAL_PHASES:
-            logger.debug(f"[TaskManager] complete() skipped: {task_id} already terminal ({current.value})")
+            logger.debug(
+                f"[TaskManager] complete() skipped: {task_id} already terminal ({current.value})"
+            )
             return
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -307,7 +331,13 @@ class UnifiedTaskManager:
         }
         if metadata_patch:
             client = await self._get_client()
-            existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
+            existing = (
+                await client.table("unified_tasks")
+                .select("metadata")
+                .eq("id", task_id)
+                .single()
+                .execute()
+            )
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
             updates["metadata"] = merged
 
@@ -334,7 +364,9 @@ class UnifiedTaskManager:
         """
         current = await self._get_phase(task_id)
         if current in _TERMINAL_PHASES:
-            logger.debug(f"[TaskManager] fail() skipped: {task_id} already terminal ({current.value})")
+            logger.debug(
+                f"[TaskManager] fail() skipped: {task_id} already terminal ({current.value})"
+            )
             return
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -348,7 +380,13 @@ class UnifiedTaskManager:
             updates["error_code"] = error_code
         if metadata_patch:
             client = await self._get_client()
-            existing = await client.table("unified_tasks").select("metadata").eq("id", task_id).single().execute()
+            existing = (
+                await client.table("unified_tasks")
+                .select("metadata")
+                .eq("id", task_id)
+                .single()
+                .execute()
+            )
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
             updates["metadata"] = merged
 
@@ -374,7 +412,9 @@ class UnifiedTaskManager:
             .execute()
         )
         if not result.data:
-            logger.warning(f"[TaskManager] Cancel: task {task_id} not found for user {user_id}")
+            logger.warning(
+                f"[TaskManager] Cancel: task {task_id} not found for user {user_id}"
+            )
             return
 
         current_raw = result.data.get("phase", "queued")
@@ -384,17 +424,21 @@ class UnifiedTaskManager:
             current = TaskPhase.QUEUED
 
         if current in _TERMINAL_PHASES:
-            logger.debug(f"[TaskManager] cancel() skipped: {task_id} already terminal ({current.value})")
+            logger.debug(
+                f"[TaskManager] cancel() skipped: {task_id} already terminal ({current.value})"
+            )
             return
 
         celery_id = result.data.get("celery_task_id")
 
         await (
             client.table("unified_tasks")
-            .update({
-                "phase": TaskPhase.CANCELLED.value,
-                "status": _PHASE_TO_STATUS[TaskPhase.CANCELLED],
-            })
+            .update(
+                {
+                    "phase": TaskPhase.CANCELLED.value,
+                    "status": _PHASE_TO_STATUS[TaskPhase.CANCELLED],
+                }
+            )
             .eq("id", task_id)
             .eq("user_id", user_id)
             .execute()
@@ -405,10 +449,13 @@ class UnifiedTaskManager:
         if celery_id:
             try:
                 from app.celery_app import celery_app
+
                 celery_app.control.revoke(celery_id, terminate=True)
                 logger.info(f"[TaskManager] Revoked Celery task {celery_id}")
             except Exception as e:
-                logger.warning(f"[TaskManager] Failed to revoke Celery task {celery_id}: {e}")
+                logger.warning(
+                    f"[TaskManager] Failed to revoke Celery task {celery_id}: {e}"
+                )
 
         logger.debug(f"[TaskManager] Cancelled {task_id}")
 
@@ -464,8 +511,23 @@ class UnifiedTaskManager:
         )
 
         stats = {
-            "by_type": {"parse": 0, "download": 0, "upload": 0, "transcode": 0, "ai_pipeline": 0, "ai_extract": 0, "ai_transcription": 0, "ai_summary": 0},
-            "by_status": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0},
+            "by_type": {
+                "parse": 0,
+                "download": 0,
+                "upload": 0,
+                "transcode": 0,
+                "ai_pipeline": 0,
+                "ai_extract": 0,
+                "ai_transcription": 0,
+                "ai_summary": 0,
+            },
+            "by_status": {
+                "pending": 0,
+                "processing": 0,
+                "completed": 0,
+                "failed": 0,
+                "cancelled": 0,
+            },
             "active_total": 0,
         }
         for row in result.data or []:
@@ -533,16 +595,18 @@ class UnifiedTaskManager:
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        await client.table("unified_tasks").update({
-            "phase": TaskPhase.QUEUED.value,
-            "status": "pending",
-            "progress": 0,
-            "error_msg": None,
-            "error_code": None,
-            "started_at": None,
-            "completed_at": None,
-            "updated_at": now_iso,
-        }).eq("id", task_id).execute()
+        await client.table("unified_tasks").update(
+            {
+                "phase": TaskPhase.QUEUED.value,
+                "status": "pending",
+                "progress": 0,
+                "error_msg": None,
+                "error_code": None,
+                "started_at": None,
+                "completed_at": None,
+                "updated_at": now_iso,
+            }
+        ).eq("id", task_id).execute()
 
         return task
 
@@ -572,7 +636,9 @@ class UnifiedTaskManager:
         dedup_key = self.make_dedup_key(task_type, dedup_identifier)
         redis = self._get_redis()
 
-        acquired = await asyncio.to_thread(redis.set, dedup_key, "locked", nx=True, ex=DEDUP_LOCK_TTL)
+        acquired = await asyncio.to_thread(
+            redis.set, dedup_key, "locked", nx=True, ex=DEDUP_LOCK_TTL
+        )
         if acquired:
             logger.debug(f"[TaskManager] Acquired dedup lock: {dedup_key}")
             return {"action": "created", "dedup_key": dedup_key}
@@ -592,11 +658,13 @@ class UnifiedTaskManager:
             task = active_result.data[0]
             task_id = task["id"]
             subscribers = task.get("subscribers") or []
-            subscribers.append({
-                "user_id": user_id,
-                "resource_id": resource_id,
-                "subscribed_at": datetime.now(timezone.utc).isoformat(),
-            })
+            subscribers.append(
+                {
+                    "user_id": user_id,
+                    "resource_id": resource_id,
+                    "subscribed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             await (
                 client.table("unified_tasks")
                 .update({"subscribers": subscribers})
@@ -607,7 +675,11 @@ class UnifiedTaskManager:
                 f"[TaskManager] Subscribed user {user_id} to task {task_id} "
                 f"(dedup_key={dedup_key})"
             )
-            return {"action": "subscribed", "task_id": str(task_id), "dedup_key": dedup_key}
+            return {
+                "action": "subscribed",
+                "task_id": str(task_id),
+                "dedup_key": dedup_key,
+            }
 
         completed_result = await (
             client.table("unified_tasks")
@@ -649,7 +721,9 @@ class UnifiedTaskManager:
         )
         task = result.data
         if not task:
-            logger.warning(f"[TaskManager] notify_subscribers: task {task_id} not found")
+            logger.warning(
+                f"[TaskManager] notify_subscribers: task {task_id} not found"
+            )
             return
 
         subscribers = task.get("subscribers") or []
@@ -777,7 +851,10 @@ class UnifiedTaskManager:
             return "NETWORK_TIMEOUT"
         if any(kw in msg for kw in ("404", "not found", "does not exist")):
             return "RESOURCE_404"
-        if any(kw in msg for kw in ("disk full", "no space", "storage full", "quota exceeded")):
+        if any(
+            kw in msg
+            for kw in ("disk full", "no space", "storage full", "quota exceeded")
+        ):
             if "ai" in msg or "openai" in msg or "whisper" in msg:
                 return "AI_QUOTA_EXCEEDED"
             return "STORAGE_FULL"

@@ -264,7 +264,9 @@ async def update_agent(
     )
     agent = existing_resp.data
     if not agent:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
     if agent.get("created_by") is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -330,7 +332,9 @@ async def delete_agent(agent_id: str, user: AuthDep = None) -> None:
     )
     agent = existing_resp.data
     if not agent:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
     if agent.get("created_by") is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -586,9 +590,7 @@ async def get_usage(
         date_key = created_at[:10] if created_at else "unknown"
         daily[date_key] = daily.get(date_key, 0) + tokens
 
-    daily_trend = [
-        {"date": date, "tokens": t} for date, t in sorted(daily.items())
-    ]
+    daily_trend = [{"date": date, "tokens": t} for date, t in sorted(daily.items())]
 
     return {
         "total_tokens": total_tokens,

@@ -110,6 +110,7 @@ class ABogusDouyinParser:
         """解析抖音分享链接 / aweme_id，返回 aweme_detail 字典。"""
         if not user_agent:
             from app.services.douyin_parse.ua_pool import pick_ua
+
             user_agent = pick_ua()
         ua = user_agent
         eng: SignEngine = engine or cls.DEFAULT_ENGINE
@@ -257,9 +258,7 @@ class ABogusDouyinParser:
             return ""
 
     @classmethod
-    async def _cookie_from_user_config(
-        cls, user_id: str
-    ) -> tuple[str, dict[str, str]]:
+    async def _cookie_from_user_config(cls, user_id: str) -> tuple[str, dict[str, str]]:
         extras: dict[str, str] = {}
         cookie = ""
         try:

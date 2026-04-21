@@ -8,8 +8,6 @@ Handles CRUD for review_comments, review_annotations, and review_status tables.
 
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
-
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -123,9 +121,7 @@ class ReviewRepository:
         result = await client.table("review_annotations").insert(annotations).execute()
         return result.data or []
 
-    async def get_annotations_by_comment(
-        self, comment_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_annotations_by_comment(self, comment_id: str) -> List[Dict[str, Any]]:
         client = await self._get_client()
         result = (
             await client.table("review_annotations")

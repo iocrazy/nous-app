@@ -7,29 +7,27 @@ Endpoints for parsing and fetching media (single, batch, per-type, extract-audio
 Helper functions are in media_fetch_helpers.py.
 """
 
-import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
 
-from app.core.deps import AuthDep
-from app.core.utils import Utils
-from app.repositories.user_logs_repository import log_user_action
-from app.repositories.media_repository import MediaRepository
-from app.services.douyin_parse.formatter import DouyinFormatter
-from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.points_service import PointsService
-from app.services.url_router import URLRouter
-from app.schemas.media import MediaTypeFetchRequest
-from app.services.media_service import MediaService
-
+from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
-    resolve_team_id,
     dedup_and_dispatch,
     handle_ytdlp_fetch,
+    resolve_team_id,
 )
-from app.api.media_batch_router import router as batch_router
+from app.core.deps import AuthDep
+from app.core.utils import Utils
+from app.repositories.media_repository import MediaRepository
+from app.repositories.user_logs_repository import log_user_action
+from app.schemas.media import MediaTypeFetchRequest
+from app.services.douyin_parse.formatter import DouyinFormatter
+from app.services.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media_service import MediaService
+from app.services.points_service import PointsService
+from app.services.url_router import URLRouter
 
 router = APIRouter()
 router.include_router(batch_router)
@@ -44,7 +42,9 @@ TAGS_FETCH = ["Video Fetch"]
 
 @router.post("/fetch", tags=TAGS_FETCH)
 async def fetch_video(
-    request: MediaFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep,
+    request: MediaFetchRequest,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
     raw_request: Request,
 ):
     """
@@ -71,6 +71,7 @@ async def fetch_video(
             await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
 
             from app.db.supabase_client import get_async_supabase_admin as _get_admin
+
             _admin = await _get_admin()
             _existing = (
                 await _admin.table("parsed_media")
@@ -91,7 +92,7 @@ async def fetch_video(
                     raise HTTPException(status_code=402, detail=points_result["reason"])
                 _points_cost = points_result.get("points_cost", 0)
             else:
-                logger.info(f"[Fetch/Parse] URL already parsed, skipping points charge")
+                logger.info("[Fetch/Parse] URL already parsed, skipping points charge")
 
         platform, handler_type = URLRouter.detect_platform(url)
         logger.info(f"[URLRouter] Platform: {platform}, Handler: {handler_type}")
@@ -172,13 +173,16 @@ async def fetch_media_by_type(
         repo = MediaRepository()
         media = await repo.get_by_platform_id(platform_id)
         if not media:
-            raise HTTPException(status_code=404, detail="Media not found. Use POST /videos/fetch first.")
+            raise HTTPException(
+                status_code=404, detail="Media not found. Use POST /videos/fetch first."
+            )
 
         media_id = media.get("id")
         media_type = media.get("media_type", 0)
         video_title = media.get("title", platform_id)
 
         from app.repositories.resources_repository import ResourcesRepository
+
         resources_repo = ResourcesRepository()
         user_resource = await resources_repo.get_resource_by_media_id_and_creator(
             media_id, auth.user_id
@@ -191,7 +195,8 @@ async def fetch_media_by_type(
                 media_id=media_id,
                 user_id=auth.user_id,
                 parsed_data=media,
-                need_download_video="video" in request.types or "image" in request.types,
+                need_download_video="video" in request.types
+                or "image" in request.types,
                 need_download_music=False,
                 need_download_cover="cover" in request.types,
                 is_image_type=int(media_type) in (2, 68),
@@ -229,17 +234,31 @@ async def fetch_media_by_type(
                     )
                     if new_parsed:
                         update_fields = {}
-                        for field in ["video_download_urls", "image_download_urls", "music_play_urls", "cover_urls"]:
+                        for field in [
+                            "video_download_urls",
+                            "image_download_urls",
+                            "music_play_urls",
+                            "cover_urls",
+                        ]:
                             if new_parsed.get(field):
                                 update_fields[field] = new_parsed[field]
-                        for field in ["like_count", "comment_count", "share_count", "favorite_count"]:
+                        for field in [
+                            "like_count",
+                            "comment_count",
+                            "share_count",
+                            "favorite_count",
+                        ]:
                             if new_parsed.get(field) is not None:
                                 update_fields[field] = new_parsed[field]
                         if update_fields:
                             await repo.update(platform_id, update_fields)
-                            logger.info(f"[Refetch] Re-parsed {platform_id}: updated {list(update_fields.keys())}")
+                            logger.info(
+                                f"[Refetch] Re-parsed {platform_id}: updated {list(update_fields.keys())}"
+                            )
             except Exception as e:
-                logger.warning(f"[Refetch] Re-parse failed for {platform_id}, proceeding with existing URLs: {e}")
+                logger.warning(
+                    f"[Refetch] Re-parse failed for {platform_id}, proceeding with existing URLs: {e}"
+                )
 
         dispatch_result = await dedup_and_dispatch(
             platform_id=platform_id,
@@ -266,7 +285,8 @@ async def fetch_media_by_type(
             "success": True,
             "message": "Fetch submitted",
             "platform_id": platform_id,
-            "task_id": dispatch_result.get("unified_task_id") or dispatch_result.get("task_id"),
+            "task_id": dispatch_result.get("unified_task_id")
+            or dispatch_result.get("task_id"),
             "types_submitted": dispatch_result["types_submitted"],
             "types_skipped": dispatch_result["types_skipped"],
             "types_subscribed": dispatch_result["types_subscribed"],
@@ -304,6 +324,7 @@ async def extract_audio(
         video_title = media.get("title", platform_id)[:30]
 
         from app.services.unified_task_manager import get_task_manager
+
         tracker = get_task_manager()
         unified_task_id = None
         try:
@@ -320,7 +341,9 @@ async def extract_audio(
 
         async def _do_extract(pid: str, task_id: str | None):
             import asyncio
+
             from app.tasks.download_tasks import _extract_audio_from_video
+
             _tracker = get_task_manager()
             try:
                 success = await asyncio.to_thread(_extract_audio_from_video, pid)

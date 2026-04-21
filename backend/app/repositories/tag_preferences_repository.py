@@ -37,8 +37,14 @@ class TagPreferencesRepository:
             row = result.data
             return {
                 "starred_tag_ids": row.get("starred_tag_ids") or [],
-                "picker_settings": {**self.DEFAULTS["picker_settings"], **(row.get("picker_settings") or {})},
-                "panel_size": {**self.DEFAULTS["panel_size"], **(row.get("panel_size") or {})},
+                "picker_settings": {
+                    **self.DEFAULTS["picker_settings"],
+                    **(row.get("picker_settings") or {}),
+                },
+                "panel_size": {
+                    **self.DEFAULTS["panel_size"],
+                    **(row.get("panel_size") or {}),
+                },
             }
         except Exception:
             # Table may not exist yet — return defaults gracefully
@@ -64,7 +70,9 @@ class TagPreferencesRepository:
 
             if "panel_size" in updates and updates["panel_size"] is not None:
                 size = updates["panel_size"]
-                data["panel_size"] = size if isinstance(size, dict) else size.model_dump()
+                data["panel_size"] = (
+                    size if isinstance(size, dict) else size.model_dump()
+                )
 
             await client.table("user_tag_preferences").upsert(
                 data, on_conflict="user_id"

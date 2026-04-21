@@ -116,6 +116,4 @@ async def list_characters(
         logger.error(
             "[SBCharacters] list_characters project=%s failed: %s", project_id, exc
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to list characters: {exc}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to list characters: {exc}")

@@ -18,9 +18,14 @@ class UnifiedProgressTracker:
     to connected clients without polling.
     """
 
-    def __init__(self, task_id: str, redis_client,
-                 unified_tracker=None, unified_task_id=None,
-                 user_id: str | None = None):
+    def __init__(
+        self,
+        task_id: str,
+        redis_client,
+        unified_tracker=None,
+        unified_task_id=None,
+        user_id: str | None = None,
+    ):
         self.task_id = task_id
         self.redis = redis_client
         self.unified_tracker = unified_tracker
@@ -31,7 +36,7 @@ class UnifiedProgressTracker:
         self._last_time = 0
         self._speed = 0.0
         # Stage-based progress mapping: maps raw download % to overall task %
-        self._stage_offset = 0    # Start percentage for current stage
+        self._stage_offset = 0  # Start percentage for current stage
         self._stage_weight = 100  # Weight of current stage (percentage points)
 
     def set_stage(self, offset: int, weight: int):
@@ -101,19 +106,25 @@ class UnifiedProgressTracker:
         )
 
         # Map raw download percent to overall task progress using stage boundaries
-        overall_percent = self._stage_offset + int(raw_percent * self._stage_weight / 100)
-        overall_percent = min(max(overall_percent, 0), 99)  # Reserve 100 for explicit completion
+        overall_percent = self._stage_offset + int(
+            raw_percent * self._stage_weight / 100
+        )
+        overall_percent = min(
+            max(overall_percent, 0), 99
+        )  # Reserve 100 for explicit completion
 
         # Publish real-time progress via Redis pub/sub → WebSocket
-        self._publish({
-            "unified_task_id": self.unified_task_id,
-            "celery_task_id": self.task_id,
-            "status": "downloading",
-            "percent": overall_percent,
-            "speed": speed_str,
-            "downloaded": downloaded,
-            "total": total,
-        })
+        self._publish(
+            {
+                "unified_task_id": self.unified_task_id,
+                "celery_task_id": self.task_id,
+                "status": "downloading",
+                "percent": overall_percent,
+                "speed": speed_str,
+                "downloaded": downloaded,
+                "total": total,
+            }
+        )
 
     def _format_speed(self, bytes_per_sec: float) -> str:
         """Format speed as human readable string."""
@@ -138,15 +149,17 @@ class UnifiedProgressTracker:
         self.redis.setex(
             f"download_progress:{self.task_id}", 60, json.dumps(progress_data)
         )
-        self._publish({
-            "unified_task_id": self.unified_task_id,
-            "celery_task_id": self.task_id,
-            "status": "completed",
-            "percent": 100,
-            "speed": "0 B/s",
-            "downloaded": 0,
-            "total": 0,
-        })
+        self._publish(
+            {
+                "unified_task_id": self.unified_task_id,
+                "celery_task_id": self.task_id,
+                "status": "completed",
+                "percent": 100,
+                "speed": "0 B/s",
+                "downloaded": 0,
+                "total": 0,
+            }
+        )
 
     def failed(self, error: str):
         """Mark download as failed in Redis and publish via pub/sub."""
@@ -161,19 +174,23 @@ class UnifiedProgressTracker:
         self.redis.setex(
             f"download_progress:{self.task_id}", 300, json.dumps(progress_data)
         )
-        self._publish({
-            "unified_task_id": self.unified_task_id,
-            "celery_task_id": self.task_id,
-            "status": "failed",
-            "percent": 0,
-            "speed": "0 B/s",
-            "downloaded": 0,
-            "total": 0,
-            "error": error_msg,
-        })
+        self._publish(
+            {
+                "unified_task_id": self.unified_task_id,
+                "celery_task_id": self.task_id,
+                "status": "failed",
+                "percent": 0,
+                "speed": "0 B/s",
+                "downloaded": 0,
+                "total": 0,
+                "error": error_msg,
+            }
+        )
 
 
-def force_progress(tracker: UnifiedProgressTracker, progress: int, subtitle: str = None):
+def force_progress(
+    tracker: UnifiedProgressTracker, progress: int, subtitle: str = None
+):
     """Force a progress update via Redis pub/sub at download stage boundaries.
 
     Used before/after video, music, cover downloads to ensure the user sees
@@ -182,15 +199,17 @@ def force_progress(tracker: UnifiedProgressTracker, progress: int, subtitle: str
     """
     clamped = min(max(progress, 0), 99)
     speed_str = tracker._format_speed(tracker._speed)
-    tracker._publish({
-        "unified_task_id": tracker.unified_task_id,
-        "celery_task_id": tracker.task_id,
-        "status": "downloading",
-        "percent": clamped,
-        "speed": speed_str,
-        "downloaded": 0,
-        "total": 0,
-    })
+    tracker._publish(
+        {
+            "unified_task_id": tracker.unified_task_id,
+            "celery_task_id": tracker.task_id,
+            "status": "downloading",
+            "percent": clamped,
+            "speed": speed_str,
+            "downloaded": 0,
+            "total": 0,
+        }
+    )
     logger.debug(f"[Download/Progress] Stage update: {progress}% subtitle={subtitle}")
 
 
@@ -200,12 +219,12 @@ def calc_stage_ranges(download_video: bool, download_cover: bool) -> dict:
     Returns dict mapping stage name to (offset, weight) tuple.
     Ranges span 0% to 95% (5% reserved for finalization).
     """
-    raw_weights = {'video': 85, 'cover': 15}
+    raw_weights = {"video": 85, "cover": 15}
     parts = []
     if download_video:
-        parts.append('video')
+        parts.append("video")
     if download_cover:
-        parts.append('cover')
+        parts.append("cover")
 
     if not parts:
         return {}

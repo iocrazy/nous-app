@@ -6,16 +6,15 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.team_repository import TeamRepository
 from app.schemas.team import (
-    TeamCreate,
-    TeamUpdate,
-    TeamResponse,
-    TeamListResponse,
-    TeamMemberResponse,
-    TeamMemberListResponse,
-    TeamMemberUpdate,
     JoinTeamRequest,
+    TeamCreate,
+    TeamListResponse,
+    TeamMemberListResponse,
+    TeamMemberResponse,
+    TeamMemberUpdate,
+    TeamResponse,
+    TeamUpdate,
 )
-
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
 
@@ -34,11 +33,11 @@ async def list_teams(auth: AuthDep):
                 owner_id=t["owner_id"],
                 invite_code=t.get("invite_code", ""),
                 description=t.get("description"),
-                created_at=t["created_at"]
+                created_at=t["created_at"],
             )
             for t in teams
         ],
-        total=len(teams)
+        total=len(teams),
     )
 
 
@@ -53,7 +52,7 @@ async def create_team(team: TeamCreate, auth: AuthDep):
         logger.error(f"Failed to create team: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create team"
+            detail="Failed to create team",
         )
 
     return TeamResponse(
@@ -62,7 +61,7 @@ async def create_team(team: TeamCreate, auth: AuthDep):
         owner_id=created["owner_id"],
         invite_code=created.get("invite_code", ""),
         description=created.get("description"),
-        created_at=created["created_at"]
+        created_at=created["created_at"],
     )
 
 
@@ -75,7 +74,7 @@ async def get_team(team_id: str, auth: AuthDep):
     if not team:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Team not found or access denied"
+            detail="Team not found or access denied",
         )
 
     return TeamResponse(
@@ -84,7 +83,7 @@ async def get_team(team_id: str, auth: AuthDep):
         owner_id=team["owner_id"],
         invite_code=team.get("invite_code", ""),
         description=team.get("description"),
-        created_at=team["created_at"]
+        created_at=team["created_at"],
     )
 
 
@@ -101,16 +100,14 @@ async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
 
     if not update_data:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No update data provided"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No update data provided"
         )
 
     updated = await repo.update_team(team_id, auth.user_id, **update_data)
 
     if not updated:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Team not found or not owner"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found or not owner"
         )
 
     return TeamResponse(
@@ -119,7 +116,7 @@ async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
         owner_id=updated["owner_id"],
         invite_code=updated.get("invite_code", ""),
         description=updated.get("description"),
-        created_at=updated["created_at"]
+        created_at=updated["created_at"],
     )
 
 
@@ -131,8 +128,7 @@ async def delete_team(team_id: str, auth: AuthDep):
 
     if not deleted:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Team not found or not owner"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found or not owner"
         )
 
 
@@ -145,7 +141,7 @@ async def list_team_members(team_id: str, auth: AuthDep):
     if not members and not await repo.get_team_by_id(team_id, auth.user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Team not found or access denied"
+            detail="Team not found or access denied",
         )
 
     return TeamMemberListResponse(
@@ -156,20 +152,17 @@ async def list_team_members(team_id: str, auth: AuthDep):
                 role=m["role"],
                 joined_at=m["joined_at"],
                 email=m.get("email"),
-                name=m.get("name")
+                name=m.get("name"),
             )
             for m in members
         ],
-        total=len(members)
+        total=len(members),
     )
 
 
 @router.put("/{team_id}/members/{user_id}", response_model=TeamMemberResponse)
 async def update_member_role(
-    team_id: str,
-    user_id: str,
-    update: TeamMemberUpdate,
-    auth: AuthDep
+    team_id: str, user_id: str, update: TeamMemberUpdate, auth: AuthDep
 ):
     """Update a team member's role (owner/admin only)."""
     repo = TeamRepository()
@@ -177,7 +170,7 @@ async def update_member_role(
     if update.role not in ["admin", "editor", "reviewer", "viewer"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be 'admin', 'editor', 'reviewer', or 'viewer'"
+            detail="Role must be 'admin', 'editor', 'reviewer', or 'viewer'",
         )
 
     updated = await repo.update_member_role(team_id, user_id, update.role, auth.user_id)
@@ -185,7 +178,7 @@ async def update_member_role(
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied or member not found"
+            detail="Permission denied or member not found",
         )
 
     # Get updated member info
@@ -194,8 +187,7 @@ async def update_member_role(
 
     if not member:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Member not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
         )
 
     return TeamMemberResponse(
@@ -204,7 +196,7 @@ async def update_member_role(
         role=member["role"],
         joined_at=member["joined_at"],
         email=member.get("email"),
-        name=member.get("name")
+        name=member.get("name"),
     )
 
 
@@ -217,7 +209,7 @@ async def remove_member(team_id: str, user_id: str, auth: AuthDep):
     if not removed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied, member not found, or cannot remove owner"
+            detail="Permission denied, member not found, or cannot remove owner",
         )
 
 
@@ -232,14 +224,13 @@ async def join_team(request: JoinTeamRequest, auth: AuthDep):
         if "Already a member" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Already a member of this team"
+                detail="Already a member of this team",
             )
         raise
 
     if not team:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid invite code"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invalid invite code"
         )
 
     return TeamResponse(
@@ -248,5 +239,5 @@ async def join_team(request: JoinTeamRequest, auth: AuthDep):
         owner_id=team["owner_id"],
         invite_code=team.get("invite_code", ""),
         description=team.get("description"),
-        created_at=team["created_at"]
+        created_at=team["created_at"],
     )

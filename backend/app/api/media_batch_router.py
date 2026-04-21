@@ -11,22 +11,21 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 
+from app.api.media_fetch_helpers import (
+    BatchFetchRequest,
+    resolve_and_attach_tags,
+    resolve_team_id,
+)
 from app.core.deps import AuthDep
 from app.core.utils import Utils
+from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 from app.services.douyin_parse.formatter import DouyinFormatter
 from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.points_service import PointsService
 from app.services.media_service import MediaService
-from app.repositories.tags_repository import TagsRepository
-
-from app.api.media_fetch_helpers import (
-    BatchFetchRequest,
-    resolve_team_id,
-    resolve_and_attach_tags,
-)
+from app.services.points_service import PointsService
 
 router = APIRouter()
 
@@ -35,7 +34,9 @@ TAGS_FETCH = ["Video Fetch"]
 
 @router.post("/fetch/batch", tags=TAGS_FETCH)
 async def fetch_videos_batch(
-    request: BatchFetchRequest, background_tasks: BackgroundTasks, auth: AuthDep,
+    request: BatchFetchRequest,
+    background_tasks: BackgroundTasks,
+    auth: AuthDep,
     raw_request: Request,
 ):
     """
@@ -61,7 +62,8 @@ async def fetch_videos_batch(
     if request.use_celery:
         from app.tasks.parse_tasks import parse_batch_links_task
 
-        task = await asyncio.to_thread(parse_batch_links_task.delay,
+        task = await asyncio.to_thread(
+            parse_batch_links_task.delay,
             urls=request.urls,
             user_id=auth.user_id,
             video_bool=request.video_bool,
@@ -93,7 +95,9 @@ async def fetch_videos_batch(
         settings_repo = UserSettingsRepository()
         user_settings = await settings_repo.get_by_user_id(auth.user_id)
         if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+            user_parse_mode = user_settings["settings_json"].get(
+                "parse_mode", "lighthttp"
+            )
         logger.info(f"[Batch Parse] User {auth.user_id} parse mode: {user_parse_mode}")
     except Exception as e:
         logger.warning(f"Failed to read user parse mode, using default: {e}")
@@ -112,6 +116,7 @@ async def fetch_videos_batch(
 
             # One UA per URL — shared across LightHTTP + BrowserAuto fallbacks.
             from app.services.douyin_parse.ua_pool import pick_ua
+
             item_ua = pick_ua()
 
             if user_parse_mode == "drissionpage":
@@ -147,9 +152,12 @@ async def fetch_videos_batch(
                 if parsed_data:
                     platform_id = parsed_data.get("platform_id")
                     parsed_data["user_id"] = auth.user_id
-                    background_tasks.add_task(MediaService.process_video, platform_id, parsed_data)
+                    background_tasks.add_task(
+                        MediaService.process_video, platform_id, parsed_data
+                    )
 
                     if request.tag_ids or request.tags:
+
                         async def _attach_tags_after_save(
                             pid: str,
                             t_ids: list[str] | None,
@@ -157,18 +165,28 @@ async def fetch_videos_batch(
                             uid: str,
                         ):
                             import asyncio
-                            from app.repositories.resources_repository import ResourcesRepository
+
+                            from app.repositories.resources_repository import (
+                                ResourcesRepository,
+                            )
+
                             res_repo = ResourcesRepository()
                             for _ in range(10):
-                                resource = await res_repo.get_resource_by_platform_id(pid)
+                                resource = await res_repo.get_resource_by_platform_id(
+                                    pid
+                                )
                                 if resource:
                                     rid = str(resource["id"])
                                     if t_ids:
                                         tags_repo = TagsRepository()
-                                        await tags_repo.bulk_add_tags_to_resource(rid, t_ids, source="manual")
+                                        await tags_repo.bulk_add_tags_to_resource(
+                                            rid, t_ids, source="manual"
+                                        )
                                     if t_names:
                                         await resolve_and_attach_tags(rid, t_names, uid)
-                                    logger.info(f"Tags attached to resource {rid} for {pid}")
+                                    logger.info(
+                                        f"Tags attached to resource {rid} for {pid}"
+                                    )
                                     return
                                 await asyncio.sleep(1)
                             logger.warning(f"Timeout attaching tags for {pid}")
@@ -185,31 +203,35 @@ async def fetch_videos_batch(
                     if published_at and hasattr(published_at, "isoformat"):
                         published_at = published_at.isoformat()
 
-                    results.append({
-                        "url": url,
-                        "platform_id": platform_id,
-                        "status": "submitted",
-                        "data": {
+                    results.append(
+                        {
+                            "url": url,
                             "platform_id": platform_id,
-                            "title": parsed_data.get("title"),
-                            "description": parsed_data.get("description"),
-                            "author": parsed_data.get("author"),
-                            "media_type": parsed_data.get("media_type"),
-                            "video_download_urls": parsed_data.get("video_download_urls", []),
-                            "cover_urls": parsed_data.get("cover_urls", []),
-                            "like_count": parsed_data.get("like_count", 0),
-                            "comment_count": parsed_data.get("comment_count", 0),
-                            "share_count": parsed_data.get("share_count", 0),
-                            "favorite_count": parsed_data.get("favorite_count", 0),
-                            "duration": parsed_data.get("duration", "0"),
-                            "published_at": published_at,
-                            "image_urls": parsed_data.get("image_urls", []),
-                            "sec_uid": parsed_data.get("sec_uid"),
-                            "unique_id": parsed_data.get("unique_id"),
-                            "valid_url": url,
-                            "user_id": auth.user_id,
-                        },
-                    })
+                            "status": "submitted",
+                            "data": {
+                                "platform_id": platform_id,
+                                "title": parsed_data.get("title"),
+                                "description": parsed_data.get("description"),
+                                "author": parsed_data.get("author"),
+                                "media_type": parsed_data.get("media_type"),
+                                "video_download_urls": parsed_data.get(
+                                    "video_download_urls", []
+                                ),
+                                "cover_urls": parsed_data.get("cover_urls", []),
+                                "like_count": parsed_data.get("like_count", 0),
+                                "comment_count": parsed_data.get("comment_count", 0),
+                                "share_count": parsed_data.get("share_count", 0),
+                                "favorite_count": parsed_data.get("favorite_count", 0),
+                                "duration": parsed_data.get("duration", "0"),
+                                "published_at": published_at,
+                                "image_urls": parsed_data.get("image_urls", []),
+                                "sec_uid": parsed_data.get("sec_uid"),
+                                "unique_id": parsed_data.get("unique_id"),
+                                "valid_url": url,
+                                "user_id": auth.user_id,
+                            },
+                        }
+                    )
                 else:
                     errors.append({"url": url, "error": "Parse failed"})
             else:
@@ -230,7 +252,9 @@ async def fetch_videos_batch(
                     reference_type="video_parse_batch",
                     reason=f"Partial batch refund: {len(errors)}/{len(request.urls)} URLs failed",
                 )
-                logger.info(f"Refunded {refund_amount} points for {len(errors)} failed batch URLs")
+                logger.info(
+                    f"Refunded {refund_amount} points for {len(errors)} failed batch URLs"
+                )
             except Exception as refund_err:
                 logger.error(f"Failed to refund batch points: {refund_err}")
 

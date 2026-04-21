@@ -13,13 +13,12 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api import api_router
-from app.api.frontend_config_router import load_config as load_frontend_config
-from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
@@ -32,6 +31,7 @@ async def lifespan(app: FastAPI):
     # Load persisted transcode settings from database (system_settings)
     try:
         from app.db import get_async_supabase_admin
+
         supabase = await get_async_supabase_admin()
         result = await (
             supabase.table("system_settings")
@@ -71,6 +71,7 @@ async def lifespan(app: FastAPI):
             sha = info.get("commit_sha")
             if sha:
                 from app.db import get_async_supabase_admin
+
                 sb = await get_async_supabase_admin()
                 exists = await (
                     sb.table("deployment_logs")
@@ -370,18 +371,30 @@ try:
         supabase = await get_async_supabase_admin()
 
         # Determine which column to query based on file_type
-        resource_col = "id,creator_id,file_path" if file_type == "file" else "id,creator_id,cover_image_path,thumbnail_path"
+        resource_col = (
+            "id,creator_id,file_path"
+            if file_type == "file"
+            else "id,creator_id,cover_image_path,thumbnail_path"
+        )
         media_col = "download_path" if file_type == "file" else "cover_download_path"
 
         # 1. Try resources table
         try:
-            res = await supabase.table("resources").select(resource_col).eq("id", media_id).maybe_single().execute()
+            res = (
+                await supabase.table("resources")
+                .select(resource_col)
+                .eq("id", media_id)
+                .maybe_single()
+                .execute()
+            )
             if res.data:
                 result = None
                 if file_type == "file" and res.data.get("file_path"):
                     result = res.data["file_path"]
                 elif file_type == "cover":
-                    result = res.data.get("thumbnail_path") or res.data.get("cover_image_path")
+                    result = res.data.get("thumbnail_path") or res.data.get(
+                        "cover_image_path"
+                    )
                 if result:
                     creator_id = res.data.get("creator_id")
                     resource_id = res.data["id"]
@@ -394,7 +407,13 @@ try:
 
         # 2. Try parsed_media table (no ownership info — legacy)
         try:
-            res = await supabase.table("parsed_media").select(media_col).eq("id", media_id).maybe_single().execute()
+            res = (
+                await supabase.table("parsed_media")
+                .select(media_col)
+                .eq("id", media_id)
+                .maybe_single()
+                .execute()
+            )
             if res.data and res.data.get(media_col):
                 result = res.data[media_col]
                 entry = _MediaCacheEntry(result, None, (), _time.time())
@@ -439,7 +458,9 @@ try:
         if not full_path.exists() or not full_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
 
-        mime_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        mime_type = (
+            mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+        )
         headers = {
             "Referrer-Policy": "no-referrer",
             "Content-Disposition": "inline",
@@ -479,7 +500,9 @@ try:
 
         if not user_id:
             if share_token:
-                raise HTTPException(status_code=403, detail="Invalid or expired share link")
+                raise HTTPException(
+                    status_code=403, detail="Invalid or expired share link"
+                )
             raise HTTPException(status_code=403, detail="Access denied")
 
         # Fast path: creator check using cached data
@@ -523,7 +546,9 @@ try:
         The actual file path is resolved from the database, never exposed in the URL.
         Includes resource-level permission checks.
         """
-        user_id = await _authenticate_media_request(request, token, share_token, review_token)
+        user_id = await _authenticate_media_request(
+            request, token, share_token, review_token
+        )
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "file")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
         return _serve_file(file_path)
@@ -541,7 +566,9 @@ try:
         URL pattern: /media/{id}/cover?token=signed_token
         Includes resource-level permission checks.
         """
-        user_id = await _authenticate_media_request(request, token, share_token, review_token)
+        user_id = await _authenticate_media_request(
+            request, token, share_token, review_token
+        )
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "cover")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
         return _serve_file(file_path, cache_immutable=True)

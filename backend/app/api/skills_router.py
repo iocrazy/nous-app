@@ -89,9 +89,7 @@ async def update_skill(
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
         if existing.get("team_id") is None:
-            raise HTTPException(
-                status_code=403, detail="Cannot modify system presets"
-            )
+            raise HTTPException(status_code=403, detail="Cannot modify system presets")
         if existing.get("created_by") != auth.user_id:
             raise HTTPException(
                 status_code=403, detail="Only the skill owner can update"
@@ -114,9 +112,7 @@ async def delete_skill(auth: AuthDep, skill_id: str) -> Dict[str, Any]:
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
         if existing.get("team_id") is None:
-            raise HTTPException(
-                status_code=403, detail="Cannot delete system presets"
-            )
+            raise HTTPException(status_code=403, detail="Cannot delete system presets")
         if existing.get("created_by") != auth.user_id:
             raise HTTPException(
                 status_code=403, detail="Only the skill owner can delete"

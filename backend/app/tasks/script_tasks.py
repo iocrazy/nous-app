@@ -15,6 +15,7 @@ def _run_async(coro):
 async def _start_unified(task_id: str) -> None:
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
         await mgr.start(task_id)
     except Exception as e:
@@ -24,6 +25,7 @@ async def _start_unified(task_id: str) -> None:
 async def _update_progress(task_id: str, progress: int, subtitle: str = "") -> None:
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
         await mgr.update_progress(task_id, progress, subtitle)
     except Exception as e:
@@ -33,6 +35,7 @@ async def _update_progress(task_id: str, progress: int, subtitle: str = "") -> N
 async def _complete_unified(task_id: str, result_data: dict) -> None:
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
         await mgr.complete(task_id, subtitle="Done")
     except Exception as e:
@@ -42,6 +45,7 @@ async def _complete_unified(task_id: str, result_data: dict) -> None:
 async def _fail_unified(task_id: str, error_msg: str) -> None:
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
         await mgr.fail(task_id, error_msg)
     except Exception as e:

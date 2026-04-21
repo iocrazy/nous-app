@@ -97,7 +97,9 @@ class StoryboardAIService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(
+                timeout=settings.LLM_TIMEOUT_SECONDS
+            ) as client:
                 response = await client.post(
                     f"{settings.LLM_API_URL}/chat/completions",
                     json=payload,
@@ -144,7 +146,7 @@ class StoryboardAIService:
         stripped = text.strip()
         for fence in ("```json", "```"):
             if stripped.startswith(fence):
-                stripped = stripped[len(fence):]
+                stripped = stripped[len(fence) :]
                 if stripped.endswith("```"):
                     stripped = stripped[:-3]
                 stripped = stripped.strip()
@@ -161,15 +163,13 @@ class StoryboardAIService:
             end = text.rfind(end_char)
             if start != -1 and end > start:
                 try:
-                    return json.loads(text[start: end + 1])
+                    return json.loads(text[start : end + 1])
                 except json.JSONDecodeError:
                     continue
 
         raise ValueError(f"No valid JSON found in LLM output: {text[:300]!r}")
 
-    async def _build_character_prompt_fragments(
-        self, character_ids: List[str]
-    ) -> str:
+    async def _build_character_prompt_fragments(self, character_ids: List[str]) -> str:
         """
         Fetch each character and return a joined description string.
 
@@ -359,7 +359,11 @@ class StoryboardAIService:
 
         # Fill any remaining None slots (defensive)
         filled: List[Dict[str, Any]] = [
-            item if item is not None else {"success": False, "error": "unknown", "request_index": i}
+            (
+                item
+                if item is not None
+                else {"success": False, "error": "unknown", "request_index": i}
+            )
             for i, item in enumerate(output)
         ]
         return filled
@@ -468,7 +472,9 @@ class StoryboardAIService:
         """
         style_instruction = ""
         if style_guide:
-            style_instruction = f"\nApply this visual style guide to all scenes: {style_guide}\n"
+            style_instruction = (
+                f"\nApply this visual style guide to all scenes: {style_guide}\n"
+            )
 
         system_prompt = (
             "You are a professional storyboard artist and cinematographer. "
@@ -535,9 +541,7 @@ class StoryboardAIService:
                 video_path
             )
         except Exception as exc:
-            logger.error(
-                "detect_scenes failed for video %s: %s", video_path, exc
-            )
+            logger.error("detect_scenes failed for video %s: %s", video_path, exc)
             raise
 
         if not raw_keyframes:
@@ -558,8 +562,7 @@ class StoryboardAIService:
                 '"movement": "...", "suggested_prompt": "..."}'
             )
             user_content = (
-                f"Video frame at t={timestamp:.2f}s. "
-                f"Image file: {image_path}"
+                f"Video frame at t={timestamp:.2f}s. " f"Image file: {image_path}"
             )
 
             messages = [
@@ -653,9 +656,7 @@ class StoryboardAIService:
                 f"- {c.get('name', 'Unknown')}: {c.get('description', 'no description')}"
                 for c in characters
             ]
-            context_parts.append(
-                "Project characters:\n" + "\n".join(char_descriptions)
-            )
+            context_parts.append("Project characters:\n" + "\n".join(char_descriptions))
 
         # Optionally enrich with selected frame data
         if selected_frame_id:
@@ -688,26 +689,26 @@ class StoryboardAIService:
                     "chat: could not fetch frame %s: %s", selected_frame_id, exc
                 )
 
-        context_block = "\n\n".join(context_parts) if context_parts else "No additional context."
+        context_block = (
+            "\n\n".join(context_parts) if context_parts else "No additional context."
+        )
 
         # Skill injection
         skill_prefix = ""
         if skill_id:
             try:
                 from app.repositories.skill_repository import SkillRepository
+
                 skill_repo = SkillRepository()
                 skill = await skill_repo.get_by_id(skill_id)
                 if skill and skill.get("status") == "active":
-                    skill_prefix = (
-                        f"<skill>\n{skill['content_md']}\n</skill>\n\n"
-                    )
+                    skill_prefix = f"<skill>\n{skill['content_md']}\n</skill>\n\n"
                     if skill.get("output_format"):
-                        skill_prefix += (
-                            f"Output format:\n{skill['output_format']}\n\n"
-                        )
+                        skill_prefix += f"Output format:\n{skill['output_format']}\n\n"
                     logger.info(
                         "chat: injected skill %s for project %s",
-                        skill_id, project_id,
+                        skill_id,
+                        project_id,
                     )
                 else:
                     logger.warning(
@@ -757,9 +758,7 @@ class StoryboardAIService:
                 if isinstance(parsed, list):
                     actions = parsed
                 else:
-                    logger.warning(
-                        "chat: actions block is not a JSON array – ignoring"
-                    )
+                    logger.warning("chat: actions block is not a JSON array – ignoring")
             except json.JSONDecodeError as exc:
                 logger.warning(
                     "chat: could not parse actions JSON for project %s: %s",

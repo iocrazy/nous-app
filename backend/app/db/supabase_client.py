@@ -51,7 +51,9 @@ class AsyncSupabaseClient:
 
         if cls._instance is None or cls._instance_loop_id != current_loop_id:
             if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
-                raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured")
+                raise ValueError(
+                    "SUPABASE_URL and SUPABASE_ANON_KEY must be configured"
+                )
 
             cls._instance = await create_async_client(
                 settings.SUPABASE_URL,
@@ -68,7 +70,10 @@ class AsyncSupabaseClient:
         """Get async Supabase admin client (service_role key)."""
         current_loop_id = id(asyncio.get_running_loop())
 
-        if cls._admin_instance is None or cls._admin_instance_loop_id != current_loop_id:
+        if (
+            cls._admin_instance is None
+            or cls._admin_instance_loop_id != current_loop_id
+        ):
             if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
                 raise ValueError(
                     "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured"

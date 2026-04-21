@@ -37,9 +37,7 @@ class IesDouyinParser:
     TIMEOUT = 15.0
 
     @classmethod
-    async def _get_user_overrides(
-        cls, user_id: Optional[str]
-    ) -> Dict[str, str]:
+    async def _get_user_overrides(cls, user_id: Optional[str]) -> Dict[str, str]:
         """Fetch user's Douyin cookie and custom headers from user_cookies table.
 
         Returns a dict of extra headers to merge (may include Cookie header).
@@ -49,6 +47,7 @@ class IesDouyinParser:
         extra: Dict[str, str] = {}
         try:
             from app.repositories.cookies_repository import CookiesRepository
+
             repo = CookiesRepository()
             row = await repo.get_by_user_and_platform(user_id, "douyin")
             if not row:
@@ -72,7 +71,9 @@ class IesDouyinParser:
         except Exception as e:
             logger.debug(f"[IesDouyinParser] Failed to load user overrides: {e}")
         if extra:
-            logger.info(f"[IesDouyinParser] Loaded user overrides: {list(extra.keys())}")
+            logger.info(
+                f"[IesDouyinParser] Loaded user overrides: {list(extra.keys())}"
+            )
         return extra
 
     @classmethod
@@ -99,6 +100,7 @@ class IesDouyinParser:
         """
         if not user_agent:
             from app.services.douyin_parse.ua_pool import pick_ua
+
             user_agent = pick_ua()
 
         try:
@@ -114,7 +116,9 @@ class IesDouyinParser:
                 return None
 
             video_id, content_type = result
-            logger.info(f"[IesDouyinParser] 获取到视频 ID: {video_id}, type: {content_type}")
+            logger.info(
+                f"[IesDouyinParser] 获取到视频 ID: {video_id}, type: {content_type}"
+            )
 
             # 2. 访问分享页面获取数据
             aweme_detail = await cls._fetch_share_page(
@@ -179,7 +183,9 @@ class IesDouyinParser:
                 if video_id.isdigit():
                     return video_id, "video"
 
-                logger.warning(f"[IesDouyinParser] URL 模式不匹配, final_url={final_url}")
+                logger.warning(
+                    f"[IesDouyinParser] URL 模式不匹配, final_url={final_url}"
+                )
                 return None
 
         except Exception as e:
@@ -202,6 +208,7 @@ class IesDouyinParser:
         """
         if not user_agent:
             from app.services.douyin_parse.ua_pool import pick_ua
+
             user_agent = pick_ua()
 
         path_segment = "slides" if content_type == "slides" else "video"
@@ -223,7 +230,11 @@ class IesDouyinParser:
                 # ── Failure analysis: classify page and log on any failure ──
                 # Reference: Notion doc "抖音验证码检测脚本"
                 has_router_data = "_ROUTER_DATA" in html_content
-                captcha_keywords = ["captcha_container", "verifycenter", "请完成下列验证后继续"]
+                captcha_keywords = [
+                    "captcha_container",
+                    "verifycenter",
+                    "请完成下列验证后继续",
+                ]
                 has_captcha = any(kw in html_content for kw in captcha_keywords)
                 has_slardar = "slardar" in html_content
                 has_login_wall = "登录后免费畅享高清视频" in html_content
@@ -298,7 +309,7 @@ class IesDouyinParser:
 
                 if not item_list:
                     logger.warning(
-                        f"[IesDouyinParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
+                        "[IesDouyinParser] ⚠️ Parse failed | reason=EMPTY_ITEM_LIST"
                     )
                     return None
 

@@ -225,9 +225,7 @@ async def check_alerts(auth: AdminAuthDep):
             mute_until = rule.get("mute_until")
             if mute_until:
                 try:
-                    mute_dt = datetime.fromisoformat(
-                        mute_until.replace("Z", "+00:00")
-                    )
+                    mute_dt = datetime.fromisoformat(mute_until.replace("Z", "+00:00"))
                     if mute_dt > now:
                         continue
                 except (ValueError, AttributeError):
@@ -261,9 +259,7 @@ async def check_alerts(auth: AdminAuthDep):
             )
 
         elif metric_type == "log_level_count":
-            metric_value = await repo.app_log_count_by_level(
-                "CRITICAL", window_start
-            )
+            metric_value = await repo.app_log_count_by_level("CRITICAL", window_start)
 
         if metric_value is None:
             continue

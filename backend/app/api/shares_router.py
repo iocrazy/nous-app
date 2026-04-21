@@ -29,6 +29,7 @@ class ShareCommentCreate(BaseModel):
     timecode: Optional[float] = Field(None, ge=0, description="Timestamp in seconds")
     visibility: str = Field("all", pattern="^(all|team|private)$")
 
+
 router = APIRouter(prefix="/shares")
 
 SHARE_CODE_LENGTH = 8
@@ -246,12 +247,7 @@ async def get_share(share_id: str, auth: AuthDep):
     try:
         client = await get_async_supabase_admin()
 
-        result = (
-            await client.table("shares")
-            .select("*")
-            .eq("id", share_id)
-            .execute()
-        )
+        result = await client.table("shares").select("*").eq("id", share_id).execute()
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Share not found")
@@ -259,7 +255,9 @@ async def get_share(share_id: str, auth: AuthDep):
         share = result.data[0]
 
         if share["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to view this share")
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view this share"
+            )
 
         share = _enrich_share(share)
 
@@ -309,10 +307,14 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
         share = existing.data[0]
 
         if share["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to update this share")
+            raise HTTPException(
+                status_code=403, detail="Not authorized to update this share"
+            )
 
         if share["status"] == "cancelled":
-            raise HTTPException(status_code=400, detail="Cannot update a cancelled share")
+            raise HTTPException(
+                status_code=400, detail="Cannot update a cancelled share"
+            )
 
         update_data = {}
 
@@ -476,7 +478,9 @@ async def access_share_by_code(
 
         # Check status
         if share["status"] in ("cancelled", "inactive"):
-            raise HTTPException(status_code=410, detail="This share is no longer available")
+            raise HTTPException(
+                status_code=410, detail="This share is no longer available"
+            )
 
         # Check expiration
         if _is_expired(share):
@@ -528,10 +532,12 @@ async def access_share_by_code(
                 view_record = existing_view.data[0]
                 await (
                     client.table("share_views")
-                    .update({
-                        "view_count": view_record["view_count"] + 1,
-                        "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                    })
+                    .update(
+                        {
+                            "view_count": view_record["view_count"] + 1,
+                            "last_viewed_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
                     .eq("id", view_record["id"])
                     .execute()
                 )
@@ -539,21 +545,25 @@ async def access_share_by_code(
                 # Create new view record
                 await (
                     client.table("share_views")
-                    .insert({
-                        "share_id": share["id"],
-                        "viewer_id": viewer_id,
-                        "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                    })
+                    .insert(
+                        {
+                            "share_id": share["id"],
+                            "viewer_id": viewer_id,
+                            "last_viewed_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
                     .execute()
                 )
         else:
             # Anonymous viewer: create a record without viewer_id
             await (
                 client.table("share_views")
-                .insert({
-                    "share_id": share["id"],
-                    "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                })
+                .insert(
+                    {
+                        "share_id": share["id"],
+                        "last_viewed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
                 .execute()
             )
 
@@ -563,7 +573,9 @@ async def access_share_by_code(
             try:
                 res_data = (
                     await client.table("resources")
-                    .select("mime_type, file_type, filename, cover_image_path, thumbnail_path, media_id")
+                    .select(
+                        "mime_type, file_type, filename, cover_image_path, thumbnail_path, media_id"
+                    )
                     .eq("id", share["resource_id"])
                     .maybe_single()
                     .execute()
@@ -575,7 +587,11 @@ async def access_share_by_code(
                         "filename": res_data.data.get("filename"),
                         "cover_image_path": res_data.data.get("cover_image_path"),
                         "thumbnail_path": res_data.data.get("thumbnail_path"),
-                        "media_id": str(res_data.data["media_id"]) if res_data.data.get("media_id") else None,
+                        "media_id": (
+                            str(res_data.data["media_id"])
+                            if res_data.data.get("media_id")
+                            else None
+                        ),
                     }
             except Exception as e:
                 logger.warning(f"Failed to fetch resource metadata for share: {e}")
@@ -729,11 +745,7 @@ async def create_share_comment(
                 detail="Authentication required to post comments",
             )
 
-        result = (
-            await client.table("review_comments")
-            .insert(comment_data)
-            .execute()
-        )
+        result = await client.table("review_comments").insert(comment_data).execute()
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to create comment")

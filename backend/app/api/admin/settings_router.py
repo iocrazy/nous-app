@@ -10,7 +10,6 @@ from app.repositories.admin.system_settings_repository import (
 from app.schemas.admin import SystemSettingResponse, SystemSettingUpdate
 from app.utils.admin_helpers import create_audit_log
 
-
 router = APIRouter()
 
 

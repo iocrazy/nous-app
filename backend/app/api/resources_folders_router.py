@@ -7,7 +7,6 @@ Regular folder and smart folder CRUD operations.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
@@ -70,9 +69,7 @@ async def list_smart_folders(
 
 
 @router.patch("/smart-folders/{folder_id}")
-async def update_smart_folder(
-    folder_id: str, data: SmartFolderUpdate, auth: AuthDep
-):
+async def update_smart_folder(folder_id: str, data: SmartFolderUpdate, auth: AuthDep):
     """Update a smart folder's name, rules, icon, or color."""
     try:
         repo = ResourcesRepository()
@@ -80,9 +77,7 @@ async def update_smart_folder(
         if not folder:
             raise HTTPException(status_code=404, detail="Smart folder not found")
         if not folder.get("is_smart"):
-            raise HTTPException(
-                status_code=400, detail="Folder is not a smart folder"
-            )
+            raise HTTPException(status_code=400, detail="Folder is not a smart folder")
 
         update_data = data.model_dump(exclude_none=True)
         # Convert rules Pydantic model to dict for JSONB storage
@@ -107,9 +102,7 @@ async def delete_smart_folder(folder_id: str, auth: AuthDep):
         if not folder:
             raise HTTPException(status_code=404, detail="Smart folder not found")
         if not folder.get("is_smart"):
-            raise HTTPException(
-                status_code=400, detail="Folder is not a smart folder"
-            )
+            raise HTTPException(status_code=400, detail="Folder is not a smart folder")
 
         await repo.delete_folder(folder_id)
         return {"success": True, "message": "Smart folder deleted"}
@@ -134,9 +127,7 @@ async def smart_folder_results(
         if not folder:
             raise HTTPException(status_code=404, detail="Smart folder not found")
         if not folder.get("is_smart"):
-            raise HTTPException(
-                status_code=400, detail="Folder is not a smart folder"
-            )
+            raise HTTPException(status_code=400, detail="Folder is not a smart folder")
 
         rules = folder.get("smart_rules")
         if not rules or not rules.get("conditions"):
@@ -288,7 +279,11 @@ async def delete_folder(folder_id: str, auth: AuthDep):
             raise HTTPException(status_code=404, detail="Folder not found")
 
         result = await svc.permanent_delete_folder(folder_id, auth.user_id)
-        return {"success": True, "message": "Folder permanently deleted", "data": result}
+        return {
+            "success": True,
+            "message": "Folder permanently deleted",
+            "data": result,
+        }
     except HTTPException:
         raise
     except Exception as e:

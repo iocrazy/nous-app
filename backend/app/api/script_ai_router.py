@@ -31,7 +31,9 @@ async def _verify_script_access(script_id: str, user_id: str) -> None:
 
 
 @router.post("/generate-outline")
-async def generate_outline(auth: AuthDep, body: GenerateOutlineRequest) -> Dict[str, Any]:
+async def generate_outline(
+    auth: AuthDep, body: GenerateOutlineRequest
+) -> Dict[str, Any]:
     """Dispatch async outline generation. Returns task_id immediately."""
     try:
         await _verify_script_access(body.script_id, auth.user_id)
@@ -72,9 +74,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
 
         # Update the chapter with expanded content
         script_svc = ScriptService()
-        updated = await script_svc.update_chapter(
-            body.chapter_id, {"content": content}
-        )
+        updated = await script_svc.update_chapter(body.chapter_id, {"content": content})
 
         return {"success": True, "data": {"content": content, "chapter": updated}}
     except Exception as exc:

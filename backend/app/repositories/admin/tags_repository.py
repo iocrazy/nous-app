@@ -65,10 +65,7 @@ class AdminTagsRepository:
     async def delete_group(self, group_id: str) -> bool:
         client = await self._client()
         result = (
-            await client.table(self.GROUPS_TABLE)
-            .delete()
-            .eq("id", group_id)
-            .execute()
+            await client.table(self.GROUPS_TABLE).delete().eq("id", group_id).execute()
         )
         return bool(result.data)
 
@@ -121,9 +118,7 @@ class AdminTagsRepository:
     async def all_tag_group_ids(self) -> list[dict[str, Any]]:
         """Used by list_groups to compute tag counts per group."""
         client = await self._client()
-        result = (
-            await client.table(self.TAGS_TABLE).select("group_id").execute()
-        )
+        result = await client.table(self.TAGS_TABLE).select("group_id").execute()
         return result.data or []
 
     async def usage_counts(self, tag_ids: list[str]) -> dict[str, int]:
@@ -143,9 +138,7 @@ class AdminTagsRepository:
             counts[tid] = counts.get(tid, 0) + 1
         return counts
 
-    async def create_tag(
-        self, payload: dict[str, Any]
-    ) -> Optional[dict[str, Any]]:
+    async def create_tag(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
         client = await self._client()
         result = await client.table(self.TAGS_TABLE).insert(payload).execute()
         return result.data[0] if result.data else None
@@ -171,12 +164,7 @@ class AdminTagsRepository:
             .eq("tag_id", tag_id)
             .execute()
         )
-        result = (
-            await client.table(self.TAGS_TABLE)
-            .delete()
-            .eq("id", tag_id)
-            .execute()
-        )
+        result = await client.table(self.TAGS_TABLE).delete().eq("id", tag_id).execute()
         return bool(result.data)
 
     # ─── Batch ─────────────────────────────────────────────────────────
@@ -193,9 +181,7 @@ class AdminTagsRepository:
                 .execute()
             )
 
-    async def batch_set_color(
-        self, tag_ids: list[str], color: str
-    ) -> None:
+    async def batch_set_color(self, tag_ids: list[str], color: str) -> None:
         client = await self._client()
         for tid in tag_ids:
             await (
@@ -214,9 +200,7 @@ class AdminTagsRepository:
                 .eq("tag_id", tid)
                 .execute()
             )
-            await (
-                client.table(self.TAGS_TABLE).delete().eq("id", tid).execute()
-            )
+            await client.table(self.TAGS_TABLE).delete().eq("id", tid).execute()
 
     async def reorder_tags(self, tag_ids: list[str]) -> None:
         client = await self._client()

@@ -21,7 +21,6 @@ from loguru import logger
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
-
 # ---------------------------------------------------------------------------
 # Cookie format helpers
 # ---------------------------------------------------------------------------
@@ -118,8 +117,10 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
-            "--socket-timeout", "15",
-            "--retries", "2",
+            "--socket-timeout",
+            "15",
+            "--retries",
+            "2",
             *ua_args,
             *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
@@ -140,11 +141,17 @@ class YtdlpService:
                 proc.kill()
                 # Try to read whatever stderr yt-dlp has written so far
                 _out, _err = await asyncio.wait_for(proc.communicate(), timeout=2)
-                stderr_snippet = _err.decode("utf-8", errors="replace")[:500] if _err else ""
+                stderr_snippet = (
+                    _err.decode("utf-8", errors="replace")[:500] if _err else ""
+                )
             except Exception:
                 stderr_snippet = ""
-            logger.error(f"[yt-dlp] Metadata fetch timed out after 90s: {url}\n--- stderr ---\n{stderr_snippet}")
-            raise RuntimeError(f"yt-dlp timed out (90s). Likely network unreachable. stderr: {stderr_snippet[:200]}")
+            logger.error(
+                f"[yt-dlp] Metadata fetch timed out after 90s: {url}\n--- stderr ---\n{stderr_snippet}"
+            )
+            raise RuntimeError(
+                f"yt-dlp timed out (90s). Likely network unreachable. stderr: {stderr_snippet[:200]}"
+            )
 
         if proc.returncode != 0:
             error_msg = stderr.decode("utf-8", errors="replace").strip()
@@ -246,7 +253,9 @@ class YtdlpService:
                                 try:
                                     pct = float(parts[0].rstrip("%"))
                                     speed = parts[3] if len(parts) > 3 else "0 B/s"
-                                    result = progress_callback(int(pct * 100), 10000, speed)
+                                    result = progress_callback(
+                                        int(pct * 100), 10000, speed
+                                    )
                                     if asyncio.iscoroutine(result):
                                         await result
                                 except (ValueError, IndexError):
@@ -497,6 +506,7 @@ class YtdlpService:
         """
         import os
         from urllib.parse import urlparse
+
         host = (urlparse(url).hostname or "").lower()
         needs_proxy_hosts = ("youtube.com", "youtu.be", "twitter.com", "x.com")
         if not any(h in host for h in needs_proxy_hosts):
@@ -581,7 +591,9 @@ class YtdlpService:
 
         cookie_file = os.path.join(cookies_dir, f"{platform}.txt")
         if os.path.isfile(cookie_file):
-            logger.info(f"[yt-dlp] Using filesystem cookie for {platform}: {cookie_file}")
+            logger.info(
+                f"[yt-dlp] Using filesystem cookie for {platform}: {cookie_file}"
+            )
             return ["--cookies", cookie_file]
 
         return []

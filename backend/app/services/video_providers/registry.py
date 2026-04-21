@@ -1,6 +1,5 @@
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from app.services.video_providers.base import BaseImageProvider, BaseVideoProvider
 

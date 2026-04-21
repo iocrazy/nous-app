@@ -176,11 +176,17 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API Key")
     DOUBAO_API_KEY: str = Field(default="", description="Doubao API Key")
     WHISPER_PROVIDER: str = Field(
-        default="openai_api", description="Whisper provider: openai_api, volcengine, or local"
+        default="openai_api",
+        description="Whisper provider: openai_api, volcengine, or local",
     )
     VOLCENGINE_APP_ID: str = Field(default="", description="Volcengine ASR App ID")
-    VOLCENGINE_ACCESS_TOKEN: str = Field(default="", description="Volcengine ASR Access Token")
-    MEDIA_PUBLIC_URL: str = Field(default="https://mediahubserver.heygo.cn:88", description="Public URL for media file access")
+    VOLCENGINE_ACCESS_TOKEN: str = Field(
+        default="", description="Volcengine ASR Access Token"
+    )
+    MEDIA_PUBLIC_URL: str = Field(
+        default="https://mediahubserver.heygo.cn:88",
+        description="Public URL for media file access",
+    )
     AI_DEFAULT_SUMMARY_MODEL: str = Field(
         default="gpt-4o-mini", description="Default LLM model for summaries"
     )

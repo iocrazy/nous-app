@@ -16,11 +16,11 @@
 # future `curl upstream | diff` updates are trivial. Add local wrappers
 # in `abogus_parser.py` instead of editing here.
 
-import time
 import random
+import time
+from typing import Callable, Dict, List, Union
 
-from gmssl import sm3, func
-from typing import Union, Callable, List, Dict
+from gmssl import func, sm3
 
 
 class StringProcessor:
@@ -645,7 +645,7 @@ class ABogus:
         self.array2 = []  # 加密请求头 为空
         self.array3 = []  # 加密UA
         self.options = options  # GET [0, 1, 8] POST [0, 1, 14]
-        self.ua_key = b"\x00\x01\x0E"  # ua加密key
+        self.ua_key = b"\x00\x01\x0e"  # ua加密key
 
         self.character = (
             "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe"

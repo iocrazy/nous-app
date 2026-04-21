@@ -6,13 +6,12 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.invite_repository import InviteRepository
 from app.schemas.invite import (
-    InviteCreate,
-    InviteResponse,
-    InviteListResponse,
     AcceptInviteRequest,
     AcceptInviteResponse,
+    InviteCreate,
+    InviteListResponse,
+    InviteResponse,
 )
-
 
 router = APIRouter(prefix="/invites", tags=["Invites"])
 
@@ -26,8 +25,7 @@ async def list_invites(team_id: str, auth: AuthDep):
     can_manage = await repo.check_user_can_manage_invites(team_id, auth.user_id)
     if not can_manage:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied"
         )
 
     invites = await repo.get_invites_by_team(team_id)
@@ -42,11 +40,11 @@ async def list_invites(team_id: str, auth: AuthDep):
                 expires_at=i.get("expires_at"),
                 max_uses=i.get("max_uses"),
                 use_count=i.get("use_count", 0),
-                created_at=i["created_at"]
+                created_at=i["created_at"],
             )
             for i in invites
         ],
-        total=len(invites)
+        total=len(invites),
     )
 
 
@@ -59,8 +57,7 @@ async def create_invite(invite: InviteCreate, auth: AuthDep):
     can_manage = await repo.check_user_can_manage_invites(invite.team_id, auth.user_id)
     if not can_manage:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied"
         )
 
     try:
@@ -68,13 +65,13 @@ async def create_invite(invite: InviteCreate, auth: AuthDep):
             team_id=invite.team_id,
             created_by=auth.user_id,
             expires_in=invite.expires_in,
-            max_uses=invite.max_uses
+            max_uses=invite.max_uses,
         )
     except Exception as e:
         logger.error(f"Failed to create invite: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create invite"
+            detail="Failed to create invite",
         )
 
     return InviteResponse(
@@ -85,7 +82,7 @@ async def create_invite(invite: InviteCreate, auth: AuthDep):
         expires_at=created.get("expires_at"),
         max_uses=created.get("max_uses"),
         use_count=created.get("use_count", 0),
-        created_at=created["created_at"]
+        created_at=created["created_at"],
     )
 
 
@@ -98,7 +95,7 @@ async def delete_invite(invite_id: str, auth: AuthDep):
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invite not found or permission denied"
+            detail="Invite not found or permission denied",
         )
 
 
@@ -113,36 +110,31 @@ async def accept_invite(request: AcceptInviteRequest, auth: AuthDep):
         error_msg = str(e)
         if "Invalid invite code" in error_msg:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Invalid invite code"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Invalid invite code"
             )
         if "expired" in error_msg.lower():
             raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Invite has expired"
+                status_code=status.HTTP_410_GONE, detail="Invite has expired"
             )
         if "max uses" in error_msg.lower():
             raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Invite has reached max uses"
+                status_code=status.HTTP_410_GONE, detail="Invite has reached max uses"
             )
         if "Already a member" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Already a member of this team"
+                detail="Already a member of this team",
             )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to accept invite"
+            detail="Failed to accept invite",
         )
 
     if not result:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid invite code"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invalid invite code"
         )
 
     return AcceptInviteResponse(
-        team_id=result["team_id"],
-        team_name=result["team_name"]
+        team_id=result["team_id"], team_name=result["team_name"]
     )

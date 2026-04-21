@@ -141,9 +141,13 @@ class SearchService:
                     .eq("is_trashed", False)
                     .execute()
                 )
-                user_media_ids = [r["media_id"] for r in user_resources.data if r.get("media_id")]
+                user_media_ids = [
+                    r["media_id"] for r in user_resources.data if r.get("media_id")
+                ]
                 if not user_media_ids:
-                    return SearchResponse(results=[], total=0, query=query, search_type="hybrid")
+                    return SearchResponse(
+                        results=[], total=0, query=query, search_type="hybrid"
+                    )
                 base_query = base_query.in_("id", user_media_ids)
 
             # Apply other filters
@@ -186,10 +190,17 @@ class SearchService:
                         .eq("is_trashed", False)
                         .execute()
                     )
-                    user_media_ids = [r["media_id"] for r in user_resources_2.data if r.get("media_id")]
+                    user_media_ids = [
+                        r["media_id"]
+                        for r in user_resources_2.data
+                        if r.get("media_id")
+                    ]
                 else:
                     user_media = (
-                        await client.table("parsed_media").select("id").limit(500).execute()
+                        await client.table("parsed_media")
+                        .select("id")
+                        .limit(500)
+                        .execute()
                     )
                     user_media_ids = [v["id"] for v in user_media.data]
 
@@ -275,9 +286,13 @@ class SearchService:
                 .eq("is_trashed", False)
                 .execute()
             )
-            user_media_ids_3 = [r["media_id"] for r in user_resources_3.data if r.get("media_id")]
+            user_media_ids_3 = [
+                r["media_id"] for r in user_resources_3.data if r.get("media_id")
+            ]
             if not user_media_ids_3:
-                return SearchResponse(results=[], total=0, query=query or "", search_type="hybrid")
+                return SearchResponse(
+                    results=[], total=0, query=query or "", search_type="hybrid"
+                )
             base_query = base_query.in_("id", user_media_ids_3)
         if author:
             base_query = base_query.ilike("author", f"%{author}%")
@@ -295,7 +310,9 @@ class SearchService:
                 .in_("tag_id", tag_ids)
                 .execute()
             )
-            tagged_media_ids = list(set(r["resource_id"] for r in tag_filter_result.data))
+            tagged_media_ids = list(
+                set(r["resource_id"] for r in tag_filter_result.data)
+            )
 
             if not tagged_media_ids:
                 return SearchResponse(

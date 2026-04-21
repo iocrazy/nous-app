@@ -51,6 +51,7 @@ def _update_resource_status(resource_id: str, field: str, status: str):
         return
     try:
         from app.repositories.resources_repository import ResourcesRepository
+
         repo = ResourcesRepository()
         run_async(repo.update_resource(resource_id, {field: status}))
     except Exception as e:
@@ -63,6 +64,7 @@ def _start_unified(task_id: str):
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         run_async(get_task_manager().start(task_id))
     except Exception as e:
         logger.error(f"[AI] _start_unified silent exception: {e}")
@@ -74,10 +76,15 @@ def _update_unified_progress(unified_task_id: str, progress: int, subtitle: str 
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         tracker = get_task_manager()
-        run_async(tracker.update_progress(
-            unified_task_id, progress=progress, subtitle=subtitle,
-        ))
+        run_async(
+            tracker.update_progress(
+                unified_task_id,
+                progress=progress,
+                subtitle=subtitle,
+            )
+        )
     except Exception as e:
         logger.debug(f"[AI] Unified progress update failed: {e}")
 
@@ -87,6 +94,7 @@ def _complete_unified(unified_task_id: str):
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         run_async(get_task_manager().complete(unified_task_id))
     except Exception as e:
         logger.error(f"[AI] _complete_unified silent exception: {e}")
@@ -97,21 +105,30 @@ def _fail_unified(unified_task_id: str, error_msg: str):
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
     except Exception as e:
         logger.error(f"[AI] _fail_unified silent exception: {e}")
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None, _dedup_key: str = None):
+def extract_audio_task(
+    self,
+    platform_id: str,
+    user_id: str,
+    resource_id: str = None,
+    unified_task_id: str = None,
+    next_task_id: str = None,
+    _dedup_key: str = None,
+):
     """Extract audio from a downloaded video file.
 
     Produces a .wav file for Whisper transcription.
     """
     # Store orchestrator keys in request for signal handlers
-    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
-    self.request.kwargs['_dedup_key'] = _dedup_key
-    self.request.kwargs['_unified_task_id'] = unified_task_id
+    self.request.kwargs = getattr(self.request, "kwargs", {}) or {}
+    self.request.kwargs["_dedup_key"] = _dedup_key
+    self.request.kwargs["_unified_task_id"] = unified_task_id
 
     logger.info(f"[AI] Starting audio extraction for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Extracting audio...")
@@ -171,10 +188,14 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
                 "-i",
                 full_video_path,
                 "-vn",
-                "-codec:a", "aac",
-                "-b:a", "128k",
-                "-ar", "16000",
-                "-ac", "1",
+                "-codec:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
                 "-y",
                 audio_path,
             ]
@@ -187,9 +208,12 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
 
             # Write extract_audio_path to DB
             from app.core.utils import Utils as _Utils
+
             _base = _Utils.get_download_base_path()
             _rel = os.path.relpath(audio_path, _base)
-            run_async(MediaRepository().update(platform_id, {"extract_audio_path": _rel}))
+            run_async(
+                MediaRepository().update(platform_id, {"extract_audio_path": _rel})
+            )
 
         _update_unified_progress(unified_task_id, 100, "Audio extracted")
         _complete_unified(unified_task_id)
@@ -230,7 +254,16 @@ def extract_audio_task(self, platform_id: str, user_id: str, resource_id: str = 
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str = None, resource_id: str = None, unified_task_id: str = None, next_task_id: str = None, _dedup_key: str = None):
+def transcribe_audio_task(
+    self,
+    platform_id: str,
+    user_id: str,
+    audio_path: str = None,
+    resource_id: str = None,
+    unified_task_id: str = None,
+    next_task_id: str = None,
+    _dedup_key: str = None,
+):
     """Transcribe audio using Whisper.
 
     Args:
@@ -243,9 +276,9 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         _dedup_key: Optional dedup key for orchestrator signal handlers.
     """
     # Store orchestrator keys in request for signal handlers
-    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
-    self.request.kwargs['_dedup_key'] = _dedup_key
-    self.request.kwargs['_unified_task_id'] = unified_task_id
+    self.request.kwargs = getattr(self.request, "kwargs", {}) or {}
+    self.request.kwargs["_dedup_key"] = _dedup_key
+    self.request.kwargs["_unified_task_id"] = unified_task_id
 
     logger.info(f"[AI] Starting transcription for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Transcribing...")
@@ -269,6 +302,7 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         if not resource_id:
             # Legacy path: find a resource linked to this media
             from app.repositories.resources_repository import ResourcesRepository
+
             res_repo = ResourcesRepository()
             resource = run_async(res_repo.get_resource_by_media_id(media_id))
             if resource:
@@ -301,16 +335,21 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
         from app.core.config import settings
 
         ai_settings = _get_ai_settings(user_id)
-        transcription_assignment = ai_settings.get("task_assignment", {}).get("transcription", "openai:whisper-1")
+        transcription_assignment = ai_settings.get("task_assignment", {}).get(
+            "transcription", "openai:whisper-1"
+        )
 
         # Check if using a Nous platform model
         if transcription_assignment.startswith("nous-"):
             from app.repositories.nous_repository import NousRepository
+
             nous_repo = NousRepository()
             nous_model = run_async(nous_repo.get_by_name(transcription_assignment))
             if nous_model:
                 # Override provider config with Nous platform config
-                transcription_assignment = f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                transcription_assignment = (
+                    f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                )
                 ai_settings = {
                     **ai_settings,
                     "ai_providers": {
@@ -322,9 +361,15 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
                         }
                     },
                 }
-                logger.info(f"[AI] Using Nous model '{nous_model['name']}' -> {transcription_assignment}")
+                logger.info(
+                    f"[AI] Using Nous model '{nous_model['name']}' -> {transcription_assignment}"
+                )
 
-        provider_key = transcription_assignment.split(":")[0] if ":" in transcription_assignment else transcription_assignment
+        provider_key = (
+            transcription_assignment.split(":")[0]
+            if ":" in transcription_assignment
+            else transcription_assignment
+        )
 
         if provider_key == "volcengine":
             # Use Volcengine Seed-ASR (requires public audio URL)
@@ -339,30 +384,47 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             video_dir = os.path.dirname(download_path)
             audio_filename = os.path.basename(audio_path)
 
-            import hashlib, hmac as hmac_mod, time as time_mod
+            import hashlib
+            import hmac as hmac_mod
+            import time as time_mod
+
             expires_at = int(time_mod.time()) + 3600
             payload = f"{user_id}.{expires_at}"
             from app.api.media_auth import _get_secret
+
             sig = hmac_mod.new(
                 _get_secret().encode(), payload.encode(), hashlib.sha256
             ).hexdigest()[:32]
             media_token = f"{payload}.{sig}"
 
-            media_public_url = getattr(settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88")
+            media_public_url = getattr(
+                settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"
+            )
             audio_url = (
                 f"{media_public_url}/media/"
                 f"{video_dir}/{audio_filename}?token={media_token}"
             )
 
-            _update_unified_progress(unified_task_id, 20, "Transcribing via Volcengine...")
+            _update_unified_progress(
+                unified_task_id, 20, "Transcribing via Volcengine..."
+            )
 
             ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
             audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
 
             # Determine model version from task assignment (e.g. "volcengine:seed-asr" or "volcengine:bigasr")
             from app.services.volcengine_asr_service import RESOURCE_V1, RESOURCE_V2
-            model_part = transcription_assignment.split(":", 1)[1] if ":" in transcription_assignment else "seed-asr"
-            asr_resource = RESOURCE_V1 if "bigasr" in model_part or "1.0" in model_part else RESOURCE_V2
+
+            model_part = (
+                transcription_assignment.split(":", 1)[1]
+                if ":" in transcription_assignment
+                else "seed-asr"
+            )
+            asr_resource = (
+                RESOURCE_V1
+                if "bigasr" in model_part or "1.0" in model_part
+                else RESOURCE_V2
+            )
 
             service = VolcengineASRService(
                 app_id=volcengine_config.get("app_id", ""),
@@ -378,7 +440,9 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
             )
         else:
             # Default: OpenAI Whisper API
-            provider_config = _get_provider_config(ai_settings, provider_key or "openai")
+            provider_config = _get_provider_config(
+                ai_settings, provider_key or "openai"
+            )
 
             if not provider_config.get("api_key"):
                 provider_config["api_key"] = settings.OPENAI_API_KEY
@@ -437,7 +501,14 @@ def transcribe_audio_task(self, platform_id: str, user_id: str, audio_path: str 
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str = None, unified_task_id: str = None, _dedup_key: str = None):
+def generate_summary_task(
+    self,
+    platform_id: str,
+    user_id: str,
+    resource_id: str = None,
+    unified_task_id: str = None,
+    _dedup_key: str = None,
+):
     """Generate LLM summary from a video's transcript.
 
     Args:
@@ -448,9 +519,9 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         _dedup_key: Optional dedup key for orchestrator signal handlers.
     """
     # Store orchestrator keys in request for signal handlers
-    self.request.kwargs = getattr(self.request, 'kwargs', {}) or {}
-    self.request.kwargs['_dedup_key'] = _dedup_key
-    self.request.kwargs['_unified_task_id'] = unified_task_id
+    self.request.kwargs = getattr(self.request, "kwargs", {}) or {}
+    self.request.kwargs["_dedup_key"] = _dedup_key
+    self.request.kwargs["_unified_task_id"] = unified_task_id
 
     logger.info(f"[AI] Starting summary generation for {platform_id}")
     _update_unified_progress(unified_task_id, 5, "Generating summary...")
@@ -473,6 +544,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         # Resolve resource_id for per-resource transcript/summary storage
         if not resource_id:
             from app.repositories.resources_repository import ResourcesRepository
+
             res_repo = ResourcesRepository()
             resource = run_async(res_repo.get_resource_by_media_id(media_id))
             if resource:
@@ -486,7 +558,9 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         ai_repo = AIRepository()
         transcript = run_async(ai_repo.get_transcript(resource_id))
         if not transcript or not transcript.get("full_text"):
-            logger.warning(f"[AI] No transcript for resource {resource_id}, cannot summarize")
+            logger.warning(
+                f"[AI] No transcript for resource {resource_id}, cannot summarize"
+            )
             _update_resource_status(resource_id, "summary_status", "failed")
             _update_status(platform_id, "summary_status", "failed")
             return {"status": "failed", "error": "No transcript available"}
@@ -507,10 +581,13 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         # Resolve Nous platform models to their actual provider
         if summary_assignment.startswith("nous-"):
             from app.repositories.nous_repository import NousRepository
+
             nous_repo = NousRepository()
             nous_model = run_async(nous_repo.get_by_name(summary_assignment))
             if nous_model:
-                summary_assignment = f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                summary_assignment = (
+                    f"{nous_model['actual_provider']}:{nous_model['actual_model']}"
+                )
                 ai_settings = {
                     **ai_settings,
                     "ai_providers": {
@@ -522,7 +599,9 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
                         }
                     },
                 }
-                logger.info(f"[AI] Using Nous model '{nous_model['name']}' -> {summary_assignment}")
+                logger.info(
+                    f"[AI] Using Nous model '{nous_model['name']}' -> {summary_assignment}"
+                )
 
         # Split provider:model
         if ":" in summary_assignment:
@@ -535,6 +614,7 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
         # Fallback: use global OpenAI key if user didn't configure a per-user one for OpenAI
         if provider_key == "openai" and not provider_config.get("api_key"):
             from app.core.config import settings
+
             provider_config["api_key"] = settings.OPENAI_API_KEY
 
         language = ai_settings.get("preferred_language") or "auto"
@@ -585,11 +665,14 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
 
     except Exception as e:
         from celery.exceptions import Retry as _CeleryRetry
+
         # Celery's Retry is a subclass of Exception — let it propagate unchanged
         if isinstance(e, _CeleryRetry):
             raise
-        logger.error(f"[AI] Summary generation failed for {platform_id} "
-                     f"(model={summary_model}): {e}")
+        logger.error(
+            f"[AI] Summary generation failed for {platform_id} "
+            f"(model={summary_model}): {e}"
+        )
 
         # Prefix provider:model so the user can tell which LLM was failing.
         err_msg = f"[{summary_model}] {str(e)}"[:200]
@@ -598,12 +681,15 @@ def generate_summary_task(self, platform_id: str, user_id: str, resource_id: str
             # Update unified_task with retry progress so user sees it's not dead
             try:
                 from app.services.unified_task_manager import get_task_manager
+
                 _tracker = get_task_manager()
-                run_async(_tracker.update_progress(
-                    unified_task_id,
-                    10,
-                    subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries}): {err_msg}",
-                ))
+                run_async(
+                    _tracker.update_progress(
+                        unified_task_id,
+                        10,
+                        subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries}): {err_msg}",
+                    )
+                )
             except Exception:
                 pass
             raise self.retry(exc=e)
@@ -655,17 +741,22 @@ def chain_ai_pipeline(
     dedup_key = None
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
-        dedup_result = run_async(mgr.acquire_or_subscribe(
-            task_type="ai_extract",
-            dedup_identifier=platform_id,
-            user_id=user_id,
-            resource_id=resource_id or "",
-        ))
+        dedup_result = run_async(
+            mgr.acquire_or_subscribe(
+                task_type="ai_extract",
+                dedup_identifier=platform_id,
+                user_id=user_id,
+                resource_id=resource_id or "",
+            )
+        )
         dedup_key = dedup_result.get("dedup_key")
 
         if dedup_result["action"] == "subscribed":
-            logger.info(f"[AI] Already processing {platform_id}, subscribed to existing pipeline")
+            logger.info(
+                f"[AI] Already processing {platform_id}, subscribed to existing pipeline"
+            )
             return
         if dedup_result["action"] == "completed":
             logger.info(f"[AI] AI pipeline already completed for {platform_id}")
@@ -680,6 +771,7 @@ def chain_ai_pipeline(
         try:
             from app.core.utils import Utils
             from app.repositories.media_repository import MediaRepository
+
             repo = MediaRepository()
             video = run_async(repo.get_by_platform_id(platform_id))
             if video:
@@ -708,40 +800,47 @@ def chain_ai_pipeline(
 
     try:
         from app.services.unified_task_manager import get_task_manager
+
         tracker = get_task_manager()
 
         if transcript_bool:
             # Only create extract task if no existing audio
             if not existing_audio:
-                task_ids['extract'] = run_async(tracker.create(
+                task_ids["extract"] = run_async(
+                    tracker.create(
+                        user_id=user_id,
+                        task_type="ai_extract",
+                        title=f"Audio Extract: {platform_id}",
+                        media_id=platform_id,
+                        resource_id=resource_id,
+                        group_id=group_id,
+                    )
+                )
+            task_ids["transcribe"] = run_async(
+                tracker.create(
                     user_id=user_id,
-                    task_type="ai_extract",
-                    title=f"Audio Extract: {platform_id}",
+                    task_type="ai_transcription",
+                    title=f"Transcribe: {platform_id}",
                     media_id=platform_id,
                     resource_id=resource_id,
                     group_id=group_id,
-                ))
-            task_ids['transcribe'] = run_async(tracker.create(
-                user_id=user_id,
-                task_type="ai_transcription",
-                title=f"Transcribe: {platform_id}",
-                media_id=platform_id,
-                resource_id=resource_id,
-                group_id=group_id,
-            ))
+                )
+            )
 
         if summary_bool and transcript_bool:
-            task_ids['summary'] = run_async(tracker.create(
-                user_id=user_id,
-                task_type="ai_summary",
-                title=f"Summarize: {platform_id}",
-                media_id=platform_id,
-                resource_id=resource_id,
-                group_id=group_id,
-            ))
+            task_ids["summary"] = run_async(
+                tracker.create(
+                    user_id=user_id,
+                    task_type="ai_summary",
+                    title=f"Summarize: {platform_id}",
+                    media_id=platform_id,
+                    resource_id=resource_id,
+                    group_id=group_id,
+                )
+            )
 
         # Start the first task
-        first_task = 'extract' if 'extract' in task_ids else 'transcribe'
+        first_task = "extract" if "extract" in task_ids else "transcribe"
         if first_task in task_ids:
             run_async(tracker.start(task_ids[first_task]))
 
@@ -757,33 +856,56 @@ def chain_ai_pipeline(
     tasks = []
     if transcript_bool:
         if existing_audio:
-            logger.info(f"[AI] Audio already exists, skipping extract: {existing_audio}")
+            logger.info(
+                f"[AI] Audio already exists, skipping extract: {existing_audio}"
+            )
             # Go straight to transcribe with the existing audio path
-            tasks.append(transcribe_audio_task.si(
-                platform_id, user_id, existing_audio, resource_id,
-                task_ids.get('transcribe'), task_ids.get('summary'),
-                _dedup_key=dedup_key,
-            ))
+            tasks.append(
+                transcribe_audio_task.si(
+                    platform_id,
+                    user_id,
+                    existing_audio,
+                    resource_id,
+                    task_ids.get("transcribe"),
+                    task_ids.get("summary"),
+                    _dedup_key=dedup_key,
+                )
+            )
         else:
             # No audio yet, run full extract → transcribe chain
-            tasks.append(extract_audio_task.si(
-                platform_id, user_id, resource_id,
-                task_ids.get('extract'), task_ids.get('transcribe'),
-                _dedup_key=dedup_key,
-            ))
-            tasks.append(transcribe_audio_task.si(
-                platform_id, user_id, None, resource_id,
-                task_ids.get('transcribe'), task_ids.get('summary'),
-                _dedup_key=dedup_key,
-            ))
+            tasks.append(
+                extract_audio_task.si(
+                    platform_id,
+                    user_id,
+                    resource_id,
+                    task_ids.get("extract"),
+                    task_ids.get("transcribe"),
+                    _dedup_key=dedup_key,
+                )
+            )
+            tasks.append(
+                transcribe_audio_task.si(
+                    platform_id,
+                    user_id,
+                    None,
+                    resource_id,
+                    task_ids.get("transcribe"),
+                    task_ids.get("summary"),
+                    _dedup_key=dedup_key,
+                )
+            )
 
     if summary_bool and transcript_bool:
         # generate_summary_task(platform_id, user_id, resource_id, unified_task_id, _dedup_key)
-        tasks.append(generate_summary_task.si(
-            platform_id, user_id, resource_id,
-            task_ids.get('summary'),
-            _dedup_key=dedup_key,
-        ))
+        tasks.append(
+            generate_summary_task.si(
+                platform_id,
+                user_id,
+                resource_id,
+                task_ids.get("summary"),
+                _dedup_key=dedup_key,
+            )
+        )
 
     if tasks:
         pipeline = chain(*tasks)
@@ -795,6 +917,7 @@ def chain_ai_pipeline(
         # reaper couldn't distinguish a dispatched task from a lost one.
         try:
             from app.services.unified_task_manager import get_task_manager
+
             _mgr = get_task_manager()
             # chain() returns an AsyncResult whose .parent chain ends at
             # the first task; walk the list in reverse to grab all IDs.
@@ -819,7 +942,9 @@ def chain_ai_pipeline(
         except Exception as e:
             logger.debug(f"[AI] Failed to link celery_task_ids: {e}")
 
-        logger.info(f"[AI] Pipeline queued for {platform_id}: {len(tasks)} tasks, group={group_id}")
+        logger.info(
+            f"[AI] Pipeline queued for {platform_id}: {len(tasks)} tasks, group={group_id}"
+        )
         run_async(
             log_user_action(
                 user_id=user_id,

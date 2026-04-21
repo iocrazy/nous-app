@@ -13,12 +13,11 @@ import hashlib
 import json
 import mimetypes
 import re
-
-import aiofiles
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import aiofiles
 from loguru import logger
 
 from app.core.config import settings
@@ -79,7 +78,14 @@ class ResourcesService:
         resource_id = str(resource["id"])
 
         # Save to disk — teams/{scope_id}/uploads/{resource_id}/v1/
-        save_dir = Path(settings.DOWNLOAD_PATH) / "teams" / scope_id / "uploads" / resource_id / "v1"
+        save_dir = (
+            Path(settings.DOWNLOAD_PATH)
+            / "teams"
+            / scope_id
+            / "uploads"
+            / resource_id
+            / "v1"
+        )
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
         async with aiofiles.open(target, "wb") as f:
@@ -125,7 +131,9 @@ class ResourcesService:
         if file_type == "video":
             versions = await self.repo.get_versions(resource_id)
             if versions:
-                await self._trigger_transcode_async(resource_id, str(versions[0]["id"]), mime, user_id=user_id)
+                await self._trigger_transcode_async(
+                    resource_id, str(versions[0]["id"]), mime, user_id=user_id
+                )
 
         return resource
 
@@ -213,7 +221,9 @@ class ResourcesService:
 
         # Trigger HLS transcode for video files
         if file_type == "video":
-            await self._trigger_transcode_async(resource_id, str(version["id"]), mime, user_id=user_id)
+            await self._trigger_transcode_async(
+                resource_id, str(version["id"]), mime, user_id=user_id
+            )
 
         return version
 
@@ -270,6 +280,7 @@ class ResourcesService:
         file_path = target.get("file_path")
         if file_path:
             import shutil
+
             base = Path(settings.DOWNLOAD_PATH)
             full = base / file_path
             # Remove the v{n}/ directory
@@ -409,12 +420,15 @@ class ResourcesService:
             raise ValueError("Resource not found in this scope/folder")
 
         # Save last location for restore
-        await self.repo.update_resource(resource_id, {
-            "last_folder_id": item.get("folder_id"),
-            "last_library_id": item.get("library_id"),
-            "last_scope_type": scope_type,
-            "last_scope_id": scope_id,
-        })
+        await self.repo.update_resource(
+            resource_id,
+            {
+                "last_folder_id": item.get("folder_id"),
+                "last_library_id": item.get("library_id"),
+                "last_scope_type": scope_type,
+                "last_scope_id": scope_id,
+            },
+        )
 
         return await self.repo.delete_resource_item(item["id"])
 
@@ -453,6 +467,7 @@ class ResourcesService:
         # If last_folder_id references a trashed/deleted folder, clear it
         if folder_id:
             from app.db.supabase_client import get_async_supabase_admin
+
             client = await get_async_supabase_admin()
             folder_check = await (
                 client.table("folders")
@@ -465,14 +480,16 @@ class ResourcesService:
                 folder_id = None  # Folder gone or trashed -> restore to library root
 
         # Recreate the resource_item
-        await self.repo.create_resource_item({
-            "resource_id": resource_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
-            "folder_id": folder_id,
-            "library_id": library_id,
-            "added_by": user_id,
-        })
+        await self.repo.create_resource_item(
+            {
+                "resource_id": resource_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "folder_id": folder_id,
+                "library_id": library_id,
+                "added_by": user_id,
+            }
+        )
 
         # Un-trash the resource
         return await self.repo.update_resource(
@@ -509,9 +526,7 @@ class ResourcesService:
 
         return result
 
-    async def permanent_delete_folder(
-        self, folder_id: str, user_id: str
-    ) -> dict:
+    async def permanent_delete_folder(self, folder_id: str, user_id: str) -> dict:
         """Permanently delete a folder, all sub-folders, and their resources."""
         # 1. Collect all descendant folder IDs
         all_folder_ids = [folder_id]
@@ -583,9 +598,7 @@ class ResourcesService:
 
                 cleaned += 1
             except Exception as e:
-                logger.error(
-                    f"Failed to cleanup resource {resource['id']}: {e}"
-                )
+                logger.error(f"Failed to cleanup resource {resource['id']}: {e}")
 
         if cleaned:
             logger.info(f"Cleaned up {cleaned} expired trashed resources")
@@ -659,7 +672,9 @@ class ResourcesService:
     def _prune_empty_parents(start: Path, base: Path) -> None:
         """Remove empty ancestor directories between start and base."""
         base_resolved = base.resolve()
-        current = start.parent if start.is_file() or not start.exists() else start.parent
+        current = (
+            start.parent if start.is_file() or not start.exists() else start.parent
+        )
         while current.resolve() != base_resolved and current != current.parent:
             try:
                 if current.exists() and not any(current.iterdir()):
@@ -721,10 +736,13 @@ class ResourcesService:
             return "audio"
         return "document"
 
-    def _trigger_transcode(self, resource_id: str, version_id: str, mime_type: str, user_id: str = None):
+    def _trigger_transcode(
+        self, resource_id: str, version_id: str, mime_type: str, user_id: str = None
+    ):
         """Queue HLS transcoding for a video version (sync — for Celery context)."""
         try:
             from app.tasks.transcode_tasks import maybe_trigger_transcode
+
             maybe_trigger_transcode(resource_id, version_id, mime_type, user_id=user_id)
         except Exception as e:
             logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
@@ -760,9 +778,13 @@ class ResourcesService:
             duration_sec = None
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "ffprobe", "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
                     str(file_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -791,6 +813,7 @@ class ResourcesService:
         dedup_key = None
         try:
             from app.services.unified_task_manager import get_task_manager
+
             mgr = get_task_manager()
             result = await mgr.acquire_or_subscribe(
                 task_type="transcode",
@@ -800,7 +823,9 @@ class ResourcesService:
             )
             dedup_key = result.get("dedup_key")
             if result["action"] in ("subscribed", "completed"):
-                logger.info(f"[Transcode] Dedup hit for version {version_id}: {result['action']}")
+                logger.info(
+                    f"[Transcode] Dedup hit for version {version_id}: {result['action']}"
+                )
                 return
         except Exception as e:
             logger.warning(f"[Transcode] Dedup check failed, proceeding normally: {e}")
@@ -809,19 +834,30 @@ class ResourcesService:
             await self.repo.update_version(version_id, {"transcode_status": "pending"})
 
             from app.tasks.transcode_tasks import transcode_to_hls
-            await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, user_id, _dedup_key=dedup_key)
+
+            await asyncio.to_thread(
+                transcode_to_hls.delay,
+                resource_id,
+                version_id,
+                user_id,
+                _dedup_key=dedup_key,
+            )
             logger.info(
                 f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"
             )
         except Exception as e:
-            logger.warning(f"[Transcode] Failed to queue transcode for {resource_id}: {e}")
+            logger.warning(
+                f"[Transcode] Failed to queue transcode for {resource_id}: {e}"
+            )
 
     async def _extract_video_metadata(self, filepath: str) -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
                 filepath,

@@ -9,20 +9,19 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.users_repository import AdminUsersRepository
 from app.schemas.admin import (
-    AdminUserResponse,
-    AdminUserListResponse,
-    AdminUserUpdate,
     AdminUserBanRequest,
+    AdminUserListResponse,
+    AdminUserResponse,
+    AdminUserUpdate,
 )
 from app.utils.admin_helpers import (
-    create_audit_log,
     batch_get_user_auth_info,
     batch_get_user_counts,
+    create_audit_log,
     get_user_auth_info,
-    get_user_video_count,
     get_user_team_count,
+    get_user_video_count,
 )
-
 
 router = APIRouter()
 
@@ -73,19 +72,21 @@ async def list_users(
         uid = u["id"]
         video_count, team_count = user_counts.get(uid, (0, 0))
         email, last_sign_in_at = auth_info.get(uid, (None, None))
-        items.append(AdminUserResponse(
-            id=str(uid),
-            email=email,
-            username=u.get("username"),
-            avatar_url=u.get("avatar_url"),
-            role=str(u.get("role", "user")),
-            is_banned=u.get("is_banned", False),
-            created_at=u["created_at"],
-            updated_at=u.get("updated_at"),
-            last_sign_in_at=last_sign_in_at,
-            video_count=video_count,
-            team_count=team_count,
-        ))
+        items.append(
+            AdminUserResponse(
+                id=str(uid),
+                email=email,
+                username=u.get("username"),
+                avatar_url=u.get("avatar_url"),
+                role=str(u.get("role", "user")),
+                is_banned=u.get("is_banned", False),
+                created_at=u["created_at"],
+                updated_at=u.get("updated_at"),
+                last_sign_in_at=last_sign_in_at,
+                video_count=video_count,
+                team_count=team_count,
+            )
+        )
 
     return AdminUserListResponse(
         items=items,
@@ -251,7 +252,9 @@ async def ban_user(
         ip_address=client_ip,
     )
 
-    logger.info(f"User {user_id} {'banned' if ban_request.is_banned else 'unbanned'} by admin {auth.user_id}")
+    logger.info(
+        f"User {user_id} {'banned' if ban_request.is_banned else 'unbanned'} by admin {auth.user_id}"
+    )
 
     # Return updated user
     return await get_user(user_id, auth)

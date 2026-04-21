@@ -539,9 +539,7 @@ class PointsRepository:
             if days is not None:
                 from datetime import datetime, timedelta, timezone
 
-                cutoff = (
-                    datetime.now(timezone.utc) - timedelta(days=days)
-                ).isoformat()
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
                 query = query.gte("created_at", cutoff)
             query = query.order("created_at", desc=True)
             query = query.range(offset, offset + limit - 1)

@@ -77,9 +77,7 @@ class CookiesRepository:
             )
             return None
 
-    async def upsert(
-        self, user_id: str, platform: str, data: Dict
-    ) -> Optional[Dict]:
+    async def upsert(self, user_id: str, platform: str, data: Dict) -> Optional[Dict]:
         """
         创建或更新用户 Cookie
 
@@ -133,14 +131,9 @@ class CookiesRepository:
         try:
             table = await self._get_table()
             await (
-                table.delete()
-                .eq("user_id", user_id)
-                .eq("platform", platform)
-                .execute()
+                table.delete().eq("user_id", user_id).eq("platform", platform).execute()
             )
-            logger.info(
-                f"用户 Cookie 已删除: user_id={user_id}, platform={platform}"
-            )
+            logger.info(f"用户 Cookie 已删除: user_id={user_id}, platform={platform}")
             return True
         except Exception as e:
             logger.error(

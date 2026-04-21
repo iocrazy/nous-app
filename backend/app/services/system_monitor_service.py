@@ -28,7 +28,9 @@ _CRITICAL_TASKS = {
 }
 
 
-def check_worker_ready(task_name: str = "app.tasks.download_tasks.download_unified_task") -> tuple[bool, str]:
+def check_worker_ready(
+    task_name: str = "app.tasks.download_tasks.download_unified_task",
+) -> tuple[bool, str]:
     """Check if a Celery worker is online and has the specified task registered.
 
     Returns (is_ready, error_message).
@@ -39,7 +41,10 @@ def check_worker_ready(task_name: str = "app.tasks.download_tasks.download_unifi
         inspect = celery_app.control.inspect(timeout=1.0)
         ping = inspect.ping()
         if not ping:
-            return False, "No Celery workers online. Start with: celery -A app.celery_app worker"
+            return (
+                False,
+                "No Celery workers online. Start with: celery -A app.celery_app worker",
+            )
 
         registered = inspect.registered() or {}
         all_registered: set[str] = set()

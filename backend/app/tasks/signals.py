@@ -27,8 +27,8 @@ from typing import Any, Optional
 from celery.signals import task_failure, task_prerun, task_success
 from loguru import logger
 
-
 # ─── Async helper ────────────────────────────────────────────────────
+
 
 def _run_async(coro) -> Any:
     """Run an async coroutine from synchronous Celery signal context."""
@@ -41,6 +41,7 @@ def _run_async(coro) -> Any:
 
 # ─── Kwargs extraction helpers ───────────────────────────────────────
 
+
 def _get_unified_task_id(kwargs: dict) -> Optional[str]:
     """Extract ``_unified_task_id`` from task kwargs, or None."""
     return kwargs.get("_unified_task_id") if kwargs else None
@@ -52,6 +53,7 @@ def _get_dedup_key(kwargs: dict) -> Optional[str]:
 
 
 # ─── Signal: task_prerun ─────────────────────────────────────────────
+
 
 @task_prerun.connect
 def on_task_prerun(sender=None, task_id=None, args=None, kwargs=None, **kw):
@@ -85,6 +87,7 @@ def on_task_prerun(sender=None, task_id=None, args=None, kwargs=None, **kw):
 
 
 # ─── Signal: task_success ────────────────────────────────────────────
+
 
 @task_success.connect
 def on_task_success(sender=None, result=None, **kw):
@@ -124,6 +127,7 @@ def on_task_success(sender=None, result=None, **kw):
 
 # ─── Signal: task_failure ────────────────────────────────────────────
 
+
 @task_failure.connect
 def on_task_failure(sender=None, task_id=None, exception=None, **kw):
     """When a Celery task fails with an exception.
@@ -150,9 +154,7 @@ def on_task_failure(sender=None, task_id=None, exception=None, **kw):
         )
 
         _run_async(
-            mgr.notify_subscribers(
-                unified_id, success=False, error_code=error_code
-            )
+            mgr.notify_subscribers(unified_id, success=False, error_code=error_code)
         )
 
         dedup_key = _get_dedup_key(task_kwargs)

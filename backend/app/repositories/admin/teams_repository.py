@@ -46,12 +46,7 @@ class AdminTeamsRepository:
 
     async def update(self, team_id: str, changes: dict[str, Any]) -> None:
         client = await self._client()
-        await (
-            client.table(self.TEAMS_TABLE)
-            .update(changes)
-            .eq("id", team_id)
-            .execute()
-        )
+        await client.table(self.TEAMS_TABLE).update(changes).eq("id", team_id).execute()
 
     async def delete(self, team_id: str) -> None:
         client = await self._client()
@@ -79,9 +74,7 @@ class AdminTeamsRepository:
         )
         return result.data or []
 
-    async def get_member(
-        self, team_id: str, user_id: str
-    ) -> Optional[dict[str, Any]]:
+    async def get_member(self, team_id: str, user_id: str) -> Optional[dict[str, Any]]:
         client = await self._client()
         result = (
             await client.table(self.MEMBERS_TABLE)
@@ -93,9 +86,7 @@ class AdminTeamsRepository:
         )
         return result.data
 
-    async def update_member_role(
-        self, team_id: str, user_id: str, role: str
-    ) -> None:
+    async def update_member_role(self, team_id: str, user_id: str, role: str) -> None:
         client = await self._client()
         await (
             client.table(self.MEMBERS_TABLE)
@@ -141,6 +132,5 @@ class AdminTeamsRepository:
             .execute()
         )
         return {
-            str(r["team_id"]): r.get("points_balance", 0)
-            for r in (result.data or [])
+            str(r["team_id"]): r.get("points_balance", 0) for r in (result.data or [])
         }

@@ -19,12 +19,12 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.services.storyboard_service import StoryboardService
 from app.schemas.storyboard import (
     GenerateImageRequest,
     GenerateVideoRequest,
     SplitScriptRequest,
 )
+from app.services.storyboard_service import StoryboardService
 from app.services.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/storyboard")
@@ -65,9 +65,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/generate/image")
-async def generate_image(
-    auth: AuthDep, body: GenerateImageRequest
-) -> Dict[str, Any]:
+async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str, Any]:
     """
     Dispatch an AI image-generation task for a canvas node.
 
@@ -125,9 +123,7 @@ async def generate_image(
 
 
 @router.post("/generate/video")
-async def generate_video(
-    auth: AuthDep, body: GenerateVideoRequest
-) -> Dict[str, Any]:
+async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str, Any]:
     """
     Dispatch an AI video-generation task to animate a canvas node image.
 
@@ -159,8 +155,11 @@ async def generate_video(
             body.prompt or "",
             body.provider,
             int(body.duration_seconds),
-            0.5 if body.motion_intensity == "medium"
-            else (0.25 if body.motion_intensity == "low" else 0.75),
+            (
+                0.5
+                if body.motion_intensity == "medium"
+                else (0.25 if body.motion_intensity == "low" else 0.75)
+            ),
         )
 
         logger.info(
@@ -183,9 +182,7 @@ async def generate_video(
 
 
 @router.post("/split-script")
-async def split_script(
-    auth: AuthDep, body: SplitScriptRequest
-) -> Dict[str, Any]:
+async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any]:
     """
     Dispatch a script-splitting task that creates one canvas node per scene.
 
@@ -231,9 +228,7 @@ async def split_script(
 
 
 @router.post("/analyze-video")
-async def analyze_video(
-    auth: AuthDep, body: AnalyzeVideoRequest
-) -> Dict[str, Any]:
+async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, Any]:
     """
     Dispatch a video analysis task that annotates keyframes via LLM.
 
@@ -278,9 +273,7 @@ async def analyze_video(
 
 
 @router.post("/detect-scenes")
-async def detect_scenes(
-    auth: AuthDep, body: DetectScenesRequest
-) -> Dict[str, Any]:
+async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, Any]:
     """
     Dispatch a scene-detection task (no LLM annotation).
 
@@ -355,7 +348,5 @@ async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
         )
         return {"success": True, "data": result}
     except Exception as exc:
-        logger.error(
-            "[SBAi] chat project=%s failed: %s", body.project_id, exc
-        )
+        logger.error("[SBAi] chat project=%s failed: %s", body.project_id, exc)
         raise HTTPException(status_code=500, detail=f"Chat request failed: {exc}")

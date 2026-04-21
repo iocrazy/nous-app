@@ -1,6 +1,6 @@
 """Style Template request/response Pydantic schemas."""
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 

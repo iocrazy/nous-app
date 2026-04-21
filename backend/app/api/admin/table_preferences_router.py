@@ -30,9 +30,7 @@ VALID_TABLE_KEYS = {
 
 def _validate_table_key(table_key: str) -> None:
     if table_key not in VALID_TABLE_KEYS:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid table_key: {table_key}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid table_key: {table_key}")
 
 
 @router.get("/{table_key}", response_model=AdminTablePreferenceResponse)

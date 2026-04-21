@@ -55,7 +55,9 @@ class ScriptProjectRepository(BaseRepository):
                 "limit": limit,
             }
         except Exception as e:
-            logger.error("Failed to list script projects for project %s: %s", project_id, e)
+            logger.error(
+                "Failed to list script projects for project %s: %s", project_id, e
+            )
             return {"items": [], "total": 0, "page": page, "limit": limit}
 
 
@@ -80,7 +82,9 @@ class ScriptChapterRepository(BaseRepository):
             logger.info("Bulk-upserted %d chapters for script %s", len(rows), script_id)
             return result.data or []
         except Exception as e:
-            logger.error("Failed to bulk-upsert chapters for script %s: %s", script_id, e)
+            logger.error(
+                "Failed to bulk-upsert chapters for script %s: %s", script_id, e
+            )
             raise
 
     async def delete(self, chapter_id: str) -> None:

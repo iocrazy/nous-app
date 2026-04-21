@@ -25,8 +25,8 @@ SUBMIT_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
 QUERY_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
 
 # Resource IDs (model versions)
-RESOURCE_V1 = "volc.bigasr.auc"      # 豆包录音文件识别模型 1.0
-RESOURCE_V2 = "volc.seedasr.auc"     # 豆包录音文件识别模型 2.0
+RESOURCE_V1 = "volc.bigasr.auc"  # 豆包录音文件识别模型 1.0
+RESOURCE_V2 = "volc.seedasr.auc"  # 豆包录音文件识别模型 2.0
 
 
 class VolcengineASRService:
@@ -118,7 +118,9 @@ class VolcengineASRService:
             status_code = resp.headers.get("X-Api-Status-Code", "")
             if status_code != "20000000" and resp.status_code != 200:
                 error_msg = resp.headers.get("X-Api-Message", resp.text[:200])
-                raise RuntimeError(f"Volcengine ASR submit failed: {status_code} {error_msg}")
+                raise RuntimeError(
+                    f"Volcengine ASR submit failed: {status_code} {error_msg}"
+                )
 
             logger.info(f"[VolcASR] Submitted, request_id={request_id}")
 
@@ -151,9 +153,7 @@ class VolcengineASRService:
                         f"Volcengine ASR query failed: {resp_status} {error_msg}"
                     )
 
-            raise TimeoutError(
-                f"Volcengine ASR timed out after {max_poll_seconds}s"
-            )
+            raise TimeoutError(f"Volcengine ASR timed out after {max_poll_seconds}s")
 
     def _parse_result(self, data: dict) -> TranscriptResult:
         """Parse Volcengine ASR response into TranscriptResult."""

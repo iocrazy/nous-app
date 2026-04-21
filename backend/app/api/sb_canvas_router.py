@@ -7,7 +7,6 @@ Endpoints for managing canvas nodes, edges, and frames:
 individual CRUD, batch sync, frame metadata updates, and reorder.
 """
 
-import asyncio
 import mimetypes
 from typing import Any, Dict, List, Optional
 
@@ -17,9 +16,9 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.storyboard_repository import (
-    StoryboardNodeRepository,
     StoryboardEdgeRepository,
     StoryboardFrameRepository,
+    StoryboardNodeRepository,
 )
 from app.schemas.storyboard import (
     CanvasSyncRequest,
@@ -307,9 +306,7 @@ async def split_image(
             asset_id,
             exc,
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to split image: {exc}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to split image: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -377,12 +374,8 @@ async def upload_image(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(
-            "[SBCanvas] upload_image project=%s failed: %s", project_id, exc
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to upload image: {exc}"
-        )
+        logger.error("[SBCanvas] upload_image project=%s failed: %s", project_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +387,9 @@ async def upload_image(
 async def serve_asset_file(
     auth: AuthDep,
     asset_id: str,
-    preview: bool = Query(False, description="Return preview thumbnail instead of original"),
+    preview: bool = Query(
+        False, description="Return preview thumbnail instead of original"
+    ),
 ) -> FileResponse:
     """
     Serve a storyboard asset file (original or preview thumbnail).
@@ -410,8 +405,8 @@ async def serve_asset_file(
         # Verify access via project
         await svc.verify_project_access(str(asset["project_id"]), auth.user_id)
 
-        from pathlib import Path
         import os
+        from pathlib import Path
 
         nas_base = os.environ.get("NAS_BASE_PATH", "/app/downloads")
 

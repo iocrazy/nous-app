@@ -7,27 +7,26 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.core.modules import ALL_MODULE_KEYS, MODULE_DEFINITIONS, validate_module_keys
 from app.core.team_permissions import ASSIGNABLE_ROLES, get_role_info
 from app.repositories.admin.teams_repository import AdminTeamsRepository
 from app.schemas.admin import (
-    AdminTeamResponse,
+    AdminModuleDefinition,
     AdminTeamListResponse,
     AdminTeamMemberResponse,
-    AdminUpdateMemberRoleRequest,
     AdminTeamModulesResponse,
-    AdminModuleDefinition,
+    AdminTeamResponse,
+    AdminUpdateMemberRoleRequest,
     AdminUpdateModulesRequest,
     TeamRoleResponse,
 )
-from app.core.modules import MODULE_DEFINITIONS, ALL_MODULE_KEYS, validate_module_keys
 from app.utils.admin_helpers import (
-    create_audit_log,
-    get_user_info,
-    get_team_member_count,
-    batch_get_user_info,
     batch_get_team_member_counts,
+    batch_get_user_info,
+    create_audit_log,
+    get_team_member_count,
+    get_user_info,
 )
-
 
 router = APIRouter()
 
@@ -78,20 +77,22 @@ async def list_teams(
         tid = team["id"]
         oid = team["owner_id"]
         owner_email, owner_username = owner_info.get(oid, (None, None))
-        items.append(AdminTeamResponse(
-            id=str(tid),
-            name=team["name"],
-            owner_id=str(oid),
-            owner_email=owner_email,
-            owner_username=owner_username,
-            invite_code=team["invite_code"],
-            description=team.get("description"),
-            is_personal=team.get("is_personal", False),
-            member_count=member_counts.get(tid, 0),
-            points_balance=points_balances.get(str(tid), 0),
-            enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
-            created_at=team["created_at"],
-        ))
+        items.append(
+            AdminTeamResponse(
+                id=str(tid),
+                name=team["name"],
+                owner_id=str(oid),
+                owner_email=owner_email,
+                owner_username=owner_username,
+                invite_code=team["invite_code"],
+                description=team.get("description"),
+                is_personal=team.get("is_personal", False),
+                member_count=member_counts.get(tid, 0),
+                points_balance=points_balances.get(str(tid), 0),
+                enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
+                created_at=team["created_at"],
+            )
+        )
 
     return AdminTeamListResponse(
         items=items,
@@ -162,13 +163,15 @@ async def get_team_members(
     for member in members_rows:
         uid = member["user_id"]
         email, username = user_info.get(uid, (None, None))
-        members.append(AdminTeamMemberResponse(
-            user_id=str(uid),
-            email=email,
-            username=username,
-            role=member["role"],
-            joined_at=member["joined_at"],
-        ))
+        members.append(
+            AdminTeamMemberResponse(
+                user_id=str(uid),
+                email=email,
+                username=username,
+                role=member["role"],
+                joined_at=member["joined_at"],
+            )
+        )
 
     return members
 
@@ -278,7 +281,9 @@ async def delete_team(
     logger.info(f"Team {team_id} ({team['name']}) deleted by admin {auth.user_id}")
 
 
-@router.patch("/{team_id}/members/{user_id}/role", response_model=AdminTeamMemberResponse)
+@router.patch(
+    "/{team_id}/members/{user_id}/role", response_model=AdminTeamMemberResponse
+)
 async def update_member_role(
     team_id: str,
     user_id: str,
@@ -302,7 +307,9 @@ async def update_member_role(
 
     team = await repo.get(team_id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+        )
 
     if user_id == team["owner_id"]:
         raise HTTPException(
@@ -312,7 +319,10 @@ async def update_member_role(
 
     member = await repo.get_member(team_id, user_id)
     if not member:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found in this team",
+        )
 
     old_role = member["role"]
     await repo.update_member_role(team_id, user_id, body.role)
@@ -357,7 +367,9 @@ async def remove_member(
 
     team = await repo.get(team_id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+        )
 
     if user_id == team["owner_id"]:
         raise HTTPException(
@@ -367,7 +379,10 @@ async def remove_member(
 
     member = await repo.get_member(team_id, user_id)
     if not member:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in this team")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found in this team",
+        )
 
     old_role = member["role"]
     await repo.delete_member(team_id, user_id)
@@ -382,7 +397,9 @@ async def remove_member(
         ip_address=client_ip,
     )
 
-    logger.info(f"Member {user_id} (role={old_role}) removed from team {team_id} by admin {auth.user_id}")
+    logger.info(
+        f"Member {user_id} (role={old_role}) removed from team {team_id} by admin {auth.user_id}"
+    )
 
 
 # ============================================
@@ -399,7 +416,9 @@ async def get_team_modules(
     repo = AdminTeamsRepository()
     team = await repo.get(team_id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+        )
 
     enabled = team.get("enabled_modules") or ALL_MODULE_KEYS
 
@@ -435,7 +454,9 @@ async def update_team_modules(
 
     team = await repo.get(team_id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+        )
 
     old_modules = team.get("enabled_modules") or ALL_MODULE_KEYS
 
@@ -454,6 +475,8 @@ async def update_team_modules(
         ip_address=client_ip,
     )
 
-    logger.info(f"Team {team_id} modules updated by admin {auth.user_id}: {body.enabled_modules}")
+    logger.info(
+        f"Team {team_id} modules updated by admin {auth.user_id}: {body.enabled_modules}"
+    )
 
     return await get_team_modules(team_id, auth)

@@ -11,11 +11,10 @@ import asyncio
 import json
 import mimetypes
 import re
-
-import aiofiles
 from pathlib import Path
 from typing import Optional
 
+import aiofiles
 from loguru import logger
 
 from app.core.config import settings
@@ -54,10 +53,7 @@ class ProjectsService:
         counts = await asyncio.gather(
             *(self.repo.get_project_file_count(p["id"]) for p in projects)
         )
-        return [
-            {**p, "file_count": count}
-            for p, count in zip(projects, counts)
-        ]
+        return [{**p, "file_count": count} for p, count in zip(projects, counts)]
 
     async def create_project(self, user_id: str, data: dict) -> dict:
         """
@@ -515,9 +511,7 @@ class ProjectsService:
             data["parent_id"] = parent_id
         return await self.repo.create_folder(data)
 
-    async def rename_folder(
-        self, project_id: str, folder_id: str, name: str
-    ) -> dict:
+    async def rename_folder(self, project_id: str, folder_id: str, name: str) -> dict:
         """Rename a folder."""
         result = await self.repo.update_folder(folder_id, project_id, {"name": name})
         if not result:
@@ -541,16 +535,12 @@ class ProjectsService:
         """List all shares for files in a project."""
         return await self.repo.get_shares_by_project(project_id)
 
-    async def create_share(
-        self, project_id: str, data: dict, user_id: str
-    ) -> dict:
+    async def create_share(self, project_id: str, data: dict, user_id: str) -> dict:
         """Create a share link for a project file."""
         import secrets
         from datetime import datetime, timedelta, timezone
 
-        file_record = await self.repo.get_file_in_project(
-            data["file_id"], project_id
-        )
+        file_record = await self.repo.get_file_in_project(data["file_id"], project_id)
         if not file_record:
             raise ValueError("File not found in project")
 
@@ -582,9 +572,7 @@ class ProjectsService:
         """List all tasks for a project."""
         return await self.repo.get_tasks(project_id)
 
-    async def create_task(
-        self, project_id: str, data: dict, user_id: str
-    ) -> dict:
+    async def create_task(self, project_id: str, data: dict, user_id: str) -> dict:
         """Create a new task in a project."""
         insert_data: dict = {
             "project_id": project_id,
@@ -596,9 +584,7 @@ class ProjectsService:
                 insert_data[field] = data[field]
         return await self.repo.create_task(insert_data)
 
-    async def update_task(
-        self, project_id: str, task_id: str, data: dict
-    ) -> dict:
+    async def update_task(self, project_id: str, task_id: str, data: dict) -> dict:
         """Update a task."""
         if not data:
             raise ValueError("No fields to update")
@@ -642,9 +628,7 @@ class ProjectsService:
         self, project_id: str, member_id: str, role: str
     ) -> dict:
         """Update a member's role."""
-        result = await self.repo.update_member(
-            member_id, project_id, {"role": role}
-        )
+        result = await self.repo.update_member(member_id, project_id, {"role": role})
         if not result:
             raise ValueError("Member not found")
         return result
@@ -681,9 +665,7 @@ class ProjectsService:
             insert_data["deadline"] = data["deadline"]
         return await self.repo.create_collection(insert_data)
 
-    async def delete_collection(
-        self, project_id: str, collection_id: str
-    ) -> bool:
+    async def delete_collection(self, project_id: str, collection_id: str) -> bool:
         """Delete a collection link."""
         return await self.repo.delete_collection(collection_id, project_id)
 

@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Project schemas
 # ---------------------------------------------------------------------------
@@ -108,9 +107,7 @@ _SHOT_TYPE_PATTERN = (
     "^(extreme_close_up|close_up|medium_close_up|medium|medium_wide|wide|extreme_wide)$"
 )
 _CAMERA_ANGLE_PATTERN = "^(eye_level|low_angle|high_angle|bird_eye|worm_eye)$"
-_CAMERA_MOVEMENT_PATTERN = (
-    "^(static|push|pull|pan|tilt|dolly|crane|tracking)$"
-)
+_CAMERA_MOVEMENT_PATTERN = "^(static|push|pull|pan|tilt|dolly|crane|tracking)$"
 _FOCAL_LENGTH_PATTERN = "^(24mm|35mm|50mm|85mm|135mm)$"
 _TRANSITION_TYPE_PATTERN = "^(cut|fade|dissolve)$"
 

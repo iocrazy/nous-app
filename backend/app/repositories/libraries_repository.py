@@ -72,9 +72,7 @@ class LibrariesRepository:
             logger.error(f"Failed to list libraries: {e}")
             raise
 
-    async def update(
-        self, library_id: str, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def update(self, library_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             client = await self._get_client()
             result = (

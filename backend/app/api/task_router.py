@@ -86,7 +86,9 @@ async def get_task_status(task_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail=f"获取任务状态失败: {str(e)}")
 
 
-@router.get("/{task_id}/progress", tags=TAGS, summary="Get download progress by Celery task ID")
+@router.get(
+    "/{task_id}/progress", tags=TAGS, summary="Get download progress by Celery task ID"
+)
 async def get_download_progress(task_id: str, auth: AuthDep):
     """Get real-time download progress from Redis by Celery task ID.
 
@@ -122,7 +124,9 @@ async def get_download_progress(task_id: str, auth: AuthDep):
 
     except Exception as e:
         logger.error(f"Failed to get download progress: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get download progress: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get download progress: {e}"
+        )
 
 
 @router.delete("/{task_id}", tags=TAGS)

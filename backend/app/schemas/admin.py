@@ -1,9 +1,9 @@
 """Admin API schemas for requests and responses."""
 
 from datetime import datetime
-from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from typing import Any, List, Optional
 
+from pydantic import BaseModel, Field
 
 # ============================================
 # User Management Schemas
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 class AdminUserResponse(BaseModel):
     """Admin user response with full details."""
+
     id: str
     email: Optional[str] = None
     username: Optional[str] = None
@@ -27,6 +28,7 @@ class AdminUserResponse(BaseModel):
 
 class AdminUserListResponse(BaseModel):
     """Paginated list of admin users."""
+
     items: List[AdminUserResponse]
     total: int
     page: int
@@ -35,12 +37,14 @@ class AdminUserListResponse(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     """Request to update user by admin."""
+
     role: Optional[str] = None
     is_banned: Optional[bool] = None
 
 
 class AdminUserBanRequest(BaseModel):
     """Request to ban/unban a user."""
+
     is_banned: bool
     reason: Optional[str] = None
 
@@ -52,6 +56,7 @@ class AdminUserBanRequest(BaseModel):
 
 class AdminTeamMemberResponse(BaseModel):
     """Team member details for admin view."""
+
     user_id: str
     email: Optional[str] = None
     username: Optional[str] = None
@@ -61,11 +66,13 @@ class AdminTeamMemberResponse(BaseModel):
 
 class AdminUpdateMemberRoleRequest(BaseModel):
     """Request to update a team member's role."""
+
     role: str
 
 
 class TeamRoleResponse(BaseModel):
     """Team role definition for API response."""
+
     role: str
     permissions: List[str]
     is_assignable: bool
@@ -73,6 +80,7 @@ class TeamRoleResponse(BaseModel):
 
 class AdminTeamResponse(BaseModel):
     """Admin team response with full details."""
+
     id: str
     name: str
     owner_id: str
@@ -89,6 +97,7 @@ class AdminTeamResponse(BaseModel):
 
 class AdminModuleDefinition(BaseModel):
     """Module definition for API response."""
+
     key: str
     name: str
     description: str
@@ -97,17 +106,20 @@ class AdminModuleDefinition(BaseModel):
 
 class AdminTeamModulesResponse(BaseModel):
     """Team module settings response."""
+
     team_id: str
     modules: List[AdminModuleDefinition]
 
 
 class AdminUpdateModulesRequest(BaseModel):
     """Request to update team module permissions."""
+
     enabled_modules: List[str]
 
 
 class AdminTeamListResponse(BaseModel):
     """Paginated list of admin teams."""
+
     items: List[AdminTeamResponse]
     total: int
     page: int
@@ -121,6 +133,7 @@ class AdminTeamListResponse(BaseModel):
 
 class AuditLogCreate(BaseModel):
     """Request to create an audit log entry."""
+
     action: str
     target_type: str
     target_id: str
@@ -130,6 +143,7 @@ class AuditLogCreate(BaseModel):
 
 class AuditLogResponse(BaseModel):
     """Audit log entry response."""
+
     id: str
     admin_id: str
     admin_email: Optional[str] = None
@@ -144,6 +158,7 @@ class AuditLogResponse(BaseModel):
 
 class AuditLogListResponse(BaseModel):
     """Paginated list of audit logs."""
+
     items: List[AuditLogResponse]
     total: int
     page: int
@@ -157,6 +172,7 @@ class AuditLogListResponse(BaseModel):
 
 class AdminStatsResponse(BaseModel):
     """Admin dashboard statistics."""
+
     total_users: int = 0
     total_videos: int = 0
     total_teams: int = 0
@@ -173,6 +189,7 @@ class AdminStatsResponse(BaseModel):
 
 class AdminUserCreditsResponse(BaseModel):
     """User credits information for admin."""
+
     user_id: str
     balance: int = 0
     total_earned: int = 0
@@ -183,6 +200,7 @@ class AdminUserCreditsResponse(BaseModel):
 
 class AdminCreditsAdjustRequest(BaseModel):
     """Request to adjust user credits."""
+
     amount: int = Field(..., description="Amount to adjust (positive or negative)")
     reason: Optional[str] = None
 
@@ -194,6 +212,7 @@ class AdminCreditsAdjustRequest(BaseModel):
 
 class SystemSettingResponse(BaseModel):
     """System setting response."""
+
     key: str
     value: Any
     description: Optional[str] = None
@@ -203,6 +222,7 @@ class SystemSettingResponse(BaseModel):
 
 class SystemSettingUpdate(BaseModel):
     """Request to update a system setting."""
+
     value: Any
 
 
@@ -213,6 +233,7 @@ class SystemSettingUpdate(BaseModel):
 
 class AdminVideoResponse(BaseModel):
     """Admin video response with core details."""
+
     id: int
     aweme_id: str
     user_id: Optional[str] = None
@@ -239,6 +260,7 @@ class AdminVideoResponse(BaseModel):
 
 class AdminVideoListResponse(BaseModel):
     """Paginated list of admin videos."""
+
     items: List[AdminVideoResponse]
     total: int
     page: int
@@ -247,6 +269,7 @@ class AdminVideoListResponse(BaseModel):
 
 class AdminVideoDetailResponse(AdminVideoResponse):
     """Extended video response with download paths and URLs."""
+
     video_original_url: Optional[str] = None
     video_download_path: Optional[str] = None
     cover_download_path: Optional[str] = None
@@ -263,6 +286,7 @@ class AdminVideoDetailResponse(AdminVideoResponse):
 
 class AdminVideoStatsResponse(BaseModel):
     """Video status distribution stats."""
+
     total: int = 0
     completed: int = 0
     pending: int = 0
@@ -279,6 +303,7 @@ class AdminVideoStatsResponse(BaseModel):
 
 class AdminTranscodeVersionResponse(BaseModel):
     """A resource version with transcode status info."""
+
     id: str
     resource_id: str
     version_number: int
@@ -299,6 +324,7 @@ class AdminTranscodeVersionResponse(BaseModel):
 
 class AdminTranscodeListResponse(BaseModel):
     """Paginated list of transcode versions."""
+
     items: List[AdminTranscodeVersionResponse]
     total: int
     page: int
@@ -307,6 +333,7 @@ class AdminTranscodeListResponse(BaseModel):
 
 class AdminTranscodeStatsResponse(BaseModel):
     """Transcode status distribution stats."""
+
     total_video_versions: int = 0
     completed: int = 0
     processing: int = 0
@@ -317,6 +344,7 @@ class AdminTranscodeStatsResponse(BaseModel):
 
 class AdminTranscodeSettingsResponse(BaseModel):
     """Current HLS transcode settings."""
+
     transcode_enabled: bool = True
     transcode_tiers: str = "480p,720p,1080p"
     ffmpeg_encoder: str = "auto"
@@ -327,6 +355,7 @@ class AdminTranscodeSettingsResponse(BaseModel):
 
 class AdminTranscodeSettingsUpdate(BaseModel):
     """Request to update HLS transcode settings."""
+
     transcode_enabled: Optional[bool] = None
     transcode_tiers: Optional[str] = None
     ffmpeg_encoder: Optional[str] = None
@@ -342,6 +371,7 @@ class AdminTranscodeSettingsUpdate(BaseModel):
 
 class AdminTaskResponse(BaseModel):
     """Admin task response with user info."""
+
     id: str
     user_id: str
     user_email: Optional[str] = None
@@ -366,6 +396,7 @@ class AdminTaskResponse(BaseModel):
 
 class AdminTaskListResponse(BaseModel):
     """Paginated list of admin tasks."""
+
     items: List[AdminTaskResponse]
     total: int
     page: int = 1
@@ -374,6 +405,7 @@ class AdminTaskListResponse(BaseModel):
 
 class AdminTaskStatsResponse(BaseModel):
     """Task status distribution stats."""
+
     total: int
     pending: int
     processing: int
@@ -389,6 +421,7 @@ class AdminTaskStatsResponse(BaseModel):
 
 class TableFilter(BaseModel):
     """Single filter condition."""
+
     field: str
     operator: str
     value: Any = None
@@ -396,12 +429,14 @@ class TableFilter(BaseModel):
 
 class TableSort(BaseModel):
     """Single sort directive."""
+
     field: str
     direction: str = "asc"
 
 
 class AdminTablePreferenceResponse(BaseModel):
     """Stored table preferences for a user + table_key."""
+
     table_key: str
     filters: List[TableFilter] = []
     sorts: List[TableSort] = []
@@ -411,6 +446,7 @@ class AdminTablePreferenceResponse(BaseModel):
 
 class AdminTablePreferenceUpdate(BaseModel):
     """Upsert payload for table preferences."""
+
     filters: List[TableFilter] = []
     sorts: List[TableSort] = []
     visible_columns: Optional[List[str]] = None
@@ -424,6 +460,7 @@ class AdminTablePreferenceUpdate(BaseModel):
 
 class AdminCreditsStatsResponse(BaseModel):
     """System-wide credits statistics for the admin dashboard."""
+
     total_points_in_system: int = 0
     total_consumed: int = 0
     total_purchased: int = 0
@@ -435,6 +472,7 @@ class AdminCreditsStatsResponse(BaseModel):
 
 class AdminRevenueChartItem(BaseModel):
     """Single data point for the revenue trend chart."""
+
     date: str
     revenue_cents: int = 0
     points_sold: int = 0
@@ -442,12 +480,14 @@ class AdminRevenueChartItem(BaseModel):
 
 class AdminConsumptionChartItem(BaseModel):
     """Single data point for the consumption distribution chart."""
+
     action_type: str
     total_points: int = 0
 
 
 class AdminTopTeamItem(BaseModel):
     """Team entry for the top-consumers ranking."""
+
     team_id: str
     team_name: str
     total_consumed: int = 0
@@ -455,6 +495,7 @@ class AdminTopTeamItem(BaseModel):
 
 class AdminCreditTransactionResponse(BaseModel):
     """A single point_transactions row enriched with team/user info."""
+
     id: str
     team_id: str
     team_name: Optional[str] = None
@@ -469,6 +510,7 @@ class AdminCreditTransactionResponse(BaseModel):
 
 class AdminCreditTransactionListResponse(BaseModel):
     """Paginated list of credit transactions."""
+
     items: List[AdminCreditTransactionResponse]
     total: int
     page: int = 1
@@ -477,6 +519,7 @@ class AdminCreditTransactionListResponse(BaseModel):
 
 class AdminOrderResponse(BaseModel):
     """A single orders row enriched with team/user/package info."""
+
     id: str
     order_no: str
     team_id: str
@@ -494,6 +537,7 @@ class AdminOrderResponse(BaseModel):
 
 class AdminOrderListResponse(BaseModel):
     """Paginated list of orders."""
+
     items: List[AdminOrderResponse]
     total: int
     page: int = 1
@@ -502,6 +546,7 @@ class AdminOrderListResponse(BaseModel):
 
 class AdminPackageRequest(BaseModel):
     """Create or update a point package."""
+
     name: str
     description: Optional[str] = None
     points_amount: int
@@ -512,12 +557,14 @@ class AdminPackageRequest(BaseModel):
 
 class AdminPricingUpdateRequest(BaseModel):
     """Update pricing for a specific action_type."""
+
     points_cost: int
     description: Optional[str] = None
 
 
 class AdminBatchGiftRequest(BaseModel):
     """Gift points to multiple teams at once."""
+
     team_ids: List[str]
     amount: int
     description: Optional[str] = None
@@ -525,6 +572,7 @@ class AdminBatchGiftRequest(BaseModel):
 
 class AdminPointsAdjustRequest(BaseModel):
     """Admin manual points adjustment for a single team."""
+
     team_id: str
     amount: int = Field(..., description="Amount to adjust (positive or negative)")
     description: Optional[str] = None
@@ -532,6 +580,7 @@ class AdminPointsAdjustRequest(BaseModel):
 
 class AdminTeamCreditsDetailResponse(BaseModel):
     """Detailed credits info for a single team."""
+
     team_id: str
     team_name: str
     points_balance: int = 0

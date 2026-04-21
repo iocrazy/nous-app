@@ -47,11 +47,11 @@ logger = logging.getLogger(__name__)
 
 NAS_BASE_PATH = os.environ.get("NAS_BASE_PATH", "/app/downloads")
 
-_PLACEHOLDER_COLOR = (40, 40, 40)   # dark grey for missing-frame cells
-_PDF_PAGE_W = 1240                   # A4-ish at 150 dpi
+_PLACEHOLDER_COLOR = (40, 40, 40)  # dark grey for missing-frame cells
+_PDF_PAGE_W = 1240  # A4-ish at 150 dpi
 _PDF_PAGE_H = 1754
 _PDF_MARGIN = 60
-_PDF_FRAME_H = 700                   # height reserved for the frame image
+_PDF_FRAME_H = 700  # height reserved for the frame image
 _METADATA_ROW_H = 36
 _METADATA_LABEL_W = 220
 _METADATA_VALUE_W = _PDF_PAGE_W - 2 * _PDF_MARGIN - _METADATA_LABEL_W
@@ -213,6 +213,7 @@ class StoryboardExportService:
             )
             # Move to exports directory with the correct export name
             import shutil
+
             shutil.move(merged_path, str(out_path))
         except Exception as exc:
             logger.error(
@@ -262,9 +263,7 @@ class StoryboardExportService:
         pages: List[Image.Image] = []
 
         # -- Cover page -------------------------------------------------------
-        pages.append(
-            self._build_cover_page(project, characters)
-        )
+        pages.append(self._build_cover_page(project, characters))
 
         # -- Frame pages -------------------------------------------------------
         for frame in frames:
@@ -405,7 +404,11 @@ class StoryboardExportService:
 
         for label, value in meta_fields:
             # Alternating row background
-            row_bg = (245, 247, 250) if meta_fields.index((label, value)) % 2 == 0 else (255, 255, 255)
+            row_bg = (
+                (245, 247, 250)
+                if meta_fields.index((label, value)) % 2 == 0
+                else (255, 255, 255)
+            )
             draw.rectangle(
                 [m, y, _PDF_PAGE_W - m, y + _METADATA_ROW_H],
                 fill=row_bg,
@@ -469,6 +472,7 @@ class StoryboardExportService:
         # Fetch edges separately (not in the standard gather above)
         try:
             from app.repositories.storyboard_repository import StoryboardEdgeRepository
+
             edge_repo = StoryboardEdgeRepository()
             edges = await edge_repo.get_by_project(project_id)
         except Exception as exc:
@@ -525,7 +529,8 @@ class StoryboardExportService:
 
                 # -- Video assets -------------------------------------------------
                 video_assets = [
-                    a for a in assets
+                    a
+                    for a in assets
                     if (a.get("asset_type") or "").lower() == "video"
                     or (a.get("filename") or "").lower().endswith(".mp4")
                 ]
@@ -593,6 +598,4 @@ class StoryboardExportService:
             try:
                 zf.write(str(src), arc_name)
             except Exception as exc:
-                logger.warning(
-                    "_zip_media_list: cannot add %s to ZIP – %s", src, exc
-                )
+                logger.warning("_zip_media_list: cannot add %s to ZIP – %s", src, exc)

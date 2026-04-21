@@ -37,9 +37,7 @@ class AdminStatsRepository:
 
     async def count_teams(self) -> int:
         client = await self._client()
-        result = (
-            await client.table("teams").select("id", count="exact").execute()
-        )
+        result = await client.table("teams").select("id", count="exact").execute()
         return result.count or 0
 
     async def distinct_active_users_since(self, since: datetime) -> int:
@@ -52,17 +50,11 @@ class AdminStatsRepository:
                 .gte("created_at", since.isoformat())
                 .execute()
             )
-            return (
-                len({log["user_id"] for log in result.data})
-                if result.data
-                else 0
-            )
+            return len({log["user_id"] for log in result.data}) if result.data else 0
         except Exception:
             return 0
 
-    async def user_registrations_since(
-        self, since: datetime
-    ) -> list[dict[str, Any]]:
+    async def user_registrations_since(self, since: datetime) -> list[dict[str, Any]]:
         client = await self._client()
         result = (
             await client.table("user_profiles")
@@ -72,9 +64,7 @@ class AdminStatsRepository:
         )
         return result.data or []
 
-    async def video_status_history(
-        self, since: datetime
-    ) -> list[dict[str, Any]]:
+    async def video_status_history(self, since: datetime) -> list[dict[str, Any]]:
         client = await self._client()
         result = (
             await client.table("parsed_media")

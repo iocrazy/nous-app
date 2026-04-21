@@ -27,7 +27,9 @@ class DatabaseLogSink:
     MAX_QUEUE_SIZE = 2000
 
     def __init__(self) -> None:
-        self._queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=self.MAX_QUEUE_SIZE)
+        self._queue: queue.Queue[dict[str, Any]] = queue.Queue(
+            maxsize=self.MAX_QUEUE_SIZE
+        )
         self._thread: threading.Thread | None = None
         self._started = False
         self._lock = threading.Lock()
@@ -37,11 +39,13 @@ class DatabaseLogSink:
     # ------------------------------------------------------------------
 
     # Modules whose logs are pure noise and should not be persisted to DB
-    _NOISE_MODULES = frozenset({
-        "celery.app.trace",
-        "celery.beat",
-        "celery.worker.strategy",
-    })
+    _NOISE_MODULES = frozenset(
+        {
+            "celery.app.trace",
+            "celery.beat",
+            "celery.worker.strategy",
+        }
+    )
 
     def __call__(self, message: Any) -> None:
         # Skip logs generated during flush to prevent recursion
@@ -89,7 +93,9 @@ class DatabaseLogSink:
             "module": record.get("name", ""),
             "function": record.get("function", ""),
             "line": record.get("line"),
-            "file_path": str(record.get("file", {}).path) if record.get("file") else None,
+            "file_path": (
+                str(record.get("file", {}).path) if record.get("file") else None
+            ),
             "exception": exception_text[:8000] if exception_text else None,
             "extra": extra if extra else {},
             "logged_at": record["time"].astimezone(timezone.utc).isoformat(),
@@ -104,7 +110,9 @@ class DatabaseLogSink:
             if self._started:
                 return
             self._started = True
-            self._thread = threading.Thread(target=self._flush_loop, daemon=True, name="db-log-sink")
+            self._thread = threading.Thread(
+                target=self._flush_loop, daemon=True, name="db-log-sink"
+            )
             self._thread.start()
 
     def _flush_loop(self) -> None:

@@ -165,9 +165,12 @@ async def upload_resource(
         # Mark upload complete
         if unified_task_id:
             try:
-                await tracker.complete(unified_task_id, metadata_patch={
-                    "resource_id": str(result.get("id", "")),
-                })
+                await tracker.complete(
+                    unified_task_id,
+                    metadata_patch={
+                        "resource_id": str(result.get("id", "")),
+                    },
+                )
             except Exception:
                 pass
 

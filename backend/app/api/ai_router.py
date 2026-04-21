@@ -84,13 +84,17 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         .execute()
     )
     if _active.data:
-        return {"message": "Transcription already in progress", "resource_id": resource_id}
+        return {
+            "message": "Transcription already in progress",
+            "resource_id": resource_id,
+        }
     # === End dedup ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
-    from app.repositories.user_settings_repository import UserSettingsRepository
-    from app.repositories.nous_repository import NousRepository
     import math
+
+    from app.repositories.nous_repository import NousRepository
+    from app.repositories.user_settings_repository import UserSettingsRepository
 
     settings_repo = UserSettingsRepository()
     user_settings = await settings_repo.get_by_user_id(auth.user_id)
@@ -108,7 +112,9 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         nous_repo = NousRepository()
         nous_model = await nous_repo.get_by_name(selected_model)
         if not nous_model or not nous_model.get("is_enabled"):
-            raise HTTPException(status_code=400, detail=f"Nous model '{selected_model}' not available")
+            raise HTTPException(
+                status_code=400, detail=f"Nous model '{selected_model}' not available"
+            )
 
         # Compute cost by media duration (reuse media from resolver)
         duration_seconds = float(media.get("duration", 0)) if media else 0
@@ -123,7 +129,9 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
 
         # Build detailed description for transaction record
         video_title = (media.get("title") or platform_id)[:50]
-        dur_str = _format_duration_short(duration_seconds) if duration_seconds > 0 else ""
+        dur_str = (
+            _format_duration_short(duration_seconds) if duration_seconds > 0 else ""
+        )
         _description = f"AI Transcription: {video_title} ({selected_model}"
         if dur_str:
             _description += f", {dur_str}"
@@ -146,7 +154,8 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
 
-        await asyncio.to_thread(chain_ai_pipeline,
+        await asyncio.to_thread(
+            chain_ai_pipeline,
             platform_id=platform_id,
             user_id=auth.user_id,
             resource_id=resource_id,
@@ -236,8 +245,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
-            from app.tasks.ai_tasks import generate_summary_task
             from app.services.unified_task_manager import get_task_manager
+            from app.tasks.ai_tasks import generate_summary_task
 
             # Create unified task for Task Center visibility
             tracker = get_task_manager()
@@ -253,11 +262,16 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 
             celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
-                platform_id, auth.user_id, resource_id, task_id,
+                platform_id,
+                auth.user_id,
+                resource_id,
+                task_id,
             )
             # Link celery task id so admin panel / retry flow can locate it.
             try:
-                await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
+                await tracker._atomic_update(
+                    task_id, {"celery_task_id": celery_task.id}
+                )
             except Exception as _e:
                 logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
             # Dispatch succeeded — worker now owns the unified_task.
@@ -271,7 +285,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # No transcript, run full pipeline
             from app.tasks.ai_tasks import chain_ai_pipeline
 
-            await asyncio.to_thread(chain_ai_pipeline,
+            await asyncio.to_thread(
+                chain_ai_pipeline,
                 platform_id=platform_id,
                 user_id=auth.user_id,
                 resource_id=resource_id,
@@ -287,13 +302,16 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
         if _orphan_task_id:
             try:
                 from app.services.unified_task_manager import get_task_manager
+
                 await get_task_manager().fail(
                     _orphan_task_id,
                     f"Dispatch failed: {str(e)[:180]}",
                     error_code="DISPATCH_ERROR",
                 )
             except Exception as fail_err:
-                logger.error(f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}")
+                logger.error(
+                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                )
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(
@@ -357,7 +375,8 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     try:
         from app.tasks.ai_tasks import chain_ai_pipeline
 
-        await asyncio.to_thread(chain_ai_pipeline,
+        await asyncio.to_thread(
+            chain_ai_pipeline,
             platform_id=platform_id,
             user_id=auth.user_id,
             resource_id=None,
@@ -415,7 +434,9 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
 
     # Resolve resource_id for per-resource transcript lookup (user-specific)
     res_repo = ResourcesRepository()
-    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    resource = await res_repo.get_resource_by_media_id_and_creator(
+        media_id, auth.user_id
+    )
     _resource_id = str(resource["id"]) if resource else None
 
     ai_repo = AIRepository()
@@ -426,8 +447,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, just run summary
-            from app.tasks.ai_tasks import generate_summary_task
             from app.services.unified_task_manager import get_task_manager
+            from app.tasks.ai_tasks import generate_summary_task
 
             tracker = get_task_manager()
             task_id = await tracker.create(
@@ -442,10 +463,15 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
 
             celery_task = await asyncio.to_thread(
                 generate_summary_task.delay,
-                platform_id, auth.user_id, _resource_id, task_id,
+                platform_id,
+                auth.user_id,
+                _resource_id,
+                task_id,
             )
             try:
-                await tracker._atomic_update(task_id, {"celery_task_id": celery_task.id})
+                await tracker._atomic_update(
+                    task_id, {"celery_task_id": celery_task.id}
+                )
             except Exception as _e:
                 logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
             _orphan_task_id = None
@@ -454,7 +480,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             # No transcript, run full pipeline
             from app.tasks.ai_tasks import chain_ai_pipeline
 
-            await asyncio.to_thread(chain_ai_pipeline,
+            await asyncio.to_thread(
+                chain_ai_pipeline,
                 platform_id=platform_id,
                 user_id=auth.user_id,
                 resource_id=_resource_id,
@@ -469,13 +496,16 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         if _orphan_task_id:
             try:
                 from app.services.unified_task_manager import get_task_manager
+
                 await get_task_manager().fail(
                     _orphan_task_id,
                     f"Dispatch failed: {str(e)[:180]}",
                     error_code="DISPATCH_ERROR",
                 )
             except Exception as fail_err:
-                logger.error(f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}")
+                logger.error(
+                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                )
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(
@@ -582,7 +612,9 @@ async def get_transcript(platform_id: str, auth: AuthDep):
 
     # Resolve resource_id from media (user-specific)
     res_repo = ResourcesRepository()
-    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    resource = await res_repo.get_resource_by_media_id_and_creator(
+        media_id, auth.user_id
+    )
     if not resource:
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
@@ -640,7 +672,9 @@ async def get_summary(platform_id: str, auth: AuthDep):
 
     # Resolve resource_id from media (user-specific)
     res_repo = ResourcesRepository()
-    resource = await res_repo.get_resource_by_media_id_and_creator(media_id, auth.user_id)
+    resource = await res_repo.get_resource_by_media_id_and_creator(
+        media_id, auth.user_id
+    )
     if not resource:
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 

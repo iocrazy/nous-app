@@ -20,7 +20,11 @@ from app.tasks.download_helpers import (
     extract_audio_from_video,
     validate_and_refresh_urls,
 )
-from app.tasks.download_progress import UnifiedProgressTracker, calc_stage_ranges, force_progress
+from app.tasks.download_progress import (
+    UnifiedProgressTracker,
+    calc_stage_ranges,
+    force_progress,
+)
 from app.tasks.utils import run_async
 
 
@@ -47,6 +51,7 @@ def _do_douyin_download(
 
     # Ensure download URLs are available (re-parse if missing)
     from app.repositories.media_repository import MediaRepository as _MR_urls
+
     media = run_async(_MR_urls().get_by_platform_id(platform_id))
     if media:
         needed = []
@@ -57,18 +62,23 @@ def _do_douyin_download(
         media = ensure_download_urls(platform_id, media, needed)
         # Diagnostic: log URL availability after ensure
         for t in needed:
-            url_field = {"video": "video_download_urls",
-                         "cover": "cover_urls", "image": "image_download_urls"}.get(t)
+            url_field = {
+                "video": "video_download_urls",
+                "cover": "cover_urls",
+                "image": "image_download_urls",
+            }.get(t)
             urls = media.get(url_field) if url_field else None
             url_count = len(urls) if urls else 0
-            logger.info(f"[Download/Diag] {t}: {url_count} URLs available for {platform_id} (field={url_field})")
+            logger.info(
+                f"[Download/Diag] {t}: {url_count} URLs available for {platform_id} (field={url_field})"
+            )
 
     # ── Pre-download: validate URL accessibility, refresh if expired ──
     if int(media_type) in (0, 4, 61):  # Video types
         if download_video:
             # Set stage boundaries for fine-grained video progress
-            if 'video' in stages:
-                offset, weight = stages['video']
+            if "video" in stages:
+                offset, weight = stages["video"]
                 tracker.set_stage(offset, weight)
                 force_progress(tracker, offset, subtitle="Downloading video...")
 
@@ -83,7 +93,9 @@ def _do_douyin_download(
             logger.info(f"[Download/Exec] video: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_video_by_platform_id(
-                    platform_id, user_id=user_id, progress_tracker=tracker,
+                    platform_id,
+                    user_id=user_id,
+                    progress_tracker=tracker,
                     user_agent=user_agent,
                 )
             )
@@ -95,7 +107,9 @@ def _do_douyin_download(
             logger.info(f"[Download/Exec] video: {results['video']} for {platform_id}")
             if results["video"] != "completed":
                 error_msg = getattr(video_result, "error", None) or "Download failed"
-                logger.warning(f"[Download/Exec] video failed for {platform_id}: {error_msg}")
+                logger.warning(
+                    f"[Download/Exec] video failed for {platform_id}: {error_msg}"
+                )
 
                 # ── yt-dlp fallback: try downloading via yt-dlp if httpx failed ──
                 original_url = media.get("original_url") if media else None
@@ -118,7 +132,9 @@ def _do_douyin_download(
 
                         ytdlp_result = run_async(
                             YtdlpService.download_video(
-                                original_url, str(storage_dir), platform_id,
+                                original_url,
+                                str(storage_dir),
+                                platform_id,
                                 progress_callback=on_progress,
                                 user_agent=user_agent,
                             )
@@ -126,7 +142,10 @@ def _do_douyin_download(
                         if ytdlp_result.get("file_path"):
                             file_name = os.path.basename(ytdlp_result["file_path"])
                             relative_path = f"{relative_prefix}/{file_name}"
-                            from app.repositories.media_repository import MediaRepository as _MR_yt
+                            from app.repositories.media_repository import (
+                                MediaRepository as _MR_yt,
+                            )
+
                             run_async(
                                 _MR_yt().mark_media_as_downloaded(
                                     platform_id=platform_id,
@@ -165,11 +184,13 @@ def _do_douyin_download(
                         f"(DrissionPage) to get fresh URLs for {platform_id}"
                     )
                     try:
-                        from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
-                        from app.services.douyin_parse.formatter import DouyinFormatter
                         from app.repositories.media_repository import (
                             MediaRepository as _MR_browser,
                         )
+                        from app.services.douyin_parse.drissionpage_parser import (
+                            DrissionPageParser,
+                        )
+                        from app.services.douyin_parse.formatter import DouyinFormatter
 
                         browser_detail = run_async(
                             DrissionPageParser.fetch_one_video(
@@ -242,25 +263,31 @@ def _do_douyin_download(
                         )
 
             # Mark video stage complete
-            if 'video' in stages:
-                video_end = stages['video'][0] + stages['video'][1]
+            if "video" in stages:
+                video_end = stages["video"][0] + stages["video"][1]
                 force_progress(tracker, video_end)
 
             # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
             if results.get("video") == "completed":
-                logger.info(f"[Download/Exec] music: extracting from video for {platform_id}...")
+                logger.info(
+                    f"[Download/Exec] music: extracting from video for {platform_id}..."
+                )
                 if extract_audio_from_video(platform_id):
                     results["music"] = DownloadStatus.COMPLETED.value
-                    logger.info(f"[Download/Exec] music: extracted successfully for {platform_id}")
+                    logger.info(
+                        f"[Download/Exec] music: extracted successfully for {platform_id}"
+                    )
                 else:
-                    logger.warning(f"[Download/Exec] music: extraction failed for {platform_id}")
+                    logger.warning(
+                        f"[Download/Exec] music: extraction failed for {platform_id}"
+                    )
                     results["music"] = DownloadStatus.FAILED.value
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too
             # Mark image stage start
-            if 'video' in stages:
-                offset, weight = stages['video']
+            if "video" in stages:
+                offset, weight = stages["video"]
                 tracker.set_stage(offset, weight)
                 force_progress(tracker, offset, subtitle="Downloading images...")
 
@@ -275,7 +302,9 @@ def _do_douyin_download(
             logger.info(f"[Download/Exec] image: downloading {platform_id}...")
             video_result = run_async(
                 DownloaderService.download_images_by_platform_id(
-                    platform_id, user_id=user_id, user_agent=user_agent,
+                    platform_id,
+                    user_id=user_id,
+                    user_agent=user_agent,
                 )
             )
             results["video"] = (
@@ -285,14 +314,18 @@ def _do_douyin_download(
             )
             logger.info(f"[Download/Exec] image: {results['video']} for {platform_id}")
             if results["video"] != "completed":
-                error_msg = getattr(video_result, "error", None) or "Image download failed"
-                logger.warning(f"[Download/Exec] image failed for {platform_id}: {error_msg}")
+                error_msg = (
+                    getattr(video_result, "error", None) or "Image download failed"
+                )
+                logger.warning(
+                    f"[Download/Exec] image failed for {platform_id}: {error_msg}"
+                )
 
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
+                    from app.repositories.media_repository import MediaRepository
                     from app.services.douyin_parse.formatter import DouyinFormatter
                     from app.services.douyin_parse.ies_parser import IesDouyinParser
-                    from app.repositories.media_repository import MediaRepository
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
@@ -302,6 +335,7 @@ def _do_douyin_download(
                     _re_ua = user_agent
                     if not _re_ua:
                         from app.services.douyin_parse.ua_pool import pick_ua
+
                         _re_ua = pick_ua()
                     aweme_detail = run_async(
                         IesDouyinParser._fetch_share_page(
@@ -355,21 +389,23 @@ def _do_douyin_download(
                     )
 
             # Mark image stage complete
-            if 'video' in stages:
-                video_end = stages['video'][0] + stages['video'][1]
+            if "video" in stages:
+                video_end = stages["video"][0] + stages["video"][1]
                 force_progress(tracker, video_end)
 
     if download_cover:
         # Mark cover stage start
-        if 'cover' in stages:
-            offset, weight = stages['cover']
+        if "cover" in stages:
+            offset, weight = stages["cover"]
             tracker.set_stage(offset, weight)
             force_progress(tracker, offset, subtitle="Downloading cover...")
 
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         result = run_async(
             DownloaderService.download_cover_by_platform_id(
-                platform_id, user_id=user_id, user_agent=user_agent,
+                platform_id,
+                user_id=user_id,
+                user_agent=user_agent,
             )
         )
         results["cover"] = (
@@ -380,8 +416,8 @@ def _do_douyin_download(
         logger.info(f"[Download/Exec] cover: {results['cover']} for {platform_id}")
 
         # Mark cover stage complete
-        if 'cover' in stages:
-            cover_end = stages['cover'][0] + stages['cover'][1]
+        if "cover" in stages:
+            cover_end = stages["cover"][0] + stages["cover"][1]
             force_progress(tracker, cover_end)
 
     return results
@@ -420,8 +456,8 @@ def _do_ytdlp_download(
 
     if download_video:
         # Mark video stage start
-        if 'video' in stages:
-            offset, weight = stages['video']
+        if "video" in stages:
+            offset, weight = stages["video"]
             tracker.set_stage(offset, weight)
             force_progress(tracker, offset, subtitle="Downloading video...")
 
@@ -432,7 +468,10 @@ def _do_ytdlp_download(
 
         result = run_async(
             YtdlpService.download_video(
-                url, str(storage_dir), platform_id, progress_callback=on_progress,
+                url,
+                str(storage_dir),
+                platform_id,
+                progress_callback=on_progress,
                 user_agent=user_agent,
             )
         )
@@ -455,37 +494,50 @@ def _do_ytdlp_download(
             logger.info(f"[Download/Exec] video: completed for {platform_id}")
         else:
             results["video"] = DownloadStatus.FAILED.value
-            logger.warning(f"[Download/Exec] video failed via yt-dlp for {platform_id}: no output file")
+            logger.warning(
+                f"[Download/Exec] video failed via yt-dlp for {platform_id}: no output file"
+            )
 
         # Mark video stage complete
-        if 'video' in stages:
-            video_end = stages['video'][0] + stages['video'][1]
+        if "video" in stages:
+            video_end = stages["video"][0] + stages["video"][1]
             force_progress(tracker, video_end)
 
         # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
         if results.get("video") == DownloadStatus.COMPLETED.value:
-            logger.info(f"[Download/Exec] music: extracting from video for {platform_id}...")
+            logger.info(
+                f"[Download/Exec] music: extracting from video for {platform_id}..."
+            )
             if extract_audio_from_video(platform_id):
                 results["music"] = DownloadStatus.COMPLETED.value
-                logger.info(f"[Download/Exec] music: extracted successfully for {platform_id}")
+                logger.info(
+                    f"[Download/Exec] music: extracted successfully for {platform_id}"
+                )
             else:
-                logger.warning(f"[Download/Exec] music: extraction failed for {platform_id}")
+                logger.warning(
+                    f"[Download/Exec] music: extraction failed for {platform_id}"
+                )
                 results["music"] = DownloadStatus.FAILED.value
 
     if download_cover:
         # Mark cover stage start
-        if 'cover' in stages:
-            offset, weight = stages['cover']
+        if "cover" in stages:
+            offset, weight = stages["cover"]
             tracker.set_stage(offset, weight)
             force_progress(tracker, offset, subtitle="Downloading cover...")
 
         logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
         cover_result = run_async(
             DownloaderService.download_cover_by_platform_id(
-                platform_id, user_id=user_id, user_agent=user_agent,
+                platform_id,
+                user_id=user_id,
+                user_agent=user_agent,
             )
         )
-        if cover_result and cover_result.cover_download_status == DownloadStatus.COMPLETED:
+        if (
+            cover_result
+            and cover_result.cover_download_status == DownloadStatus.COMPLETED
+        ):
             results["cover"] = DownloadStatus.COMPLETED.value
             logger.info(f"[Download/Exec] cover: completed for {platform_id}")
         else:
@@ -494,8 +546,8 @@ def _do_ytdlp_download(
             results["cover"] = DownloadStatus.FAILED.value
 
         # Mark cover stage complete
-        if 'cover' in stages:
-            cover_end = stages['cover'][0] + stages['cover'][1]
+        if "cover" in stages:
+            cover_end = stages["cover"][0] + stages["cover"][1]
             force_progress(tracker, cover_end)
 
     return results

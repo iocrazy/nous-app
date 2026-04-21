@@ -75,7 +75,9 @@ async def update_script_project(
 ) -> Dict[str, Any]:
     try:
         svc = ScriptService()
-        updated = await svc.update_project(script_id, body.model_dump(exclude_none=True))
+        updated = await svc.update_project(
+            script_id, body.model_dump(exclude_none=True)
+        )
         return {"success": True, "data": updated}
     except Exception as exc:
         logger.error("[Scripts] update_project %s failed: %s", script_id, exc)

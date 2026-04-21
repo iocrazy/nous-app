@@ -30,8 +30,23 @@ EXCLUDED_PREFIXES = (
 )
 
 # Fields whose values should be sanitized in request bodies and query strings
-SENSITIVE_FIELDS = {"password", "token", "secret", "key", "authorization", "access_token", "refresh_token"}
-SENSITIVE_QUERY_KEYS = {"token", "share_token", "access_token", "refresh_token", "api_key", "apikey"}
+SENSITIVE_FIELDS = {
+    "password",
+    "token",
+    "secret",
+    "key",
+    "authorization",
+    "access_token",
+    "refresh_token",
+}
+SENSITIVE_QUERY_KEYS = {
+    "token",
+    "share_token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+}
 
 # Max body size to log (10KB)
 MAX_BODY_SIZE = 10 * 1024
@@ -64,7 +79,9 @@ def _sanitize_query_params(params: dict) -> dict:
     }
 
 
-def _extract_user_id_from_jwt(authorization: Optional[str]) -> tuple[Optional[str], str]:
+def _extract_user_id_from_jwt(
+    authorization: Optional[str],
+) -> tuple[Optional[str], str]:
     """Extract user_id from JWT without verification (lightweight).
 
     Returns:
@@ -209,19 +226,21 @@ async def _write_log(
     """Write request log to database (fire-and-forget)."""
     try:
         supabase = await get_async_supabase_admin()
-        await supabase.table("api_request_logs").insert({
-            "request_id": request_id,
-            "user_id": user_id,
-            "auth_type": auth_type,
-            "method": method,
-            "path": path,
-            "query_params": query_params,
-            "request_body": request_body,
-            "status_code": status_code,
-            "response_time_ms": response_time_ms,
-            "ip_address": ip_address,
-            "user_agent": user_agent,
-            "error_detail": error_detail,
-        }).execute()
+        await supabase.table("api_request_logs").insert(
+            {
+                "request_id": request_id,
+                "user_id": user_id,
+                "auth_type": auth_type,
+                "method": method,
+                "path": path,
+                "query_params": query_params,
+                "request_body": request_body,
+                "status_code": status_code,
+                "response_time_ms": response_time_ms,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+                "error_detail": error_detail,
+            }
+        ).execute()
     except Exception as e:
         logger.warning(f"Failed to write request log: {e}")
