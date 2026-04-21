@@ -9,11 +9,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibraryAgent, AISettings as AISettingsType } from '../../types';
+import type { AILibraryAgent, AILibrarySkill, AISettings as AISettingsType } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import { ChevronDown, GitFork } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, GitFork, Plus, X } from 'lucide-react';
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
 
@@ -37,6 +37,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [sub, setSub] = useState<SubTab>('overview');
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
+  const [localSkillIds, setLocalSkillIds] = useState<number[]>([]);
+  const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
@@ -47,6 +50,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     setAgent(null);
     setError(null);
     setSub('overview');
+    setLocalSkillIds([]);
 
     aiLibraryService
       .getAgent(slug)
@@ -54,6 +58,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
         if (cancelled) return;
         setAgent(a);
         setDraft(buildDraft(a));
+        setLocalSkillIds(a.skill_ids);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -65,6 +70,35 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       cancelled = true;
     };
   }, [slug]);
+
+  // Lazily load the full skill catalog the first time the Skills tab is opened.
+  // Cached on the editor instance — reused across tab switches until the agent
+  // slug changes (which remounts the effect via the loadSkills dependency).
+  useEffect(() => {
+    if (sub !== 'skills' || allSkills !== null || skillsLoading) return;
+    let cancelled = false;
+    setSkillsLoading(true);
+    aiLibraryService
+      .listSkills()
+      .then((list) => {
+        if (cancelled) return;
+        setAllSkills(list);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[AgentEditor] listSkills failed:', err);
+        addToast(
+          `Failed to load skills: ${err instanceof Error ? err.message : String(err)}`,
+          'error',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setSkillsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sub, allSkills, skillsLoading, addToast]);
 
   if (error) {
     return (
@@ -82,15 +116,29 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   // Preset agents are read-only unless the caller is an admin.
   const readOnly = isPreset && !isAdmin;
 
+  // Skills dirty check — structural compare of the ordered id array.
+  const skillsDirty =
+    JSON.stringify(localSkillIds) !== JSON.stringify(agent.skill_ids);
+
   const save = async (): Promise<void> => {
     if (readOnly) return;
     setSaving(true);
     setError(null);
     try {
-      const updated = await aiLibraryService.updateAgent(slug, draft);
+      // Build the PATCH payload immutably from the overview/files draft, and
+      // attach ``skill_ids`` only when the Skills tab has pending changes so
+      // we don't wipe+rewrite bindings on unrelated saves.
+      const patch: Partial<AILibraryAgent> = skillsDirty
+        ? { ...draft, skill_ids: localSkillIds }
+        : { ...draft };
+      const updated = await aiLibraryService.updateAgent(slug, patch);
       setAgent(updated);
       setDraft(buildDraft(updated));
-      addToast(t('aiLibrary.agents.saved', 'Agent saved'), 'success');
+      setLocalSkillIds(updated.skill_ids);
+      const message = skillsDirty
+        ? t('aiLibrary.agents.skillsUpdatedToast', 'Skills updated')
+        : t('aiLibrary.agents.saved', 'Agent saved');
+      addToast(message, 'success');
     } catch (err) {
       console.error('[AgentEditor] updateAgent failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -99,6 +147,34 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     } finally {
       setSaving(false);
     }
+  };
+
+  // ─── Skill binding helpers (local-state only; PATCH on Save) ───────────────
+
+  const addSkill = (skillId: number): void => {
+    if (readOnly) return;
+    setLocalSkillIds((ids) =>
+      ids.includes(skillId) ? ids : [...ids, skillId],
+    );
+  };
+
+  const removeSkill = (skillId: number): void => {
+    if (readOnly) return;
+    setLocalSkillIds((ids) => ids.filter((id) => id !== skillId));
+  };
+
+  const moveSkill = (skillId: number, direction: -1 | 1): void => {
+    if (readOnly) return;
+    setLocalSkillIds((ids) => {
+      const idx = ids.indexOf(skillId);
+      if (idx === -1) return ids;
+      const next = idx + direction;
+      if (next < 0 || next >= ids.length) return ids;
+      const copy = [...ids];
+      const [moved] = copy.splice(idx, 1);
+      copy.splice(next, 0, moved);
+      return copy;
+    });
   };
 
   const updateDraft = <K extends keyof AILibraryAgent>(key: K, value: AILibraryAgent[K]) => {
@@ -342,12 +418,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       )}
 
       {sub === 'skills' && (
-        <section>
-          <p className="text-sm text-zinc-400">
-            {t('aiLibrary.agents.boundSkills')}: <span className="text-zinc-200 font-medium">{agent.skill_ids.length}</span>
-          </p>
-          {/* Phase 2: multi-select with toggles to bind/unbind skills */}
-        </section>
+        <SkillsSection
+          localSkillIds={localSkillIds}
+          allSkills={allSkills}
+          skillsLoading={skillsLoading}
+          readOnly={readOnly}
+          onAdd={addSkill}
+          onRemove={removeSkill}
+          onMove={moveSkill}
+        />
       )}
 
       {forkModalOpen && (
@@ -503,6 +582,235 @@ function renderModelSelect(params: {
     </div>
   );
 }
+
+/**
+ * Skills sub-tab body — renders the bound skill list (with reorder + remove)
+ * plus the "Available Skills" picker underneath. All mutations flow through
+ * local state (``localSkillIds``); the PATCH is triggered by the header Save
+ * button, which reads both the Overview draft and the skill ids at save time.
+ *
+ * Read-only mode (system preset + non-admin viewer) hides every action button
+ * but still shows the bound list so the viewer can see what's composed.
+ */
+const SkillsSection: React.FC<{
+  localSkillIds: number[];
+  allSkills: AILibrarySkill[] | null;
+  skillsLoading: boolean;
+  readOnly: boolean;
+  onAdd: (skillId: number) => void;
+  onRemove: (skillId: number) => void;
+  onMove: (skillId: number, direction: -1 | 1) => void;
+}> = ({ localSkillIds, allSkills, skillsLoading, readOnly, onAdd, onRemove, onMove }) => {
+  const { t } = useTranslation();
+
+  // Build a quick lookup so we can render skill metadata for the bound list
+  // without scanning `allSkills` on every row.
+  const skillById = useMemo(() => {
+    const map = new Map<number, AILibrarySkill>();
+    (allSkills ?? []).forEach((s) => map.set(s.id, s));
+    return map;
+  }, [allSkills]);
+
+  // Bound list preserves the user-chosen order (== sort_order on save).
+  const boundSkills = useMemo(
+    () =>
+      localSkillIds.map((id) => ({
+        id,
+        skill: skillById.get(id) ?? null,
+      })),
+    [localSkillIds, skillById],
+  );
+
+  // Available list = every accessible skill minus the ones already bound.
+  // Stable order = the server order from ``listSkills`` (name asc with preset
+  // grouping today).
+  const availableSkills = useMemo(() => {
+    if (!allSkills) return [];
+    const bound = new Set(localSkillIds);
+    return allSkills.filter((s) => !bound.has(s.id));
+  }, [allSkills, localSkillIds]);
+
+  if (skillsLoading && allSkills === null) {
+    return <p className="text-sm text-zinc-500">Loading skills...</p>;
+  }
+
+  return (
+    <section className="space-y-6">
+      {readOnly && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          {t('aiLibrary.agents.presetReadOnly')}
+        </div>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-zinc-200">
+          {t('aiLibrary.agents.currentSkills', 'Bound Skills')}
+          <span className="ml-2 text-xs font-normal text-zinc-500">
+            ({boundSkills.length})
+          </span>
+        </h3>
+        {boundSkills.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-4 text-sm text-zinc-500">
+            {t(
+              'aiLibrary.agents.noSkillsBound',
+              'No skills bound yet. Add one below.',
+            )}
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {boundSkills.map(({ id, skill }, idx) => (
+              <li
+                key={id}
+                className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2"
+              >
+                <span className="text-xl leading-none" aria-hidden>
+                  {skill?.icon ?? '🧩'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-zinc-100">
+                    {skill?.name ?? `Skill #${id}`}
+                  </div>
+                  {skill?.slug && (
+                    <div className="truncate font-mono text-xs text-zinc-500">
+                      {skill.slug}
+                    </div>
+                  )}
+                </div>
+                {skill && <SkillScopeBadge skill={skill} />}
+                {!readOnly && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onMove(id, -1)}
+                      disabled={idx === 0}
+                      className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      title={t('aiLibrary.agents.moveUp', 'Move up')}
+                      aria-label={t('aiLibrary.agents.moveUp', 'Move up')}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onMove(id, 1)}
+                      disabled={idx === boundSkills.length - 1}
+                      className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      title={t('aiLibrary.agents.moveDown', 'Move down')}
+                      aria-label={t('aiLibrary.agents.moveDown', 'Move down')}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemove(id)}
+                      className="rounded-md border border-red-500/30 bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20"
+                      title={t('aiLibrary.agents.removeSkill', 'Remove')}
+                      aria-label={t('aiLibrary.agents.removeSkill', 'Remove')}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {!readOnly && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-zinc-200">
+            {t('aiLibrary.agents.availableSkills', 'Available Skills')}
+            <span className="ml-2 text-xs font-normal text-zinc-500">
+              ({availableSkills.length})
+            </span>
+          </h3>
+          {availableSkills.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-4 text-sm text-zinc-500">
+              {t(
+                'aiLibrary.agents.noAvailableSkills',
+                'No available skills. Create one in the Skills tab.',
+              )}
+            </div>
+          ) : (
+            <ul className="space-y-1.5">
+              {availableSkills.map((skill) => (
+                <li
+                  key={skill.id}
+                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2"
+                >
+                  <span className="text-xl leading-none" aria-hidden>
+                    {skill.icon ?? '🧩'}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-zinc-100">
+                      {skill.name}
+                    </div>
+                    {skill.slug && (
+                      <div className="truncate font-mono text-xs text-zinc-500">
+                        {skill.slug}
+                      </div>
+                    )}
+                  </div>
+                  <SkillScopeBadge skill={skill} />
+                  <button
+                    type="button"
+                    onClick={() => onAdd(skill.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20"
+                  >
+                    <Plus size={12} />
+                    {t('aiLibrary.agents.addSkill', 'Add')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
+  );
+};
+
+/**
+ * Compact scope indicator for the skill-binding rows. Mirrors the preset /
+ * team / project / private pattern used elsewhere in the AI Library UI.
+ */
+const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
+  const { t } = useTranslation();
+  const base = 'rounded border px-2 py-0.5 text-xs whitespace-nowrap';
+  const isPreset =
+    skill.is_public && skill.team_id == null && skill.project_id == null;
+
+  if (isPreset) {
+    return (
+      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
+        {t('aiLibrary.agents.systemPreset', 'System Preset')}
+      </span>
+    );
+  }
+  if (skill.team_id != null) {
+    return (
+      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
+        {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
+          name: skill.team_name ?? skill.team_id,
+        })}
+      </span>
+    );
+  }
+  if (skill.project_id != null) {
+    return (
+      <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
+        {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
+          name: skill.project_name ?? skill.project_id,
+        })}
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
+      {t('aiLibrary.skills.scopeBadgePrivate', 'Private')}
+    </span>
+  );
+};
 
 /**
  * Build the editable draft subset from a hydrated agent. Keeps keys that the

@@ -1178,7 +1178,16 @@
       "groupSystemPresets": "System Presets",
       "groupPrivate": "My Private",
       "groupTeam": "Team: {{name}}",
-      "groupProject": "Project: {{name}}"
+      "groupProject": "Project: {{name}}",
+      "currentSkills": "Bound Skills",
+      "availableSkills": "Available Skills",
+      "addSkill": "Add",
+      "removeSkill": "Remove",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "noSkillsBound": "No skills bound yet. Add one below.",
+      "noAvailableSkills": "No available skills. Create one in the Skills tab.",
+      "skillsUpdatedToast": "Skills updated"
     },
     "skills": {
       "addFile": "+ Add file",
