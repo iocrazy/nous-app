@@ -960,6 +960,9 @@ export interface AILibraryAgent {
   skill_ids: number[]; // BIGINT from backend — Phase 1 values fit in Number
   created_at: string;
   updated_at: string;
+  // Phase 2 PR 2.9 — denormalized by the backend for scope badges.
+  team_name?: string | null;
+  project_name?: string | null;
 }
 
 /**
@@ -973,6 +976,10 @@ export interface CreateAgentPayload {
   name: string;
   description?: string;
   fork_from?: string;
+  // Scope (Phase 2 PR 2.9) — at most one of team_id / project_id. Omit both
+  // for a private per-user agent.
+  team_id?: number;
+  project_id?: number;
   model?: string;
   temperature?: number;
   max_tokens?: number;

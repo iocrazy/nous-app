@@ -33,6 +33,11 @@ class AgentOut(AgentBase):
     created_at: datetime
     updated_at: datetime
     skill_ids: list[int] = Field(default_factory=list)  # BIGINT FK to skills.id
+    # Phase 2 PR 2.9 — denormalized names for the scope badge in the UI.
+    # Populated by the router when team_id / project_id is set. Both optional
+    # (absent for private agents and system presets).
+    team_name: Optional[str] = None
+    project_name: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
@@ -55,6 +60,11 @@ class AgentCreate(BaseModel):
     temperature / max_tokens from an existing agent (system preset or user-owned)
     as a starting point. Skill bindings are NOT copied — the user adds those
     explicitly via PATCH afterwards.
+
+    Scope (Phase 2 PR 2.9): optional ``team_id`` / ``project_id`` make the new
+    agent visible to all members of that team / project. If neither is set,
+    the agent is private to the creating user. The two fields are mutually
+    exclusive — set at most one.
     """
 
     slug: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
@@ -63,6 +73,9 @@ class AgentCreate(BaseModel):
     fork_from: Optional[str] = Field(
         default=None, description="Slug of an existing agent to copy content from."
     )
+    # Scope — at most one of team_id / project_id. Both None = private per-user.
+    team_id: Optional[int] = None
+    project_id: Optional[int] = None
     # Explicit field overrides. If fork_from is also set, these win.
     model: Optional[str] = None
     temperature: Optional[float] = None

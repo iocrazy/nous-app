@@ -30,6 +30,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
+from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import (
@@ -74,6 +75,149 @@ def _is_system_skill(skill: Dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Scope membership helpers (Phase 2 PR 2.9)
+# ---------------------------------------------------------------------------
+
+
+async def _user_is_team_member(user_id: UUID, team_id: int) -> bool:
+    """Return True iff the user has a ``team_members`` row for this team."""
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", team_id)
+        .eq("user_id", str(user_id))
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
+
+
+async def _user_can_write_project(user_id: UUID, project_id: int) -> bool:
+    """True iff user is owner of ``project_id`` OR a ``project_members`` row.
+
+    Any project membership qualifies (including viewer) — we only need
+    presence to let the user attach an agent to the project's scope. Finer
+    role-based restrictions can layer on later if needed.
+    """
+    client = await get_async_supabase_admin()
+    # Owner check
+    proj = (
+        await client.table("projects")
+        .select("owner_id")
+        .eq("id", project_id)
+        .maybe_single()
+        .execute()
+    )
+    if proj and proj.data and str(proj.data.get("owner_id")) == str(user_id):
+        return True
+    # Explicit membership
+    member = (
+        await client.table("project_members")
+        .select("project_id")
+        .eq("project_id", project_id)
+        .eq("user_id", str(user_id))
+        .limit(1)
+        .execute()
+    )
+    return bool(member.data)
+
+
+async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
+    """Return BIGINT team ids the user is a member of (empty on miss)."""
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+    return [
+        int(r["team_id"]) for r in (result.data or []) if r.get("team_id") is not None
+    ]
+
+
+async def _fetch_user_project_ids(user_id: UUID) -> List[int]:
+    """Return BIGINT project ids the user owns or is a member of."""
+    client = await get_async_supabase_admin()
+    owned = (
+        await client.table("projects")
+        .select("id")
+        .eq("owner_id", str(user_id))
+        .execute()
+    )
+    member = (
+        await client.table("project_members")
+        .select("project_id")
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+    ids: set[int] = set()
+    for row in owned.data or []:
+        if row.get("id") is not None:
+            ids.add(int(row["id"]))
+    for row in member.data or []:
+        if row.get("project_id") is not None:
+            ids.add(int(row["project_id"]))
+    return sorted(ids)
+
+
+async def _fetch_team_names(team_ids: List[int]) -> Dict[int, str]:
+    """Return {team_id: name} for the given BIGINT ids ([] → {})."""
+    if not team_ids:
+        return {}
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("teams").select("id, name").in_("id", team_ids).execute()
+    )
+    return {int(r["id"]): r["name"] for r in (result.data or [])}
+
+
+async def _fetch_project_names(project_ids: List[int]) -> Dict[int, str]:
+    """Return {project_id: name} for the given BIGINT ids ([] → {})."""
+    if not project_ids:
+        return {}
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("projects")
+        .select("id, name")
+        .in_("id", project_ids)
+        .execute()
+    )
+    return {int(r["id"]): r["name"] for r in (result.data or [])}
+
+
+async def _enrich_agents_with_scope_names(
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Attach ``team_name`` / ``project_name`` to each agent row (Phase 2 PR 2.9).
+
+    Single batch query per scope — avoids N+1.
+    """
+    team_ids = sorted({int(r["team_id"]) for r in rows if r.get("team_id") is not None})
+    project_ids = sorted(
+        {int(r["project_id"]) for r in rows if r.get("project_id") is not None}
+    )
+    team_names = await _fetch_team_names(team_ids)
+    project_names = await _fetch_project_names(project_ids)
+
+    enriched: List[Dict[str, Any]] = []
+    for row in rows:
+        t_id = row.get("team_id")
+        p_id = row.get("project_id")
+        enriched.append(
+            {
+                **row,
+                "team_name": team_names.get(int(t_id)) if t_id is not None else None,
+                "project_name": (
+                    project_names.get(int(p_id)) if p_id is not None else None
+                ),
+            }
+        )
+    return enriched
+
+
+# ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
 
@@ -82,14 +226,26 @@ def _is_system_skill(skill: Dict[str, Any]) -> bool:
 async def list_agents(auth: AuthDep) -> List[Dict[str, Any]]:
     """Return all agents visible to the current user with their skill bindings.
 
-    Includes system presets + user-owned agents (+ team/project scoped when
-    applicable). Each row is enriched with ``skill_ids`` (ordered, enabled only).
+    Visible set = union of:
+      * system presets (``is_system_preset=true``)
+      * user's own agents (``user_id = me``)
+      * agents on any team the user is a member of
+      * agents on any project the user owns or is a member of
+
+    Each row is enriched with ``skill_ids`` (ordered, enabled only) plus the
+    denormalized ``team_name`` / ``project_name`` for UI scope badges.
     """
     agent_repo, _ = _repos()
     user_uuid = _coerce_user_uuid(auth.user_id)
-    rows = await agent_repo.list_accessible(user_id=user_uuid)
+    team_ids = await _fetch_user_team_ids(user_uuid)
+    project_ids = await _fetch_user_project_ids(user_uuid)
+    rows = await agent_repo.list_accessible(
+        user_id=user_uuid,
+        team_ids=team_ids,
+        project_ids=project_ids,
+    )
 
-    enriched: List[Dict[str, Any]] = []
+    enriched_with_skills: List[Dict[str, Any]] = []
     for row in rows:
         try:
             agent_uuid = UUID(str(row["id"]))
@@ -97,8 +253,8 @@ async def list_agents(auth: AuthDep) -> List[Dict[str, Any]]:
             logger.warning("[ai-library] skipping agent with bad id: %s", exc)
             continue
         skill_ids = await agent_repo.get_skill_ids(agent_uuid)
-        enriched.append({**row, "skill_ids": skill_ids})
-    return enriched
+        enriched_with_skills.append({**row, "skill_ids": skill_ids})
+    return await _enrich_agents_with_scope_names(enriched_with_skills)
 
 
 @router.get(
@@ -107,7 +263,10 @@ async def list_agents(auth: AuthDep) -> List[Dict[str, Any]]:
     summary="Get a single agent by slug",
 )
 async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
-    """Fetch a single agent by slug, 404 if missing."""
+    """Fetch a single agent by slug, 404 if missing.
+
+    Response includes ``team_name`` / ``project_name`` for scope display.
+    """
     agent_repo, _ = _repos()
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
@@ -116,7 +275,8 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
         )
     agent_uuid = UUID(str(agent["id"]))
     agent = {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
-    return agent
+    enriched = await _enrich_agents_with_scope_names([agent])
+    return enriched[0]
 
 
 @router.post(
@@ -131,12 +291,42 @@ async def create_agent(
 ) -> Dict[str, Any]:
     """Create a non-preset agent owned by the current user.
 
+    Scope (Phase 2 PR 2.9):
+      * No ``team_id`` / ``project_id``: private per-user agent (default).
+      * ``team_id`` set: visible to all team members. Caller must be a member.
+      * ``project_id`` set: visible to project owner + members. Caller must be
+        the owner or a member.
+      * ``team_id`` + ``project_id`` both set → 400 (mutually exclusive).
+
     If ``fork_from`` is set, copies identity_md / soul_md / agent_md /
     model / temperature / max_tokens from that agent as a starting point.
     Explicit fields in the payload override forked values. Skill bindings
     are NOT copied — the user adds them separately via PATCH.
     """
     agent_repo, _ = _repos()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+
+    # Scope validation — mutually exclusive + membership check.
+    if payload.team_id is not None and payload.project_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="team_id and project_id are mutually exclusive",
+        )
+    if payload.team_id is not None:
+        if not await _user_is_team_member(user_uuid, payload.team_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"user is not a member of team {payload.team_id}",
+            )
+    if payload.project_id is not None:
+        if not await _user_can_write_project(user_uuid, payload.project_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"user is not the owner or a member of project "
+                    f"{payload.project_id}"
+                ),
+            )
 
     # Slug must be unique
     if await agent_repo.get_by_slug(payload.slug):
@@ -152,7 +342,9 @@ async def create_agent(
         "description": payload.description,
         "persona": payload.description or f"{payload.name} (user-created)",
         "is_system_preset": False,
-        "user_id": str(_coerce_user_uuid(auth.user_id)),
+        "user_id": str(user_uuid),
+        "team_id": payload.team_id,
+        "project_id": payload.project_id,
         "model": "qwen-max",
         "temperature": 0.7,
         "max_tokens": 4096,
@@ -195,7 +387,8 @@ async def create_agent(
             fields[key] = val
 
     created = await agent_repo.insert(fields)
-    return {**created, "skill_ids": []}
+    enriched = await _enrich_agents_with_scope_names([{**created, "skill_ids": []}])
+    return enriched[0]
 
 
 @router.patch(
@@ -241,7 +434,9 @@ async def update_agent(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="agent disappeared after update",
         )
-    return {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    enriched = await _enrich_agents_with_scope_names([row])
+    return enriched[0]
 
 
 # ---------------------------------------------------------------------------
@@ -251,10 +446,20 @@ async def update_agent(
 
 @router.get("/skills", response_model=List[SkillOut], summary="List accessible skills")
 async def list_skills(auth: AuthDep) -> List[Dict[str, Any]]:
-    """Return skills visible to the current user, each enriched with its files."""
+    """Return skills visible to the current user, each enriched with its files.
+
+    Visible set = public (system) skills + user's own + team/project-scoped
+    skills for teams/projects the user belongs to.
+    """
     _, skill_repo = _repos()
     user_uuid = _coerce_user_uuid(auth.user_id)
-    skills = await skill_repo.list_accessible(user_id=user_uuid)
+    team_ids = await _fetch_user_team_ids(user_uuid)
+    project_ids = await _fetch_user_project_ids(user_uuid)
+    skills = await skill_repo.list_accessible(
+        user_id=user_uuid,
+        team_ids=team_ids,
+        project_ids=project_ids,
+    )
 
     enriched: List[Dict[str, Any]] = []
     for s in skills:

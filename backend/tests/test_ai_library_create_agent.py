@@ -299,3 +299,195 @@ def test_create_agent_rejects_bad_slug_pattern(client: TestClient, fake_auth) ->
     assert resp.status_code == 422  # Pydantic validation failure
 
     client.app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Scope tests (Phase 2 PR 2.9)
+# ---------------------------------------------------------------------------
+
+
+def _patch_scope_helpers(
+    *,
+    is_team_member: bool = True,
+    can_write_project: bool = True,
+):
+    """Patch the scope-membership helpers in ai_library_router.
+
+    The router calls these before the repo, so we can exercise 403s and
+    happy paths without wiring a real Supabase client.
+    """
+    from unittest.mock import patch as _patch
+
+    return _patch.multiple(
+        "app.api.ai_library_router",
+        _user_is_team_member=AsyncMock(return_value=is_team_member),
+        _user_can_write_project=AsyncMock(return_value=can_write_project),
+        _enrich_agents_with_scope_names=AsyncMock(
+            side_effect=lambda rows: [
+                {**r, "team_name": None, "project_name": None} for r in rows
+            ]
+        ),
+    )
+
+
+def test_create_agent_with_team_id_succeeds(client: TestClient, fake_auth) -> None:
+    """User is a team member → agent is created with team_id populated."""
+    _install_auth_override(client.app, fake_auth)
+
+    inserted: list = []
+    with (
+        _patch_agent_repo(inserted, existing=None),
+        _patch_scope_helpers(is_team_member=True),
+    ):
+        resp = client.post(
+            "/api/v1/ai-library/agents",
+            json={"slug": "team-agent", "name": "Team Agent", "team_id": 42},
+        )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["team_id"] == 42
+    assert body["project_id"] is None
+    assert body["user_id"] == fake_auth.user_id
+    row = inserted[0]
+    assert row["team_id"] == 42
+    assert row["project_id"] is None
+
+    client.app.dependency_overrides.clear()
+
+
+def test_create_agent_with_team_id_non_member_forbidden(
+    client: TestClient, fake_auth
+) -> None:
+    """User is NOT a team member → 403 Forbidden, no insert."""
+    _install_auth_override(client.app, fake_auth)
+
+    inserted: list = []
+    with (
+        _patch_agent_repo(inserted, existing=None),
+        _patch_scope_helpers(is_team_member=False),
+    ):
+        resp = client.post(
+            "/api/v1/ai-library/agents",
+            json={"slug": "team-agent", "name": "Team Agent", "team_id": 999},
+        )
+
+    assert resp.status_code == 403
+    assert "not a member" in resp.json()["detail"]
+    assert inserted == []
+
+    client.app.dependency_overrides.clear()
+
+
+def test_create_agent_with_project_id_owner_succeeds(
+    client: TestClient, fake_auth
+) -> None:
+    """User owns (or is a member of) the project → agent is created."""
+    _install_auth_override(client.app, fake_auth)
+
+    inserted: list = []
+    with (
+        _patch_agent_repo(inserted, existing=None),
+        _patch_scope_helpers(can_write_project=True),
+    ):
+        resp = client.post(
+            "/api/v1/ai-library/agents",
+            json={"slug": "proj-agent", "name": "Project Agent", "project_id": 7},
+        )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["project_id"] == 7
+    assert body["team_id"] is None
+    row = inserted[0]
+    assert row["project_id"] == 7
+
+    client.app.dependency_overrides.clear()
+
+
+def test_create_agent_with_project_id_non_member_forbidden(
+    client: TestClient, fake_auth
+) -> None:
+    """Caller has no access to the project → 403."""
+    _install_auth_override(client.app, fake_auth)
+
+    inserted: list = []
+    with (
+        _patch_agent_repo(inserted, existing=None),
+        _patch_scope_helpers(can_write_project=False),
+    ):
+        resp = client.post(
+            "/api/v1/ai-library/agents",
+            json={"slug": "proj-agent", "name": "Project Agent", "project_id": 123},
+        )
+
+    assert resp.status_code == 403
+    assert inserted == []
+
+    client.app.dependency_overrides.clear()
+
+
+def test_create_agent_team_and_project_mutually_exclusive(
+    client: TestClient, fake_auth
+) -> None:
+    """Setting both team_id and project_id → 400, no insert."""
+    _install_auth_override(client.app, fake_auth)
+
+    inserted: list = []
+    with _patch_agent_repo(inserted, existing=None), _patch_scope_helpers():
+        resp = client.post(
+            "/api/v1/ai-library/agents",
+            json={
+                "slug": "both-scopes",
+                "name": "Both",
+                "team_id": 1,
+                "project_id": 2,
+            },
+        )
+
+    assert resp.status_code == 400
+    assert "mutually exclusive" in resp.json()["detail"]
+    assert inserted == []
+
+    client.app.dependency_overrides.clear()
+
+
+def test_list_accessible_passes_team_and_project_ids_to_repo(
+    client: TestClient, fake_auth
+) -> None:
+    """GET /agents fetches user's team_ids + project_ids then passes them to the repo."""
+    _install_auth_override(client.app, fake_auth)
+
+    from unittest.mock import patch as _patch
+
+    repo_mock = AsyncMock()
+    repo_mock.list_accessible = AsyncMock(return_value=[])
+    repo_mock.get_skill_ids = AsyncMock(return_value=[])
+
+    with (
+        _patch(
+            "app.api.ai_library_router._repos",
+            return_value=(repo_mock, AsyncMock()),
+        ),
+        _patch(
+            "app.api.ai_library_router._fetch_user_team_ids",
+            new=AsyncMock(return_value=[11, 22]),
+        ),
+        _patch(
+            "app.api.ai_library_router._fetch_user_project_ids",
+            new=AsyncMock(return_value=[33]),
+        ),
+        _patch(
+            "app.api.ai_library_router._enrich_agents_with_scope_names",
+            new=AsyncMock(side_effect=lambda rows: rows),
+        ),
+    ):
+        resp = client.get("/api/v1/ai-library/agents")
+
+    assert resp.status_code == 200
+    repo_mock.list_accessible.assert_awaited_once()
+    kwargs = repo_mock.list_accessible.await_args.kwargs
+    assert kwargs["team_ids"] == [11, 22]
+    assert kwargs["project_ids"] == [33]
+
+    client.app.dependency_overrides.clear()

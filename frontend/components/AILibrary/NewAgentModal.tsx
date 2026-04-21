@@ -1,11 +1,18 @@
 // frontend/components/AILibrary/NewAgentModal.tsx
-// Modal form for creating a new user-owned agent (Phase 2 PR 2.8a).
-// Supports optional fork from an existing agent (preset or custom).
+// Modal form for creating a new user-owned agent.
+//
+// Phase 2 PR 2.8a: optional fork from an existing agent.
+// Phase 2 PR 2.9:  optional scope — Private / Team / Project.
+//   - Private (default): agent is visible only to the creator
+//   - Team:    visible to all members of the chosen team
+//   - Project: visible to owner + members of the chosen project
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibraryAgent } from '../../types';
+import type { AILibraryAgent, Team, Project } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { fetchMyTeams } from '../../services/teamService';
+import { fetchProjects } from '../../services/projectsService';
 
 interface NewAgentModalProps {
   existingAgents: AILibraryAgent[];
@@ -17,6 +24,8 @@ interface NewAgentModalProps {
    */
   initialForkFrom?: string;
 }
+
+type ScopeKind = 'private' | 'team' | 'project';
 
 const SLUG_PATTERN = /^[a-z0-9_-]+$/;
 
@@ -34,8 +43,45 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Scope picker state — default private (no team / no project).
+  const [scopeKind, setScopeKind] = useState<ScopeKind>('private');
+  const [teamId, setTeamId] = useState<string>('');
+  const [projectId, setProjectId] = useState<string>('');
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [scopeLoading, setScopeLoading] = useState(false);
+
+  // Lazy-fetch teams + projects the first time the user leaves "Private".
+  useEffect(() => {
+    if (scopeKind === 'private') return;
+    if (teams.length > 0 || projects.length > 0) return;
+    let cancelled = false;
+    setScopeLoading(true);
+    Promise.all([fetchMyTeams(), fetchProjects()])
+      .then(([teamList, projectList]) => {
+        if (cancelled) return;
+        setTeams(teamList);
+        setProjects(projectList);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[NewAgentModal] load scopes failed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setScopeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeKind, teams.length, projects.length]);
+
   const slugIsValid = slug.length > 0 && SLUG_PATTERN.test(slug);
-  const canSubmit = slugIsValid && name.trim().length > 0 && !submitting;
+  const scopeIsValid =
+    scopeKind === 'private' ||
+    (scopeKind === 'team' && teamId !== '') ||
+    (scopeKind === 'project' && projectId !== '');
+  const canSubmit =
+    slugIsValid && name.trim().length > 0 && scopeIsValid && !submitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,11 +89,18 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
     setSubmitting(true);
     setError(null);
     try {
+      // Resolve BIGINT scope ids — strings in the UI, numbers on the wire.
+      const parsedTeamId =
+        scopeKind === 'team' && teamId ? Number(teamId) : undefined;
+      const parsedProjectId =
+        scopeKind === 'project' && projectId ? Number(projectId) : undefined;
       const created = await aiLibraryService.createAgent({
         slug,
         name: name.trim(),
         description: description.trim() || undefined,
         fork_from: forkFrom || undefined,
+        team_id: parsedTeamId,
+        project_id: parsedProjectId,
       });
       onCreated(created.slug);
     } catch (err) {
@@ -126,6 +179,78 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
             />
           </div>
 
+          <fieldset className="space-y-2">
+            <legend className="block text-xs font-medium text-zinc-400">
+              {t('aiLibrary.agents.scopeLabel', 'Scope')}
+            </legend>
+            <div className="flex gap-2">
+              <ScopeRadio
+                checked={scopeKind === 'private'}
+                disabled={submitting}
+                onChange={() => setScopeKind('private')}
+                label={t('aiLibrary.agents.scopePrivateLabel', 'Private')}
+              />
+              <ScopeRadio
+                checked={scopeKind === 'team'}
+                disabled={submitting}
+                onChange={() => setScopeKind('team')}
+                label={t('aiLibrary.agents.scopeTeamLabel', 'Team')}
+              />
+              <ScopeRadio
+                checked={scopeKind === 'project'}
+                disabled={submitting}
+                onChange={() => setScopeKind('project')}
+                label={t('aiLibrary.agents.scopeProjectLabel', 'Project')}
+              />
+            </div>
+            {scopeKind === 'team' && (
+              <select
+                value={teamId}
+                onChange={(e) => setTeamId(e.target.value)}
+                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                disabled={submitting || scopeLoading}
+                required
+              >
+                <option value="">
+                  {scopeLoading
+                    ? t('common.loading', 'Loading...')
+                    : t('aiLibrary.agents.scopeTeamPicker', 'Select a team')}
+                </option>
+                {teams.map((tm) => (
+                  <option key={tm.id} value={tm.id}>
+                    {tm.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {scopeKind === 'project' && (
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                disabled={submitting || scopeLoading}
+                required
+              >
+                <option value="">
+                  {scopeLoading
+                    ? t('common.loading', 'Loading...')
+                    : t('aiLibrary.agents.scopeProjectPicker', 'Select a project')}
+                </option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-xs text-zinc-500">
+              {t(
+                'aiLibrary.agents.scopeHint',
+                'Private = only you. Team / Project = everyone in that scope.',
+              )}
+            </p>
+          </fieldset>
+
           <div>
             <label className="block text-xs font-medium text-zinc-400">
               {t('aiLibrary.agents.forkFromLabel', 'Fork from')}
@@ -186,5 +311,40 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
     </div>
   );
 };
+
+/**
+ * Small radio chip used by the Scope picker. Kept inline so the modal file
+ * stays self-contained; extract later if other forms need the same UI.
+ */
+interface ScopeRadioProps {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: () => void;
+}
+
+const ScopeRadio: React.FC<ScopeRadioProps> = ({
+  checked,
+  disabled,
+  label,
+  onChange,
+}) => (
+  <label
+    className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+      checked
+        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+        : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-750'
+    } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+  >
+    <input
+      type="radio"
+      className="h-3.5 w-3.5"
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+    />
+    {label}
+  </label>
+);
 
 export default NewAgentModal;

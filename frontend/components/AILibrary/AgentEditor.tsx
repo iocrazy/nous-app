@@ -142,11 +142,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             <span className="font-mono">{agent.slug}</span>
             <span>·</span>
             <span>{agent.model}</span>
-            {isPreset && (
-              <span className="ml-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-zinc-300">
-                {t('aiLibrary.agents.systemPreset')}
-              </span>
-            )}
+            <ScopeBadge agent={agent} />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -363,6 +359,49 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
         />
       )}
     </div>
+  );
+};
+
+/**
+ * Tiny presentational badge showing the agent's scope: system preset,
+ * team-scoped, project-scoped, or private (falls back to showing nothing
+ * for now when ``is_system_preset=false`` and both team/project are null —
+ * keeps the header uncluttered for the common per-user case).
+ */
+const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
+  const { t } = useTranslation();
+  const base =
+    'ml-1 rounded border px-2 py-0.5 whitespace-nowrap';
+
+  if (agent.is_system_preset) {
+    return (
+      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
+        {t('aiLibrary.agents.systemPreset', 'System Preset')}
+      </span>
+    );
+  }
+  if (agent.team_id != null) {
+    return (
+      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
+        {t('aiLibrary.agents.scopeBadgeTeam', 'Team: {{name}}', {
+          name: agent.team_name ?? agent.team_id,
+        })}
+      </span>
+    );
+  }
+  if (agent.project_id != null) {
+    return (
+      <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
+        {t('aiLibrary.agents.scopeBadgeProject', 'Project: {{name}}', {
+          name: agent.project_name ?? agent.project_id,
+        })}
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
+      {t('aiLibrary.agents.scopeBadgePrivate', 'Private')}
+    </span>
   );
 };
 

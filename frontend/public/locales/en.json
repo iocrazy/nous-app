@@ -1163,7 +1163,21 @@
       "enabledLabel": "Enabled",
       "modelProviderNotEnabled": "provider not enabled",
       "forkAgent": "Fork to My Agents",
-      "forkedToast": "Forked as {{slug}}"
+      "forkedToast": "Forked as {{slug}}",
+      "scopeLabel": "Scope",
+      "scopePrivateLabel": "Private",
+      "scopeTeamLabel": "Team",
+      "scopeProjectLabel": "Project",
+      "scopeTeamPicker": "Select a team",
+      "scopeProjectPicker": "Select a project",
+      "scopeHint": "Private = only you. Team / Project = everyone in that scope.",
+      "scopeBadgePrivate": "Private",
+      "scopeBadgeTeam": "Team: {{name}}",
+      "scopeBadgeProject": "Project: {{name}}",
+      "groupSystemPresets": "System Presets",
+      "groupPrivate": "My Private",
+      "groupTeam": "Team: {{name}}",
+      "groupProject": "Project: {{name}}"
     },
     "skills": {
       "addFile": "+ Add file",

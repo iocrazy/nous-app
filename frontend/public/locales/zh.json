@@ -1163,7 +1163,21 @@
       "enabledLabel": "启用",
       "modelProviderNotEnabled": "提供方未启用",
       "forkAgent": "复制到我的智能体",
-      "forkedToast": "已创建 {{slug}}"
+      "forkedToast": "已创建 {{slug}}",
+      "scopeLabel": "可见范围",
+      "scopePrivateLabel": "仅自己",
+      "scopeTeamLabel": "团队",
+      "scopeProjectLabel": "项目",
+      "scopeTeamPicker": "选择团队",
+      "scopeProjectPicker": "选择项目",
+      "scopeHint": "仅自己 = 只有你可见；团队 / 项目 = 对应范围内所有成员可见。",
+      "scopeBadgePrivate": "仅自己",
+      "scopeBadgeTeam": "团队：{{name}}",
+      "scopeBadgeProject": "项目：{{name}}",
+      "groupSystemPresets": "系统预置",
+      "groupPrivate": "我的私有",
+      "groupTeam": "团队：{{name}}",
+      "groupProject": "项目：{{name}}"
     },
     "skills": {
       "addFile": "+ 添加文件",

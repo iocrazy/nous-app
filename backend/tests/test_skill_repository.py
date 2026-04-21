@@ -13,7 +13,6 @@ import pytest
 
 from app.repositories.skill_repository import SkillRepository
 
-
 # ─── Fake Supabase client/query plumbing ──────────────────────────────
 
 
@@ -268,16 +267,17 @@ async def test_list_accessible_filters_active_status(
     repo: SkillRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._data = [{"id": 1, "name": "Public skill", "is_public": True}]
-    rows = await repo.list_accessible(uuid4())
+    uid = uuid4()
+    rows = await repo.list_accessible(uid)
     assert len(rows) == 1
 
     eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
     assert ("status", "active") in eq_values
 
-    # No project_id => OR filter contains only is_public=true.
+    # No project_id / team_ids => OR filter is public + user's own only.
     or_calls = [c for c in fake_query.calls if c[0] == "or_"]
     assert len(or_calls) == 1
-    assert or_calls[0][1] == ("is_public.eq.true",)
+    assert or_calls[0][1] == (f"is_public.eq.true,created_by.eq.{uid}",)
 
 
 @pytest.mark.asyncio
@@ -285,11 +285,31 @@ async def test_list_accessible_with_project_id_widens_or_filter(
     repo: SkillRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._data = []
-    await repo.list_accessible(uuid4(), project_id=777)
+    uid = uuid4()
+    await repo.list_accessible(uid, project_id=777)
 
     or_calls = [c for c in fake_query.calls if c[0] == "or_"]
     assert len(or_calls) == 1
-    assert or_calls[0][1] == ("is_public.eq.true,project_id.eq.777",)
+    assert or_calls[0][1] == (
+        f"is_public.eq.true,created_by.eq.{uid},project_id.in.(777)",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_accessible_with_team_and_project_ids(
+    repo: SkillRepository, fake_query: _FakeQuery
+) -> None:
+    """New plural params: team_ids + project_ids both widen the OR filter."""
+    fake_query._data = []
+    uid = uuid4()
+    await repo.list_accessible(uid, team_ids=[10, 20], project_ids=[30])
+
+    or_calls = [c for c in fake_query.calls if c[0] == "or_"]
+    assert len(or_calls) == 1
+    assert or_calls[0][1] == (
+        f"is_public.eq.true,created_by.eq.{uid},"
+        f"project_id.in.(30),team_id.in.(10,20)",
+    )
 
 
 # ─── update_fields ────────────────────────────────────────────────────
