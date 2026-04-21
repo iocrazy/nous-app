@@ -184,9 +184,7 @@ def test_create_skill_with_team_id_non_member_forbidden(
     client.app.dependency_overrides.clear()
 
 
-def test_create_skill_with_project_id_succeeds(
-    client: TestClient, fake_auth
-) -> None:
+def test_create_skill_with_project_id_succeeds(client: TestClient, fake_auth) -> None:
     """User owns / is a member of the project → skill created."""
     _install_auth_override(client.app, fake_auth)
 
@@ -343,9 +341,7 @@ def test_create_skill_team_and_project_mutually_exclusive(
     client.app.dependency_overrides.clear()
 
 
-def test_create_skill_rejects_bad_slug_pattern(
-    client: TestClient, fake_auth
-) -> None:
+def test_create_skill_rejects_bad_slug_pattern(client: TestClient, fake_auth) -> None:
     """Slug must match ^[a-z0-9_-]+$."""
     _install_auth_override(client.app, fake_auth)
 
