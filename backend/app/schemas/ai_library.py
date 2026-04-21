@@ -48,6 +48,30 @@ class AgentUpdate(BaseModel):
     skill_ids: Optional[list[int]] = None  # replace binding
 
 
+class AgentCreate(BaseModel):
+    """Payload for POST /agents — create a new user-owned (non-preset) agent.
+
+    Optional ``fork_from`` copies identity_md / soul_md / agent_md / model /
+    temperature / max_tokens from an existing agent (system preset or user-owned)
+    as a starting point. Skill bindings are NOT copied — the user adds those
+    explicitly via PATCH afterwards.
+    """
+
+    slug: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    fork_from: Optional[str] = Field(
+        default=None, description="Slug of an existing agent to copy content from."
+    )
+    # Explicit field overrides. If fork_from is also set, these win.
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    identity_md: Optional[str] = None
+    soul_md: Optional[str] = None
+    agent_md: Optional[str] = None
+
+
 # ---------- Skills & files ----------
 
 

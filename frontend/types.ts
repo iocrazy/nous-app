@@ -962,6 +962,25 @@ export interface AILibraryAgent {
   updated_at: string;
 }
 
+/**
+ * Payload for POST /agents — creating a new user-owned (non-preset) agent.
+ * `fork_from` optionally copies identity_md / soul_md / agent_md / model /
+ * temperature / max_tokens from an existing agent. Explicit field overrides
+ * in the payload win over forked values.
+ */
+export interface CreateAgentPayload {
+  slug: string;
+  name: string;
+  description?: string;
+  fork_from?: string;
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+  identity_md?: string;
+  soul_md?: string;
+  agent_md?: string;
+}
+
 export interface AILibrarySkillFile {
   id: string;
   skill_id: number; // BIGINT

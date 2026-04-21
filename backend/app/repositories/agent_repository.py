@@ -168,6 +168,19 @@ class AgentRepository:
             logger.error(f"Failed to update agent {agent_id}: {e}")
             raise
 
+    async def insert(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new ai_agents row.
+
+        The caller is responsible for setting ``is_system_preset`` (false for
+        user-created agents). ``persona`` is required by the schema — caller
+        should set a sensible default if unknown. Returns the inserted row.
+        """
+        client = await self._get_client()
+        result = await client.table(self.TABLE).insert(fields).execute()
+        if not result.data:
+            raise RuntimeError("insert returned no data")
+        return result.data[0]
+
     # Fields snapshotted into ai_agent_versions. Narrower than update_fields'
     # accepted fields — only behavioral content, per Phase 2 plan.
     _VERSIONED_AGENT_FIELDS = (
