@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ---------- Agents ----------
 
@@ -130,6 +130,46 @@ class SkillUpdate(BaseModel):
     icon: Optional[str] = None
     output_format: Optional[str] = None
     frontmatter_json: Optional[dict] = None
+
+
+class SkillCreate(BaseModel):
+    """Payload for POST /skills — create a new user-owned (non-preset) skill.
+
+    Mirrors ``AgentCreate`` in spirit:
+
+    * Optional ``fork_from`` copies body_md / frontmatter_json / category /
+      icon / output_format / description from an existing skill as a
+      starting point. Skill files (the ``skill_files`` rows) are NOT copied
+      — fork only clones the primary SKILL.md body + metadata.
+    * Scope: optional ``team_id`` / ``project_id`` make the new skill visible
+      to all members of that team / project. If neither is set, the skill
+      is private to the creating user. The two fields are mutually
+      exclusive — set at most one.
+    """
+
+    slug: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    category: Optional[str] = None
+    # Default None so fork_from can copy the source's icon. The router falls
+    # back to "✨" for non-forked skills where the caller omits it.
+    icon: Optional[str] = None
+    body_md: Optional[str] = None
+    frontmatter_json: Optional[dict] = None
+    output_format: Optional[str] = None
+    # Scope — at most one of team_id / project_id. Both None = private per-user.
+    team_id: Optional[int] = None
+    project_id: Optional[int] = None
+    fork_from: Optional[str] = Field(
+        default=None,
+        description="Slug of an existing skill to copy body/metadata from.",
+    )
+
+    @model_validator(mode="after")
+    def _mutually_exclusive_scope(self) -> "SkillCreate":
+        if self.team_id is not None and self.project_id is not None:
+            raise ValueError("team_id and project_id are mutually exclusive")
+        return self
 
 
 # ---------- Composer output ----------

@@ -302,6 +302,23 @@ class SkillRepository(BaseRepository):
     # Writes on skills table (PATCH-style)
     # ------------------------------------------------------------------
 
+    async def insert(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new ``skills`` row.
+
+        The caller is responsible for setting ``is_public`` (false for
+        user-created skills, true for system presets) and supplying a slug.
+        Returns the inserted row.
+        """
+        try:
+            client = await self._get_client()
+            result = await client.table(self.TABLE).insert(fields).execute()
+            if not result.data:
+                raise RuntimeError("insert skill returned no data")
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Failed to insert skill: {e}")
+            raise
+
     async def update_fields(
         self, skill_id: int, updates: Dict[str, Any]
     ) -> Dict[str, Any]:
