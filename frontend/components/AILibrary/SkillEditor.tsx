@@ -145,10 +145,13 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
         >
           ← Back
         </button>
-        <h2 className="min-w-0 truncate font-semibold text-zinc-100">
-          {skill.icon ? `${skill.icon} ` : ''}
-          {skill.name}
-        </h2>
+        <div className="min-w-0 flex-1 flex items-center justify-center gap-2">
+          <h2 className="min-w-0 truncate font-semibold text-zinc-100">
+            {skill.icon ? `${skill.icon} ` : ''}
+            {skill.name}
+          </h2>
+          <SkillScopeBadge skill={skill} isPreset={isPreset} />
+        </div>
         <button
           onClick={save}
           disabled={saving || isPreset}
@@ -256,6 +259,51 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
         </section>
       </div>
     </div>
+  );
+};
+
+/**
+ * Tiny presentational badge showing the skill's scope: system preset,
+ * team-scoped, project-scoped, or private. Mirrors ScopeBadge from
+ * AgentEditor.tsx — kept inline here to avoid cross-file imports while
+ * the pattern is still settling.
+ */
+const SkillScopeBadge: React.FC<{
+  skill: AILibrarySkill;
+  isPreset: boolean;
+}> = ({ skill, isPreset }) => {
+  const { t } = useTranslation();
+  const base = 'ml-1 rounded border px-2 py-0.5 text-xs whitespace-nowrap';
+
+  if (isPreset) {
+    return (
+      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
+        {t('aiLibrary.agents.systemPreset', 'System Preset')}
+      </span>
+    );
+  }
+  if (skill.team_id != null) {
+    return (
+      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
+        {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
+          name: skill.team_id,
+        })}
+      </span>
+    );
+  }
+  if (skill.project_id != null) {
+    return (
+      <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
+        {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
+          name: skill.project_id,
+        })}
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
+      {t('aiLibrary.skills.scopeBadgePrivate', 'Private')}
+    </span>
   );
 };
 
